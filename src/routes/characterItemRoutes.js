@@ -1,5 +1,8 @@
-// ADICIONAR em src/routes/characterInventoryRoutes.js, antes de "module.exports = router;"
-// IMPORTANTE: coloque esta linha ANTES de router.route("/:id") — do contrário o
-// Express vai tentar casar "/use" com o parâmetro :id e nunca vai chegar aqui.
+const express = require("express");
+const characterInventoryController = require("../controllers/characterInventoryController");
+
+const router = express.Router();
 
 router.route("/use").post(characterInventoryController.useItem);
+
+module.exports = router;
