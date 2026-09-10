@@ -1,0 +1,69 @@
+// src/app.js
+const express = require("express");
+const cors = require("cors");
+const { connectDB, sequelize } = require("./config/database");
+
+// Importa TODOS os modelos primeiro.
+// A ordem de importação dos modelos aqui geralmente não importa,
+const User = require("./models/User");
+const Race = require("./models/Race");
+const Class = require("./models/Class");
+const Item = require("./models/Item");
+const Power = require("./models/Power");
+const Character = require("./models/Character");
+const ArmorProperties = require("./models/ArmorProperties");
+const CharacterAbilities = require("./models/CharacterAbilities");
+const CharacterInventory = require("./models/CharacterInventory");
+const ClassAbilities = require("./models/ClassAbilities");
+const ConsumableProperties = require("./models/ConsumableProperties");
+const RaceAbilities = require("./models/RaceAbilities");
+const WeaponProperties = require("./models/WeaponProperties");
+
+// Importa as rotas
+const userRoutes = require("./routes/userRoutes");
+const raceRoutes = require("./routes/raceRoutes");
+const powerRoutes = require("./routes/powerRoutes");
+const itemRoutes = require("./routes/itemsRoutes");
+const classRoutes = require("./routes/classRoutes");
+const characterRoutes = require("./routes/characterRoutes");
+const armorPropertiesRoutes = require("./routes/armorPropertiesRoutes");
+const characterAbilitiesRoutes = require("./routes/characterAbilitiesRoutes");
+const characterInventoryRoutes = require("./routes/characterInventoryRoutes");
+const classAbilitiesRoutes = require("./routes/classAbilitiesRoutes");
+const consumablePropertiesRoutes = require("./routes/consumablePropertiesRoutes");
+const raceAbilitiesRoutes = require("./routes/raceAbilitiesRoutes");
+const weaponPropertiesRoutes = require("./routes/weaponPropertiesRoutes");
+const combatRoutes = require("./routes/combatRoutes");
+
+const app = express();
+const port = process.env.PORT || 3001;
+
+// Conecta ao banco de dados e sincroniza os modelos
+// connectDB já chama sequelize.sync()
+connectDB();
+
+app.use(express.json());
+app.use(cors());
+
+app.get("/", (req, res) => {
+  res.send("Bem-vindo à API do meu RPG!");
+});
+
+app.use("/api/users", userRoutes);
+app.use("/api/races", raceRoutes);
+app.use("/api/powers", powerRoutes);
+app.use("/api/items", itemRoutes);
+app.use("/api/classes", classRoutes);
+app.use("/api/characters", characterRoutes);
+app.use("/api/armor-properties", armorPropertiesRoutes);
+app.use("/api/character-abilities", characterAbilitiesRoutes);
+app.use("/api/character-inventory", characterInventoryRoutes);
+app.use("/api/class-abilities", classAbilitiesRoutes);
+app.use("/api/consumable-properties", consumablePropertiesRoutes);
+app.use("/api/race-abilities", raceAbilitiesRoutes);
+app.use("/api/weapon-properties", weaponPropertiesRoutes);
+app.use("/api/combat", combatRoutes);
+
+app.listen(port, () => {
+  console.log(`Servidor rodando em http://localhost:${port}`);
+});
