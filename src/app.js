@@ -34,7 +34,7 @@ const consumablePropertiesRoutes = require("./routes/consumablePropertiesRoutes"
 const raceAbilitiesRoutes = require("./routes/raceAbilitiesRoutes");
 const weaponPropertiesRoutes = require("./routes/weaponPropertiesRoutes");
 const combatRoutes = require("./routes/combatRoutes");
-const shopRoutes = require("./routes/Shoproutes");
+const shopRoutes = require("./routes/shopRoutes");
 const characterUseItemRoutes = require("./routes/characterItemRoutes");
 
 const app = express();
