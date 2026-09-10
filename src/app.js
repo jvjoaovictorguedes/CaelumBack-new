@@ -34,6 +34,8 @@ const consumablePropertiesRoutes = require("./routes/consumablePropertiesRoutes"
 const raceAbilitiesRoutes = require("./routes/raceAbilitiesRoutes");
 const weaponPropertiesRoutes = require("./routes/weaponPropertiesRoutes");
 const combatRoutes = require("./routes/combatRoutes");
+const shopRoutes = require("./routes/Shoproutes");
+const characterUseItemRoutes = require("./routes/characterItemRoutes");
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -60,6 +62,7 @@ app.get("/", (req, res) => {
   res.send("Bem-vindo à API do meu RPG!");
 });
 
+app.use("/api/shop", shopRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/races", raceRoutes);
 app.use("/api/powers", powerRoutes);
@@ -74,7 +77,7 @@ app.use("/api/consumable-properties", consumablePropertiesRoutes);
 app.use("/api/race-abilities", raceAbilitiesRoutes);
 app.use("/api/weapon-properties", weaponPropertiesRoutes);
 app.use("/api/combat", combatRoutes);
-
+app.use("/api/character-items", characterUseItemRoutes);
 app.listen(port, () => {
   console.log(`Servidor rodando em http://localhost:${port}`);
 });
