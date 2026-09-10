@@ -4,6 +4,9 @@ require("dotenv").config();
 
 const databaseUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
 const useSsl = process.env.DB_SSL === "true";
+const databaseSource = databaseUrl
+  ? "DATABASE_URL/POSTGRES_URL"
+  : "DB_*/PG* variables";
 const databaseOptions = {
   dialect: "postgres",
   logging: false,
@@ -38,8 +41,20 @@ const sequelize = databaseUrl
       },
     );
 
+let databaseReady = false;
+
 const connectDB = async () => {
   let delay = 2000;
+  const databaseConfig = databaseUrl
+    ? new URL(databaseUrl)
+    : {
+        hostname: process.env.DB_HOST || process.env.PGHOST || "localhost",
+        port: process.env.DB_PORT || process.env.PGPORT || 5432,
+      };
+
+  console.log(
+    `Banco configurado via ${databaseSource}: ${databaseConfig.hostname}:${databaseConfig.port}`,
+  );
 
   while (true) {
     try {
@@ -47,8 +62,10 @@ const connectDB = async () => {
       console.log("Conexão com o banco de dados estabelecida com sucesso.");
       await sequelize.sync({ alter: true });
       console.log("Modelos sincronizados com o banco de dados.");
+      databaseReady = true;
       return;
     } catch (error) {
+      databaseReady = false;
       console.error(
         `Não foi possível conectar ao banco de dados. Nova tentativa em ${delay / 1000}s:`,
         error.message,
@@ -59,4 +76,4 @@ const connectDB = async () => {
   }
 };
 
-module.exports = { sequelize, connectDB };
+module.exports = { sequelize, connectDB, isDatabaseReady: () => databaseReady };

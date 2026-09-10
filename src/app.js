@@ -1,7 +1,7 @@
 // src/app.js
 const express = require("express");
 const cors = require("cors");
-const { connectDB, sequelize } = require("./config/database");
+const { connectDB, isDatabaseReady } = require("./config/database");
 
 // Importa TODOS os modelos primeiro.
 // A ordem de importação dos modelos aqui geralmente não importa,
@@ -44,6 +44,17 @@ connectDB();
 
 app.use(express.json());
 app.use(cors());
+
+app.use((req, res, next) => {
+  if (req.path === "/" || isDatabaseReady()) {
+    return next();
+  }
+
+  return res.status(503).json({
+    message:
+      "Banco de dados indisponível. Tente novamente em alguns instantes.",
+  });
+});
 
 app.get("/", (req, res) => {
   res.send("Bem-vindo à API do meu RPG!");
