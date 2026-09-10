@@ -8,7 +8,8 @@ const CharacterInventory = require("../models/CharacterInventory");
 // body: { id_personagem, id_item, quantidade }
 exports.purchaseItem = async (req, res) => {
   const { id_personagem, id_item } = req.body;
-  const quantidade = Number(req.body.quantidade) || 1;
+  const quantidade =
+    req.body.quantidade === undefined ? 1 : Number(req.body.quantidade);
 
   if (!id_personagem || !id_item) {
     return res.status(400).json({
@@ -16,7 +17,7 @@ exports.purchaseItem = async (req, res) => {
     });
   }
 
-  if (quantidade <= 0) {
+  if (!Number.isInteger(quantidade) || quantidade <= 0) {
     return res.status(400).json({ message: "Quantidade inválida." });
   }
 
