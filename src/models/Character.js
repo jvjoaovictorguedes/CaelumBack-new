@@ -3,7 +3,6 @@ const { sequelize } = require("../config/database");
 const User = require("./User");
 const Race = require("./Race");
 const Class = require("./Class");
-const Item = require("./Item");
 
 const Character = sequelize.define("Character", {
   id: {
@@ -91,7 +90,7 @@ const Character = sequelize.define("Character", {
       "Luz",
       "Escuridao",
       "Raio",
-      "Yin&Yang"
+      "Yin&Yang",
     ),
     allowNull: true,
   },
@@ -113,70 +112,6 @@ const Character = sequelize.define("Character", {
     allowNull: false,
     references: {
       model: Class,
-      key: "id",
-    },
-  },
-  slot_cabeca_item_id: {
-    type: DataTypes.INTEGER,
-    allowNull: true,
-    references: {
-      model: Item,
-      key: "id",
-    },
-  },
-  slot_torso_item_id: {
-    type: DataTypes.INTEGER,
-    allowNull: true,
-    references: {
-      model: Item,
-      key: "id",
-    },
-  },
-  slot_maos_item_id: {
-    type: DataTypes.INTEGER,
-    allowNull: true,
-    references: {
-      model: Item,
-      key: "id",
-    },
-  },
-  slot_pes_item_id: {
-    type: DataTypes.INTEGER,
-    allowNull: true,
-    references: {
-      model: Item,
-      key: "id",
-    },
-  },
-  slot_arma_principal_item_id: {
-    type: DataTypes.INTEGER,
-    allowNull: true,
-    references: {
-      model: Item,
-      key: "id",
-    },
-  },
-  slot_arma_secundaria_item_id: {
-    type: DataTypes.INTEGER,
-    allowNull: true,
-    references: {
-      model: Item,
-      key: "id",
-    },
-  },
-  slot_acessorio1_item_id: {
-    type: DataTypes.INTEGER,
-    allowNull: true,
-    references: {
-      model: Item,
-      key: "id",
-    },
-  },
-  slot_acessorio2_item_id: {
-    type: DataTypes.INTEGER,
-    allowNull: true,
-    references: {
-      model: Item,
       key: "id",
     },
   },
