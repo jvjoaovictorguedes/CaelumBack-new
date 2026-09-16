@@ -225,7 +225,16 @@ exports.getStatus = async (req, res) => {
 exports.getRanking = async (req, res) => {
   try {
     const ranking = await PvpStatus.findAll({
-      include: [{ model: Character, attributes: ["id", "nome", "nivel"] }],
+      include: [
+        {
+          model: Character,
+          attributes: ["id", "nome", "nivel", "genero"],
+          include: [
+            { model: Race, attributes: ["nome_masculino", "nome_feminino"] },
+            { model: Class, attributes: ["nome"] },
+          ],
+        },
+      ],
       order: [["vitorias", "DESC"], ["total_batalhas", "ASC"]],
       limit: 20,
     });
