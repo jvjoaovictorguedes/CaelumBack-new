@@ -37,6 +37,7 @@ const combatRoutes = require("./routes/combatRoutes");
 const shopRoutes = require("./routes/shopRoutes");
 const characterUseItemRoutes = require("./routes/characterItemRoutes");
 const attributeRoutes = require("./routes/attributeRoutes");
+const characterEquipmentRoutes = require("./routes/CharacterEquipmentRoutes");
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -80,6 +81,7 @@ app.use("/api/weapon-properties", weaponPropertiesRoutes);
 app.use("/api/combat", combatRoutes);
 app.use("/api/character-items", characterUseItemRoutes);
 app.use("/api/attributes", attributeRoutes);
+app.use("/api/character-equipment", characterEquipmentRoutes);
 app.listen(port, () => {
   console.log(`Servidor rodando em http://localhost:${port}`);
 });
