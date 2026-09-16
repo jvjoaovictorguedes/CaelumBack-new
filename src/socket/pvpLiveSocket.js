@@ -13,7 +13,11 @@
 
 const Character = require("../models/Character");
 const Class = require("../models/Class");
-const { vidaMaximaDe, manaMaximaDe } = require("../services/combatFormulas");
+const {
+  vidaMaximaDe,
+  manaMaximaDe,
+  comMultiplicadoresDeClasse,
+} = require("../services/combatFormulas");
 const { aplicarAcao } = require("../services/duelEngine");
 const { buscarPoderesDoPersonagem, aplicarResultadoDuelo } = require("../controllers/pvpController");
 const {
@@ -46,7 +50,10 @@ async function carregarLutador(characterId) {
   if (!personagem) return null;
   const poderes = await buscarPoderesDoPersonagem(characterId);
   const bonus = await buscarBonusDeAtributos(characterId);
-  const base = personagemComBonus(personagem.toJSON(), bonus);
+  const base = comMultiplicadoresDeClasse(
+    personagemComBonus(personagem.toJSON(), bonus),
+    personagem.Class,
+  );
   return {
     id: base.id,
     nome: base.nome,

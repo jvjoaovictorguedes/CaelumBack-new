@@ -3,9 +3,14 @@
 const { sequelize } = require("../config/database");
 const CharacterInventory = require("../models/CharacterInventory");
 const Character = require("../models/Character");
+const Class = require("../models/Class");
 const Item = require("../models/Item");
 const ConsumableProperties = require("../models/ConsumableProperties");
-const { vidaMaximaDe, manaMaximaDe } = require("../services/combatFormulas");
+const {
+  vidaMaximaDe,
+  manaMaximaDe,
+  comMultiplicadoresDeClasse,
+} = require("../services/combatFormulas");
 const {
   buscarBonusDeAtributos,
   personagemComBonus,
@@ -77,6 +82,7 @@ exports.useItem = async (req, res) => {
       }
 
       const character = await Character.findByPk(id_personagem, {
+        include: [{ model: Class }],
         transaction,
         lock: transaction.LOCK.UPDATE,
       });
@@ -86,12 +92,15 @@ exports.useItem = async (req, res) => {
         throw error;
       }
 
-      // Precisa considerar o bônus de equipamento aqui também — senão a
-      // vida máxima "de verdade" (a que o personagem já anda com mais
-      // vitalidade por causa de um item) fica menor do que devia só
-      // dentro dessa conta, e a poção nunca cura além do valor base.
+      // Precisa considerar o bônus de equipamento e o multiplicador da
+      // classe aqui também — senão a vida/mana máxima "de verdade" fica
+      // menor do que devia só dentro dessa conta, e a poção nunca cura
+      // além do valor sem esses ajustes.
       const bonusEquipamento = await buscarBonusDeAtributos(id_personagem);
-      const personagemEfetivo = personagemComBonus(character.toJSON(), bonusEquipamento);
+      const personagemEfetivo = comMultiplicadoresDeClasse(
+        personagemComBonus(character.toJSON(), bonusEquipamento),
+        character.Class,
+      );
       const vidaMaxima = vidaMaximaDe(personagemEfetivo);
       const manaMaxima = manaMaximaDe(personagemEfetivo);
 

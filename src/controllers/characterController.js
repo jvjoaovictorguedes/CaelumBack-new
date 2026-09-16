@@ -9,7 +9,15 @@ const CharacterEquipment = require("../models/CharacterEquipment");
 const ClassAbilities = require("../models/ClassAbilities");
 const RaceAbilities = require("../models/RaceAbilities");
 const CharacterAbilities = require("../models/CharacterAbilities");
-const { buscarBonusDeAtributos } = require("../services/equipmentBonusService");
+const {
+  buscarBonusDeAtributos,
+  personagemComBonus,
+} = require("../services/equipmentBonusService");
+const {
+  vidaMaximaDe,
+  manaMaximaDe,
+  comMultiplicadoresDeClasse,
+} = require("../services/combatFormulas");
 
 User.hasMany(Character, { foreignKey: "id_usuario" });
 Character.belongsTo(User, { foreignKey: "id_usuario" });
@@ -168,10 +176,19 @@ exports.getCharacterById = async (req, res) => {
       return res.status(404).json({ message: "Personagem não encontrado." });
     }
     const bonus_atributos = await buscarBonusDeAtributos(character.id);
+    const personagemEfetivo = comMultiplicadoresDeClasse(
+      personagemComBonus(character.toJSON(), bonus_atributos),
+      character.Class,
+    );
     res.status(200).json({
       status: "success",
       data: {
-        character: { ...character.toJSON(), bonus_atributos },
+        character: {
+          ...character.toJSON(),
+          bonus_atributos,
+          vida_maxima: vidaMaximaDe(personagemEfetivo),
+          mana_maxima: manaMaximaDe(personagemEfetivo),
+        },
       },
     });
   } catch (error) {

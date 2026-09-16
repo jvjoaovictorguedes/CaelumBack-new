@@ -1,6 +1,7 @@
 "use strict";
 
-// Guerreiro aprende Golpe Poderoso, Mago aprende Cura Arcana.
+// Guerreiro aprende Golpe Poderoso, Mago aprende Cura Arcana e Bola de
+// Fogo (sem essa segunda, o mago não tinha poder ofensivo nenhum).
 module.exports = {
   async up(queryInterface) {
     const [rows] = await queryInterface.sequelize.query(
@@ -14,6 +15,7 @@ module.exports = {
     await queryInterface.bulkInsert("class_abilities", [
       { id_classe: 1, id_poder: 1, nivel_aprendizagem: 1 },
       { id_classe: 2, id_poder: 2, nivel_aprendizagem: 1 },
+      { id_classe: 2, id_poder: 4, nivel_aprendizagem: 1 },
     ]);
   },
 

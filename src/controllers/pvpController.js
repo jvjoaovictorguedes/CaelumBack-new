@@ -13,7 +13,11 @@ const Power = require("../models/Power");
 const PvpStatus = require("../models/PvpStatus");
 const PvpMatches = require("../models/PvpMatches");
 const { adicionarExperiencia } = require("../services/experienceService");
-const { vidaMaximaDe, manaMaximaDe } = require("../services/combatFormulas");
+const {
+  vidaMaximaDe,
+  manaMaximaDe,
+  comMultiplicadoresDeClasse,
+} = require("../services/combatFormulas");
 const { aplicarAcao } = require("../services/duelEngine");
 const {
   buscarBonusDeAtributos,
@@ -282,8 +286,14 @@ exports.challenge = async (req, res) => {
       ]);
 
     const resultado = simularDuelo({
-      desafiante: personagemComBonus(desafiante.toJSON(), bonusDesafiante),
-      desafiado: personagemComBonus(desafiado.toJSON(), bonusDesafiado),
+      desafiante: comMultiplicadoresDeClasse(
+        personagemComBonus(desafiante.toJSON(), bonusDesafiante),
+        desafiante.Class,
+      ),
+      desafiado: comMultiplicadoresDeClasse(
+        personagemComBonus(desafiado.toJSON(), bonusDesafiado),
+        desafiado.Class,
+      ),
       poderesDesafiante,
       poderesDesafiado,
     });

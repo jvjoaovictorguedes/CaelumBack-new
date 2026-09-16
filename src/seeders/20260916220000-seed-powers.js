@@ -3,6 +3,10 @@
 // Placeholder — os dois primeiros vêm do mock-api.ts (mesmo nome/efeito
 // usado no front quando NEXT_PUBLIC_USE_MOCKS=true), o terceiro é um
 // poder exclusivo de Celestial pra dar algo pra testar em RaceAbilities.
+// O quarto (Bola de Fogo) foi adicionado depois: sem ele o Mago não
+// tinha NENHUM poder ofensivo — só Cura Arcana (cura) — então não tinha
+// como um mago causar dano de verdade além do ataque básico (que agora
+// é bem mais fraco pra essa classe, de propósito).
 module.exports = {
   async up(queryInterface) {
     const [rows] = await queryInterface.sequelize.query(
@@ -53,10 +57,23 @@ module.exports = {
         createdAt: new Date(),
         updatedAt: new Date(),
       },
+      {
+        id: 4,
+        nome: "Bola de Fogo",
+        descricao: "Uma explosao de energia arcana lancada contra o inimigo.",
+        tipo_poder: "Ativo",
+        custo_mana: 10,
+        dano_base: 6,
+        cura_base: 0,
+        escala_atributo: "Inteligencia",
+        valor_escala: 1.2,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
     ]);
   },
 
   async down(queryInterface) {
-    await queryInterface.bulkDelete("Powers", { id: [1, 2, 3] });
+    await queryInterface.bulkDelete("Powers", { id: [1, 2, 3, 4] });
   },
 };

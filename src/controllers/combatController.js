@@ -8,6 +8,7 @@
 // experienceService.js.
 
 const Character = require("../models/Character");
+const Class = require("../models/Class");
 const CharacterAbilities = require("../models/CharacterAbilities");
 const Power = require("../models/Power");
 const { adicionarExperiencia } = require("../services/experienceService");
@@ -17,6 +18,7 @@ const {
   chanceDeEsquiva,
   vidaMaximaDe,
   danoBasicoEsperado,
+  comMultiplicadoresDeClasse,
 } = require("../services/combatFormulas");
 const {
   buscarBonusDeAtributos,
@@ -103,9 +105,9 @@ function gerarInimigo(jogador) {
 // Gera um inimigo compatível com o nível do personagem.
 exports.gerarInimigoParaPersonagem = async (req, res) => {
   try {
-    const character = await Character.findByPk(
-      req.params.characterId
-    );
+    const character = await Character.findByPk(req.params.characterId, {
+      include: [{ model: Class }],
+    });
 
     if (!character) {
       return res.status(404).json({
@@ -114,7 +116,10 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
     }
 
     const bonusEquipamento = await buscarBonusDeAtributos(character.id);
-    const jogadorEfetivo = personagemComBonus(character.toJSON(), bonusEquipamento);
+    const jogadorEfetivo = comMultiplicadoresDeClasse(
+      personagemComBonus(character.toJSON(), bonusEquipamento),
+      character.Class,
+    );
     const inimigo = gerarInimigo(jogadorEfetivo);
 
     res.status(200).json({
@@ -144,7 +149,9 @@ exports.executarTurno = async (req, res) => {
       });
     }
 
-    const character = await Character.findByPk(characterId);
+    const character = await Character.findByPk(characterId, {
+      include: [{ model: Class }],
+    });
 
     if (!character) {
       return res.status(404).json({
@@ -155,9 +162,9 @@ exports.executarTurno = async (req, res) => {
     const log = [];
 
     const bonusEquipamento = await buscarBonusDeAtributos(characterId);
-    const personagemAtual = personagemComBonus(
-      character.toJSON(),
-      bonusEquipamento,
+    const personagemAtual = comMultiplicadoresDeClasse(
+      personagemComBonus(character.toJSON(), bonusEquipamento),
+      character.Class,
     );
 
     const inimigoAtual = {
@@ -247,12 +254,8 @@ exports.executarTurno = async (req, res) => {
       }
 
       if (cura > 0) {
-        const vidaMaximaPersonagem =
-          30 +
-          (personagemAtual.vitalidade || 0) * 6;
-
         personagemAtual.vida_atual = Math.min(
-          vidaMaximaPersonagem,
+          vidaMaximaDe(personagemAtual),
           personagemAtual.vida_atual + cura
         );
 
