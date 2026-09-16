@@ -81,10 +81,13 @@ exports.useItem = async (req, res) => {
         throw error;
       }
 
+      // "FOR UPDATE" não pode se aplicar ao lado nullable de um LEFT
+      // OUTER JOIN (é o que o include de Class gera) — o Postgres recusa
+      // a query inteira se não escopar o lock só pra tabela Character.
       const character = await Character.findByPk(id_personagem, {
         include: [{ model: Class }],
         transaction,
-        lock: transaction.LOCK.UPDATE,
+        lock: { level: transaction.LOCK.UPDATE, of: Character },
       });
       if (!character) {
         const error = new Error("Personagem não encontrado.");
