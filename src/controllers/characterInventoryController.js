@@ -107,18 +107,19 @@ exports.useItem = async (req, res) => {
       const vidaMaxima = vidaMaximaDe(personagemEfetivo);
       const manaMaxima = manaMaximaDe(personagemEfetivo);
 
+      // efeito_vida/efeito_mana são percentuais (ex: 30 = 30% da vida/mana
+      // máxima), não pontos fixos. Um valor fixo (tipo "cura 30 pontos")
+      // vira inútil assim que a vida máxima escala com vitalidade/
+      // equipamento/classe — e ainda mostrava um número na loja que na
+      // prática não batia com o que curava perto do teto de vida.
       if (efeito.efeito_vida) {
-        character.vida_atual = Math.min(
-          vidaMaxima,
-          character.vida_atual + efeito.efeito_vida * quantidade,
-        );
+        const cura = Math.round(vidaMaxima * (efeito.efeito_vida / 100) * quantidade);
+        character.vida_atual = Math.min(vidaMaxima, character.vida_atual + cura);
       }
 
       if (efeito.efeito_mana) {
-        character.mana_atual = Math.min(
-          manaMaxima,
-          character.mana_atual + efeito.efeito_mana * quantidade,
-        );
+        const cura = Math.round(manaMaxima * (efeito.efeito_mana / 100) * quantidade);
+        character.mana_atual = Math.min(manaMaxima, character.mana_atual + cura);
       }
 
       await character.save({ transaction });

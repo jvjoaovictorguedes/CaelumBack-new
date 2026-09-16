@@ -1,9 +1,9 @@
 "use strict";
 
-// IDs fixados de propósito: id 2 = "Espada de Ferro" e id 3 = "Pocao de
-// Vida" pra bater com o que já está hardcoded no front (ShopItem.tsx
-// manda id_item: 3 na compra; mock-api.ts usa os mesmos ids no inventário
-// mockado). O id 1 é só pra "ocupar" o auto-incremento antes do 2 e 3.
+// IDs fixados de propósito: id 2 = "Espada de Ferro", id 3 = "Pocao de
+// Vida" e id 4 = "Pocao de Mana" pra bater com o que já está hardcoded
+// no front (shop/page.tsx usa esses ids nas compras). O id 1 é só pra
+// "ocupar" o auto-incremento antes dos outros.
 module.exports = {
   async up(queryInterface) {
     const [rows] = await queryInterface.sequelize.query(
@@ -42,7 +42,19 @@ module.exports = {
       {
         id: 3,
         nome: "Pocao de Vida",
-        descricao: "Regenera 30 pontos de vida durante a aventura.",
+        descricao: "Regenera 30% da vida maxima durante a aventura.",
+        tipo_item: "Consumivel",
+        raridade: "Comum",
+        valor_compra: 4,
+        valor_venda: 0,
+        peso: 0.5,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      {
+        id: 4,
+        nome: "Pocao de Mana",
+        descricao: "Regenera 30% da mana maxima durante a aventura.",
         tipo_item: "Consumivel",
         raridade: "Comum",
         valor_compra: 4,
@@ -55,6 +67,6 @@ module.exports = {
   },
 
   async down(queryInterface) {
-    await queryInterface.bulkDelete("Items", { id: [1, 2, 3] });
+    await queryInterface.bulkDelete("Items", { id: [1, 2, 3, 4] });
   },
 };
