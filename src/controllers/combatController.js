@@ -42,12 +42,17 @@ function gerarInimigo(nivelPersonagem) {
 
   const variacao = () => Math.floor(Math.random() * 3) - 1;
 
-  const vitalidade = 6 + nivel * 2 + variacao();
-  const forca = 4 + nivel * 2 + variacao();
-  const agilidade = 3 + Math.floor(nivel * 1.5) + variacao();
-  const velocidade = 3 + Math.floor(nivel * 1.3) + variacao();
+  // No nível 1, um personagem médio (só com o bônus de atributo da raça,
+  // sem pontos distribuídos ainda) tem uns 2 de força/vitalidade. Os
+  // valores antigos (base 6 de vitalidade e 4 de força) davam inimigos
+  // com o dobro do HP do jogador e dano maior que a vida máxima dele em
+  // poucos golpes — praticamente imbatível no começo do jogo.
+  const vitalidade = Math.max(1, nivel * 2 + variacao());
+  const forca = Math.max(1, 2 + Math.floor(nivel * 1.2) + variacao());
+  const agilidade = Math.max(1, 1 + Math.floor(nivel * 1.1) + variacao());
+  const velocidade = Math.max(1, 1 + Math.floor(nivel) + variacao());
 
-  const vidaMaxima = 30 + vitalidade * 6;
+  const vidaMaxima = 20 + vitalidade * 5;
 
   return {
     nome: sortear(NOMES_INIMIGOS),
@@ -58,7 +63,7 @@ function gerarInimigo(nivelPersonagem) {
     velocidade,
     vida_maxima: vidaMaxima,
     vida_atual: vidaMaxima,
-    dano_base: 5 + Math.floor(forca * 0.8),
+    dano_base: 3 + Math.floor(forca * 0.7),
   };
 }
 
@@ -460,6 +465,10 @@ exports.executarTurno = async (req, res) => {
 
           mana_atual:
             personagemAtual.mana_atual,
+
+          nivel: character.nivel,
+          experiencia: character.experiencia,
+          pontos_distribuir: character.pontos_distribuir,
         },
 
         enemy: inimigoAtual,
