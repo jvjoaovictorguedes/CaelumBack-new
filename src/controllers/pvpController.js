@@ -13,13 +13,8 @@ const Power = require("../models/Power");
 const PvpStatus = require("../models/PvpStatus");
 const PvpMatches = require("../models/PvpMatches");
 const { adicionarExperiencia } = require("../services/experienceService");
-const {
-  calcularDanoBasico,
-  calcularEfeitoPoder,
-  chanceDeEsquiva,
-  vidaMaximaDe,
-  manaMaximaDe,
-} = require("../services/combatFormulas");
+const { vidaMaximaDe, manaMaximaDe } = require("../services/combatFormulas");
+const { aplicarAcao } = require("../services/duelEngine");
 
 // Primeira vez que PvpStatus é consultado com include — nunca teve
 // associação registrada em lugar nenhum.
@@ -64,38 +59,15 @@ function simularDuelo({ desafiante, desafiado, poderesDesafiante, poderesDesafia
     const atacante = chave === "A" ? estadoA : estadoB;
     const defensor = chave === "A" ? estadoB : estadoA;
     const poderes = chave === "A" ? poderesDesafiante : poderesDesafiado;
-    const vidaMaxDefensor = chave === "A" ? vidaMaxB : vidaMaxA;
     const vidaMaxAtacante = chave === "A" ? vidaMaxA : vidaMaxB;
 
     const acao = escolherAcao(atacante, poderes);
-    let dano = 0;
-    let cura = 0;
-    let esquivou = false;
-    let nomeAcao = "Ataque básico";
-
-    if (acao.tipo === "power") {
-      nomeAcao = acao.power.nome;
-      atacante.mana_atual -= acao.power.custo_mana;
-      const efeito = calcularEfeitoPoder(acao.power, atacante);
-      dano = efeito.dano;
-      cura = efeito.cura;
-    }
-
-    if (dano > 0 || acao.tipo === "attack") {
-      if (chanceDeEsquiva(defensor, atacante)) {
-        esquivou = true;
-        dano = 0;
-      } else if (acao.tipo === "attack") {
-        dano = calcularDanoBasico(atacante);
-        defensor.vida_atual = Math.max(0, defensor.vida_atual - dano);
-      } else {
-        defensor.vida_atual = Math.max(0, defensor.vida_atual - dano);
-      }
-    }
-
-    if (cura > 0) {
-      atacante.vida_atual = Math.min(vidaMaxAtacante, atacante.vida_atual + cura);
-    }
+    const { nomeAcao, dano, cura, esquivou } = aplicarAcao({
+      atacante,
+      defensor,
+      acao,
+      vidaMaxAtacante,
+    });
 
     const nomeAtacante = chave === "A" ? desafiante.nome : desafiado.nome;
     const nomeDefensor = chave === "A" ? desafiado.nome : desafiante.nome;
@@ -157,6 +129,55 @@ async function garantirStatus(idPersonagem, transaction) {
     transaction,
   });
   return status;
+}
+
+// Credita a recompensa, atualiza PvpStatus dos dois lados e registra a
+// partida em PvpMatches. Usado tanto pelo duelo assíncrono (challenge,
+// abaixo) quanto pelo duelo ao vivo (pvpLiveSocket).
+async function aplicarResultadoDuelo({ vencedor, perdedor, rodadas }) {
+  const recompensa = {
+    dinheiro: 5 + perdedor.nivel * 2,
+    experiencia: 10 + perdedor.nivel * 5,
+  };
+
+  await vencedor.update({ dinheiro: vencedor.dinheiro + recompensa.dinheiro });
+  const resultadoXP = await adicionarExperiencia(vencedor.id, recompensa.experiencia);
+
+  const [statusVencedor, statusPerdedor] = await Promise.all([
+    garantirStatus(vencedor.id),
+    garantirStatus(perdedor.id),
+  ]);
+
+  const novaSequenciaVencedor = statusVencedor.sequencia_vitorias + 1;
+  await statusVencedor.update({
+    total_batalhas: statusVencedor.total_batalhas + 1,
+    vitorias: statusVencedor.vitorias + 1,
+    sequencia_vitorias: novaSequenciaVencedor,
+    maximo_sequencia_vitorias: Math.max(
+      statusVencedor.maximo_sequencia_vitorias,
+      novaSequenciaVencedor,
+    ),
+    ultima_batalha_dia: new Date(),
+  });
+
+  await statusPerdedor.update({
+    total_batalhas: statusPerdedor.total_batalhas + 1,
+    derrotas: statusPerdedor.derrotas + 1,
+    sequencia_vitorias: 0,
+    ultima_batalha_dia: new Date(),
+  });
+
+  await PvpMatches.create({
+    id_vencedor: vencedor.id,
+    id_perdedor: perdedor.id,
+    nome_arena: NOME_ARENA,
+    duracao_segundos: rodadas,
+    vencedor_pontos: 1,
+    perdedor_pontos: 0,
+    tempo_final_combate: new Date(),
+  });
+
+  return { recompensa, nivelAposVitoria: resultadoXP.nivel };
 }
 
 // GET /api/pvp/opponents/:characterId
@@ -254,46 +275,10 @@ exports.challenge = async (req, res) => {
     const vencedor = resultado.vencedorKey === "A" ? desafiante : desafiado;
     const perdedor = resultado.vencedorKey === "A" ? desafiado : desafiante;
 
-    const recompensa = {
-      dinheiro: 5 + perdedor.nivel * 2,
-      experiencia: 10 + perdedor.nivel * 5,
-    };
-
-    await vencedor.update({ dinheiro: vencedor.dinheiro + recompensa.dinheiro });
-    const resultadoXP = await adicionarExperiencia(vencedor.id, recompensa.experiencia);
-
-    const [statusVencedor, statusPerdedor] = await Promise.all([
-      garantirStatus(vencedor.id),
-      garantirStatus(perdedor.id),
-    ]);
-
-    const novaSequenciaVencedor = statusVencedor.sequencia_vitorias + 1;
-    await statusVencedor.update({
-      total_batalhas: statusVencedor.total_batalhas + 1,
-      vitorias: statusVencedor.vitorias + 1,
-      sequencia_vitorias: novaSequenciaVencedor,
-      maximo_sequencia_vitorias: Math.max(
-        statusVencedor.maximo_sequencia_vitorias,
-        novaSequenciaVencedor,
-      ),
-      ultima_batalha_dia: new Date(),
-    });
-
-    await statusPerdedor.update({
-      total_batalhas: statusPerdedor.total_batalhas + 1,
-      derrotas: statusPerdedor.derrotas + 1,
-      sequencia_vitorias: 0,
-      ultima_batalha_dia: new Date(),
-    });
-
-    await PvpMatches.create({
-      id_vencedor: vencedor.id,
-      id_perdedor: perdedor.id,
-      nome_arena: NOME_ARENA,
-      duracao_segundos: resultado.rodadas,
-      vencedor_pontos: 1,
-      perdedor_pontos: 0,
-      tempo_final_combate: new Date(),
+    const { recompensa, nivelAposVitoria } = await aplicarResultadoDuelo({
+      vencedor,
+      perdedor,
+      rodadas: resultado.rodadas,
     });
 
     return res.status(200).json({
@@ -319,7 +304,7 @@ exports.challenge = async (req, res) => {
         vencedor: { id: vencedor.id, nome: vencedor.nome },
         perdedor: { id: perdedor.id, nome: perdedor.nome },
         recompensa,
-        nivelAposVitoria: resultadoXP.nivel,
+        nivelAposVitoria,
       },
     });
   } catch (error) {
@@ -329,3 +314,8 @@ exports.challenge = async (req, res) => {
       .json({ message: "Erro interno do servidor ao processar o duelo." });
   }
 };
+
+// Reexporta peças internas para o motor de PVP ao vivo (pvpLiveSocket.js)
+// reaproveitar em vez de duplicar.
+exports.buscarPoderesDoPersonagem = buscarPoderesDoPersonagem;
+exports.aplicarResultadoDuelo = aplicarResultadoDuelo;

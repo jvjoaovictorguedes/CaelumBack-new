@@ -1,7 +1,10 @@
 // src/app.js
 const express = require("express");
 const cors = require("cors");
+const http = require("http");
+const { Server: SocketIOServer } = require("socket.io");
 const { connectDB, isDatabaseReady } = require("./config/database");
+const registerPvpLiveHandlers = require("./socket/pvpLiveSocket");
 
 // Importa TODOS os modelos primeiro.
 // A ordem de importação dos modelos aqui geralmente não importa,
@@ -91,6 +94,15 @@ app.use("/api/attributes", attributeRoutes);
 app.use("/api/character-equipment", characterEquipmentRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/pvp", pvpRoutes);
-app.listen(port, () => {
+
+// PVP ao vivo (Socket.io) precisa do servidor HTTP cru pra fazer o
+// upgrade da conexão — por isso o app não usa mais app.listen direto.
+const server = http.createServer(app);
+const io = new SocketIOServer(server, {
+  cors: { origin: "*" },
+});
+registerPvpLiveHandlers(io);
+
+server.listen(port, () => {
   console.log(`Servidor rodando em http://localhost:${port}`);
 });
