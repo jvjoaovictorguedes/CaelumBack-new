@@ -16,6 +16,7 @@ const {
   calcularEfeitoPoder,
   chanceDeEsquiva,
   vidaMaximaDe,
+  danoBasicoEsperado,
 } = require("../services/combatFormulas");
 const {
   buscarBonusDeAtributos,
@@ -62,7 +63,7 @@ function gerarInimigo(jogador) {
   const variacao = () => 0.9 + Math.random() * 0.2; // ±10%
 
   const vidaJogador = vidaMaximaDe(jogador);
-  const ataqueJogador = Math.max(1, 4 + (jogador.forca || 0) * 0.9);
+  const ataqueJogador = Math.max(1, danoBasicoEsperado(jogador));
 
   const vidaMaxima = Math.max(
     20,

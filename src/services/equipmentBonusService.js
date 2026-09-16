@@ -37,6 +37,7 @@ async function buscarBonusDeAtributos(idPersonagem) {
   });
 
   const bonus = bonusZerado();
+  let arma = null;
 
   for (const equipamento of equipamentos) {
     const item = equipamento.item;
@@ -58,6 +59,16 @@ async function buscarBonusDeAtributos(idPersonagem) {
         bonus[campo] += item.WeaponProperty.valor_bonus_atributo || 0;
       }
     }
+
+    // A faixa de dano da arma (dano_min/dano_max) só existia no banco —
+    // nada usava. Guardamos aqui a da mão principal pra calcularDanoBasico
+    // usar no ataque básico, em vez de só olhar a força.
+    if (equipamento.slot === "ArmaPrincipal" && item.WeaponProperty) {
+      arma = {
+        dano_min: item.WeaponProperty.dano_min,
+        dano_max: item.WeaponProperty.dano_max,
+      };
+    }
   }
 
   // Arredonda aqui pra já sair um número limpo tanto pro combate quanto
@@ -66,7 +77,7 @@ async function buscarBonusDeAtributos(idPersonagem) {
     bonus[campo] = Math.round(bonus[campo]);
   }
 
-  return bonus;
+  return { ...bonus, arma };
 }
 
 // Devolve uma cópia do personagem com os atributos somados ao bônus de
@@ -81,6 +92,7 @@ function personagemComBonus(personagemBase, bonus) {
     agilidade: Math.round((personagemBase.agilidade || 0) + (b.agilidade || 0)),
     inteligencia: Math.round((personagemBase.inteligencia || 0) + (b.inteligencia || 0)),
     velocidade: Math.round((personagemBase.velocidade || 0) + (b.velocidade || 0)),
+    arma_equipada: b.arma ?? null,
   };
 }
 
