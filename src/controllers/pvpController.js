@@ -231,8 +231,8 @@ exports.challenge = async (req, res) => {
     }
 
     const [desafiante, desafiado] = await Promise.all([
-      Character.findByPk(id_desafiante),
-      Character.findByPk(id_desafiado),
+      Character.findByPk(id_desafiante, { include: [{ model: Class }] }),
+      Character.findByPk(id_desafiado, { include: [{ model: Class }] }),
     ]);
 
     if (!desafiante || !desafiado) {
@@ -301,8 +301,20 @@ exports.challenge = async (req, res) => {
       data: {
         log: resultado.log,
         turnos: resultado.turnos,
-        desafiante: { id: desafiante.id, nome: desafiante.nome, genero: desafiante.genero, chave: "A" },
-        desafiado: { id: desafiado.id, nome: desafiado.nome, genero: desafiado.genero, chave: "B" },
+        desafiante: {
+          id: desafiante.id,
+          nome: desafiante.nome,
+          genero: desafiante.genero,
+          classe: desafiante.Class?.nome,
+          chave: "A",
+        },
+        desafiado: {
+          id: desafiado.id,
+          nome: desafiado.nome,
+          genero: desafiado.genero,
+          classe: desafiado.Class?.nome,
+          chave: "B",
+        },
         vencedorChave: resultado.vencedorKey,
         vencedor: { id: vencedor.id, nome: vencedor.nome },
         perdedor: { id: perdedor.id, nome: perdedor.nome },
