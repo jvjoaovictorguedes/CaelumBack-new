@@ -10,7 +10,7 @@ const CharacterAbilities = sequelize.define("CharacterAbilities", {
     primaryKey: true,
     allowNull: false,
   },
-  id_character: {
+  id_personagem: {
     type: DataTypes.INTEGER,
     references: {
       model: Character,

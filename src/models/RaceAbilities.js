@@ -4,7 +4,7 @@ const Race = require("./Race");
 const Power = require("./Power");
 
 const RaceAbilities = sequelize.define("RaceAbilities", {
-  id_race: {
+  id_raca: {
     type: DataTypes.INTEGER,
     primaryKey: true,
     references: {

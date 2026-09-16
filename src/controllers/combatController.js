@@ -195,7 +195,7 @@ exports.executarTurno = async (req, res) => {
 
       const aprendeu = await CharacterAbilities.findOne({
         where: {
-          id_character: characterId,
+          id_personagem: characterId,
           id_power: poderUsado.id,
         },
       });

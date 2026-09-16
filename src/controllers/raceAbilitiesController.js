@@ -4,8 +4,8 @@ const Race = require("../models/Race"); // Importa Race para inclusão
 const Power = require("../models/Power"); // Importa Power para inclusão
 
 // Associações (se não estiverem em um arquivo separado, devem estar aqui ou em app.js)
-// Race.hasMany(RaceAbilities, { foreignKey: 'id_race' });
-// RaceAbilities.belongsTo(Race, { foreignKey: 'id_race' });
+// Race.hasMany(RaceAbilities, { foreignKey: 'id_raca' });
+// RaceAbilities.belongsTo(Race, { foreignKey: 'id_raca' });
 
 // Power.hasMany(RaceAbilities, { foreignKey: 'id_power' });
 // RaceAbilities.belongsTo(Power, { foreignKey: 'id_power' });
@@ -65,9 +65,9 @@ exports.getAllRaceAbilities = async (req, res) => {
 // Obter uma habilidade de raça por ID_Race e ID_Power
 exports.getRaceAbilityByRaceAndPowerId = async (req, res) => {
   try {
-    const { id_race, id_power } = req.params;
+    const { id_raca, id_power } = req.params;
     const raceAbility = await RaceAbilities.findOne({
-      where: { id_race, id_power },
+      where: { id_raca, id_power },
       include: [
         { model: Race, attributes: ["id", "nome", "descricao"] },
         { model: Power, attributes: ["id", "nome", "tipo_poder"] },
@@ -100,9 +100,9 @@ exports.getRaceAbilityByRaceAndPowerId = async (req, res) => {
 // Atualizar uma habilidade de raça por ID_Race e ID_Power
 exports.updateRaceAbility = async (req, res) => {
   try {
-    const { id_race, id_power } = req.params;
+    const { id_raca, id_power } = req.params;
     const [updatedRows] = await RaceAbilities.update(req.body, {
-      where: { id_race, id_power },
+      where: { id_raca, id_power },
     });
 
     if (updatedRows === 0) {
@@ -115,7 +115,7 @@ exports.updateRaceAbility = async (req, res) => {
     }
 
     const updatedRaceAbility = await RaceAbilities.findOne({
-      where: { id_race, id_power }, // Buscar pelo PK composta
+      where: { id_raca, id_power }, // Buscar pelo PK composta
       include: [
         { model: Race, attributes: ["id", "nome", "descricao"] },
         { model: Power, attributes: ["id", "nome", "tipo_poder"] },
@@ -141,9 +141,9 @@ exports.updateRaceAbility = async (req, res) => {
 // Deletar uma habilidade de raça por ID_Race e ID_Power
 exports.deleteRaceAbility = async (req, res) => {
   try {
-    const { id_race, id_power } = req.params;
+    const { id_raca, id_power } = req.params;
     const deletedRows = await RaceAbilities.destroy({
-      where: { id_race, id_power },
+      where: { id_raca, id_power },
     });
 
     if (deletedRows === 0) {

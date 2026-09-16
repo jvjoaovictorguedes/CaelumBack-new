@@ -4,8 +4,8 @@ const Character = require("../models/Character"); // Importa Character para incl
 const Power = require("../models/Power"); // Importa Power para inclusão
 
 // Associações (se não estiverem em um arquivo separado, devem estar aqui ou em app.js)
-// Character.hasMany(CharacterAbilities, { foreignKey: 'id_character' });
-// CharacterAbilities.belongsTo(Character, { foreignKey: 'id_character' });
+// Character.hasMany(CharacterAbilities, { foreignKey: 'id_personagem' });
+// CharacterAbilities.belongsTo(Character, { foreignKey: 'id_personagem' });
 
 // Power.hasMany(CharacterAbilities, { foreignKey: 'id_power' }); // Um poder pode ser aprendido por muitos personagens
 // CharacterAbilities.belongsTo(Power, { foreignKey: 'id_power' });
@@ -40,7 +40,7 @@ exports.getAllCharacterAbilities = async (req, res) => {
     // Permite filtrar as habilidades de um único personagem
     // (ex: ?characterId=3), do jeito que a tela de combate precisa.
     const { characterId } = req.query;
-    const whereClause = characterId ? { id_character: characterId } : {};
+    const whereClause = characterId ? { id_personagem: characterId } : {};
 
     const characterAbilities = await CharacterAbilities.findAll({
       where: whereClause,
