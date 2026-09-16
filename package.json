@@ -9,6 +9,7 @@
     "seed": "sequelize-cli db:seed:all",
     "setup:local": "npm run migrate && npm run seed",
     "check:requires": "node check_requires_case.js",
+    "seed:equipamentos": "node scripts/seed-equipamentos-producao.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
