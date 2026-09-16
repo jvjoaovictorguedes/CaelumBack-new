@@ -45,7 +45,7 @@ module.exports = {
         descricao: "Regenera 30 pontos de vida durante a aventura.",
         tipo_item: "Consumivel",
         raridade: "Comum",
-        valor_compra: 1,
+        valor_compra: 4,
         valor_venda: 0,
         peso: 0.5,
         createdAt: new Date(),
