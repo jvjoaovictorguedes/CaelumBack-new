@@ -5,6 +5,11 @@ const CharacterInventory = require("../models/CharacterInventory");
 const Character = require("../models/Character");
 const Item = require("../models/Item");
 const ConsumableProperties = require("../models/ConsumableProperties");
+const { vidaMaximaDe, manaMaximaDe } = require("../services/combatFormulas");
+const {
+  buscarBonusDeAtributos,
+  personagemComBonus,
+} = require("../services/equipmentBonusService");
 
 // Sem essas associações, qualquer include: [{model: Character}, {model: Item}]
 // abaixo derruba a chamada com "CharacterInventory is not associated to X!".
@@ -81,7 +86,14 @@ exports.useItem = async (req, res) => {
         throw error;
       }
 
-      const vidaMaxima = 30 + (character.vitalidade || 0) * 6;
+      // Precisa considerar o bônus de equipamento aqui também — senão a
+      // vida máxima "de verdade" (a que o personagem já anda com mais
+      // vitalidade por causa de um item) fica menor do que devia só
+      // dentro dessa conta, e a poção nunca cura além do valor base.
+      const bonusEquipamento = await buscarBonusDeAtributos(id_personagem);
+      const personagemEfetivo = personagemComBonus(character.toJSON(), bonusEquipamento);
+      const vidaMaxima = vidaMaximaDe(personagemEfetivo);
+      const manaMaxima = manaMaximaDe(personagemEfetivo);
 
       if (efeito.efeito_vida) {
         character.vida_atual = Math.min(
@@ -91,8 +103,10 @@ exports.useItem = async (req, res) => {
       }
 
       if (efeito.efeito_mana) {
-        character.mana_atual =
-          character.mana_atual + efeito.efeito_mana * quantidade;
+        character.mana_atual = Math.min(
+          manaMaxima,
+          character.mana_atual + efeito.efeito_mana * quantidade,
+        );
       }
 
       await character.save({ transaction });
