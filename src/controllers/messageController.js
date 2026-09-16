@@ -93,6 +93,29 @@ exports.getConversation = async (req, res) => {
   }
 };
 
+// GET /api/messages/unread-count/:userId
+// Só o total de não lidas — pensado pra ficar sendo consultado em
+// segundo plano (ex: badge no menu) sem o custo de montar a inbox inteira.
+exports.getUnreadCount = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const total = await Message.count({
+      where: { id_destinatario: userId, lida: false },
+    });
+
+    return res.status(200).json({
+      status: "success",
+      data: { naoLidas: total },
+    });
+  } catch (error) {
+    console.error("Erro ao contar mensagens não lidas:", error);
+    return res
+      .status(500)
+      .json({ message: "Erro interno do servidor ao contar mensagens." });
+  }
+};
+
 // GET /api/messages/inbox/:userId
 // Uma linha por pessoa com quem o usuário já trocou mensagem, com a
 // última mensagem e quantidade de não lidas.
