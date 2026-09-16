@@ -15,6 +15,7 @@ const {
   calcularDanoBasico,
   calcularEfeitoPoder,
   chanceDeEsquiva,
+  vidaMaximaDe,
 } = require("../services/combatFormulas");
 const {
   buscarBonusDeAtributos,
@@ -37,24 +38,52 @@ function sortear(lista) {
   return lista[Math.floor(Math.random() * lista.length)];
 }
 
-// Gera um inimigo balanceado a partir do nível do personagem.
-// Fica só na memória (não precisa de tabela própria no banco).
-function gerarInimigo(nivelPersonagem) {
-  const nivel = Math.max(1, nivelPersonagem);
+// Quantos turnos de ataque básico, em média, cada lado precisa pra matar
+// o outro. O do inimigo é maior de propósito: o jogador sai na frente
+// (folga pra usar poder/errar um turno/tomar uma esquiva ruim), mas
+// ainda precisa jogar direito — não é vitória de graça.
+const RODADAS_PARA_MATAR_INIMIGO = 4;
+const RODADAS_PARA_INIMIGO_MATAR_JOGADOR = 4.2;
 
-  const variacao = () => Math.floor(Math.random() * 3) - 1;
+// Gera um inimigo calibrado a partir dos ATRIBUTOS DE VERDADE do
+// personagem (já com bônus de equipamento somado) — não mais só o nível.
+// Antes o inimigo era pensado pra um "personagem médio" daquele nível
+// (uma quantidade assumida de força/vitalidade); quem não investia
+// pontos em vida, por exemplo, sempre enfrentava um inimigo tanque
+// demais pro tanto de dano que conseguia causar, e vice-versa. Agora a
+// vida do inimigo escala com o ataque real do jogador (se você bate
+// forte, o inimigo aguenta mais golpes, mas você ainda mata em ~4
+// turnos) e o dano do inimigo escala com a vida real do jogador (se
+// você é frágil, o inimigo bate mais fraco, mas ainda ameaça em ~6
+// turnos) — o resultado da luta depende do seu build de verdade, não
+// de uma média que talvez nem seja a sua.
+function gerarInimigo(jogador) {
+  const nivel = Math.max(1, jogador.nivel || 1);
+  const variacao = () => 0.9 + Math.random() * 0.2; // ±10%
 
-  // No nível 1, um personagem médio (só com o bônus de atributo da raça,
-  // sem pontos distribuídos ainda) tem uns 2 de força/vitalidade. Os
-  // valores antigos (base 6 de vitalidade e 4 de força) davam inimigos
-  // com o dobro do HP do jogador e dano maior que a vida máxima dele em
-  // poucos golpes — praticamente imbatível no começo do jogo.
-  const vitalidade = Math.max(1, nivel * 2 + variacao());
-  const forca = Math.max(1, 2 + Math.floor(nivel * 1.2) + variacao());
-  const agilidade = Math.max(1, 1 + Math.floor(nivel * 1.1) + variacao());
-  const velocidade = Math.max(1, 1 + Math.floor(nivel) + variacao());
+  const vidaJogador = vidaMaximaDe(jogador);
+  const ataqueJogador = Math.max(1, 4 + (jogador.forca || 0) * 0.9);
 
-  const vidaMaxima = 20 + vitalidade * 5;
+  const vidaMaxima = Math.max(
+    20,
+    Math.round(ataqueJogador * RODADAS_PARA_MATAR_INIMIGO * variacao()),
+  );
+  const danoBase = Math.max(
+    1,
+    Math.round((vidaJogador / RODADAS_PARA_INIMIGO_MATAR_JOGADOR) * variacao()),
+  );
+
+  // Agilidade/velocidade espelham as do próprio jogador (com variação),
+  // pra esquiva e ordem de turno ficarem parelhas com o que ele tem —
+  // em vez de, de novo, assumir uma agilidade "média" pro nível.
+  const agilidade = Math.max(1, Math.round((jogador.agilidade || 1) * variacao()));
+  const velocidade = Math.max(1, Math.round((jogador.velocidade || 1) * variacao()));
+
+  // forca/vitalidade do inimigo aqui são só pra manter o formato da
+  // resposta (a API sempre devolveu esses campos) — quem decide o
+  // resultado da luta é vida_maxima/dano_base calculados acima.
+  const forca = Math.max(1, Math.round((danoBase - 3) / 0.7));
+  const vitalidade = Math.max(1, Math.round((vidaMaxima - 20) / 5));
 
   return {
     nome: sortear(NOMES_INIMIGOS),
@@ -65,7 +94,7 @@ function gerarInimigo(nivelPersonagem) {
     velocidade,
     vida_maxima: vidaMaxima,
     vida_atual: vidaMaxima,
-    dano_base: 3 + Math.floor(forca * 0.7),
+    dano_base: danoBase,
   };
 }
 
@@ -83,7 +112,9 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       });
     }
 
-    const inimigo = gerarInimigo(character.nivel);
+    const bonusEquipamento = await buscarBonusDeAtributos(character.id);
+    const jogadorEfetivo = personagemComBonus(character.toJSON(), bonusEquipamento);
+    const inimigo = gerarInimigo(jogadorEfetivo);
 
     res.status(200).json({
       status: "success",
