@@ -13,6 +13,21 @@ const SLOT_COLUMNS = [
 
 module.exports = {
   async up(queryInterface, Sequelize) {
+    const existingTables = await queryInterface.showAllTables();
+    if (existingTables.includes("character_equipment")) {
+      console.log('[migration] Tabela "character_equipment" já existe — pulando criação.');
+      return;
+    }
+
+    // Num banco criado do zero pela migration baseline de Characters, as
+    // colunas antigas de slot (slot_cabeca_item_id etc.) nunca existiram —
+    // só existem em bancos que rodaram sync() antes desse refactor. Detecta
+    // isso pra não tentar copiar/remover algo que não está lá.
+    const charactersDescription = await queryInterface.describeTable("Characters");
+    const hasLegacySlotColumns = SLOT_COLUMNS.some(
+      ([column]) => column in charactersDescription,
+    );
+
     // Tudo numa transação: ou migra tudo, ou não muda nada.
     await queryInterface.sequelize.transaction(async (transaction) => {
       await queryInterface.createTable(
@@ -51,8 +66,16 @@ module.exports = {
         { transaction },
       );
 
+      if (!hasLegacySlotColumns) {
+        console.log(
+          '[migration] "Characters" já não tem as colunas antigas de slot — nada pra copiar/remover.',
+        );
+        return;
+      }
+
       // 1) Copia os dados existentes das colunas de slot pra tabela nova.
       for (const [column, slot] of SLOT_COLUMNS) {
+        if (!(column in charactersDescription)) continue;
         await queryInterface.sequelize.query(
           `
             INSERT INTO "character_equipment" (id_personagem, slot, id_item)
@@ -66,6 +89,7 @@ module.exports = {
 
       // 2) Só depois de copiar, remove as colunas antigas.
       for (const [column] of SLOT_COLUMNS) {
+        if (!(column in charactersDescription)) continue;
         await queryInterface.removeColumn("Characters", column, {
           transaction,
         });

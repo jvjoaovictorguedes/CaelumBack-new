@@ -21,14 +21,29 @@ async function findTableByColumn(queryInterface, columnName) {
   return rows[0].table_name;
 }
 
+async function columnExists(queryInterface, tableName, columnName) {
+  const description = await queryInterface.describeTable(tableName);
+  return Object.prototype.hasOwnProperty.call(description, columnName);
+}
+
 module.exports = {
   async up(queryInterface) {
     const tableName = await findTableByColumn(queryInterface, "nivel_aprendizado");
+    // Num banco criado do zero pela migration baseline, a tabela já nasce
+    // com "id_raca" — não há o que renomear.
+    if (!(await columnExists(queryInterface, tableName, "id_race"))) {
+      console.log(`[migration] "${tableName}" já está com "id_raca" — pulando rename.`);
+      return;
+    }
     await queryInterface.renameColumn(tableName, "id_race", "id_raca");
   },
 
   async down(queryInterface) {
     const tableName = await findTableByColumn(queryInterface, "nivel_aprendizado");
+    if (!(await columnExists(queryInterface, tableName, "id_raca"))) {
+      console.log(`[migration] "${tableName}" já está com "id_race" — pulando rollback.`);
+      return;
+    }
     await queryInterface.renameColumn(tableName, "id_raca", "id_race");
   },
 };
