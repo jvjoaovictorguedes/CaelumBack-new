@@ -1,3 +1,4 @@
+const { Op } = require("sequelize");
 const CharacterEquipment = require("../models/CharacterEquipment");
 const CharacterInventory = require("../models/CharacterInventory");
 const Character = require("../models/Character");
@@ -81,6 +82,18 @@ exports.equipItem = async (req, res) => {
     if (!inventoryEntry || inventoryEntry.quantidade < 1) {
       return res.status(400).json({
         message: "Você não possui esse item no inventário.",
+      });
+    }
+
+    // O inventário só guarda "quantas cópias eu tenho", não "quantas já
+    // estão em uso" — sem isso dava pra equipar a mesma espada em
+    // ArmaPrincipal e ArmaSecundaria ao mesmo tempo com só 1 no inventário.
+    const jaEquipadoAlhures = await CharacterEquipment.count({
+      where: { id_personagem, id_item, slot: { [Op.ne]: slot } },
+    });
+    if (inventoryEntry.quantidade <= jaEquipadoAlhures) {
+      return res.status(400).json({
+        message: `Você só tem ${inventoryEntry.quantidade} unidade(s) de "${item.nome}" e já está usando ${jaEquipadoAlhures} em outro slot.`,
       });
     }
 
