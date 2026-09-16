@@ -26,6 +26,7 @@ const NOMES_INIMIGOS = [
   "Aranha Venenosa",
   "Cultista Renegado",
   "Draconídeo Jovem",
+  "Minotauro",
 ];
 
 function sortear(lista) {
