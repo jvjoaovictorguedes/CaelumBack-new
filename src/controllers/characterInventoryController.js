@@ -6,6 +6,14 @@ const Character = require("../models/Character");
 const Item = require("../models/Item");
 const ConsumableProperties = require("../models/ConsumableProperties");
 
+// Sem essas associações, qualquer include: [{model: Character}, {model: Item}]
+// abaixo derruba a chamada com "CharacterInventory is not associated to X!".
+Character.hasMany(CharacterInventory, { foreignKey: "id_personagem" });
+CharacterInventory.belongsTo(Character, { foreignKey: "id_personagem" });
+
+Item.hasMany(CharacterInventory, { foreignKey: "id_item" });
+CharacterInventory.belongsTo(Item, { foreignKey: "id_item" });
+
 // POST /api/character-items/use
 // body: { id_personagem, id_item, quantidade }
 exports.useItem = async (req, res) => {

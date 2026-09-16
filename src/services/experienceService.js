@@ -14,6 +14,8 @@ async function adicionarExperiencia(characterId, quantidadeXP) {
     throw new Error("A quantidade de XP deve ser maior que zero.");
   }
 
+const nivelInicial = character.nivel;
+
 let novaExperiencia = character.experiencia + quantidadeXP;
 let novoNivel = character.nivel;
 let novosPontos = character.pontos_distribuir;
@@ -30,6 +32,13 @@ character.nivel = novoNivel;
 character.pontos_distribuir = novosPontos;
 
 await character.save();
+
+return {
+  nivel: novoNivel,
+  experiencia: novaExperiencia,
+  pontos_distribuir: novosPontos,
+  niveisGanhos: novoNivel - nivelInicial,
+};
 }
 module.exports = {
   adicionarExperiencia,

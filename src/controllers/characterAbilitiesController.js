@@ -3,12 +3,13 @@ const CharacterAbilities = require("../models/CharacterAbilities");
 const Character = require("../models/Character"); // Importa Character para inclusão
 const Power = require("../models/Power"); // Importa Power para inclusão
 
-// Associações (se não estiverem em um arquivo separado, devem estar aqui ou em app.js)
-// Character.hasMany(CharacterAbilities, { foreignKey: 'id_personagem' });
-// CharacterAbilities.belongsTo(Character, { foreignKey: 'id_personagem' });
+// Sem essas associações, qualquer include: [{model: Character}, {model: Power}]
+// abaixo derruba a chamada com "CharacterAbilities is not associated to X!".
+Character.hasMany(CharacterAbilities, { foreignKey: "id_personagem" });
+CharacterAbilities.belongsTo(Character, { foreignKey: "id_personagem" });
 
-// Power.hasMany(CharacterAbilities, { foreignKey: 'id_power' }); // Um poder pode ser aprendido por muitos personagens
-// CharacterAbilities.belongsTo(Power, { foreignKey: 'id_power' });
+Power.hasMany(CharacterAbilities, { foreignKey: "id_power" }); // Um poder pode ser aprendido por muitos personagens
+CharacterAbilities.belongsTo(Power, { foreignKey: "id_power" });
 
 // Criar uma nova habilidade de personagem
 exports.createCharacterAbility = async (req, res) => {
