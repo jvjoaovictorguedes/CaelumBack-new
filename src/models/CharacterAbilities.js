@@ -36,6 +36,14 @@ const CharacterAbilities = sequelize.define("CharacterAbilities", {
     defaultValue: false,
     allowNull: false,
   },
+}, {
+  indexes: [
+    {
+      unique: true,
+      fields: ["id_personagem", "id_power"],
+      name: "character_abilities_personagem_power_unique",
+    },
+  ],
 });
 
 module.exports = CharacterAbilities;

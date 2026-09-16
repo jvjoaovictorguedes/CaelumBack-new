@@ -175,6 +175,18 @@ exports.getCharacterById = async (req, res) => {
     if (!character) {
       return res.status(404).json({ message: "Personagem não encontrado." });
     }
+
+    // Sincroniza poderes de classe/raça toda vez que o personagem é
+    // carregado — bulkCreate com ignoreDuplicates é seguro de chamar
+    // repetidamente. Sem isso, um personagem criado antes de um poder
+    // novo ser adicionado à classe (ex: Bola de Fogo pro Mago) nunca
+    // aprendia esse poder, só quem criasse personagem depois.
+    try {
+      await concederPoderesIniciais(character);
+    } catch (erroPoderes) {
+      console.error("Erro ao sincronizar poderes iniciais:", erroPoderes);
+    }
+
     const bonus_atributos = await buscarBonusDeAtributos(character.id);
     const personagemEfetivo = comMultiplicadoresDeClasse(
       personagemComBonus(character.toJSON(), bonus_atributos),

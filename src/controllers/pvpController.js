@@ -42,14 +42,19 @@ async function buscarPoderesDoPersonagem(idPersonagem) {
 
 // Escolhe a ação de cada turno: usa o poder ofensivo mais forte que
 // consegue pagar; se não tiver mana pra nenhum, ataca na unha.
+// Duelo assíncrono resolve os dois lados sozinho (sem jogador na hora),
+// então precisa "decidir" qual ação tomar — sorteia entre os poderes
+// ofensivos que dá pra pagar, em vez de sempre usar o de maior dano.
+// Isso deixa cada duelo com uma pegada diferente mesmo entre os mesmos
+// dois personagens, em vez de sempre repetir a mesma sequência ótima.
 function escolherAcao(personagemAtual, poderes) {
   const usaveis = poderes.filter(
     (p) => p.custo_mana <= personagemAtual.mana_atual && p.dano_base > 0,
   );
   if (usaveis.length === 0) return { tipo: "attack" };
 
-  const melhor = usaveis.reduce((a, b) => (b.dano_base > a.dano_base ? b : a));
-  return { tipo: "power", power: melhor };
+  const escolhido = usaveis[Math.floor(Math.random() * usaveis.length)];
+  return { tipo: "power", power: escolhido };
 }
 
 function simularDuelo({ desafiante, desafiado, poderesDesafiante, poderesDesafiado }) {
