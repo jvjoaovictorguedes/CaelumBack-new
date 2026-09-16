@@ -26,6 +26,16 @@ const databaseOptions = {
   }),
 };
 
+if (databaseUrl && !/^postgres(ql)?:\/\//.test(databaseUrl)) {
+  // Falha rápido com uma mensagem clara em vez de deixar o Sequelize
+  // estourar um erro genérico (ou pior: um erro fora de try/catch que
+  // derruba o processo sem dizer por quê nos logs do Railway).
+  console.error(
+    `DATABASE_URL/POSTGRES_URL não parece uma URL do Postgres válida (deveria começar com "postgres://" ou "postgresql://"). Valor recebido: "${databaseUrl.slice(0, 15)}...".`,
+  );
+  process.exit(1);
+}
+
 const sequelize = databaseUrl
   ? new Sequelize(databaseUrl, {
       ...databaseOptions,
@@ -45,16 +55,24 @@ let databaseReady = false;
 
 const connectDB = async () => {
   let delay = 2000;
-  const databaseConfig = databaseUrl
-    ? new URL(databaseUrl)
-    : {
-        hostname: process.env.DB_HOST || process.env.PGHOST || "localhost",
-        port: process.env.DB_PORT || process.env.PGPORT || 5432,
-      };
 
-  console.log(
-    `Banco configurado via ${databaseSource}: ${databaseConfig.hostname}:${databaseConfig.port}`,
-  );
+  try {
+    const databaseConfig = databaseUrl
+      ? new URL(databaseUrl)
+      : {
+          hostname: process.env.DB_HOST || process.env.PGHOST || "localhost",
+          port: process.env.DB_PORT || process.env.PGPORT || 5432,
+        };
+
+    console.log(
+      `Banco configurado via ${databaseSource}: ${databaseConfig.hostname}:${databaseConfig.port}`,
+    );
+  } catch (error) {
+    console.error(
+      "Não foi possível interpretar a configuração do banco (só afeta a mensagem de log, não impede a conexão):",
+      error.message,
+    );
+  }
 
   while (true) {
     try {

@@ -44,7 +44,12 @@ const port = process.env.PORT || 3001;
 
 // Conecta ao banco de dados e sincroniza os modelos
 // connectDB já chama sequelize.sync()
-connectDB();
+// O .catch() é essencial: connectDB() roda sem await, e uma promise
+// rejeitada sem handler derruba o processo inteiro (comportamento padrão
+// do Node desde a v15) mesmo depois do servidor já estar no ar.
+connectDB().catch((error) => {
+  console.error("Erro fatal e inesperado ao conectar ao banco de dados:", error);
+});
 
 app.use(express.json());
 app.use(cors());
