@@ -16,6 +16,10 @@ const {
   calcularEfeitoPoder,
   chanceDeEsquiva,
 } = require("../services/combatFormulas");
+const {
+  buscarBonusDeAtributos,
+  personagemComBonus,
+} = require("../services/equipmentBonusService");
 
 const NOMES_INIMIGOS = [
   "Lobo das Sombras",
@@ -118,9 +122,11 @@ exports.executarTurno = async (req, res) => {
 
     const log = [];
 
-    const personagemAtual = {
-      ...character.toJSON(),
-    };
+    const bonusEquipamento = await buscarBonusDeAtributos(characterId);
+    const personagemAtual = personagemComBonus(
+      character.toJSON(),
+      bonusEquipamento,
+    );
 
     const inimigoAtual = {
       ...enemy,

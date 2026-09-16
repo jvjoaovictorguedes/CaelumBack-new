@@ -15,6 +15,10 @@ const PvpMatches = require("../models/PvpMatches");
 const { adicionarExperiencia } = require("../services/experienceService");
 const { vidaMaximaDe, manaMaximaDe } = require("../services/combatFormulas");
 const { aplicarAcao } = require("../services/duelEngine");
+const {
+  buscarBonusDeAtributos,
+  personagemComBonus,
+} = require("../services/equipmentBonusService");
 
 // Primeira vez que PvpStatus é consultado com include — nunca teve
 // associação registrada em lugar nenhum.
@@ -260,14 +264,17 @@ exports.challenge = async (req, res) => {
       return res.status(404).json({ message: "Personagem não encontrado." });
     }
 
-    const [poderesDesafiante, poderesDesafiado] = await Promise.all([
-      buscarPoderesDoPersonagem(desafiante.id),
-      buscarPoderesDoPersonagem(desafiado.id),
-    ]);
+    const [poderesDesafiante, poderesDesafiado, bonusDesafiante, bonusDesafiado] =
+      await Promise.all([
+        buscarPoderesDoPersonagem(desafiante.id),
+        buscarPoderesDoPersonagem(desafiado.id),
+        buscarBonusDeAtributos(desafiante.id),
+        buscarBonusDeAtributos(desafiado.id),
+      ]);
 
     const resultado = simularDuelo({
-      desafiante: desafiante.toJSON(),
-      desafiado: desafiado.toJSON(),
+      desafiante: personagemComBonus(desafiante.toJSON(), bonusDesafiante),
+      desafiado: personagemComBonus(desafiado.toJSON(), bonusDesafiado),
       poderesDesafiante,
       poderesDesafiado,
     });

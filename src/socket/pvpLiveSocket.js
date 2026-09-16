@@ -16,6 +16,10 @@ const Class = require("../models/Class");
 const { vidaMaximaDe, manaMaximaDe } = require("../services/combatFormulas");
 const { aplicarAcao } = require("../services/duelEngine");
 const { buscarPoderesDoPersonagem, aplicarResultadoDuelo } = require("../controllers/pvpController");
+const {
+  buscarBonusDeAtributos,
+  personagemComBonus,
+} = require("../services/equipmentBonusService");
 
 const NOME_ARENA = "Arena de Caelum";
 const PRAZO_ACEITAR_MS = 20000;
@@ -41,7 +45,8 @@ async function carregarLutador(characterId) {
   const personagem = await Character.findByPk(characterId, { include: [{ model: Class }] });
   if (!personagem) return null;
   const poderes = await buscarPoderesDoPersonagem(characterId);
-  const base = personagem.toJSON();
+  const bonus = await buscarBonusDeAtributos(characterId);
+  const base = personagemComBonus(personagem.toJSON(), bonus);
   return {
     id: base.id,
     nome: base.nome,
