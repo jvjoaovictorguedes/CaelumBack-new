@@ -1,6 +1,7 @@
 const User = require("../models/User");
 const jwt = require("jsonwebtoken");
 const Character = require("../models/Character");
+const { emitirTicket } = require("../services/socketTicketService");
 
 require("dotenv").config();
 const { JWT_SECRET } = require("../config/jwt");
@@ -126,6 +127,20 @@ exports.getUserById = async (req, res) => {
     res
       .status(500)
       .json({ message: "Erro interno do servidor ao buscar usuário." });
+  }
+};
+
+// GET /api/users/socket-ticket
+// authMiddleware já garantiu req.user.id via JWT. O ticket é o que o
+// cliente manda no "identificar" do Socket.IO — de vida curta (30s) e
+// só serve pra isso, então mesmo vazando não dá pra reusar como sessão.
+exports.getSocketTicket = async (req, res) => {
+  try {
+    const ticket = emitirTicket(req.user.id);
+    return res.status(200).json({ status: "success", data: { ticket } });
+  } catch (error) {
+    console.error("Erro ao emitir ticket de socket:", error);
+    return res.status(500).json({ message: "Erro interno do servidor." });
   }
 };
 

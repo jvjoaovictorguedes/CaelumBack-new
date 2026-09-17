@@ -24,6 +24,7 @@ const {
   buscarBonusDeAtributos,
   personagemComBonus,
 } = require("../services/equipmentBonusService");
+const { personagemViaTicket } = require("./socketAuth");
 
 const NOME_ARENA = "Arena de Caelum";
 const PRAZO_ACEITAR_MS = 20000;
@@ -90,8 +91,13 @@ function poderesPublicos(poderes) {
 
 module.exports = function registerPvpLiveHandlers(io) {
   io.on("connection", (socket) => {
-    socket.on("identificar", ({ characterId } = {}) => {
-      if (!characterId) return;
+    socket.on("identificar", async ({ ticket } = {}) => {
+      // O characterId nunca vem do cliente — só do ticket de curta
+      // duração emitido via GET /api/users/socket-ticket (autenticado
+      // por JWT), senão qualquer socket conectado conseguia agir como
+      // qualquer personagem só informando o ID certo.
+      const characterId = await personagemViaTicket(ticket);
+      if (!characterId) return socket.emit("pvp:erro", { mensagem: "Ticket inválido ou expirado." });
       const chave = chaveOnline(characterId);
 
       // Se esse characterId já tinha outro socket identificado (aba

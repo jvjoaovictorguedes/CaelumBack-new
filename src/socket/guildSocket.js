@@ -8,6 +8,7 @@
 
 const GuildMember = require("../models/GuildMember");
 const Character = require("../models/Character");
+const { personagemViaTicket } = require("./socketAuth");
 
 function salaDaGuild(idGuild) {
   return `guild:${idGuild}`;
@@ -25,9 +26,13 @@ function emitParaGuild(idGuild, evento, payload) {
 module.exports = function registerGuildHandlers(io) {
   ioRegistrado = io;
   io.on("connection", (socket) => {
-    socket.on("identificar", ({ characterId } = {}) => {
+    socket.on("identificar", async ({ ticket } = {}) => {
+      // Igual ao PvP ao vivo: characterId só vem do ticket verificado,
+      // nunca do que o cliente mandar direto (senão qualquer socket
+      // conseguia falar/ouvir o chat de guilda de outro personagem).
+      const characterId = await personagemViaTicket(ticket);
       if (!characterId) return;
-      socket.characterId = String(characterId);
+      socket.characterId = characterId;
     });
 
     socket.on("guild:join-room", async (_payload, callback) => {
