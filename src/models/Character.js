@@ -61,6 +61,14 @@ const Character = sequelize.define("Character", {
     allowNull: false,
     defaultValue: DataTypes.NOW,
   },
+  // Combate PvE em andamento (inimigo + timestamp), se houver — ver
+  // combatController.js. Persistido no banco (não só em memória do
+  // processo) pra sobreviver a um restart/redeploy do servidor sem
+  // derrubar a luta que o jogador está no meio.
+  encontro_pve: {
+    type: DataTypes.JSONB,
+    allowNull: true,
+  },
   forca: {
     type: DataTypes.INTEGER,
     allowNull: false,

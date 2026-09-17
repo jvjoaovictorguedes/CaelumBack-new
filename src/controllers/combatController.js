@@ -43,49 +43,35 @@ function sortear(lista) {
   return lista[Math.floor(Math.random() * lista.length)];
 }
 
-// Estado do inimigo ativo por personagem, guardado no servidor —
-// characterId (string) -> inimigo. Sem isso, o cliente tinha que devolver
-// o objeto `enemy` inteiro a cada turno (POST /combat/turn), e nada
-// impedia ele de mandar um inimigo forjado (vida_atual: 1, nivel:
-// 999999, dano_base negativo) e "vencer" sem lutar de verdade. Agora o
-// servidor é a única fonte de verdade sobre o HP/nível/dano do inimigo;
-// qualquer `enemy` que o cliente ainda mande no corpo é ignorado.
+// Estado do inimigo ativo, persistido em Character.encontro_pve (coluna
+// JSONB) — não mais só em memória do processo. Antes um Map em memória
+// (characterId -> inimigo) sobrevivia enquanto o processo Node ficasse de
+// pé, mas qualquer restart (deploy, crash, autoscale) apagava todo
+// combate em andamento sem aviso: o jogador via o inimigo na tela, clicava
+// em atacar, e caía em "Nenhum combate ativo" do nada — o inimigo tinha
+// sumido da memória mas a tela ainda mostrava ele. Persistir no personagem
+// também resolve de graça a limitação de só funcionar com UMA instância
+// do processo (documentada em rateLimitMiddleware.js pro rate limiter,
+// que tem o mesmo problema).
 //
-// Expira sozinho depois de um tempo (encontro abandonado) pra não vazar
-// memória indefinidamente num processo de longa duração.
-const ENCONTROS_ATIVOS = new Map();
+// O inimigo nunca vem do cliente — só o servidor sabe o estado real.
+// Qualquer `enemy` que o corpo da requisição ainda contenha é ignorado.
 const VALIDADE_ENCONTRO_MS = 30 * 60 * 1000;
 
-function encontroAtivoDe(characterId) {
-  const chave = String(characterId);
-  const encontro = ENCONTROS_ATIVOS.get(chave);
+// Expira sozinho depois de um tempo (encontro abandonado) — devolve uma
+// CÓPIA do encontro válido (ou null), nunca a referência crua de
+// character.encontro_pve: o resto do turno muta esse objeto in-place
+// (inimigoAtual.vida_atual -= dano) conforme o combate avança, e se
+// fosse a mesma referência guardada em character.dataValues, o
+// Sequelize não detectaria diferença nenhuma na hora de reatribuir
+// `character.encontro_pve = inimigoAtual` no final (mesmo objeto,
+// "nada mudou" do ponto de vista do dirty-check) — o campo simplesmente
+// não seria salvo.
+function encontroValido(character) {
+  const encontro = character.encontro_pve;
   if (!encontro) return null;
-  if (Date.now() - encontro.criadoEm > VALIDADE_ENCONTRO_MS) {
-    ENCONTROS_ATIVOS.delete(chave);
-    return null;
-  }
-  return encontro;
-}
-
-// Trava simples por personagem contra requests concorrentes (duplo
-// clique, duas abas, replay). Como o Node roda o corpo do handler em
-// single-thread e o check-and-set abaixo não tem nenhum `await` no
-// meio, não existe janela pra uma segunda requisição passar entre a
-// checagem e a marcação — a segunda request só é atendida depois que a
-// primeira já liberou (bloco finally) ou já apagou o encontro
-// (vitória/derrota), garantindo que XP/ouro/resultado sejam concedidos
-// exatamente uma vez por vitória.
-function tentarTravarEncontro(characterId) {
-  const encontro = encontroAtivoDe(characterId);
-  if (!encontro) return { encontro: null, travado: false };
-  if (encontro.processando) return { encontro, travado: false, ocupado: true };
-  encontro.processando = true;
-  return { encontro, travado: true };
-}
-
-function destravarEncontro(characterId) {
-  const encontro = ENCONTROS_ATIVOS.get(String(characterId));
-  if (encontro) encontro.processando = false;
+  if (Date.now() - encontro.criadoEm > VALIDADE_ENCONTRO_MS) return null;
+  return { ...encontro };
 }
 
 // Quantos turnos de ataque básico, em média, cada lado precisa pra matar
@@ -179,7 +165,8 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
     }
 
     const inimigo = gerarInimigo(jogadorEfetivo);
-    ENCONTROS_ATIVOS.set(String(character.id), { ...inimigo, criadoEm: Date.now() });
+    character.encontro_pve = { ...inimigo, criadoEm: Date.now() };
+    await character.save();
 
     res.status(200).json({
       status: "success",
@@ -209,27 +196,40 @@ exports.executarTurno = async (req, res) => {
       });
     }
 
-    // O inimigo nunca vem do cliente — só o servidor sabe o estado real
-    // (ver ENCONTROS_ATIVOS acima). Qualquer `enemy` que o corpo da
-    // requisição ainda contenha é ignorado de propósito.
-    const { encontro: inimigoAtual, travado, ocupado } = tentarTravarEncontro(characterId);
-    if (!inimigoAtual) {
-      return res.status(400).json({
-        message:
-          "Nenhum combate ativo para esse personagem. Busque um inimigo antes de atacar.",
+    // Uma única transação com o personagem travado (LOCK.UPDATE) cobre
+    // o turno inteiro, do início ao fim: serializa qualquer segunda
+    // requisição concorrente pra esse mesmo personagem (duplo clique,
+    // duas abas) — ela só é atendida depois que esta transação
+    // commitar, e nesse ponto já enxerga o encontro_pve atualizado (ou
+    // ausente, se o combate já tiver terminado nesta primeira).
+    return await sequelize.transaction(async (transaction) => {
+      // "FOR UPDATE" não pode se aplicar ao lado nullable de um LEFT
+      // OUTER JOIN (é o que o include de Class gera) — o Postgres recusa
+      // a query inteira se não escopar o lock só pra tabela Character
+      // (mesmo padrão já usado em characterInventoryController.js).
+      const character = await Character.findByPk(characterId, {
+        include: [{ model: Class }],
+        transaction,
+        lock: { level: transaction.LOCK.UPDATE, of: Character },
       });
-    }
-    if (!travado || ocupado) {
-      return res.status(409).json({
-        message: "Uma ação anterior deste combate ainda está sendo processada.",
-      });
-    }
 
-    try {
-      return await processarTurno({ req, res, characterId, inimigoAtual });
-    } finally {
-      destravarEncontro(characterId);
-    }
+      if (!character) {
+        return res.status(404).json({ message: "Personagem não encontrado." });
+      }
+
+      // O inimigo nunca vem do cliente — só o servidor sabe o estado
+      // real (Character.encontro_pve). Qualquer `enemy` que o corpo da
+      // requisição ainda contenha é ignorado de propósito.
+      const inimigoAtual = encontroValido(character);
+      if (!inimigoAtual) {
+        return res.status(400).json({
+          message:
+            "Nenhum combate ativo para esse personagem. Busque um inimigo antes de atacar.",
+        });
+      }
+
+      return await processarTurno({ req, res, character, inimigoAtual, transaction });
+    });
   } catch (error) {
     console.error(
       "Erro ao processar turno de combate:",
@@ -243,17 +243,9 @@ exports.executarTurno = async (req, res) => {
   }
 };
 
-async function processarTurno({ req, res, characterId, inimigoAtual }) {
+async function processarTurno({ req, res, character, inimigoAtual, transaction }) {
   const { action } = req.body;
-  const character = await Character.findByPk(characterId, {
-    include: [{ model: Class }],
-  });
-
-    if (!character) {
-      return res.status(404).json({
-        message: "Personagem não encontrado.",
-      });
-    }
+  const characterId = character.id;
 
     const log = [];
 
@@ -265,9 +257,9 @@ async function processarTurno({ req, res, characterId, inimigoAtual }) {
 
     // Mesma regeneração passiva do início do combate — evita bloquear
     // "derrotado" quem já regenerou o suficiente enquanto estava longe.
-    if (sincronizarRegeneracaoDeVida(character, personagemAtual)) {
-      await character.save();
-    }
+    // Só ajusta o objeto em memória aqui; a persistência acontece no(s)
+    // save() mais abaixo, já dentro da mesma transação/lock.
+    sincronizarRegeneracaoDeVida(character, personagemAtual);
 
     if (personagemAtual.vida_atual <= 0) {
       return res.status(400).json({
@@ -419,26 +411,21 @@ async function processarTurno({ req, res, characterId, inimigoAtual }) {
       const dinheiroGanho =
         5 + inimigoAtual.nivel * 4;
 
-      // Tudo numa transação com o personagem travado (LOCK.UPDATE): XP,
-      // dinheiro, vida e mana saem num único save — evita perder uma
-      // recompensa se duas vitórias do mesmo personagem forem
-      // processadas ao mesmo tempo (double-click, duas abas).
-      const resultadoXP = await sequelize.transaction(async (transaction) => {
-        const characterTravado = await Character.findByPk(characterId, {
-          transaction,
-          lock: transaction.LOCK.UPDATE,
-        });
-        characterTravado.dinheiro += dinheiroGanho;
-        characterTravado.vida_atual = personagemAtual.vida_atual;
-        characterTravado.mana_atual = personagemAtual.mana_atual;
-        characterTravado.ultima_atualizacao_vida = new Date();
-        return adicionarExperiencia(characterId, xpGanho, {
-          transaction,
-          personagem: characterTravado,
-        });
+      // O personagem já está travado (LOCK.UPDATE) desde o início desta
+      // mesma transação, em executarTurno — XP, dinheiro, vida, mana e o
+      // fim do encontro saem todos num único save (dentro de
+      // adicionarExperiencia), evitando perder uma recompensa se duas
+      // vitórias do mesmo personagem forem processadas ao mesmo tempo
+      // (double-click, duas abas).
+      character.dinheiro += dinheiroGanho;
+      character.vida_atual = personagemAtual.vida_atual;
+      character.mana_atual = personagemAtual.mana_atual;
+      character.ultima_atualizacao_vida = new Date();
+      character.encontro_pve = null;
+      const resultadoXP = await adicionarExperiencia(characterId, xpGanho, {
+        transaction,
+        personagem: character,
       });
-
-      ENCONTROS_ATIVOS.delete(String(characterId));
 
       // Se houve level up, adiciona ao log.
       if (resultadoXP.niveisGanhos > 0) {
@@ -484,9 +471,7 @@ async function processarTurno({ req, res, characterId, inimigoAtual }) {
             experiencia:
               resultadoXP.experiencia,
 
-            dinheiro:
-              character.dinheiro +
-              dinheiroGanho,
+            dinheiro: character.dinheiro,
 
             pontos_distribuir:
               resultadoXP.pontos_distribuir,
@@ -547,19 +532,16 @@ async function processarTurno({ req, res, characterId, inimigoAtual }) {
       log.push(
         "Você foi derrotado e precisa se recuperar antes de lutar de novo."
       );
-      ENCONTROS_ATIVOS.delete(String(characterId));
     }
 
-    await character.update({
-      vida_atual: derrotado
-        ? 0
-        : personagemAtual.vida_atual,
-
-      mana_atual:
-        personagemAtual.mana_atual,
-
-      ultima_atualizacao_vida: new Date(),
-    });
+    character.vida_atual = derrotado ? 0 : personagemAtual.vida_atual;
+    character.mana_atual = personagemAtual.mana_atual;
+    character.ultima_atualizacao_vida = new Date();
+    // Combate derrotado encerra o encontro (precisa buscar um novo
+    // inimigo pra tentar de novo); senão, persiste o estado atualizado
+    // do inimigo (vida restante) pro próximo turno.
+    character.encontro_pve = derrotado ? null : inimigoAtual;
+    await character.save({ transaction });
 
     return res.status(200).json({
       status: "success",
