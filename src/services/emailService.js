@@ -1,105 +1,189 @@
-// Envio de e-mail transacional (hoje só "esqueci minha senha"). Usa
-// SMTP genérico via nodemailer — funciona com qualquer provedor
-// (SendGrid, Mailgun, SES, Gmail com senha de app, etc.), configurado
-// só por variável de ambiente, sem acoplar a um provedor específico.
+
+// Serviço de envio de e-mails transacionais usando Resend.
+// Atualmente utilizado para redefinição de senha.
 //
-// SMTP_HOST ausente é tratado como "e-mail não configurado ainda": em
-// vez de derrubar o fluxo (ou pior, fingir que enviou), loga o link de
-// reset no console do servidor. Isso deixa o fluxo utilizável em
-// dev/staging antes de configurar um provedor de verdade, mas span
-// PRECISA de SMTP_HOST configurado em produção pra realmente entregar o
-// e-mail — sem isso, o "esqueci minha senha" nunca chega na caixa de
-// entrada de ninguém.
-const nodemailer = require("nodemailer");
-const dns = require("dns");
-const net = require("net");
-const { promisify } = require("util");
+// Variáveis de ambiente necessárias:
+//
+// RESEND_API_KEY=re_xxxxxxxxxxxxxxxxx
+// RESEND_FROM=Caelum <noreply@seudominio.com>
+//
+// A RESEND_API_KEY deve existir SOMENTE no backend.
+// Nunca coloque essa chave no frontend ou em variáveis NEXT_PUBLIC_*.
 
-const resolve4 = promisify(dns.resolve4);
+const { Resend } = require("resend");
 
-let transporterCache = null;
+let resendClient = null;
 
-function smtpConfigurado() {
-  return Boolean(process.env.SMTP_HOST);
+function resendConfigurado() {
+  return Boolean(
+    process.env.RESEND_API_KEY && process.env.RESEND_FROM
+  );
 }
 
-// O nodemailer 10.x resolve o host tanto por A (IPv4) quanto AAAA (IPv6)
-// e SORTEIA aleatoriamente qual endereço usar pra conectar — não tem
-// nenhuma opção (`family` incluso) que force IPv4 nessa versão. Em
-// ambientes sem rota de saída IPv6 (Railway, entre outros), cair no
-// endereço IPv6 sorteado falha com "ENETUNREACH ...:587" antes mesmo do
-// handshake SMTP começar — e como é sorteio, o próximo pedido de reset
-// podia simplesmente ter sorte e funcionar, escondendo o problema.
-// Resolvendo o IPv4 aqui, antes de qualquer coisa, e passando o
-// endereço literal como `host`, o nodemailer nunca chega a tentar IPv6.
-// `servername` mantém a validação de certificado/SNI contra o hostname
-// de verdade (obrigatório: conectar direto num IP sem isso falha a
-// verificação do certificado TLS do Gmail).
-async function resolverEnderecoIPv4(host) {
-  if (!host) {
-    throw new Error("SMTP_HOST não configurado");
+function obterResend() {
+  if (!resendClient) {
+    if (!process.env.RESEND_API_KEY) {
+      throw new Error("RESEND_API_KEY não configurada.");
+    }
+
+    resendClient = new Resend(process.env.RESEND_API_KEY);
   }
 
-  if (net.isIP(host)) return host;
-
-  try {
-    const enderecos = await resolve4(host);
-    return enderecos[0] || host;
-  } catch (erro) {
-    console.warn(
-      `[email] Não foi possível resolver IPv4 de ${host} (${erro.message}) — tentando com o hostname original.`,
-    );
-    return host;
-  }
-}
-
-async function obterTransporter() {
-  if (transporterCache) return transporterCache;
-
-  const hostOriginal = process.env.SMTP_HOST;
-  const enderecoIPv4 = await resolverEnderecoIPv4(hostOriginal);
-
-  transporterCache = nodemailer.createTransport({
-    host: enderecoIPv4,
-    servername: hostOriginal,
-    port: Number(process.env.SMTP_PORT || 587),
-    // SMTP_SECURE=true pra porta 465 (SSL direto); por padrão usa
-    // STARTTLS (porta 587), que é o mais comum entre provedores.
-    secure: process.env.SMTP_SECURE === "true",
-    auth: process.env.SMTP_USER
-      ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD }
-      : undefined,
-  });
-
-  return transporterCache;
+  return resendClient;
 }
 
 async function enviarEmailRedefinicaoSenha({ paraEmail, link }) {
-  if (!smtpConfigurado()) {
+  // Se o Resend não estiver configurado, não derruba
+  // o fluxo de redefinição de senha.
+  //
+  // Em desenvolvimento/staging, o link continua disponível
+  // no log do backend para facilitar os testes.
+
+  if (!resendConfigurado()) {
     console.warn(
-      "[email] SMTP_HOST não configurado — e-mail de redefinição de senha NÃO foi enviado de verdade. " +
-        `Link de redefinição (válido por tempo limitado) pra ${paraEmail}: ${link}`,
+      "[email] Resend não configurado — e-mail de redefinição de senha NÃO foi enviado de verdade."
     );
-    return { enviado: false };
+
+    console.warn(
+      `[email] Link de redefinição para ${paraEmail}: ${link}`
+    );
+
+    return {
+      enviado: false,
+    };
   }
 
-  const remetente = process.env.SMTP_FROM || process.env.SMTP_USER;
+  const resend = obterResend();
 
-  const transporter = await obterTransporter();
-  await transporter.sendMail({
-    from: remetente,
-    to: paraEmail,
-    subject: "Redefinição de senha — Caelum",
-    text: `Recebemos um pedido para redefinir sua senha. Se foi você, clique no link abaixo (válido por 30 minutos):\n\n${link}\n\nSe você não pediu isso, pode ignorar este e-mail — sua senha continua a mesma.`,
-    html: `
-      <p>Recebemos um pedido para redefinir sua senha.</p>
-      <p>Se foi você, clique no link abaixo (válido por 30 minutos):</p>
-      <p><a href="${link}">${link}</a></p>
-      <p>Se você não pediu isso, pode ignorar este e-mail — sua senha continua a mesma.</p>
-    `,
-  });
+  try {
+    const { data, error } = await resend.emails.send({
+      from: process.env.RESEND_FROM,
+      to: [paraEmail],
+      subject: "Redefinição de senha — Caelum",
 
-  return { enviado: true };
+      text: `Recebemos um pedido para redefinir sua senha.
+
+Se foi você, clique no link abaixo para redefinir sua senha:
+
+${link}
+
+Este link é válido por 30 minutos.
+
+Se você não pediu uma redefinição de senha, pode ignorar este e-mail. Sua senha continuará a mesma.`,
+
+      html: `
+        <div style="
+          font-family: Arial, Helvetica, sans-serif;
+          max-width: 600px;
+          margin: 0 auto;
+          padding: 32px;
+          color: #222;
+        ">
+          <h2 style="margin-bottom: 24px;">
+            Redefinição de senha
+          </h2>
+
+          <p>
+            Recebemos um pedido para redefinir sua senha.
+          </p>
+
+          <p>
+            Se foi você, clique no botão abaixo para definir uma nova senha:
+          </p>
+
+          <p style="margin: 32px 0;">
+            <a
+              href="${link}"
+              style="
+                display: inline-block;
+                padding: 12px 24px;
+                background-color: #111827;
+                color: #ffffff;
+                text-decoration: none;
+                border-radius: 6px;
+                font-weight: bold;
+              "
+            >
+              Redefinir minha senha
+            </a>
+          </p>
+
+          <p>
+            Ou copie e cole o link abaixo no seu navegador:
+          </p>
+
+          <p style="
+            word-break: break-all;
+            font-size: 14px;
+            color: #666;
+          ">
+            ${link}
+          </p>
+
+          <p>
+            Este link é válido por <strong>30 minutos</strong>.
+          </p>
+
+          <p style="
+            margin-top: 32px;
+            color: #666;
+            font-size: 14px;
+          ">
+            Se você não pediu uma redefinição de senha,
+            pode ignorar este e-mail. Sua senha continuará a mesma.
+          </p>
+
+          <hr style="
+            margin: 32px 0;
+            border: none;
+            border-top: 1px solid #eee;
+          ">
+
+          <p style="
+            color: #999;
+            font-size: 12px;
+          ">
+            Este é um e-mail automático do Caelum.
+            Por favor, não responda a esta mensagem.
+          </p>
+        </div>
+      `,
+    });
+
+    if (error) {
+      console.error(
+        "[email] Erro retornado pelo Resend:",
+        error
+      );
+
+      return {
+        enviado: false,
+        erro: error,
+      };
+    }
+
+    console.log(
+      `[email] E-mail de redefinição enviado para ${paraEmail}. ID: ${data?.id || "N/A"}`
+    );
+
+    return {
+      enviado: true,
+      id: data?.id,
+    };
+  } catch (erro) {
+    console.error(
+      "[email] Erro ao enviar e-mail de redefinição:",
+      erro
+    );
+
+    return {
+      enviado: false,
+      erro,
+    };
+  }
 }
 
-module.exports = { enviarEmailRedefinicaoSenha, smtpConfigurado };
+module.exports = {
+  enviarEmailRedefinicaoSenha,
+  resendConfigurado,
+};
