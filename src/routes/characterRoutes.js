@@ -28,6 +28,11 @@ router.route("/me").get(authMiddleware, carregarPersonagemAtual, characterContro
 // nunca seria alcançado, "/:id" já teria casado primeiro.
 router.route("/:id/public").get(authMiddleware, characterController.getCharacterPublico);
 
+// Também precisa vir antes de "/:id" pelo mesmo motivo.
+router
+  .route("/:id/powers")
+  .get(authMiddleware, exigirDonoOuAdmin("id"), characterController.getPoderesDisponiveis);
+
 router
   .route("/:id")
   // Dados COMPLETOS de um personagem (dinheiro, vida, mana, XP,

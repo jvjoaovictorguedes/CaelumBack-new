@@ -19,4 +19,9 @@ router
   .patch(authMiddleware, adminMiddleware, characterAbilitiesController.updateCharacterAbility)
   .delete(authMiddleware, adminMiddleware, characterAbilitiesController.deleteCharacterAbility);
 
+// Ativar/desativar (equipar/desequipar) um poder já aprendido — dono do
+// personagem, não precisa ser admin (ver validação de ownership dentro
+// do controller).
+router.patch("/:id/toggle", authMiddleware, characterAbilitiesController.toggleCharacterAbility);
+
 module.exports = router;

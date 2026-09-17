@@ -45,6 +45,15 @@ Character.hasMany(CharacterEquipment, {
 CharacterEquipment.belongsTo(Character, { foreignKey: "id_personagem" });
 CharacterEquipment.belongsTo(Item, { foreignKey: "id_item", as: "item" });
 
+// ClassAbilities/RaceAbilities <-> Power nunca foram associadas de
+// verdade em lugar nenhum (classAbilitiesController.js/raceAbilitiesController.js
+// só têm a associação comentada) — sem isso, getPoderesDisponiveis (e os
+// dois controllers antigos) derrubaria com "ClassAbilities is not
+// associated to Power!" ao tentar `include: [{ model: Power }]`.
+const Power = require("../models/Power");
+ClassAbilities.belongsTo(Power, { foreignKey: "id_poder" });
+RaceAbilities.belongsTo(Power, { foreignKey: "id_power" });
+
 const CHARACTER_INCLUDES = [
   // Sem email aqui de propósito: esse include entra em toda leitura de
   // personagem (inclusive quando um jogador olha o personagem de outro,
@@ -306,6 +315,14 @@ async function carregarRespostaDoPersonagem(character) {
     await character.save();
   }
 
+  // Guilda não vinha em nenhuma resposta "privada" de personagem (só na
+  // pública, /:id/public) — a aba de "dados do jogador" do front
+  // precisa mostrar em qual guilda o próprio personagem está.
+  const membroGuild = await GuildMember.findOne({
+    where: { id_personagem: character.id },
+    include: [{ model: Guild, attributes: ["id", "nome", "sigla"] }],
+  });
+
   return {
     ...character.toJSON(),
     vida_atual: personagemEfetivo.vida_atual,
@@ -313,6 +330,9 @@ async function carregarRespostaDoPersonagem(character) {
     vida_maxima: vidaMaximaDe(personagemEfetivo),
     mana_maxima: manaMaximaDe(personagemEfetivo),
     regen_vida_restante_ms: msAteRegenCompleta(personagemEfetivo),
+    guilda: membroGuild?.Guild
+      ? { id: membroGuild.Guild.id, nome: membroGuild.Guild.nome, sigla: membroGuild.Guild.sigla }
+      : null,
   };
 }
 
@@ -466,6 +486,87 @@ exports.updateCharacter = async (req, res) => {
     res
       .status(500)
       .json({ message: "Erro interno do servidor ao atualizar personagem." });
+  }
+};
+
+// Lista TODOS os poderes de classe/raça do personagem (mesmo os que o
+// nível ainda não libera) — a aba de Habilidades do front precisa
+// mostrar os bloqueados também (só visualização, "requer nível X"), não
+// só os já aprendidos. Poderes já aprendidos vêm com o estado
+// aprendido/ativo de CharacterAbilities; os ainda não aprendidos vêm só
+// com os dados do Power + nível necessário.
+exports.getPoderesDisponiveis = async (req, res) => {
+  try {
+    const character = await Character.findByPk(req.params.id, {
+      attributes: ["id", "id_classe", "id_raca", "nivel"],
+    });
+    if (!character) {
+      return res.status(404).json({ message: "Personagem não encontrado." });
+    }
+
+    // Sincroniza antes de listar — mesmo motivo do carregarRespostaDoPersonagem:
+    // garante que poderes já liberados pelo nível atual apareçam como
+    // aprendidos, mesmo se essa for a primeira vez que o personagem é
+    // carregado desde subir de nível.
+    await concederPoderesIniciais(character);
+
+    const [poderesClasse, poderesRaca, aprendidos] = await Promise.all([
+      ClassAbilities.findAll({
+        where: { id_classe: character.id_classe },
+        include: [{ model: Power }],
+      }),
+      RaceAbilities.findAll({
+        where: { id_raca: character.id_raca },
+        include: [{ model: Power }],
+      }),
+      CharacterAbilities.findAll({
+        where: { id_personagem: character.id },
+      }),
+    ]);
+
+    const aprendidoPorPoder = new Map(
+      aprendidos.map((linha) => [linha.id_power, linha]),
+    );
+
+    function montarEntrada(poder, nivelNecessario, origem) {
+      const linhaAprendida = aprendidoPorPoder.get(poder.id);
+      return {
+        id_power: poder.id,
+        nome: poder.nome,
+        descricao: poder.descricao,
+        tipo_poder: poder.tipo_poder,
+        custo_mana: poder.custo_mana,
+        dano_base: poder.dano_base,
+        cura_base: poder.cura_base,
+        cooldown: poder.cooldown,
+        escala_atributo: poder.escala_atributo,
+        valor_escala: poder.valor_escala,
+        origem,
+        nivel_necessario: nivelNecessario,
+        aprendido: Boolean(linhaAprendida),
+        ativo: linhaAprendida?.is_active ?? false,
+        id_character_ability: linhaAprendida?.id ?? null,
+      };
+    }
+
+    const poderes = [
+      ...poderesClasse.map((linha) =>
+        montarEntrada(linha.Power, linha.nivel_aprendizagem, "classe"),
+      ),
+      ...poderesRaca.map((linha) =>
+        montarEntrada(linha.Power, linha.nivel_aprendizado, "raca"),
+      ),
+    ];
+
+    res.status(200).json({
+      status: "success",
+      data: { poderes },
+    });
+  } catch (error) {
+    console.error("Erro ao buscar poderes disponíveis:", error);
+    res
+      .status(500)
+      .json({ message: "Erro interno do servidor ao buscar poderes." });
   }
 };
 
