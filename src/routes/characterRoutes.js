@@ -33,6 +33,17 @@ router
   .route("/:id/powers")
   .get(authMiddleware, exigirDonoOuAdmin("id"), characterController.getPoderesDisponiveis);
 
+// Árvore de evoluções (ver comentário em characterController.getEvolucoesDisponiveis)
+// — ainda sem tela pública, mas a API já fica pronta e protegida do
+// mesmo jeito que o resto: leitura é dono-ou-admin, compra é só dono.
+router
+  .route("/:id/evolutions")
+  .get(authMiddleware, exigirDonoOuAdmin("id"), characterController.getEvolucoesDisponiveis);
+
+router
+  .route("/:id/evolutions/:evolutionId/purchase")
+  .post(authMiddleware, exigirDonoDoPersonagem("id"), characterController.comprarEvolucao);
+
 router
   .route("/:id")
   // Dados COMPLETOS de um personagem (dinheiro, vida, mana, XP,

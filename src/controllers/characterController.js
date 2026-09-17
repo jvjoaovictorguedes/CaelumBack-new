@@ -12,6 +12,8 @@ const CharacterEquipment = require("../models/CharacterEquipment");
 const ClassAbilities = require("../models/ClassAbilities");
 const RaceAbilities = require("../models/RaceAbilities");
 const CharacterAbilities = require("../models/CharacterAbilities");
+const Evolution = require("../models/Evolution");
+const CharacterEvolution = require("../models/CharacterEvolution");
 const {
   buscarBonusDeAtributos,
   personagemComBonus,
@@ -53,6 +55,7 @@ CharacterEquipment.belongsTo(Item, { foreignKey: "id_item", as: "item" });
 const Power = require("../models/Power");
 ClassAbilities.belongsTo(Power, { foreignKey: "id_poder" });
 RaceAbilities.belongsTo(Power, { foreignKey: "id_power" });
+Evolution.belongsTo(Power, { foreignKey: "id_power_concedido", as: "poderConcedido" });
 
 const CHARACTER_INCLUDES = [
   // Sem email aqui de propósito: esse include entra em toda leitura de
@@ -568,6 +571,193 @@ exports.getPoderesDisponiveis = async (req, res) => {
     res
       .status(500)
       .json({ message: "Erro interno do servidor ao buscar poderes." });
+  }
+};
+
+// Lista a árvore de evolução do personagem: toda Evolution cadastrada
+// pra classe+natureza mágica dele (a feature nasceu pensada no Mago,
+// mas a query já é genérica por classe — outras classes usam quando
+// tiverem evoluções cadastradas), cruzada com o que ele já comprou.
+// `id_evolucao_pre_requisito` vem junto pra o front desenhar a árvore
+// (cada nó aponta pro pai) — "mostrando pra ele onde ele pode chegar".
+exports.getEvolucoesDisponiveis = async (req, res) => {
+  try {
+    const character = await Character.findByPk(req.params.id, {
+      attributes: ["id", "id_classe", "natureza_magica", "nivel", "dinheiro"],
+    });
+    if (!character) {
+      return res.status(404).json({ message: "Personagem não encontrado." });
+    }
+
+    const [evolucoes, compradas] = await Promise.all([
+      Evolution.findAll({
+        where: { id_classe: character.id_classe, natureza_magica: character.natureza_magica },
+        include: [{ model: Power, as: "poderConcedido", attributes: ["id", "nome", "tipo_poder"] }],
+        order: [["ordem", "ASC"]],
+      }),
+      CharacterEvolution.findAll({ where: { id_personagem: character.id } }),
+    ]);
+
+    const idsComprados = new Set(compradas.map((linha) => linha.id_evolucao));
+
+    const arvore = evolucoes.map((evolucao) => {
+      const comprada = idsComprados.has(evolucao.id);
+      const preRequisitoAtendido =
+        !evolucao.id_evolucao_pre_requisito || idsComprados.has(evolucao.id_evolucao_pre_requisito);
+      const nivelAtendido = character.nivel >= evolucao.nivel_necessario;
+      const dinheiroSuficiente = character.dinheiro >= evolucao.custo;
+
+      return {
+        id: evolucao.id,
+        nome: evolucao.nome,
+        descricao: evolucao.descricao,
+        natureza_magica: evolucao.natureza_magica,
+        nivel_necessario: evolucao.nivel_necessario,
+        custo: evolucao.custo,
+        bonus_forca: evolucao.bonus_forca,
+        bonus_vitalidade: evolucao.bonus_vitalidade,
+        bonus_agilidade: evolucao.bonus_agilidade,
+        bonus_inteligencia: evolucao.bonus_inteligencia,
+        bonus_velocidade: evolucao.bonus_velocidade,
+        poder_concedido: evolucao.poderConcedido
+          ? { id: evolucao.poderConcedido.id, nome: evolucao.poderConcedido.nome, tipo_poder: evolucao.poderConcedido.tipo_poder }
+          : null,
+        id_evolucao_pre_requisito: evolucao.id_evolucao_pre_requisito,
+        imagem_url: evolucao.imagem_url,
+        comprada,
+        pode_comprar: !comprada && preRequisitoAtendido && nivelAtendido && dinheiroSuficiente,
+        pre_requisito_atendido: preRequisitoAtendido,
+        nivel_atendido: nivelAtendido,
+        dinheiro_suficiente: dinheiroSuficiente,
+      };
+    });
+
+    res.status(200).json({
+      status: "success",
+      data: { natureza_magica: character.natureza_magica, evolucoes: arvore },
+    });
+  } catch (error) {
+    console.error("Erro ao buscar evoluções disponíveis:", error);
+    res.status(500).json({ message: "Erro interno do servidor ao buscar evoluções." });
+  }
+};
+
+// Compra uma evolução: debita o custo em dinheiro, aplica o bônus de
+// atributo direto nas colunas do personagem (mesmo mecanismo de
+// attributeController.js — permanente, não recalculado por bônus de
+// equipamento) e concede o poder associado (se houver), do mesmo jeito
+// que concederPoderesIniciais faz pra poder de classe/raça.
+exports.comprarEvolucao = async (req, res) => {
+  try {
+    const resultado = await sequelize.transaction(async (transaction) => {
+      const character = await Character.findByPk(req.params.id, {
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+      if (!character) {
+        throw Object.assign(new Error("Personagem não encontrado."), { statusCode: 404 });
+      }
+
+      const evolucao = await Evolution.findByPk(req.params.evolutionId, { transaction });
+      if (!evolucao) {
+        throw Object.assign(new Error("Evolução não encontrada."), { statusCode: 404 });
+      }
+
+      if (evolucao.id_classe !== character.id_classe) {
+        throw Object.assign(
+          new Error("Essa evolução não pertence à classe deste personagem."),
+          { statusCode: 400 },
+        );
+      }
+      if (evolucao.natureza_magica !== character.natureza_magica) {
+        throw Object.assign(
+          new Error("Essa evolução não é compatível com a natureza mágica deste personagem."),
+          { statusCode: 400 },
+        );
+      }
+      if (character.nivel < evolucao.nivel_necessario) {
+        throw Object.assign(
+          new Error(`Esta evolução exige nível ${evolucao.nivel_necessario}.`),
+          { statusCode: 400 },
+        );
+      }
+
+      const jaComprada = await CharacterEvolution.findOne({
+        where: { id_personagem: character.id, id_evolucao: evolucao.id },
+        transaction,
+      });
+      if (jaComprada) {
+        throw Object.assign(new Error("Esta evolução já foi adquirida."), { statusCode: 409 });
+      }
+
+      if (evolucao.id_evolucao_pre_requisito) {
+        const preRequisitoComprado = await CharacterEvolution.findOne({
+          where: { id_personagem: character.id, id_evolucao: evolucao.id_evolucao_pre_requisito },
+          transaction,
+        });
+        if (!preRequisitoComprado) {
+          throw Object.assign(
+            new Error("É preciso adquirir a evolução anterior desta árvore primeiro."),
+            { statusCode: 400 },
+          );
+        }
+      }
+
+      if (character.dinheiro < evolucao.custo) {
+        throw Object.assign(new Error("Moedas insuficientes para esta evolução."), {
+          statusCode: 400,
+        });
+      }
+
+      character.dinheiro -= evolucao.custo;
+      character.forca += evolucao.bonus_forca;
+      character.vitalidade += evolucao.bonus_vitalidade;
+      character.agilidade += evolucao.bonus_agilidade;
+      character.inteligencia += evolucao.bonus_inteligencia;
+      character.velocidade += evolucao.bonus_velocidade;
+      await character.save({ transaction });
+
+      await CharacterEvolution.create(
+        { id_personagem: character.id, id_evolucao: evolucao.id },
+        { transaction },
+      );
+
+      if (evolucao.id_power_concedido) {
+        await CharacterAbilities.findOrCreate({
+          where: { id_personagem: character.id, id_power: evolucao.id_power_concedido },
+          defaults: {
+            id_personagem: character.id,
+            id_power: evolucao.id_power_concedido,
+            level_learned: character.nivel,
+            is_active: true,
+          },
+          transaction,
+        });
+      }
+
+      return character;
+    });
+
+    res.status(200).json({
+      status: "success",
+      message: "Evolução adquirida com sucesso!",
+      data: {
+        character: {
+          dinheiro: resultado.dinheiro,
+          forca: resultado.forca,
+          vitalidade: resultado.vitalidade,
+          agilidade: resultado.agilidade,
+          inteligencia: resultado.inteligencia,
+          velocidade: resultado.velocidade,
+        },
+      },
+    });
+  } catch (error) {
+    const statusCode = error.statusCode || 500;
+    if (statusCode === 500) console.error("Erro ao comprar evolução:", error);
+    res
+      .status(statusCode)
+      .json({ message: error.statusCode ? error.message : "Erro interno do servidor ao comprar evolução." });
   }
 };
 

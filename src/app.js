@@ -51,6 +51,7 @@ const characterEquipmentRoutes = require("./routes/CharacterEquipmentRoutes");
 const messageRoutes = require("./routes/messageRoutes");
 const pvpRoutes = require("./routes/pvpRoutes");
 const guildRoutes = require("./routes/guildRoutes");
+const evolutionRoutes = require("./routes/evolutionRoutes");
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -174,6 +175,7 @@ app.use("/api/character-equipment", characterEquipmentRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/pvp", pvpRoutes);
 app.use("/api/guilds", guildRoutes);
+app.use("/api/evolutions", evolutionRoutes);
 
 // PVP ao vivo (Socket.io) precisa do servidor HTTP cru pra fazer o
 // upgrade da conexão — por isso o app não usa mais app.listen direto.
