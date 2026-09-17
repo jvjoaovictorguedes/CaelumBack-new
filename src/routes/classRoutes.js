@@ -11,6 +11,10 @@ router
   .post(authMiddleware, adminMiddleware, classController.createClass)
   .get(classController.getAllClasses);
 
+// Precisa vir antes de "/:id" — senão o Express casa "sortear-raro" com
+// o parâmetro :id.
+router.post("/sortear-raro", authMiddleware, classController.sortearClasseRara);
+
 router
   .route("/:id")
   .get(classController.getClassById)

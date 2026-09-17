@@ -174,6 +174,19 @@ exports.unequipItem = async (req, res) => {
 
 exports.getEquipmentByCharacter = async (req, res) => {
   try {
+    // Só usado hoje pelo painel do próprio personagem (EquipmentPanel) —
+    // sem essa checagem, qualquer usuário autenticado lia o equipamento
+    // de qualquer personagem só trocando o :characterId na URL.
+    const personagem = await Character.findByPk(req.params.characterId, {
+      attributes: ["id", "id_usuario"],
+    });
+    if (!personagem) {
+      return res.status(404).json({ message: "Personagem não encontrado." });
+    }
+    if (personagem.id_usuario !== req.user.id) {
+      return res.status(403).json({ message: "Esse personagem não pertence a você." });
+    }
+
     const equipamentos = await CharacterEquipment.findAll({
       where: { id_personagem: req.params.characterId },
       include: [{ model: Item, as: "item" }],

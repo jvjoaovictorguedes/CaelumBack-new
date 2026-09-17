@@ -14,6 +14,10 @@ router
   .post(authMiddleware, adminMiddleware, raceController.createRace)
   .get(raceController.getAllRaces);
 
+// Precisa vir antes de "/:id" — senão o Express casa "sortear-raro" com
+// o parâmetro :id.
+router.post("/sortear-raro", authMiddleware, raceController.sortearRacaRara);
+
 router
   .route("/:id")
   .get(raceController.getRaceById)

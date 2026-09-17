@@ -117,6 +117,7 @@ exports.useItem = async (req, res) => {
       if (efeito.efeito_vida) {
         const cura = Math.round(vidaMaxima * (efeito.efeito_vida / 100) * quantidade);
         character.vida_atual = Math.min(vidaMaxima, character.vida_atual + cura);
+        character.ultima_atualizacao_vida = new Date();
       }
 
       if (efeito.efeito_mana) {
@@ -255,7 +256,7 @@ exports.getCharacterInventoryById = async (req, res) => {
   try {
     const inventoryEntry = await CharacterInventory.findByPk(req.params.id, {
       include: [
-        { model: Character, attributes: ["id", "nome", "nivel"] },
+        { model: Character, attributes: ["id", "nome", "nivel", "id_usuario"] },
         {
           model: Item,
           attributes: ["id", "nome", "tipo_item", "raridade", "peso"],
@@ -267,6 +268,15 @@ exports.getCharacterInventoryById = async (req, res) => {
         .status(404)
         .json({ message: "Entrada de inventário não encontrada." });
     }
+
+    // Sem isso, dava pra ler o inventário de qualquer personagem só
+    // incrementando o :id (id_personagem_inventario) na URL — nada
+    // aqui garantia que a entrada pertencesse a um personagem do
+    // próprio usuário autenticado.
+    if (inventoryEntry.Character?.id_usuario !== req.user.id) {
+      return res.status(403).json({ message: "Esta entrada de inventário não pertence a você." });
+    }
+
     res.status(200).json({
       status: "success",
       data: {

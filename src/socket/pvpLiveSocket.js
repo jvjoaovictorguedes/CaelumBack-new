@@ -276,15 +276,21 @@ module.exports = function registerPvpLiveHandlers(io) {
     socket.on("disconnect", () => {
       if (!socket.characterId) return;
       const characterId = socket.characterId;
-      // Só limpa o mapeamento se ele ainda apontar pra ESTE socket — ao
-      // forçar a desconexão do socket antigo em "identificar" (acima), o
-      // evento de disconnect dele dispara depois que o novo socket já
-      // assumiu o characterId, e sem essa checagem ele apagava a entrada
-      // que já era do socket novo.
-      if (online.get(characterId) === socket.id) {
-        online.delete(characterId);
-        socket.broadcast.emit("pvp:ficou-offline", { characterId });
-      }
+
+      // Um novo socket autenticado pro MESMO personagem já derruba o
+      // antigo em "identificar" (acima) e assume `online.get(characterId)`
+      // antes desse handler rodar (o disconnect do socket antigo só
+      // dispara depois, de forma assíncrona). Então, se o mapeamento já
+      // não aponta mais pra este socket, isso é uma reconexão/substituição
+      // — não uma desistência de verdade — e não pode limpar desafios
+      // pendentes nem, principalmente, dar a vitória de um duelo em
+      // andamento pro oponente. Só trata como desconexão real quando este
+      // ainda é o socket "dono" do personagem.
+      const eraSocketAtivo = online.get(characterId) === socket.id;
+      if (!eraSocketAtivo) return;
+
+      online.delete(characterId);
+      socket.broadcast.emit("pvp:ficou-offline", { characterId });
 
       limparDesafioPendente(characterId);
       for (const [idDesafiado, pendente] of desafiosPendentes.entries()) {

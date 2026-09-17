@@ -59,6 +59,17 @@ const Race = sequelize.define("Race", {
     type: DataTypes.STRING(255),
     allowNull: true,
   },
+  // Raça rara (ex.: Celestial) — só pode ser escolhida na criação de
+  // personagem depois de um sorteio feito e verificado no SERVIDOR
+  // (ver raridadeRolagemService.js). Antes disso, o cliente decidia
+  // sozinho (Math.random no frontend) se "ganhou" a raça e simplesmente
+  // mandava o id dela em POST /characters — nada no backend impedia
+  // qualquer um de escolher a raça rara direto, sem sortear nada.
+  raro: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
 });
 
 module.exports = Race;

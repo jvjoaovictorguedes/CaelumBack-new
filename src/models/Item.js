@@ -65,6 +65,17 @@ const Item = sequelize.define("Item", {
     type: DataTypes.STRING(255),
     allowNull: true,
   },
+  // Controle explícito de disponibilidade na loja — não confiar em
+  // "aparecer ou não no frontend", raridade ou valor_venda pra decidir
+  // se um item pode ser comprado. /shop/purchase checa este campo
+  // antes de vender; um item raro/de evento/não-comercializável fica
+  // com disponivel_loja: false e não pode ser comprado direto por ID
+  // mesmo que o cliente descubra o id_item.
+  disponivel_loja: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
 });
 
 module.exports = Item;

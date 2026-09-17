@@ -46,6 +46,16 @@ exports.purchaseItem = async (req, res) => {
         throw error;
       }
 
+      // Autoridade de disponibilidade é o próprio banco — nunca
+      // raridade/valor_venda/"aparecer no frontend". Item com
+      // disponivel_loja: false não pode ser comprado direto por ID
+      // mesmo que o cliente descubra o id_item.
+      if (!item.disponivel_loja) {
+        const error = new Error("Este item não está disponível na loja.");
+        error.statusCode = 403;
+        throw error;
+      }
+
       const precoTotal = item.valor_compra * quantidade;
 
       if (character.dinheiro < precoTotal) {

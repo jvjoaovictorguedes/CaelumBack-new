@@ -1,5 +1,10 @@
 // src/controllers/classController.js
 const Class = require("../models/Class");
+const {
+  PROPOSITO_CLASSE,
+  sortearClasseRaraGanhou,
+  emitirTicket,
+} = require("../services/raridadeRolagemService");
 
 // Criar uma nova classe
 exports.createClass = async (req, res) => {
@@ -98,6 +103,35 @@ exports.updateClass = async (req, res) => {
     res
       .status(500)
       .json({ message: "Erro interno do servidor ao atualizar classe." });
+  }
+};
+
+// POST /api/classes/sortear-raro
+// Mesma ideia de raceController.sortearRacaRara: o SERVIDOR decide se o
+// usuário ganhou acesso a uma classe rara e qual foi liberada. O
+// ticket devolvido é a única forma de createCharacter aceitar um
+// id_classe marcado como raro.
+exports.sortearClasseRara = async (req, res) => {
+  try {
+    if (!sortearClasseRaraGanhou()) {
+      return res.status(200).json({ status: "success", data: { raro: false } });
+    }
+
+    const classesRaras = await Class.findAll({ where: { raro: true } });
+    if (classesRaras.length === 0) {
+      return res.status(200).json({ status: "success", data: { raro: false } });
+    }
+
+    const classeSorteada = classesRaras[Math.floor(Math.random() * classesRaras.length)];
+    const ticket = emitirTicket(PROPOSITO_CLASSE, req.user.id, classeSorteada.id);
+
+    return res.status(200).json({
+      status: "success",
+      data: { raro: true, classe: classeSorteada, ticket },
+    });
+  } catch (error) {
+    console.error("Erro ao sortear classe rara:", error);
+    res.status(500).json({ message: "Erro interno do servidor ao sortear classe." });
   }
 };
 

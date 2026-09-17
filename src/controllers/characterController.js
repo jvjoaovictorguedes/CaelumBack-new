@@ -20,6 +20,11 @@ const {
 } = require("../services/combatFormulas");
 const { sortearNaturezaMagica } = require("../services/naturezaMagicaService");
 const { sincronizarRegeneracaoDeVida, msAteRegenCompleta } = require("../services/regenService");
+const {
+  PROPOSITO_RACA,
+  PROPOSITO_CLASSE,
+  verificarTicket: verificarTicketRaridade,
+} = require("../services/raridadeRolagemService");
 
 User.hasMany(Character, { foreignKey: "id_usuario" });
 Character.belongsTo(User, { foreignKey: "id_usuario" });
@@ -100,7 +105,7 @@ exports.createCharacter = async (req, res) => {
     // mandar, senão qualquer um criava (ou "roubava" a criação de) um
     // personagem em nome de outra conta.
     const id_usuario = req.user.id;
-    const { nome, genero, id_raca, id_classe } = req.body;
+    const { nome, genero, id_raca, id_classe, ticket_raca_rara, ticket_classe_rara } = req.body;
     if (!nome || !genero || !id_raca || !id_classe) {
       return res.status(400).json({
         message: "nome, genero, id_raca e id_classe são obrigatórios.",
@@ -119,6 +124,24 @@ exports.createCharacter = async (req, res) => {
     const classe = await Class.findByPk(id_classe);
     if (!classe) {
       return res.status(400).json({ message: "Classe inválida." });
+    }
+
+    // Raça/classe rara (Celestial/Primordial) só pode ser escolhida com
+    // um ticket emitido pelo sorteio de verdade do servidor
+    // (POST /races/sortear-raro, /classes/sortear-raro) — o cliente
+    // nunca "ganha" a rara só mandando o id dela aqui.
+    if (raca.raro && !verificarTicketRaridade(ticket_raca_rara, PROPOSITO_RACA, id_usuario, raca.id)) {
+      return res.status(403).json({
+        message: "Essa raça é rara e requer um sorteio válido para ser escolhida.",
+      });
+    }
+    if (
+      classe.raro &&
+      !verificarTicketRaridade(ticket_classe_rara, PROPOSITO_CLASSE, id_usuario, classe.id)
+    ) {
+      return res.status(403).json({
+        message: "Essa classe é rara e requer um sorteio válido para ser escolhida.",
+      });
     }
 
     // Nível, dinheiro, atributos e vida/mana NUNCA vêm do corpo da
@@ -186,6 +209,15 @@ exports.createCharacter = async (req, res) => {
   } catch (error) {
     console.error("Erro ao criar personagem:", error);
     if (error.name === "SequelizeUniqueConstraintError") {
+      // Cobre tanto a corrida de dois creates simultâneos pra mesma
+      // conta (constraint em id_usuario, pega o que a checagem acima
+      // não pegou por já ter passado) quanto o nome duplicado.
+      const campoConflitante = error.errors?.[0]?.path;
+      if (campoConflitante === "id_usuario") {
+        return res
+          .status(409)
+          .json({ message: "Sua conta já tem um personagem." });
+      }
       return res
         .status(409)
         .json({ message: "Já existe um personagem com este nome." });
@@ -241,6 +273,46 @@ exports.getCharacterByUserId = async (req, res) => {
   }
 };
 
+// Monta a resposta "completa" de um personagem (poderes sincronizados,
+// bônus de atributos, vida/mana efetivas com regeneração passiva
+// aplicada). Compartilhado por getCharacterById (leitura por ID, com
+// dono verificado por quem chama a rota) e getMeuPersonagem (leitura
+// pelo JWT, sem depender de nenhum ID vindo do cliente).
+async function carregarRespostaDoPersonagem(character) {
+  // Sincroniza poderes de classe/raça toda vez que o personagem é
+  // carregado — bulkCreate com ignoreDuplicates é seguro de chamar
+  // repetidamente. Sem isso, um personagem criado antes de um poder
+  // novo ser adicionado à classe (ex: Bola de Fogo pro Mago) nunca
+  // aprendia esse poder, só quem criasse personagem depois.
+  try {
+    await concederPoderesIniciais(character);
+  } catch (erroPoderes) {
+    console.error("Erro ao sincronizar poderes iniciais:", erroPoderes);
+  }
+
+  const bonus_atributos = await buscarBonusDeAtributos(character.id);
+  const personagemEfetivo = comMultiplicadoresDeClasse(
+    personagemComBonus(character.toJSON(), bonus_atributos),
+    character.Class,
+  );
+
+  // Regeneração passiva: calcula sob demanda quanto tempo real
+  // passou desde a última mudança de vida e aplica o que já
+  // regenerou. Só grava no banco quando há progresso de verdade.
+  if (sincronizarRegeneracaoDeVida(character, personagemEfetivo)) {
+    await character.save();
+  }
+
+  return {
+    ...character.toJSON(),
+    vida_atual: personagemEfetivo.vida_atual,
+    bonus_atributos,
+    vida_maxima: vidaMaximaDe(personagemEfetivo),
+    mana_maxima: manaMaximaDe(personagemEfetivo),
+    regen_vida_restante_ms: msAteRegenCompleta(personagemEfetivo),
+  };
+}
+
 exports.getCharacterById = async (req, res) => {
   try {
     const character = await Character.findByPk(req.params.id, {
@@ -250,45 +322,39 @@ exports.getCharacterById = async (req, res) => {
       return res.status(404).json({ message: "Personagem não encontrado." });
     }
 
-    // Sincroniza poderes de classe/raça toda vez que o personagem é
-    // carregado — bulkCreate com ignoreDuplicates é seguro de chamar
-    // repetidamente. Sem isso, um personagem criado antes de um poder
-    // novo ser adicionado à classe (ex: Bola de Fogo pro Mago) nunca
-    // aprendia esse poder, só quem criasse personagem depois.
-    try {
-      await concederPoderesIniciais(character);
-    } catch (erroPoderes) {
-      console.error("Erro ao sincronizar poderes iniciais:", erroPoderes);
-    }
+    res.status(200).json({
+      status: "success",
+      data: { character: await carregarRespostaDoPersonagem(character) },
+    });
+  } catch (error) {
+    console.error("Erro ao buscar personagem por ID:", error);
+    res
+      .status(500)
+      .json({ message: "Erro interno do servidor ao buscar personagem." });
+  }
+};
 
-    const bonus_atributos = await buscarBonusDeAtributos(character.id);
-    const personagemEfetivo = comMultiplicadoresDeClasse(
-      personagemComBonus(character.toJSON(), bonus_atributos),
-      character.Class,
-    );
-
-    // Regeneração passiva: calcula sob demanda quanto tempo real
-    // passou desde a última mudança de vida e aplica o que já
-    // regenerou. Só grava no banco quando há progresso de verdade.
-    if (sincronizarRegeneracaoDeVida(character, personagemEfetivo)) {
-      await character.save();
+// GET /api/characters/me
+// Identidade vem só do JWT (via carregarPersonagemAtual) — nenhum ID de
+// personagem/usuário trafega no request. É o substituto recomendado
+// pra depender do cookie characterId (que o cliente pode ler/editar)
+// como se fosse identidade: aqui não tem como pedir o personagem de
+// outra conta nem discordar do que o token diz.
+exports.getMeuPersonagem = async (req, res) => {
+  try {
+    const character = await Character.findByPk(req.personagemAtual.id, {
+      include: CHARACTER_INCLUDES,
+    });
+    if (!character) {
+      return res.status(404).json({ message: "Você ainda não tem um personagem." });
     }
 
     res.status(200).json({
       status: "success",
-      data: {
-        character: {
-          ...character.toJSON(),
-          vida_atual: personagemEfetivo.vida_atual,
-          bonus_atributos,
-          vida_maxima: vidaMaximaDe(personagemEfetivo),
-          mana_maxima: manaMaximaDe(personagemEfetivo),
-          regen_vida_restante_ms: msAteRegenCompleta(personagemEfetivo),
-        },
-      },
+      data: { character: await carregarRespostaDoPersonagem(character) },
     });
   } catch (error) {
-    console.error("Erro ao buscar personagem por ID:", error);
+    console.error("Erro ao buscar personagem atual:", error);
     res
       .status(500)
       .json({ message: "Erro interno do servidor ao buscar personagem." });

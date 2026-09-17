@@ -87,10 +87,19 @@ const connectDB = async () => {
       // divergência entre o que o banco tinha e o que o model esperava,
       // dava pra perder dado de verdade sem ninguém ter pedido. Schema
       // agora é sempre por migration (`npm run migrate`), nunca
-      // automático. `sync()` sem opções só cria tabela que ainda não
-      // existe — nunca toca em tabela/coluna que já existe.
-      await sequelize.sync();
-      console.log("Modelos sincronizados com o banco de dados.");
+      // automático.
+      //
+      // Em produção nem o `sync()` sem opções roda: schema em produção é
+      // 100% responsabilidade das migrations (`npm run migrate`), rodadas
+      // explicitamente no deploy — nunca implicitamente no boot do
+      // processo. Fora de produção (dev/test) continua criando tabela que
+      // ainda não existe, sem tocar em tabela/coluna já existente.
+      if (process.env.NODE_ENV === "production") {
+        console.log("Ambiente de produção: sincronização automática de schema desativada (use as migrations).");
+      } else {
+        await sequelize.sync();
+        console.log("Modelos sincronizados com o banco de dados.");
+      }
       databaseReady = true;
       return;
     } catch (error) {

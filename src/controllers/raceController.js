@@ -1,5 +1,10 @@
 // src/controllers/raceController.js
 const Race = require("../models/Race");
+const {
+  PROPOSITO_RACA,
+  sortearRacaRaraGanhou,
+  emitirTicket,
+} = require("../services/raridadeRolagemService");
 
 exports.createRace = async (req, res) => {
   try {
@@ -92,6 +97,35 @@ exports.updateRace = async (req, res) => {
     res
       .status(500)
       .json({ message: "Erro interno do servidor ao atualizar raça." });
+  }
+};
+
+// POST /api/races/sortear-raro
+// O servidor sorteia (nunca o cliente) se o usuário ganhou acesso a uma
+// raça rara nesta tentativa de criação de personagem, e qual raça rara
+// foi liberada. Só quem ganhou recebe o ticket que createCharacter vai
+// exigir pra aceitar um id_raca marcado como raro.
+exports.sortearRacaRara = async (req, res) => {
+  try {
+    if (!sortearRacaRaraGanhou()) {
+      return res.status(200).json({ status: "success", data: { raro: false } });
+    }
+
+    const racasRaras = await Race.findAll({ where: { raro: true } });
+    if (racasRaras.length === 0) {
+      return res.status(200).json({ status: "success", data: { raro: false } });
+    }
+
+    const racaSorteada = racasRaras[Math.floor(Math.random() * racasRaras.length)];
+    const ticket = emitirTicket(PROPOSITO_RACA, req.user.id, racaSorteada.id);
+
+    return res.status(200).json({
+      status: "success",
+      data: { raro: true, raca: racaSorteada, ticket },
+    });
+  } catch (error) {
+    console.error("Erro ao sortear raça rara:", error);
+    res.status(500).json({ message: "Erro interno do servidor ao sortear raça." });
   }
 };
 

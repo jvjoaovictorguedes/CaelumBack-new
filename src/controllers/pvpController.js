@@ -292,14 +292,19 @@ exports.getRanking = async (req, res) => {
 };
 
 // POST /api/pvp/challenge
-// body: { id_desafiante, id_desafiado }
+// body: { id_desafiado }
+// O desafiante é sempre o personagem do usuário autenticado
+// (req.personagemAtual, carregado por carregarPersonagemAtual) — nunca um
+// valor vindo do body, senão qualquer um podia desafiar em nome de outro
+// personagem só informando o ID.
 exports.challenge = async (req, res) => {
   try {
-    const { id_desafiante, id_desafiado } = req.body;
+    const id_desafiante = req.personagemAtual.id;
+    const { id_desafiado } = req.body;
 
-    if (!id_desafiante || !id_desafiado) {
+    if (!id_desafiado) {
       return res.status(400).json({
-        message: "id_desafiante e id_desafiado são obrigatórios.",
+        message: "id_desafiado é obrigatório.",
       });
     }
 

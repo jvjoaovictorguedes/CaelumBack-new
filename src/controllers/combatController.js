@@ -67,6 +67,27 @@ function encontroAtivoDe(characterId) {
   return encontro;
 }
 
+// Trava simples por personagem contra requests concorrentes (duplo
+// clique, duas abas, replay). Como o Node roda o corpo do handler em
+// single-thread e o check-and-set abaixo não tem nenhum `await` no
+// meio, não existe janela pra uma segunda requisição passar entre a
+// checagem e a marcação — a segunda request só é atendida depois que a
+// primeira já liberou (bloco finally) ou já apagou o encontro
+// (vitória/derrota), garantindo que XP/ouro/resultado sejam concedidos
+// exatamente uma vez por vitória.
+function tentarTravarEncontro(characterId) {
+  const encontro = encontroAtivoDe(characterId);
+  if (!encontro) return { encontro: null, travado: false };
+  if (encontro.processando) return { encontro, travado: false, ocupado: true };
+  encontro.processando = true;
+  return { encontro, travado: true };
+}
+
+function destravarEncontro(characterId) {
+  const encontro = ENCONTROS_ATIVOS.get(String(characterId));
+  if (encontro) encontro.processando = false;
+}
+
 // Quantos turnos de ataque básico, em média, cada lado precisa pra matar
 // o outro. O do inimigo é maior de propósito: o jogador sai na frente
 // (folga pra usar poder/errar um turno/tomar uma esquiva ruim), mas
@@ -191,17 +212,42 @@ exports.executarTurno = async (req, res) => {
     // O inimigo nunca vem do cliente — só o servidor sabe o estado real
     // (ver ENCONTROS_ATIVOS acima). Qualquer `enemy` que o corpo da
     // requisição ainda contenha é ignorado de propósito.
-    const inimigoAtual = encontroAtivoDe(characterId);
+    const { encontro: inimigoAtual, travado, ocupado } = tentarTravarEncontro(characterId);
     if (!inimigoAtual) {
       return res.status(400).json({
         message:
           "Nenhum combate ativo para esse personagem. Busque um inimigo antes de atacar.",
       });
     }
+    if (!travado || ocupado) {
+      return res.status(409).json({
+        message: "Uma ação anterior deste combate ainda está sendo processada.",
+      });
+    }
 
-    const character = await Character.findByPk(characterId, {
-      include: [{ model: Class }],
+    try {
+      return await processarTurno({ req, res, characterId, inimigoAtual });
+    } finally {
+      destravarEncontro(characterId);
+    }
+  } catch (error) {
+    console.error(
+      "Erro ao processar turno de combate:",
+      error
+    );
+
+    res.status(500).json({
+      message:
+        "Erro interno do servidor ao processar combate.",
     });
+  }
+};
+
+async function processarTurno({ req, res, characterId, inimigoAtual }) {
+  const { action } = req.body;
+  const character = await Character.findByPk(characterId, {
+    include: [{ model: Class }],
+  });
 
     if (!character) {
       return res.status(404).json({
@@ -256,6 +302,22 @@ exports.executarTurno = async (req, res) => {
         return res.status(403).json({
           message:
             "Este personagem não aprendeu este poder.",
+        });
+      }
+
+      // Poder passivo não é "usável" manualmente, e um poder desativado
+      // (is_active: false) não pode ser disparado por um request forjado
+      // direto na API — só a lista de poderes ativos escolhidos pelo
+      // jogador conta.
+      if (!aprendeu.is_active) {
+        return res.status(403).json({
+          message: "Este poder não está ativo para este personagem.",
+        });
+      }
+
+      if (poderUsado.tipo_poder !== "Ativo") {
+        return res.status(403).json({
+          message: "Este poder não pode ser usado manualmente em combate.",
         });
       }
 
@@ -369,6 +431,7 @@ exports.executarTurno = async (req, res) => {
         characterTravado.dinheiro += dinheiroGanho;
         characterTravado.vida_atual = personagemAtual.vida_atual;
         characterTravado.mana_atual = personagemAtual.mana_atual;
+        characterTravado.ultima_atualizacao_vida = new Date();
         return adicionarExperiencia(characterId, xpGanho, {
           transaction,
           personagem: characterTravado,
@@ -489,11 +552,13 @@ exports.executarTurno = async (req, res) => {
 
     await character.update({
       vida_atual: derrotado
-        ? 1
+        ? 0
         : personagemAtual.vida_atual,
 
       mana_atual:
         personagemAtual.mana_atual,
+
+      ultima_atualizacao_vida: new Date(),
     });
 
     return res.status(200).json({
@@ -507,7 +572,7 @@ exports.executarTurno = async (req, res) => {
 
         character: {
           vida_atual: derrotado
-            ? 1
+            ? 0
             : personagemAtual.vida_atual,
 
           mana_atual:
@@ -521,15 +586,4 @@ exports.executarTurno = async (req, res) => {
         enemy: inimigoAtual,
       },
     });
-  } catch (error) {
-    console.error(
-      "Erro ao processar turno de combate:",
-      error
-    );
-
-    res.status(500).json({
-      message:
-        "Erro interno do servidor ao processar combate.",
-    });
-  }
-};
+}

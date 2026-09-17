@@ -41,6 +41,14 @@ const Class = sequelize.define("Class", {
     type: DataTypes.STRING(255),
     allowNull: true,
   },
+  // Classe rara (Primordial/Celestial) — mesma ideia do campo `raro` de
+  // Race: só liberada por um sorteio feito e verificado no servidor,
+  // nunca por o cliente simplesmente mandar o id dela.
+  raro: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  },
 });
 
 module.exports = Class;

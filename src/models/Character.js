@@ -18,6 +18,10 @@ const Character = sequelize.define("Character", {
       key: "id",
     },
     allowNull: false,
+    // Cada conta tem no máximo um personagem — reforçado no banco (além
+    // da checagem no controller) pra nenhuma corrida de dois creates
+    // simultâneos conseguir criar um segundo personagem pra mesma conta.
+    unique: true,
   },
   nome: {
     type: DataTypes.STRING(50),

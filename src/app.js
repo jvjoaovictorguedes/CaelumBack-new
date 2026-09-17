@@ -1,6 +1,7 @@
 // src/app.js
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
 const http = require("http");
 const { Server: SocketIOServer } = require("socket.io");
 const { connectDB, isDatabaseReady } = require("./config/database");
@@ -66,16 +67,26 @@ connectDB().catch((error) => {
   console.error("Erro fatal e inesperado ao conectar ao banco de dados:", error);
 });
 
-// CORS_ORIGIN é opcional de propósito: sem ele, o comportamento
-// continua exatamente igual a antes (qualquer origem) pra não quebrar
-// um deploy que ainda não configurou a variável — mas com ela, restringe
-// só ao(s) domínio(s) do frontend, em vez de aceitar qualquer site.
+// CORS_ORIGIN é opcional fora de produção (comportamento de antes:
+// sem ele, aceita qualquer origem, pra não travar quem ainda está
+// configurando o ambiente local). Em produção isso é proibido — "*"
+// nunca é um fallback aceitável quando o backend usa cookies/JWT de
+// verdade, então o processo nem sobe sem a variável configurada.
+const emProducao = process.env.NODE_ENV === "production";
+
 const origensPermitidas = (process.env.CORS_ORIGIN || "")
   .split(",")
   .map((origem) => origem.trim())
   .filter(Boolean);
 
-if (origensPermitidas.length === 0) {
+if (emProducao && origensPermitidas.length === 0) {
+  throw new Error(
+    "CORS_ORIGIN é obrigatório em produção (NODE_ENV=production) e não pode cair em \"*\". " +
+      'Defina CORS_ORIGIN="https://seusite.com" (separado por vírgula se houver mais de um) antes de subir o servidor.',
+  );
+}
+
+if (!emProducao && origensPermitidas.length === 0) {
   console.warn(
     '[cors] CORS_ORIGIN não configurado — aceitando requisições de qualquer origem. Defina CORS_ORIGIN="https://seusite.com" (separado por vírgula se houver mais de um) pra restringir.',
   );
@@ -86,7 +97,17 @@ const corsOptions =
     ? { origin: origensPermitidas, credentials: true }
     : undefined;
 
-app.use(express.json());
+// Helmet cobre um conjunto de headers de segurança padrão (X-Content-
+// Type-Options, X-Frame-Options, HSTS, etc.) que não custam nada manter
+// e não existiam antes. crossOriginResourcePolicy fica "cross-origin"
+// porque o frontend (outro domínio) carrega imagens/mídia servidas por
+// esta API.
+app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
+
+// Limite de tamanho do corpo da requisição — sem isso, um payload JSON
+// gigante (de propósito ou por bug) era aceito e processado inteiro
+// antes de qualquer validação de rota rodar.
+app.use(express.json({ limit: "100kb" }));
 app.use(cors(corsOptions));
 
 app.use((req, res, next) => {

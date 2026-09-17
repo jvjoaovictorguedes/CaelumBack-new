@@ -41,7 +41,23 @@ exports.getAllCharacterAbilities = async (req, res) => {
     // Permite filtrar as habilidades de um único personagem
     // (ex: ?characterId=3), do jeito que a tela de combate precisa.
     const { characterId } = req.query;
-    const whereClause = characterId ? { id_personagem: characterId } : {};
+
+    if (!characterId) {
+      // Sem filtro, isso listaria os poderes aprendidos de TODOS os
+      // personagens do jogo pra qualquer usuário autenticado — não é
+      // uma tela de jogador que precise disso.
+      return res.status(400).json({ message: "characterId é obrigatório." });
+    }
+
+    const personagem = await Character.findByPk(characterId, { attributes: ["id", "id_usuario"] });
+    if (!personagem) {
+      return res.status(404).json({ message: "Personagem não encontrado." });
+    }
+    if (personagem.id_usuario !== req.user.id) {
+      return res.status(403).json({ message: "Esse personagem não pertence a você." });
+    }
+
+    const whereClause = { id_personagem: characterId };
 
     const characterAbilities = await CharacterAbilities.findAll({
       where: whereClause,
@@ -70,7 +86,7 @@ exports.getCharacterAbilityById = async (req, res) => {
   try {
     const characterAbility = await CharacterAbilities.findByPk(req.params.id, {
       include: [
-        { model: Character, attributes: ["id", "nome", "nivel"] },
+        { model: Character, attributes: ["id", "nome", "nivel", "id_usuario"] },
         { model: Power, attributes: ["id", "nome", "tipo_poder"] },
       ],
     });
@@ -78,6 +94,9 @@ exports.getCharacterAbilityById = async (req, res) => {
       return res
         .status(404)
         .json({ message: "Habilidade de personagem não encontrada." });
+    }
+    if (characterAbility.Character?.id_usuario !== req.user.id) {
+      return res.status(403).json({ message: "Essa habilidade não pertence a você." });
     }
     res.status(200).json({
       status: "success",
