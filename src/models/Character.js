@@ -92,7 +92,7 @@ const Character = sequelize.define("Character", {
       "Raio",
       "Yin&Yang",
     ),
-    allowNull: true,
+    allowNull: false,
   },
   rank: {
     type: DataTypes.STRING(50),

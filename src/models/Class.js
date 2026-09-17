@@ -32,6 +32,11 @@ const Class = sequelize.define("Class", {
     defaultValue: 1.0,
     allowNull: false,
   },
+  multiplicador_dano_magico: {
+    type: DataTypes.FLOAT,
+    defaultValue: 1.0,
+    allowNull: false,
+  },
   imagem_url: {
     type: DataTypes.STRING(255),
     allowNull: true,

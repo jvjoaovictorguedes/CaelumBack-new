@@ -18,6 +18,7 @@ const {
   manaMaximaDe,
   comMultiplicadoresDeClasse,
 } = require("../services/combatFormulas");
+const { sortearNaturezaMagica } = require("../services/naturezaMagicaService");
 
 User.hasMany(Character, { foreignKey: "id_usuario" });
 Character.belongsTo(User, { foreignKey: "id_usuario" });
@@ -98,7 +99,7 @@ exports.createCharacter = async (req, res) => {
     // mandar, senão qualquer um criava (ou "roubava" a criação de) um
     // personagem em nome de outra conta.
     const id_usuario = req.user.id;
-    const { nome, genero, id_raca, id_classe, natureza_magica } = req.body;
+    const { nome, genero, id_raca, id_classe } = req.body;
     if (!nome || !genero || !id_raca || !id_classe) {
       return res.status(400).json({
         message: "nome, genero, id_raca e id_classe são obrigatórios.",
@@ -136,7 +137,10 @@ exports.createCharacter = async (req, res) => {
       genero,
       id_raca,
       id_classe,
-      natureza_magica: natureza_magica ?? null,
+      // Sempre sorteada aqui — nunca a partir do que o cliente mandar,
+      // senão qualquer um garantia a natureza rara só mandando o valor
+      // certo no corpo da requisição.
+      natureza_magica: sortearNaturezaMagica(),
       nivel: 1,
       experiencia: 0,
       dinheiro: 15,
