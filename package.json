@@ -12,6 +12,7 @@
     "seed:equipamentos": "node scripts/seed-equipamentos-producao.js",
     "seed:poder-mago": "node scripts/seed-poder-bola-de-fogo-producao.js",
     "reseed:poderes": "node scripts/reseed-poderes-producao.js",
+    "reseed:itens": "node scripts/reseed-itens-producao.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
