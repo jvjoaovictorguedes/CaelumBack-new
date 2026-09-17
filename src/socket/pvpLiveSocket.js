@@ -11,6 +11,7 @@
 // enquanto o duelo está em andamento (só o resultado final é persistido,
 // via pvpController.aplicarResultadoDuelo).
 
+const crypto = require("crypto");
 const Character = require("../models/Character");
 const Class = require("../models/Class");
 const {
@@ -300,6 +301,17 @@ module.exports = function registerPvpLiveHandlers(io) {
         if (!power) {
           return socket.emit("pvp:erro", { mensagem: "Poder inválido." });
         }
+        // buscarPoderesDoPersonagem só filtra is_active — todo poder
+        // Passivo concedido nasce com is_active:true (e nem pode ser
+        // desativado, ver characterAbilitiesController.toggleCharacterAbility),
+        // então sem essa checagem qualquer poder passivo aprendido dava
+        // pra ser escolhido como ação de turno aqui, igual um poder
+        // ativo de verdade — coisa que o combate PvE já barra
+        // explicitamente (ver combatController.js) mas o PvP ao vivo
+        // nunca chegou a checar.
+        if (power.tipo_poder !== "Ativo") {
+          return socket.emit("pvp:erro", { mensagem: "Este poder não pode ser usado manualmente em combate." });
+        }
         if (power.custo_mana > lutadorAtacante.estado.mana_atual) {
           return socket.emit("pvp:erro", { mensagem: "Mana insuficiente para esse poder." });
         }
@@ -396,7 +408,14 @@ function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
     } else {
       const percA = duelo.a.estado.vida_atual / duelo.a.vidaMax;
       const percB = duelo.b.estado.vida_atual / duelo.b.vidaMax;
-      vencedorChave = percA >= percB ? "A" : "B";
+      // Mesmo cuidado do PvP assíncrono (pvpController.js) — empate de
+      // porcentagem de vida não pode sempre favorecer A só por ordem de
+      // comparação.
+      if (percA === percB) {
+        vencedorChave = crypto.randomInt(2) === 0 ? "A" : "B";
+      } else {
+        vencedorChave = percA > percB ? "A" : "B";
+      }
     }
     io.to(duelo.sala).emit("pvp:turno-resultado", { ...payloadTurno, turnoDe: null });
     finalizarDuelo(io, duelId, vencedorChave, "combate");

@@ -55,10 +55,22 @@ function emitParaGuild(idGuild, evento, payload) {
 module.exports = function registerGuildHandlers(io) {
   ioRegistrado = io;
   io.on("connection", (socket) => {
-    socket.on("identificar", async ({ ticket } = {}) => {
-      // Igual ao PvP ao vivo: characterId só vem do ticket verificado,
-      // nunca do que o cliente mandar direto (senão qualquer socket
-      // conseguia falar/ouvir o chat de guilda de outro personagem).
+    // Nome de evento PRÓPRIO (não "identificar" genérico) — o mesmo `io`
+    // atende tanto guildSocket quanto pvpLiveSocket, e os dois listeners
+    // ficam registrados no MESMO objeto `socket` sempre que qualquer um
+    // dos dois recebe uma conexão nova (io.on("connection") dispara pra
+    // todo mundo). Enquanto os dois escutavam "identificar", abrir o
+    // chat da guilda (um socket novo, separado do socket do PvP ao vivo)
+    // também disparava o "identificar" do pvpLiveSocket nesse socket
+    // novo — que aí registrava esse personagem como "online" no PvP com
+    // um socket.id diferente do que já estava lá, e o pvpLiveSocket
+    // DESCONECTAVA à força o socket antigo (o de verdade, o do PvP ao
+    // vivo) por achar que era uma reconexão. Resultado: só abrir o chat
+    // da guilda já derrubava a conexão de PvP ao vivo do jogador.
+    socket.on("guild:identificar", async ({ ticket } = {}) => {
+      // characterId só vem do ticket verificado, nunca do que o cliente
+      // mandar direto (senão qualquer socket conseguia falar/ouvir o
+      // chat de guilda de outro personagem).
       const characterId = await personagemViaTicket(ticket);
       if (!characterId) return;
       socket.characterId = characterId;
