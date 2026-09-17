@@ -541,6 +541,7 @@ exports.getPoderesDisponiveis = async (req, res) => {
         cooldown: poder.cooldown,
         escala_atributo: poder.escala_atributo,
         valor_escala: poder.valor_escala,
+        imagem_url: poder.imagem_url,
         origem,
         nivel_necessario: nivelNecessario,
         aprendido: Boolean(linhaAprendida),
