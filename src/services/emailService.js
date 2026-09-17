@@ -11,6 +11,10 @@
 // e-mail — sem isso, o "esqueci minha senha" nunca chega na caixa de
 // entrada de ninguém.
 const nodemailer = require("nodemailer");
+const dns = require("dns");
+const { promisify } = require("util");
+
+const resolve4 = promisify(dns.resolve4);
 
 let transporterCache = null;
 
@@ -18,11 +22,40 @@ function smtpConfigurado() {
   return Boolean(process.env.SMTP_HOST);
 }
 
-function obterTransporter() {
+// O nodemailer 10.x resolve o host tanto por A (IPv4) quanto AAAA (IPv6)
+// e SORTEIA aleatoriamente qual endereço usar pra conectar — não tem
+// nenhuma opção (`family` incluso) que force IPv4 nessa versão. Em
+// ambientes sem rota de saída IPv6 (Railway, entre outros), cair no
+// endereço IPv6 sorteado falha com "ENETUNREACH ...:587" antes mesmo do
+// handshake SMTP começar — e como é sorteio, o próximo pedido de reset
+// podia simplesmente ter sorte e funcionar, escondendo o problema.
+// Resolvendo o IPv4 aqui, antes de qualquer coisa, e passando o
+// endereço literal como `host`, o nodemailer nunca chega a tentar IPv6.
+// `servername` mantém a validação de certificado/SNI contra o hostname
+// de verdade (obrigatório: conectar direto num IP sem isso falha a
+// verificação do certificado TLS do Gmail).
+async function resolverEnderecoIPv4(host) {
+  if (dns.isIP(host)) return host;
+  try {
+    const enderecos = await resolve4(host);
+    return enderecos[0] || host;
+  } catch (erro) {
+    console.warn(
+      `[email] Não foi possível resolver IPv4 de ${host} (${erro.message}) — tentando com o hostname original.`,
+    );
+    return host;
+  }
+}
+
+async function obterTransporter() {
   if (transporterCache) return transporterCache;
 
+  const hostOriginal = process.env.SMTP_HOST;
+  const enderecoIPv4 = await resolverEnderecoIPv4(hostOriginal);
+
   transporterCache = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
+    host: enderecoIPv4,
+    servername: hostOriginal,
     port: Number(process.env.SMTP_PORT || 587),
     // SMTP_SECURE=true pra porta 465 (SSL direto); por padrão usa
     // STARTTLS (porta 587), que é o mais comum entre provedores.
@@ -46,7 +79,8 @@ async function enviarEmailRedefinicaoSenha({ paraEmail, link }) {
 
   const remetente = process.env.SMTP_FROM || process.env.SMTP_USER;
 
-  await obterTransporter().sendMail({
+  const transporter = await obterTransporter();
+  await transporter.sendMail({
     from: remetente,
     to: paraEmail,
     subject: "Redefinição de senha — Caelum",
