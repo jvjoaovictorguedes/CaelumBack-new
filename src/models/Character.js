@@ -69,6 +69,12 @@ const Character = sequelize.define("Character", {
     type: DataTypes.JSONB,
     allowNull: true,
   },
+  // Cooldown entre tentativas do Portal de Ranque (ver
+  // rankGateController.js) — evita retry imediato após perder.
+  ultima_tentativa_rank_gate: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
   forca: {
     type: DataTypes.INTEGER,
     allowNull: false,
