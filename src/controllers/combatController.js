@@ -130,9 +130,10 @@ function gerarInimigo(jogador) {
 // Gera um inimigo compatível com o nível do personagem.
 exports.gerarInimigoParaPersonagem = async (req, res) => {
   try {
-    // TODO(auth): trocar por req.personagemAtual.id quando o front puder
-    // mandar o JWT.
-    const character = await Character.findByPk(req.params.characterId, {
+    // Sempre o personagem do usuário autenticado, nunca o :characterId da
+    // URL — mantido na rota só por compatibilidade, o valor em si é
+    // ignorado.
+    const character = await Character.findByPk(req.personagemAtual.id, {
       include: [{ model: Class }],
     });
 
@@ -168,11 +169,10 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
 
 exports.executarTurno = async (req, res) => {
   try {
-    // TODO(auth): trocar por req.personagemAtual.id quando o front puder
-    // mandar o JWT.
-    const { characterId, action } = req.body;
+    const characterId = req.personagemAtual.id;
+    const { action } = req.body;
 
-    if (!characterId || !action) {
+    if (!action) {
       return res.status(400).json({
         message:
           "Dados insuficientes para resolver o turno de combate.",

@@ -9,11 +9,15 @@ Message.belongsTo(User, { foreignKey: "id_destinatario", as: "destinatario" });
 // body: { id_remetente, id_destinatario, conteudo }
 exports.sendMessage = async (req, res) => {
   try {
-    const { id_remetente, id_destinatario, conteudo } = req.body;
+    // Quem manda é sempre o usuário autenticado — nunca o id_remetente
+    // que o corpo mandar, senão qualquer um enviava mensagem se passando
+    // por outra pessoa.
+    const id_remetente = req.user.id;
+    const { id_destinatario, conteudo } = req.body;
 
-    if (!id_remetente || !id_destinatario || !conteudo?.trim()) {
+    if (!id_destinatario || !conteudo?.trim()) {
       return res.status(400).json({
-        message: "id_remetente, id_destinatario e conteudo são obrigatórios.",
+        message: "id_destinatario e conteudo são obrigatórios.",
       });
     }
 
@@ -67,6 +71,12 @@ exports.sendMessage = async (req, res) => {
 exports.getConversation = async (req, res) => {
   try {
     const { userId, otherUserId } = req.params;
+    // Sem isso, dava pra ler a conversa de qualquer dupla de usuários só
+    // trocando o :userId na URL — a única checagem real é que o :userId
+    // seja o próprio usuário autenticado.
+    if (Number(userId) !== req.user.id) {
+      return res.status(403).json({ message: "Você só pode ver sua própria conversa." });
+    }
 
     const mensagens = await Message.findAll({
       where: {
@@ -108,6 +118,9 @@ exports.getConversation = async (req, res) => {
 exports.getUnreadCount = async (req, res) => {
   try {
     const { userId } = req.params;
+    if (Number(userId) !== req.user.id) {
+      return res.status(403).json({ message: "Você só pode ver suas próprias mensagens." });
+    }
 
     const total = await Message.count({
       where: { id_destinatario: userId, lida: false },
@@ -131,6 +144,9 @@ exports.getUnreadCount = async (req, res) => {
 exports.getInbox = async (req, res) => {
   try {
     const { userId } = req.params;
+    if (Number(userId) !== req.user.id) {
+      return res.status(403).json({ message: "Você só pode ver sua própria caixa de entrada." });
+    }
 
     const mensagens = await Message.findAll({
       where: {

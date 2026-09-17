@@ -7,18 +7,15 @@ const adminMiddleware = require("../middlewares/adminMiddleware");
 const router = express.Router();
 
 // Conceder/editar/remover poder direto é administrativo — o jogo só
-// aprende poder via concederPoderesIniciais (nível/classe/raça); nenhuma
-// tela de jogador chama esses endpoints, e um POST aberto aqui deixava
-// dar qualquer poder pra qualquer personagem sem checar nível/classe.
-// As leituras continuam abertas (usadas direto pelo front sem JWT).
+// aprende poder via concederPoderesIniciais (nível/classe/raça).
 router
   .route("/")
   .post(authMiddleware, adminMiddleware, characterAbilitiesController.createCharacterAbility)
-  .get(characterAbilitiesController.getAllCharacterAbilities);
+  .get(authMiddleware, characterAbilitiesController.getAllCharacterAbilities);
 
 router
   .route("/:id")
-  .get(characterAbilitiesController.getCharacterAbilityById)
+  .get(authMiddleware, characterAbilitiesController.getCharacterAbilityById)
   .patch(authMiddleware, adminMiddleware, characterAbilitiesController.updateCharacterAbility)
   .delete(authMiddleware, adminMiddleware, characterAbilitiesController.deleteCharacterAbility);
 

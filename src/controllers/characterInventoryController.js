@@ -27,15 +27,15 @@ CharacterInventory.belongsTo(Item, { foreignKey: "id_item" });
 // POST /api/character-items/use
 // body: { id_personagem, id_item, quantidade }
 exports.useItem = async (req, res) => {
-  // TODO(auth): trocar por req.personagemAtual.id quando o front puder
-  // mandar o JWT.
-  const { id_personagem, id_item } = req.body;
+  // Quem usa o item é sempre o personagem do usuário autenticado.
+  const id_personagem = req.personagemAtual.id;
+  const { id_item } = req.body;
   const quantidade =
     req.body.quantidade === undefined ? 1 : Number(req.body.quantidade);
 
-  if (!id_personagem || !id_item) {
+  if (!id_item) {
     return res.status(400).json({
-      message: "id_personagem e id_item são obrigatórios.",
+      message: "id_item é obrigatório.",
     });
   }
 

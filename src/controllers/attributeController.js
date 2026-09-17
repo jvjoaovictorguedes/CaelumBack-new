@@ -9,9 +9,9 @@ distribuirPontosAleatoriamente,
 // Distribuição escolhida pelo jogador
 const distribuir = async (req, res) => {
 try {
-// TODO(auth): trocar por req.personagemAtual.id quando o front puder
-// mandar o JWT.
-const { id } = req.params;
+// Sempre o personagem do usuário autenticado — o :id da rota é mantido
+// só por compatibilidade com o front, mas ignorado aqui.
+const id = req.personagemAtual.id;
 const { atributo, quantidade } = req.body;
 
 // Trava a linha do personagem: sem isso, duas requisições concorrentes
@@ -49,7 +49,7 @@ return res.status(statusCode).json({
 // Distribuição aleatória
 const distribuirAleatoriamente = async (req, res) => {
 try {
-const { id } = req.params;
+const id = req.personagemAtual.id;
 
 const personagemAtualizado = await sequelize.transaction(async (transaction) => {
   const personagem = await Character.findByPk(id, {

@@ -1,34 +1,131 @@
 const express = require("express");
 const guildController = require("../controllers/guildController");
+const authMiddleware = require("../middlewares/authMiddleware");
+const { carregarPersonagemAtual } = require("../middlewares/currentCharacterMiddleware");
+const { exigirMembroDaGuild } = require("../middlewares/guildMembershipMiddleware");
 
 const router = express.Router();
 
+// authMiddleware + carregarPersonagemAtual em toda rota que age em nome
+// de "meu personagem" — o controller usa req.personagemAtual.id em vez
+// de confiar em id_personagem/idResponsavel/characterId vindo do corpo,
+// query ou params (ver comentários no próprio controller).
 router.get("/ranking", guildController.rankingGlobal);
-router.get("/character/:characterId", guildController.buscarGuildDoPersonagem);
-router.get("/invites/character/:characterId", guildController.listarConvitesDoPersonagem);
-router.post("/invites/:inviteId/respond", guildController.responderConvite);
+router.get(
+  "/character/:characterId",
+  authMiddleware,
+  carregarPersonagemAtual,
+  guildController.buscarGuildDoPersonagem,
+);
+router.get(
+  "/invites/character/:characterId",
+  authMiddleware,
+  carregarPersonagemAtual,
+  guildController.listarConvitesDoPersonagem,
+);
+router.post(
+  "/invites/:inviteId/respond",
+  authMiddleware,
+  carregarPersonagemAtual,
+  guildController.responderConvite,
+);
 
-router.route("/").post(guildController.criarGuild).get(guildController.listarGuilds);
-router.route("/:id").get(guildController.buscarGuildPorId).patch(guildController.editarGuild).delete(guildController.dissolver);
+router
+  .route("/")
+  .post(authMiddleware, carregarPersonagemAtual, guildController.criarGuild)
+  .get(guildController.listarGuilds);
 
-router.post("/:id/transfer-leadership", guildController.transferirLideranca);
+router
+  .route("/:id")
+  .get(authMiddleware, carregarPersonagemAtual, guildController.buscarGuildPorId)
+  .patch(authMiddleware, carregarPersonagemAtual, guildController.editarGuild)
+  .delete(authMiddleware, carregarPersonagemAtual, guildController.dissolver);
 
-router.post("/:id/join", guildController.entrarDireto);
-router.route("/:id/invites").post(guildController.convidar).get(guildController.listarConvitesDaGuild);
-router.route("/:id/applications").post(guildController.candidatar).get(guildController.listarCandidaturas);
-router.post("/:id/applications/:applicationId/respond", guildController.responderCandidatura);
+router.post(
+  "/:id/transfer-leadership",
+  authMiddleware,
+  carregarPersonagemAtual,
+  guildController.transferirLideranca,
+);
 
-router.post("/:id/leave", guildController.sair);
-router.delete("/:id/members/:characterId", guildController.expulsar);
-router.patch("/:id/members/:characterId/role", guildController.alterarCargo);
+router.post("/:id/join", authMiddleware, carregarPersonagemAtual, guildController.entrarDireto);
+router
+  .route("/:id/invites")
+  .post(authMiddleware, carregarPersonagemAtual, guildController.convidar)
+  .get(
+    authMiddleware,
+    carregarPersonagemAtual,
+    exigirMembroDaGuild("id"),
+    guildController.listarConvitesDaGuild,
+  );
+router
+  .route("/:id/applications")
+  .post(authMiddleware, carregarPersonagemAtual, guildController.candidatar)
+  .get(
+    authMiddleware,
+    carregarPersonagemAtual,
+    exigirMembroDaGuild("id"),
+    guildController.listarCandidaturas,
+  );
+router.post(
+  "/:id/applications/:applicationId/respond",
+  authMiddleware,
+  carregarPersonagemAtual,
+  guildController.responderCandidatura,
+);
 
-router.route("/:id/permissions").get(guildController.listarPermissoes).patch(guildController.atualizarPermissao);
+router.post("/:id/leave", authMiddleware, carregarPersonagemAtual, guildController.sair);
+router.delete(
+  "/:id/members/:characterId",
+  authMiddleware,
+  carregarPersonagemAtual,
+  guildController.expulsar,
+);
+router.patch(
+  "/:id/members/:characterId/role",
+  authMiddleware,
+  carregarPersonagemAtual,
+  guildController.alterarCargo,
+);
 
-router.post("/:id/donations", guildController.doar);
-router.get("/:id/treasury/transactions", guildController.extratoTesouro);
-router.post("/:id/treasury/expenses", guildController.registrarGasto);
-router.get("/:id/contributions", guildController.listarContribuicoes);
+router
+  .route("/:id/permissions")
+  .get(
+    authMiddleware,
+    carregarPersonagemAtual,
+    exigirMembroDaGuild("id"),
+    guildController.listarPermissoes,
+  )
+  .patch(authMiddleware, carregarPersonagemAtual, guildController.atualizarPermissao);
 
-router.get("/:id/logs", guildController.listarLogs);
+router.post("/:id/donations", authMiddleware, carregarPersonagemAtual, guildController.doar);
+router.get(
+  "/:id/treasury/transactions",
+  authMiddleware,
+  carregarPersonagemAtual,
+  exigirMembroDaGuild("id"),
+  guildController.extratoTesouro,
+);
+router.post(
+  "/:id/treasury/expenses",
+  authMiddleware,
+  carregarPersonagemAtual,
+  guildController.registrarGasto,
+);
+router.get(
+  "/:id/contributions",
+  authMiddleware,
+  carregarPersonagemAtual,
+  exigirMembroDaGuild("id"),
+  guildController.listarContribuicoes,
+);
+
+router.get(
+  "/:id/logs",
+  authMiddleware,
+  carregarPersonagemAtual,
+  exigirMembroDaGuild("id"),
+  guildController.listarLogs,
+);
 
 module.exports = router;

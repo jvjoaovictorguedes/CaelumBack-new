@@ -94,13 +94,14 @@ async function concederPoderesIniciais(character) {
 
 exports.createCharacter = async (req, res) => {
   try {
-    // TODO(auth): assim que o front conseguir mandar o token JWT, trocar
-    // por `req.user.id` em vez de confiar no id_usuario do corpo — hoje
-    // ainda não dá pra exigir isso sem quebrar a criação de personagem.
-    const { id_usuario, nome, genero, id_raca, id_classe, natureza_magica } = req.body;
-    if (!id_usuario || !nome || !genero || !id_raca || !id_classe) {
+    // Sempre o usuário autenticado — nunca o id_usuario que o corpo
+    // mandar, senão qualquer um criava (ou "roubava" a criação de) um
+    // personagem em nome de outra conta.
+    const id_usuario = req.user.id;
+    const { nome, genero, id_raca, id_classe, natureza_magica } = req.body;
+    if (!nome || !genero || !id_raca || !id_classe) {
       return res.status(400).json({
-        message: "id_usuario, nome, genero, id_raca e id_classe são obrigatórios.",
+        message: "nome, genero, id_raca e id_classe são obrigatórios.",
       });
     }
 

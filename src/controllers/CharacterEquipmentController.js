@@ -52,13 +52,14 @@ async function validarCompatibilidade(slot, item) {
 }
 
 exports.equipItem = async (req, res) => {
-  // TODO(auth): trocar por req.personagemAtual.id quando o front puder
-  // mandar o JWT — hoje ainda confia no id_personagem do corpo.
-  const { id_personagem, slot, id_item } = req.body;
+  // O personagem que está equipando é sempre o do usuário autenticado —
+  // nunca o id_personagem que o corpo da requisição mandar.
+  const id_personagem = req.personagemAtual.id;
+  const { slot, id_item } = req.body;
 
-  if (!id_personagem || !slot || !id_item) {
+  if (!slot || !id_item) {
     return res.status(400).json({
-      message: "id_personagem, slot e id_item são obrigatórios.",
+      message: "slot e id_item são obrigatórios.",
     });
   }
 
@@ -139,11 +140,12 @@ exports.equipItem = async (req, res) => {
 };
 
 exports.unequipItem = async (req, res) => {
-  const { id_personagem, slot } = req.body;
+  const id_personagem = req.personagemAtual.id;
+  const { slot } = req.body;
 
-  if (!id_personagem || !slot) {
+  if (!slot) {
     return res.status(400).json({
-      message: "id_personagem e slot são obrigatórios.",
+      message: "slot é obrigatório.",
     });
   }
 

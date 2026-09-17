@@ -101,9 +101,13 @@ async function registrarLog(idGuild, tipo, { responsavel, alvo, detalhes, transa
 // ---------------------------------------------------------------------
 
 exports.criarGuild = async (req, res) => {
-  const { id_personagem, nome, sigla, descricao, tipo_recrutamento } = req.body;
-  if (!id_personagem || !nome || !sigla) {
-    return res.status(400).json({ message: "id_personagem, nome e sigla são obrigatórios." });
+  // Quem funda é sempre o personagem do usuário autenticado — nunca o
+  // id_personagem que o corpo mandar (senão qualquer um fundava guilda
+  // em nome de outro personagem e ainda cobrava o custo dele).
+  const id_personagem = req.personagemAtual.id;
+  const { nome, sigla, descricao, tipo_recrutamento } = req.body;
+  if (!nome || !sigla) {
+    return res.status(400).json({ message: "nome e sigla são obrigatórios." });
   }
   if (nome.length < 3 || nome.length > 24) {
     return res.status(400).json({ message: "Nome deve ter entre 3 e 24 caracteres." });
@@ -226,8 +230,11 @@ exports.buscarGuildPorId = async (req, res) => {
 
     // Tesouro só aparece pra quem já é membro dessa guilda — jogador de
     // fora vendo os detalhes antes de entrar não vê saldo (seção 13).
-    const ehMembro = req.query.characterId
-      ? guild.membros.some((m) => m.id_personagem === Number(req.query.characterId))
+    // Sempre a partir do personagem autenticado, nunca de um
+    // characterId de query (senão qualquer um via tesouro alheio só
+    // alegando ser membro de outra guilda).
+    const ehMembro = req.personagemAtual
+      ? guild.membros.some((m) => m.id_personagem === req.personagemAtual.id)
       : false;
 
     return res.status(200).json({
@@ -252,7 +259,10 @@ exports.buscarGuildPorId = async (req, res) => {
 
 exports.buscarGuildDoPersonagem = async (req, res) => {
   try {
-    const membro = await GuildMember.findOne({ where: { id_personagem: req.params.characterId } });
+    // Sempre o próprio personagem autenticado — nunca o characterId da
+    // URL, senão qualquer um lia o tesouro da guilda de outro jogador
+    // só trocando o id na rota.
+    const membro = await GuildMember.findOne({ where: { id_personagem: req.personagemAtual.id } });
     if (!membro) return res.status(200).json({ status: "success", data: { guild: null } });
     const guild = await Guild.findByPk(membro.id_guild);
     return res.status(200).json({
@@ -266,7 +276,8 @@ exports.buscarGuildDoPersonagem = async (req, res) => {
 };
 
 exports.editarGuild = async (req, res) => {
-  const { idResponsavel, descricao, emblema_url, mural, meta_ativa, tipo_recrutamento } = req.body;
+  const idResponsavel = req.personagemAtual.id;
+  const { descricao, emblema_url, mural, meta_ativa, tipo_recrutamento } = req.body;
   try {
     const membro = await exigirPermissao(req.params.id, idResponsavel, "editar_identidade");
     const guild = await Guild.findByPk(req.params.id);
@@ -289,7 +300,7 @@ exports.editarGuild = async (req, res) => {
 };
 
 exports.dissolver = async (req, res) => {
-  const { idResponsavel } = req.body;
+  const idResponsavel = req.personagemAtual.id;
   try {
     await sequelize.transaction(async (transaction) => {
       const guild = await Guild.findByPk(req.params.id, { transaction, lock: transaction.LOCK.UPDATE });
@@ -311,7 +322,8 @@ exports.dissolver = async (req, res) => {
 };
 
 exports.transferirLideranca = async (req, res) => {
-  const { idAtual, idNovo } = req.body;
+  const idAtual = req.personagemAtual.id;
+  const { idNovo } = req.body;
   try {
     await sequelize.transaction(async (transaction) => {
       const guild = await Guild.findByPk(req.params.id, { transaction, lock: transaction.LOCK.UPDATE });
@@ -349,7 +361,8 @@ exports.transferirLideranca = async (req, res) => {
 // ---------------------------------------------------------------------
 
 exports.convidar = async (req, res) => {
-  const { idConvidante, idConvidado } = req.body;
+  const idConvidante = req.personagemAtual.id;
+  const { idConvidado } = req.body;
   try {
     const guild = await Guild.findByPk(req.params.id);
     if (!guild) return res.status(404).json({ message: "Guilda não encontrada." });
@@ -400,9 +413,11 @@ exports.listarConvitesDaGuild = async (req, res) => {
 
 exports.listarConvitesDoPersonagem = async (req, res) => {
   try {
+    // Sempre o próprio personagem autenticado — não o characterId da URL,
+    // senão qualquer um via os convites pendentes de outro jogador.
     const convites = await GuildInvite.findAll({
       where: {
-        id_personagem_convidado: req.params.characterId,
+        id_personagem_convidado: req.personagemAtual.id,
         status: "Pendente",
         data_expiracao: { [Op.gt]: new Date() },
       },
@@ -417,7 +432,8 @@ exports.listarConvitesDoPersonagem = async (req, res) => {
 };
 
 exports.responderConvite = async (req, res) => {
-  const { aceitar, idPersonagem } = req.body;
+  const idPersonagem = req.personagemAtual.id;
+  const { aceitar } = req.body;
   try {
     const resultado = await sequelize.transaction(async (transaction) => {
       const convite = await GuildInvite.findByPk(req.params.inviteId, { transaction, lock: transaction.LOCK.UPDATE });
@@ -470,7 +486,7 @@ exports.responderConvite = async (req, res) => {
 // Guildas "Aberto" entram na hora, sem passar por candidatura (seção 5
 // do documento: "Entrada imediata em guildas abertas, respeitando vagas").
 exports.entrarDireto = async (req, res) => {
-  const { idPersonagem } = req.body;
+  const idPersonagem = req.personagemAtual.id;
   try {
     const resultado = await sequelize.transaction(async (transaction) => {
       const guild = await Guild.findByPk(req.params.id, { transaction, lock: transaction.LOCK.UPDATE });
@@ -502,7 +518,8 @@ exports.entrarDireto = async (req, res) => {
 };
 
 exports.candidatar = async (req, res) => {
-  const { idPersonagem, mensagem } = req.body;
+  const idPersonagem = req.personagemAtual.id;
+  const { mensagem } = req.body;
   try {
     const guild = await Guild.findByPk(req.params.id);
     if (!guild) return res.status(404).json({ message: "Guilda não encontrada." });
@@ -545,7 +562,8 @@ exports.listarCandidaturas = async (req, res) => {
 };
 
 exports.responderCandidatura = async (req, res) => {
-  const { aceitar, idResponsavel } = req.body;
+  const idResponsavel = req.personagemAtual.id;
+  const { aceitar } = req.body;
   try {
     const resultado = await sequelize.transaction(async (transaction) => {
       const candidatura = await GuildApplication.findByPk(req.params.applicationId, {
@@ -599,7 +617,7 @@ exports.responderCandidatura = async (req, res) => {
 };
 
 exports.sair = async (req, res) => {
-  const { idPersonagem } = req.body;
+  const idPersonagem = req.personagemAtual.id;
   try {
     const guild = await Guild.findByPk(req.params.id);
     if (!guild) return res.status(404).json({ message: "Guilda não encontrada." });
@@ -620,7 +638,7 @@ exports.sair = async (req, res) => {
 };
 
 exports.expulsar = async (req, res) => {
-  const { idResponsavel } = req.body;
+  const idResponsavel = req.personagemAtual.id;
   const idAlvo = req.params.characterId;
   try {
     const guild = await Guild.findByPk(req.params.id);
@@ -646,7 +664,8 @@ exports.expulsar = async (req, res) => {
 };
 
 exports.alterarCargo = async (req, res) => {
-  const { idResponsavel, novoCargo } = req.body;
+  const idResponsavel = req.personagemAtual.id;
+  const { novoCargo } = req.body;
   const idAlvo = req.params.characterId;
   const CARGOS_ATRIBUIVEIS = ["Oficial", "Veterano", "Membro", "Recruta"];
   if (!CARGOS_ATRIBUIVEIS.includes(novoCargo)) {
@@ -699,7 +718,8 @@ exports.listarPermissoes = async (req, res) => {
 };
 
 exports.atualizarPermissao = async (req, res) => {
-  const { idResponsavel, cargo, permissao, permitido } = req.body;
+  const idResponsavel = req.personagemAtual.id;
+  const { cargo, permissao, permitido } = req.body;
   if (cargo === "Fundador") {
     return res.status(400).json({ message: "O cargo Fundador sempre tem todas as permissões." });
   }
@@ -729,7 +749,8 @@ exports.atualizarPermissao = async (req, res) => {
 // ---------------------------------------------------------------------
 
 exports.doar = async (req, res) => {
-  const { idPersonagem, valor } = req.body;
+  const idPersonagem = req.personagemAtual.id;
+  const { valor } = req.body;
   const valorNumerico = Number(valor);
   if (!Number.isInteger(valorNumerico) || valorNumerico <= 0) {
     return res.status(400).json({ message: "Valor de doação inválido." });
@@ -816,7 +837,8 @@ exports.doar = async (req, res) => {
 };
 
 exports.registrarGasto = async (req, res) => {
-  const { idResponsavel, valor, motivo } = req.body;
+  const idResponsavel = req.personagemAtual.id;
+  const { valor, motivo } = req.body;
   const valorNumerico = Number(valor);
   if (!Number.isInteger(valorNumerico) || valorNumerico <= 0) {
     return res.status(400).json({ message: "Valor de gasto inválido." });
