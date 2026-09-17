@@ -53,6 +53,9 @@ const port = process.env.PORT || 3001;
 // Railway (senão todo mundo cai no mesmo IP do proxy e o rate limit de
 // login/registro trava geral em vez de por pessoa).
 app.set("trust proxy", 1);
+// Não precisa anunciar "Express" pra quem for reconhecer versões/vulns
+// conhecidas do framework.
+app.disable("x-powered-by");
 
 // Conecta ao banco de dados e sincroniza os modelos
 // connectDB já chama sequelize.sync()

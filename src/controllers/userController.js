@@ -13,23 +13,27 @@ const signToken = (id) => {
   });
 };
 
+const SENHA_MIN_CARACTERES = 8;
+const SENHA_REGEX = /^(?=.*[A-Za-z])(?=.*\d).+$/;
+
 exports.registerUser = async (req, res) => {
   try {
-    const { username, email, password } = req.body;
+    const { username, password } = req.body;
+    const email = req.body.email?.trim().toLowerCase();
     if (!username || !email || !password) {
       return res
         .status(400)
         .json({ message: "Por favor, preencha todos os campos." });
     }
 
-    if (password.length < 6) {
-      return res
-        .status(400)
-        .json({ message: "A senha deve ter pelo menos 6 caracteres." });
+    if (password.length < SENHA_MIN_CARACTERES || !SENHA_REGEX.test(password)) {
+      return res.status(400).json({
+        message: `A senha deve ter pelo menos ${SENHA_MIN_CARACTERES} caracteres e incluir letras e números.`,
+      });
     }
 
     const newUser = await User.create({
-      username,
+      username: username.trim(),
       email,
       passwordHash: password,
     });
@@ -63,7 +67,8 @@ exports.registerUser = async (req, res) => {
 
 exports.loginUser = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { password } = req.body;
+    const email = req.body.email?.trim().toLowerCase();
     if (!email || !password) {
       return res
         .status(400)
