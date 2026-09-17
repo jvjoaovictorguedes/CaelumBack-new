@@ -12,6 +12,7 @@
 // entrada de ninguém.
 const nodemailer = require("nodemailer");
 const dns = require("dns");
+const net = require("net");
 const { promisify } = require("util");
 
 const resolve4 = promisify(dns.resolve4);
@@ -35,7 +36,12 @@ function smtpConfigurado() {
 // de verdade (obrigatório: conectar direto num IP sem isso falha a
 // verificação do certificado TLS do Gmail).
 async function resolverEnderecoIPv4(host) {
-  if (dns.isIP(host)) return host;
+  if (!host) {
+    throw new Error("SMTP_HOST não configurado");
+  }
+
+  if (net.isIP(host)) return host;
+
   try {
     const enderecos = await resolve4(host);
     return enderecos[0] || host;
