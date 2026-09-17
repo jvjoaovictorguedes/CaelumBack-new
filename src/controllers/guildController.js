@@ -54,6 +54,11 @@ function guildPublica(guild) {
     mural: guild.mural,
     meta_ativa: guild.meta_ativa,
     totalMembros: guild.membros ? guild.membros.length : undefined,
+    // Ranque de guilda (F...S++, ver rankService.js/guildGateController.js)
+    // — faltava aqui desde que a coluna foi adicionada, então o front
+    // nunca via o ranque real da guilda nesta resposta (só no
+    // GET /guilds/:id/rank-gate dedicado).
+    rank: guild.rank,
   };
 }
 
