@@ -1,12 +1,9 @@
 // src/controllers/consumablePropertiesController.js
 const ConsumableProperties = require("../models/ConsumableProperties");
 const Item = require("../models/Item"); // Importe para incluir nas buscas
-
-// Sem isso, getConsumablePropertiesById (que faz include: [{model: Item}])
-// derruba com "Item is not associated to ConsumableProperties!" — mesma
-// classe de bug já corrigida em Weapon/ArmorProperties.
-Item.hasOne(ConsumableProperties, { foreignKey: "id_item" });
-ConsumableProperties.belongsTo(Item, { foreignKey: "id_item" });
+// Fonte única das associações Item<->propriedades (com alias explícito)
+// — ver models/associations.js. Só o require garante que já rodaram.
+require("../models/associations");
 
 // Criar novas propriedades de consumível
 exports.createConsumableProperties = async (req, res) => {

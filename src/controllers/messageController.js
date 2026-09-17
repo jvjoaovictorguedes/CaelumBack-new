@@ -78,15 +78,37 @@ exports.getConversation = async (req, res) => {
       return res.status(403).json({ message: "Você só pode ver sua própria conversa." });
     }
 
-    const mensagens = await Message.findAll({
-      where: {
-        [Op.or]: [
-          { id_remetente: userId, id_destinatario: otherUserId },
-          { id_remetente: otherUserId, id_destinatario: userId },
-        ],
-      },
-      order: [["createdAt", "ASC"]],
+    // Sem limite/paginação, essa consulta trazia TODO o histórico entre
+    // os dois de uma vez — uma conversa antiga e longa virava uma
+    // query cada vez mais pesada (e um payload cada vez maior) a cada
+    // mensagem nova trocada, pra sempre. limit tem teto (100) pra não
+    // virar um jeito de pedir "me dá tudo mesmo assim" só usando um
+    // número grande; before pagina "mais antigas que este timestamp".
+    const limiteBruto = Number(req.query.limit);
+    const limit = Number.isInteger(limiteBruto) && limiteBruto > 0 ? Math.min(limiteBruto, 100) : 50;
+
+    const condicaoPar = {
+      [Op.or]: [
+        { id_remetente: userId, id_destinatario: otherUserId },
+        { id_remetente: otherUserId, id_destinatario: userId },
+      ],
+    };
+
+    const before = req.query.before ? new Date(req.query.before) : null;
+    const where =
+      before && !Number.isNaN(before.getTime())
+        ? { ...condicaoPar, createdAt: { [Op.lt]: before } }
+        : condicaoPar;
+
+    // Busca as mais RECENTES primeiro (pra respeitar o limit a partir
+    // do fim da conversa, não do início) e devolve em ordem
+    // cronológica, como o front já espera.
+    const maisRecentesPrimeiro = await Message.findAll({
+      where,
+      order: [["createdAt", "DESC"]],
+      limit,
     });
+    const mensagens = maisRecentesPrimeiro.reverse();
 
     await Message.update(
       { lida: true },

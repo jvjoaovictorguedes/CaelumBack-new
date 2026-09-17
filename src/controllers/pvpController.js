@@ -267,10 +267,33 @@ exports.getOpponents = async (req, res) => {
 };
 
 // GET /api/pvp/status/:characterId
+// Objeto devolvido quando o personagem ainda não tem PvpStatus —
+// nunca persistido a partir de um GET (ver comentário abaixo).
+function statusVirtual(idPersonagem) {
+  return {
+    id_personagem: Number(idPersonagem),
+    total_batalhas: 0,
+    vitorias: 0,
+    derrotas: 0,
+    sequencia_vitorias: 0,
+    maximo_sequencia_vitorias: 0,
+    sistema_classificacao: "Vitorias",
+    ultima_batalha_dia: null,
+  };
+}
+
 exports.getStatus = async (req, res) => {
   try {
-    const status = await garantirStatus(req.params.characterId);
-    return res.status(200).json({ status: "success", data: { pvpStatus: status } });
+    // GET não deve ter efeito colateral de escrita — findOrCreate
+    // fazia um GET público criar uma linha em PvpStatus só de ser
+    // chamado. PvpStatus.findOrCreate (garantirStatus) continua usado
+    // nos fluxos de ESCRITA de verdade (aplicarResultadoDuelo), que é
+    // onde o registro deveria nascer.
+    const status = await PvpStatus.findOne({ where: { id_personagem: req.params.characterId } });
+    return res.status(200).json({
+      status: "success",
+      data: { pvpStatus: status ?? statusVirtual(req.params.characterId) },
+    });
   } catch (error) {
     console.error("Erro ao buscar status de PVP:", error);
     return res

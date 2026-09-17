@@ -9,7 +9,7 @@ const GuildLog = require("../models/GuildLog");
 const GuildTreasuryTransaction = require("../models/GuildTreasuryTransaction");
 const GuildContribution = require("../models/GuildContribution");
 const Character = require("../models/Character");
-const { temPermissao, podeGerenciarCargo, PADRAO } = require("../services/guildPermissionService");
+const { temPermissao, podeGerenciarCargo, PADRAO, HIERARQUIA } = require("../services/guildPermissionService");
 const { concederExperiencia } = require("../services/guildXpService");
 const { emitParaGuild } = require("../socket/guildSocket");
 
@@ -717,19 +717,39 @@ exports.listarPermissoes = async (req, res) => {
   }
 };
 
+// Nunca confiar no ENUM do banco (GuildRolePermission.cargo) pra pegar
+// entrada inválida — um valor fora do ENUM só estouraria como erro 500
+// genérico na hora do INSERT, depois de já ter passado por toda a
+// lógica de permissão. Valida explicitamente aqui, antes de qualquer
+// escrita.
+const PERMISSOES_VALIDAS = Object.keys(PADRAO.Fundador);
+
 exports.atualizarPermissao = async (req, res) => {
   const idResponsavel = req.personagemAtual.id;
   const { cargo, permissao, permitido } = req.body;
   if (cargo === "Fundador") {
     return res.status(400).json({ message: "O cargo Fundador sempre tem todas as permissões." });
   }
+  if (!HIERARQUIA.includes(cargo)) {
+    return res.status(400).json({ message: "cargo inválido." });
+  }
+  if (!PERMISSOES_VALIDAS.includes(permissao)) {
+    return res.status(400).json({ message: "permissao inválida." });
+  }
+  // Boolean("false") === true em JavaScript — sem essa checagem,
+  // { "permitido": "false" } (uma string, não o booleano `false`) LIGAVA
+  // a permissão em vez de desligar. Exige o tipo primitivo boolean de
+  // verdade, não "qualquer coisa truthy".
+  if (typeof permitido !== "boolean") {
+    return res.status(400).json({ message: "permitido deve ser boolean." });
+  }
   try {
     await exigirPermissao(req.params.id, idResponsavel, "editar_cargos");
     const [linha] = await GuildRolePermission.findOrCreate({
       where: { id_guild: req.params.id, cargo, permissao },
-      defaults: { permitido: Boolean(permitido) },
+      defaults: { permitido: permitido },
     });
-    linha.permitido = Boolean(permitido);
+    linha.permitido = permitido;
     await linha.save();
 
     await registrarLog(req.params.id, "permissao_alterada", {

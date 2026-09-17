@@ -1,5 +1,7 @@
 // src/controllers/raceController.js
+const { sequelize } = require("../config/database");
 const Race = require("../models/Race");
+const CharacterCreationRoll = require("../models/CharacterCreationRoll");
 const {
   PROPOSITO_RACA,
   sortearRacaRaraGanhou,
@@ -102,34 +104,54 @@ exports.updateRace = async (req, res) => {
 
 // POST /api/races/sortear-raro
 // O servidor sorteia (nunca o cliente) se o usuário ganhou acesso a uma
-// raça rara nesta tentativa de criação de personagem. Diferente da
-// classe rara, aqui quem ganha não recebe uma raça já escolhida pelo
-// servidor: recebe a LISTA de todas as raças raras (Celestial,
-// Primordial, e qualquer outra que exista) pra escolher livremente —
-// cada uma com seu próprio ticket, já que o ticket é amarrado a uma
-// raça específica (id da opção). O front manda de volta só o ticket da
-// que o jogador escolheu; createCharacter valida esse ticket contra o
-// id_raca enviado.
+// raça rara — mas só UMA VEZ POR CONTA, pra sempre. O resultado (ganhou
+// ou não) fica gravado em CharacterCreationRoll.race_roll_done/
+// race_rare_won; qualquer chamada seguinte (F5, retry de rede, restart
+// do servidor, ou só o jogador tentando de novo) lê o resultado já
+// decidido em vez de rodar um novo sorteio — o rate limit em
+// rateLimitMiddleware continua existindo só como anti-spam básico, não
+// é mais ele quem garante a regra.
+//
+// Diferente da classe rara, aqui quem ganha não recebe uma raça já
+// escolhida pelo servidor: recebe a LISTA de todas as raças raras
+// (Celestial, Primordial, e qualquer outra que exista) pra escolher
+// livremente — cada uma com seu próprio ticket, já que o ticket é
+// amarrado a uma raça específica (id da opção). O front manda de volta
+// só o ticket da que o jogador escolheu; createCharacter valida esse
+// ticket contra o id_raca enviado.
 exports.sortearRacaRara = async (req, res) => {
   try {
-    if (!sortearRacaRaraGanhou()) {
-      return res.status(200).json({ status: "success", data: { raro: false } });
-    }
+    const resultado = await sequelize.transaction(async (transaction) => {
+      const [linha] = await CharacterCreationRoll.findOrCreate({
+        where: { id_usuario: req.user.id },
+        defaults: {},
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
 
-    const racasRaras = await Race.findAll({ where: { raro: true } });
-    if (racasRaras.length === 0) {
-      return res.status(200).json({ status: "success", data: { raro: false } });
-    }
+      if (!linha.race_roll_done) {
+        linha.race_roll_done = true;
+        linha.race_rare_won = sortearRacaRaraGanhou();
+        await linha.save({ transaction });
+      }
 
-    const opcoes = racasRaras.map((raca) => ({
-      raca,
-      ticket: emitirTicket(PROPOSITO_RACA, req.user.id, raca.id),
-    }));
+      if (!linha.race_rare_won) {
+        return { raro: false };
+      }
 
-    return res.status(200).json({
-      status: "success",
-      data: { raro: true, opcoes },
+      const racasRaras = await Race.findAll({ where: { raro: true }, transaction });
+      if (racasRaras.length === 0) {
+        return { raro: false };
+      }
+
+      const opcoes = racasRaras.map((raca) => ({
+        raca,
+        ticket: emitirTicket(PROPOSITO_RACA, req.user.id, raca.id),
+      }));
+      return { raro: true, opcoes };
     });
+
+    return res.status(200).json({ status: "success", data: resultado });
   } catch (error) {
     console.error("Erro ao sortear raça rara:", error);
     res.status(500).json({ message: "Erro interno do servidor ao sortear raça." });

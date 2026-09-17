@@ -9,10 +9,24 @@ const { enviarEmailRedefinicaoSenha } = require("../services/emailService");
 require("dotenv").config();
 const { JWT_SECRET } = require("../config/jwt");
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "1h";
+// Usado só quando o login pede "lembrar-me" — sem isso o cookie do
+// frontend dizia "7 dias" mas o token dentro dele morria em 1h de
+// qualquer jeito, e "lembrar-me" nunca funcionava de verdade.
+const JWT_EXPIRES_IN_REMEMBER_ME = process.env.JWT_EXPIRES_IN_REMEMBER_ME || "7d";
 
-const signToken = (id) => {
-  return jwt.sign({ id }, JWT_SECRET, {
-    expiresIn: JWT_EXPIRES_IN,
+// "proposito" distingue um JWT de sessão normal (usado em qualquer rota
+// HTTP autenticada) de outros tokens assinados com o mesmo segredo pra
+// propósitos bem mais restritos — hoje só o ticket de socket (30s de
+// validade, ver socketTicketService.js). Sem esse campo, um ticket de
+// socket ainda válido também passava em authMiddleware como se fosse um
+// JWT de sessão de verdade (jwt.verify não distingue POR QUE o token foi
+// emitido, só que a assinatura bate). authMiddleware agora rejeita
+// qualquer token cujo proposito não seja exatamente "session".
+const PROPOSITO_SESSAO = "session";
+
+const signToken = (id, { rememberMe = false } = {}) => {
+  return jwt.sign({ id, proposito: PROPOSITO_SESSAO }, JWT_SECRET, {
+    expiresIn: rememberMe ? JWT_EXPIRES_IN_REMEMBER_ME : JWT_EXPIRES_IN,
   });
 };
 
@@ -82,7 +96,7 @@ exports.loginUser = async (req, res) => {
     if (!user || !(await user.comparePassword(password))) {
       return res.status(401).json({ message: "E-mail ou senha incorretos." });
     }
-    const token = signToken(user.id);
+    const token = signToken(user.id, { rememberMe: Boolean(req.body.rememberMe) });
 
     user.ultimoLogin = new Date();
     await user.save();

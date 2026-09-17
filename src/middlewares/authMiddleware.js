@@ -19,6 +19,18 @@ const authMiddleware = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
+    // Sem isso, um ticket de socket (30s de validade, "proposito":
+    // "socket", emitido por GET /users/socket-ticket) também passava
+    // aqui como se fosse um JWT de sessão de verdade — jwt.verify só
+    // confere a assinatura, não POR QUE o token foi emitido. Qualquer
+    // token assinado com este segredo que não seja de sessão (hoje: o
+    // ticket de socket) é rejeitado como se fosse inválido.
+    if (decoded.proposito !== "session") {
+      return res.status(401).json({
+        message: "Token inválido. Faça login novamente.",
+        sessionExpired: true,
+      });
+    }
     req.user = decoded;
     next();
   } catch (error) {

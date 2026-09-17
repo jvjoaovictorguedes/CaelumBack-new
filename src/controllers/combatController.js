@@ -166,7 +166,33 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
     }
 
     const inimigo = gerarInimigo(jogadorEfetivo);
-    character.encontro_pve = { ...inimigo, criadoEm: Date.now() };
+
+    // Snapshot dos atributos ESTRUTURAIS do personagem no exato momento
+    // em que o encontro começa (força/vitalidade/etc já com bônus de
+    // equipamento, arma equipada, defesa, multiplicadores de classe) —
+    // sem isso, /combat/action recalculava esses valores A CADA TURNO a
+    // partir do equipamento ATUAL, e o inimigo continuava calibrado pro
+    // equipamento de quando foi gerado: trocar pra um equipamento mais
+    // fraco só pra gerar um inimigo fácil e depois voltar ao
+    // equipamento forte pra lutar (ou o inverso) virava trivial. Só HP/
+    // mana atuais continuam vivos/atualizáveis turno a turno — o resto
+    // fica congelado até o encontro terminar (vitória ou derrota).
+    const statsPersonagem = {
+      nivel: character.nivel,
+      forca: jogadorEfetivo.forca,
+      vitalidade: jogadorEfetivo.vitalidade,
+      agilidade: jogadorEfetivo.agilidade,
+      inteligencia: jogadorEfetivo.inteligencia,
+      velocidade: jogadorEfetivo.velocidade,
+      defesa: jogadorEfetivo.defesa,
+      arma_equipada: jogadorEfetivo.arma_equipada,
+      multiplicador_vida_por_nivel: jogadorEfetivo.multiplicador_vida_por_nivel,
+      multiplicador_mana_por_nivel: jogadorEfetivo.multiplicador_mana_por_nivel,
+      multiplicador_dano_fisico: jogadorEfetivo.multiplicador_dano_fisico,
+      multiplicador_dano_magico: jogadorEfetivo.multiplicador_dano_magico,
+    };
+
+    character.encontro_pve = { ...inimigo, criadoEm: Date.now(), statsPersonagem };
     await character.save();
 
     res.status(200).json({
@@ -204,12 +230,11 @@ exports.executarTurno = async (req, res) => {
     // commitar, e nesse ponto já enxerga o encontro_pve atualizado (ou
     // ausente, se o combate já tiver terminado nesta primeira).
     return await sequelize.transaction(async (transaction) => {
-      // "FOR UPDATE" não pode se aplicar ao lado nullable de um LEFT
-      // OUTER JOIN (é o que o include de Class gera) — o Postgres recusa
-      // a query inteira se não escopar o lock só pra tabela Character
-      // (mesmo padrão já usado em characterInventoryController.js).
+      // Não precisa mais incluir Class aqui: os multiplicadores de
+      // classe já vêm congelados em inimigoAtual.statsPersonagem (ver
+      // processarTurno) — evita o join e a pegadinha de "FOR UPDATE"
+      // não poder se aplicar ao lado nullable de um LEFT OUTER JOIN.
       const character = await Character.findByPk(characterId, {
-        include: [{ model: Class }],
         transaction,
         lock: { level: transaction.LOCK.UPDATE, of: Character },
       });
@@ -250,11 +275,22 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
 
     const log = [];
 
-    const bonusEquipamento = await buscarBonusDeAtributos(characterId);
-    const personagemAtual = comMultiplicadoresDeClasse(
-      personagemComBonus(character.toJSON(), bonusEquipamento),
-      character.Class,
-    );
+    // Atributos estruturais (força/vitalidade/arma equipada/defesa/
+    // multiplicadores de classe) vêm do SNAPSHOT tirado quando o
+    // encontro começou (ver gerarInimigoParaPersonagem) — NUNCA
+    // recalculados do equipamento atual aqui. Só vida/mana atuais
+    // continuam vindo do personagem de verdade, porque esses sim
+    // precisam refletir o progresso real do combate turno a turno.
+    // Encontros criados antes dessa mudança (sem statsPersonagem
+    // salvo) caem no fallback de character.toJSON() puro — janela
+    // curta e não reexplorável (só afeta uma luta já em andamento no
+    // exato momento do deploy).
+    const personagemAtual = {
+      ...character.toJSON(),
+      ...inimigoAtual.statsPersonagem,
+      vida_atual: character.vida_atual,
+      mana_atual: character.mana_atual,
+    };
 
     // Mesma regeneração passiva do início do combate — evita bloquear
     // "derrotado" quem já regenerou o suficiente enquanto estava longe.

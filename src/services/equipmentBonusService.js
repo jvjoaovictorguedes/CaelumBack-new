@@ -10,30 +10,35 @@ const Item = require("../models/Item");
 const WeaponProperties = require("../models/WeaponProperties");
 const ArmorProperties = require("../models/ArmorProperties");
 const { ATRIBUTO_PARA_CAMPO } = require("./combatFormulas");
-
-// Faltava em todo lugar (só existia comentado nos controllers de
-// propriedades) — sem isso não dá pra incluir WeaponProperties/
-// ArmorProperties a partir de um Item.
-Item.hasOne(WeaponProperties, { foreignKey: "id_item" });
-WeaponProperties.belongsTo(Item, { foreignKey: "id_item" });
-Item.hasOne(ArmorProperties, { foreignKey: "id_item" });
-ArmorProperties.belongsTo(Item, { foreignKey: "id_item" });
+// Só o require garante que a associação (com alias explícito) já foi
+// declarada — ver models/associations.js pra fonte única.
+require("../models/associations");
 
 function bonusZerado() {
   return { forca: 0, vitalidade: 0, agilidade: 0, inteligencia: 0, velocidade: 0, defesa: 0 };
 }
 
 // Retorna a soma dos bônus de todos os itens equipados pelo personagem.
-async function buscarBonusDeAtributos(idPersonagem) {
+// `transaction` é opcional — necessário quando o chamador precisa ler o
+// equipamento já dentro de uma transação em andamento (ex.: recalcular
+// vida/mana máxima logo depois de um equip/unequip, na MESMA transação
+// que gravou a mudança — sem passar a transaction aqui, essa leitura
+// rodaria numa conexão separada e não enxergaria a alteração ainda não
+// commitada).
+async function buscarBonusDeAtributos(idPersonagem, transaction) {
   const equipamentos = await CharacterEquipment.findAll({
     where: { id_personagem: idPersonagem },
     include: [
       {
         model: Item,
         as: "item",
-        include: [WeaponProperties, ArmorProperties],
+        include: [
+          { model: WeaponProperties, as: "weaponProperties" },
+          { model: ArmorProperties, as: "armorProperties" },
+        ],
       },
     ],
+    transaction,
   });
 
   const bonus = bonusZerado();
@@ -43,35 +48,33 @@ async function buscarBonusDeAtributos(idPersonagem) {
     const item = equipamento.item;
     if (!item) continue;
 
-    // Sequelize singulariza o alias padrão de hasOne: "ArmorProperties"
-    // vira "ArmorProperty" e "WeaponProperties" vira "WeaponProperty".
-    if (item.ArmorProperty) {
-      bonus.forca += item.ArmorProperty.bonus_forca || 0;
-      bonus.vitalidade += item.ArmorProperty.bonus_vitalidade || 0;
-      bonus.agilidade += item.ArmorProperty.bonus_agilidade || 0;
-      bonus.inteligencia += item.ArmorProperty.bonus_inteligencia || 0;
-      bonus.velocidade += item.ArmorProperty.bonus_velocidade || 0;
+    if (item.armorProperties) {
+      bonus.forca += item.armorProperties.bonus_forca || 0;
+      bonus.vitalidade += item.armorProperties.bonus_vitalidade || 0;
+      bonus.agilidade += item.armorProperties.bonus_agilidade || 0;
+      bonus.inteligencia += item.armorProperties.bonus_inteligencia || 0;
+      bonus.velocidade += item.armorProperties.bonus_velocidade || 0;
       // Essa soma existia até aqui e morria: a "defesa" do item nunca saía
       // desse laço nem chegava a personagemComBonus, então equipar
       // armadura não reduzia dano nenhum — ver aplicarMitigacaoDeDefesa em
       // combatFormulas.js pra onde esse valor passa a ser usado de fato.
-      bonus.defesa += item.ArmorProperty.defesa || 0;
+      bonus.defesa += item.armorProperties.defesa || 0;
     }
 
-    if (item.WeaponProperty?.bonus_atributo) {
-      const campo = ATRIBUTO_PARA_CAMPO[item.WeaponProperty.bonus_atributo];
+    if (item.weaponProperties?.bonus_atributo) {
+      const campo = ATRIBUTO_PARA_CAMPO[item.weaponProperties.bonus_atributo];
       if (campo) {
-        bonus[campo] += item.WeaponProperty.valor_bonus_atributo || 0;
+        bonus[campo] += item.weaponProperties.valor_bonus_atributo || 0;
       }
     }
 
     // A faixa de dano da arma (dano_min/dano_max) só existia no banco —
     // nada usava. Guardamos aqui a da mão principal pra calcularDanoBasico
     // usar no ataque básico, em vez de só olhar a força.
-    if (equipamento.slot === "ArmaPrincipal" && item.WeaponProperty) {
+    if (equipamento.slot === "ArmaPrincipal" && item.weaponProperties) {
       arma = {
-        dano_min: item.WeaponProperty.dano_min,
-        dano_max: item.WeaponProperty.dano_max,
+        dano_min: item.weaponProperties.dano_min,
+        dano_max: item.weaponProperties.dano_max,
       };
     }
   }

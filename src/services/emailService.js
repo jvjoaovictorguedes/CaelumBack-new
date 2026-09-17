@@ -37,16 +37,21 @@ async function enviarEmailRedefinicaoSenha({ paraEmail, link }) {
   // o fluxo de redefinição de senha.
   //
   // Em desenvolvimento/staging, o link continua disponível
-  // no log do backend para facilitar os testes.
-
+  // no log do backend para facilitar os testes. Em produção, nunca
+  // registra o link/token em log — segunda camada de defesa caso o
+  // boot (ver app.js) seja contornado por um hot-swap de config.
   if (!resendConfigurado()) {
-    console.warn(
-      "[email] Resend não configurado — e-mail de redefinição de senha NÃO foi enviado de verdade."
-    );
-
-    console.warn(
-      `[email] Link de redefinição para ${paraEmail}: ${link}`
-    );
+    if (process.env.NODE_ENV === "production") {
+      console.warn(
+        "[email] Resend não configurado — e-mail de redefinição de senha NÃO foi enviado. " +
+          "Link de reset omitido do log por estar em produção.",
+      );
+    } else {
+      console.warn(
+        "[email] Resend não configurado — e-mail de redefinição de senha NÃO foi enviado de verdade. " +
+          `Link de redefinição para ${paraEmail}: ${link}`,
+      );
+    }
 
     return {
       enviado: false,

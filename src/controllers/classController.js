@@ -1,8 +1,11 @@
 // src/controllers/classController.js
+const { sequelize } = require("../config/database");
 const Class = require("../models/Class");
+const CharacterCreationRoll = require("../models/CharacterCreationRoll");
 const {
   PROPOSITO_CLASSE,
   sortearClasseRaraGanhou,
+  indiceAleatorio,
   emitirTicket,
 } = require("../services/raridadeRolagemService");
 
@@ -108,27 +111,56 @@ exports.updateClass = async (req, res) => {
 
 // POST /api/classes/sortear-raro
 // Mesma ideia de raceController.sortearRacaRara: o SERVIDOR decide se o
-// usuário ganhou acesso a uma classe rara e qual foi liberada. O
-// ticket devolvido é a única forma de createCharacter aceitar um
-// id_classe marcado como raro.
+// usuário ganhou acesso a uma classe rara e qual foi liberada, mas só
+// UMA VEZ POR CONTA, pra sempre — o resultado (ganhou ou não, e QUAL
+// classe rara especificamente) fica gravado em CharacterCreationRoll.
+// Diferente da raça, aqui o sorteio já escolhe uma classe específica
+// (não é o jogador quem escolhe depois), então precisa persistir
+// também class_rare_id — sem isso, um retry depois de ganhar podia
+// sortear uma classe rara DIFERENTE da primeira.
 exports.sortearClasseRara = async (req, res) => {
   try {
-    if (!sortearClasseRaraGanhou()) {
-      return res.status(200).json({ status: "success", data: { raro: false } });
-    }
+    const resultado = await sequelize.transaction(async (transaction) => {
+      const [linha] = await CharacterCreationRoll.findOrCreate({
+        where: { id_usuario: req.user.id },
+        defaults: {},
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
 
-    const classesRaras = await Class.findAll({ where: { raro: true } });
-    if (classesRaras.length === 0) {
-      return res.status(200).json({ status: "success", data: { raro: false } });
-    }
+      if (!linha.class_roll_done) {
+        linha.class_roll_done = true;
+        linha.class_rare_won = sortearClasseRaraGanhou();
 
-    const classeSorteada = classesRaras[Math.floor(Math.random() * classesRaras.length)];
-    const ticket = emitirTicket(PROPOSITO_CLASSE, req.user.id, classeSorteada.id);
+        if (linha.class_rare_won) {
+          const classesRaras = await Class.findAll({ where: { raro: true }, transaction });
+          if (classesRaras.length > 0) {
+            linha.class_rare_id = classesRaras[indiceAleatorio(classesRaras.length)].id;
+          } else {
+            linha.class_rare_won = false;
+          }
+        }
 
-    return res.status(200).json({
-      status: "success",
-      data: { raro: true, classe: classeSorteada, ticket },
+        await linha.save({ transaction });
+      }
+
+      if (!linha.class_rare_won || !linha.class_rare_id) {
+        return { raro: false };
+      }
+
+      const classeSorteada = await Class.findByPk(linha.class_rare_id, { transaction });
+      if (!classeSorteada) {
+        return { raro: false };
+      }
+
+      return {
+        raro: true,
+        classe: classeSorteada,
+        ticket: emitirTicket(PROPOSITO_CLASSE, req.user.id, classeSorteada.id),
+      };
     });
+
+    return res.status(200).json({ status: "success", data: resultado });
   } catch (error) {
     console.error("Erro ao sortear classe rara:", error);
     res.status(500).json({ message: "Erro interno do servidor ao sortear classe." });
