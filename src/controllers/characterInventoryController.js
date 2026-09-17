@@ -213,7 +213,7 @@ exports.getAllCharacterInventory = async (req, res) => {
         { model: Character, attributes: ["id", "nome", "nivel"] },
         {
           model: Item,
-          attributes: ["id", "nome", "tipo_item", "raridade", "peso"],
+          attributes: ["id", "nome", "tipo_item", "raridade", "peso", "imagem_url"],
         },
       ],
     });

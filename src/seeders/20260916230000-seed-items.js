@@ -36,6 +36,7 @@ module.exports = {
         valor_compra: 40,
         valor_venda: 15,
         peso: 3,
+        imagem_url: "/images/sword-basic.webp",
         createdAt: new Date(),
         updatedAt: new Date(),
       },
