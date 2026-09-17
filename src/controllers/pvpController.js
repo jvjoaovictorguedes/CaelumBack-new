@@ -32,6 +32,7 @@ PvpStatus.belongsTo(Character, { foreignKey: "id_personagem" });
 
 const NOME_ARENA = "Arena de Caelum";
 const MAX_RODADAS = 40;
+const COOLDOWN_DESAFIO_SEGUNDOS = 10;
 
 async function buscarPoderesDoPersonagem(idPersonagem) {
   const habilidades = await CharacterAbilities.findAll({
@@ -302,8 +303,26 @@ exports.challenge = async (req, res) => {
       });
     }
 
-    if (Number(id_desafiante) === Number(id_desafiado)) {
+    // Comparar como string em vez de Number(): dois valores inválidos
+    // (ex.: strings não-numéricas) viravam NaN dos dois lados, e
+    // NaN === NaN é false — a checagem "não pode duelar contra si
+    // mesmo" passava batido pra entrada malformada.
+    if (String(id_desafiante) === String(id_desafiado)) {
       return res.status(400).json({ message: "Não é possível duelar contra si mesmo." });
+    }
+
+    // Cooldown curto por personagem: sem isso, dava pra scriptar
+    // POST /pvp/challenge em loop contra um personagem fraco (ex.: um
+    // alt de nível baixo) e farmar ouro/XP sem risco nenhum.
+    const statusDesafiante = await PvpStatus.findOne({ where: { id_personagem: id_desafiante } });
+    if (statusDesafiante?.ultima_batalha_dia) {
+      const segundosDesdeUltima =
+        (Date.now() - new Date(statusDesafiante.ultima_batalha_dia).getTime()) / 1000;
+      if (segundosDesdeUltima < COOLDOWN_DESAFIO_SEGUNDOS) {
+        return res.status(429).json({
+          message: `Aguarde ${Math.ceil(COOLDOWN_DESAFIO_SEGUNDOS - segundosDesdeUltima)}s para duelar de novo.`,
+        });
+      }
     }
 
     const [desafiante, desafiado] = await Promise.all([

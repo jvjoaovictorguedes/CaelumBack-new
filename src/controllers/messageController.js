@@ -17,7 +17,10 @@ exports.sendMessage = async (req, res) => {
       });
     }
 
-    if (Number(id_remetente) === Number(id_destinatario)) {
+    // String() em vez de Number(): duas entradas não-numéricas viravam
+    // NaN dos dois lados e NaN === NaN é false, deixando passar o
+    // "mandar mensagem pra si mesmo" com id malformado.
+    if (String(id_remetente) === String(id_destinatario)) {
       return res.status(400).json({
         message: "Não é possível enviar mensagem para si mesmo.",
       });
@@ -29,7 +32,13 @@ exports.sendMessage = async (req, res) => {
       });
     }
 
-    const destinatario = await User.findByPk(id_destinatario);
+    const [remetente, destinatario] = await Promise.all([
+      User.findByPk(id_remetente),
+      User.findByPk(id_destinatario),
+    ]);
+    if (!remetente) {
+      return res.status(404).json({ message: "Remetente não encontrado." });
+    }
     if (!destinatario) {
       return res.status(404).json({ message: "Destinatário não encontrado." });
     }
