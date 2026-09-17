@@ -106,6 +106,27 @@ function calcularEfeitoPoder(power, personagem) {
   return { dano, cura };
 }
 
+// Constante de "diminishing returns" da mitigação por defesa — cada
+// ponto de defesa vale cada vez menos, então armadura nunca deixa o
+// personagem invulnerável, só reduz. Com K=50: 12 de defesa (um set
+// comum/incomum completo) reduz ~19%; 60 (raro/épico misturado) reduz
+// ~55%; 136 (mítico completo em tudo) reduz ~73%. Fórmula padrão de RPG
+// (defesa / (defesa + K)) em vez de subtração linear, que a essa escala
+// de defesa (até 34 por peça) zeraria o dano de ataques básicos fracos.
+const CONSTANTE_MITIGACAO_DEFESA = 50;
+
+// Aplica a redução de dano da defesa do alvo — chamado depois de
+// calcularDanoBasico/calcularEfeitoPoder, nunca antes (a rolagem de
+// dano do atacante não sabe nada sobre o alvo). `defensor.defesa` vem
+// de personagemComBonus (equipmentBonusService.js); um inimigo de PvE
+// sem esse campo simplesmente não mitiga nada (0 de defesa).
+function aplicarMitigacaoDeDefesa(dano, defensor) {
+  const defesa = defensor?.defesa || 0;
+  if (defesa <= 0 || dano <= 0) return dano;
+  const reducao = defesa / (defesa + CONSTANTE_MITIGACAO_DEFESA);
+  return Math.max(1, Math.round(dano * (1 - reducao)));
+}
+
 function chanceDeEsquiva(defensor, atacante) {
   const diferenca = (defensor.agilidade || 0) - (atacante.agilidade || 0);
   const chanceBase = 0.05;
@@ -147,6 +168,7 @@ module.exports = {
   calcularDanoBasico,
   danoBasicoEsperado,
   calcularEfeitoPoder,
+  aplicarMitigacaoDeDefesa,
   chanceDeEsquiva,
   vidaMaximaDe,
   manaMaximaDe,

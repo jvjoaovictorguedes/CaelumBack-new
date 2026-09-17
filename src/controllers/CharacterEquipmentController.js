@@ -17,11 +17,14 @@ const VALID_SLOTS = [
   "Acessorio2",
 ];
 
+// "Maos" NÃO aceita mais Escudo (ver abaixo) — sobra só pra uma futura
+// peça de armadura tipo luva, se um dia existir. Shields vivem
+// inteiramente em ArmaSecundaria agora.
 const ARMOR_SLOTS = ["Cabeca", "Torso", "Maos", "Pes"];
 
 async function validarCompatibilidade(slot, item) {
   if (ARMOR_SLOTS.includes(slot)) {
-    if (!["Armadura", "Capacete", "Escudo"].includes(item.tipo_item)) {
+    if (!["Armadura", "Capacete"].includes(item.tipo_item)) {
       return `O item "${item.nome}" não é uma peça de armadura.`;
     }
     const propriedades = await ArmorProperties.findByPk(item.id);
@@ -34,9 +37,29 @@ async function validarCompatibilidade(slot, item) {
     return null;
   }
 
-  if (slot === "ArmaPrincipal" || slot === "ArmaSecundaria") {
+  if (slot === "ArmaPrincipal") {
     if (item.tipo_item !== "Arma") {
       return `O item "${item.nome}" não é uma arma.`;
+    }
+    return null;
+  }
+
+  if (slot === "ArmaSecundaria") {
+    // A "mão secundária" aceita uma segunda arma (dual-wield) OU um
+    // escudo — nunca os dois ao mesmo tempo, e isso já sai de graça por
+    // ser o MESMO slot do banco (upsert por id_personagem+slot: só cabe
+    // um item aqui). De propósito, Escudo não passa mais pelo
+    // ARMOR_SLOTS/slot "Maos" acima — se passasse, alguém equiparia uma
+    // segunda arma em ArmaSecundaria E um escudo em Maos ao mesmo tempo,
+    // ou seja, três itens de mão pra duas mãos.
+    if (item.tipo_item !== "Arma" && item.tipo_item !== "Escudo") {
+      return `O item "${item.nome}" não é uma arma nem um escudo.`;
+    }
+    if (item.tipo_item === "Escudo") {
+      const propriedades = await ArmorProperties.findByPk(item.id);
+      if (!propriedades) {
+        return `O item "${item.nome}" não possui propriedades de escudo configuradas.`;
+      }
     }
     return null;
   }

@@ -9,6 +9,7 @@
 const {
   calcularDanoBasico,
   calcularEfeitoPoder,
+  aplicarMitigacaoDeDefesa,
   chanceDeEsquiva,
 } = require("./combatFormulas");
 
@@ -32,9 +33,16 @@ function aplicarAcao({ atacante, defensor, acao, vidaMaxAtacante }) {
       esquivou = true;
       dano = 0;
     } else if (acao.tipo === "attack") {
-      dano = calcularDanoBasico(atacante);
+      // Mitigação pela defesa do alvo — sem isso, equipar armadura não
+      // tinha efeito nenhum no dano recebido (a defesa era somada em
+      // equipmentBonusService.js mas nunca lida por nenhum código de
+      // combate). Aplica tanto no ataque básico quanto em poder que causa
+      // dano (branch abaixo), já que o jogo só tem um stat de defesa
+      // (sem resistência mágica separada).
+      dano = aplicarMitigacaoDeDefesa(calcularDanoBasico(atacante), defensor);
       defensor.vida_atual = Math.max(0, defensor.vida_atual - dano);
     } else {
+      dano = aplicarMitigacaoDeDefesa(dano, defensor);
       defensor.vida_atual = Math.max(0, defensor.vida_atual - dano);
     }
   }

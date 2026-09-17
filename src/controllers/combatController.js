@@ -15,6 +15,7 @@ const Power = require("../models/Power");
 const { adicionarExperiencia } = require("../services/experienceService");
 const {
   calcularDanoBasico,
+  aplicarMitigacaoDeDefesa,
   calcularEfeitoPoder,
   chanceDeEsquiva,
   vidaMaximaDe,
@@ -348,13 +349,14 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
             `${inimigoAtual.nome} esquivou de ${poderUsado.nome}!`
           );
         } else {
+          const danoMitigado = aplicarMitigacaoDeDefesa(dano, inimigoAtual);
           inimigoAtual.vida_atual = Math.max(
             0,
-            inimigoAtual.vida_atual - dano
+            inimigoAtual.vida_atual - danoMitigado
           );
 
           log.push(
-            `Você usou ${poderUsado.nome} e causou ${dano} de dano em ${inimigoAtual.nome}.`
+            `Você usou ${poderUsado.nome} e causou ${danoMitigado} de dano em ${inimigoAtual.nome}.`
           );
         }
       }
@@ -386,8 +388,10 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
           `${inimigoAtual.nome} esquivou do seu ataque!`
         );
       } else {
-        const dano =
-          calcularDanoBasico(personagemAtual);
+        const dano = aplicarMitigacaoDeDefesa(
+          calcularDanoBasico(personagemAtual),
+          inimigoAtual,
+        );
 
         inimigoAtual.vida_atual = Math.max(
           0,
@@ -501,12 +505,15 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
         `Você esquivou do ataque de ${inimigoAtual.nome}!`
       );
     } else {
-      const danoRecebido = Math.max(
-        1,
-        Math.round(
-          inimigoAtual.dano_base *
-            (0.85 + Math.random() * 0.3)
-        )
+      const danoRecebido = aplicarMitigacaoDeDefesa(
+        Math.max(
+          1,
+          Math.round(
+            inimigoAtual.dano_base *
+              (0.85 + Math.random() * 0.3)
+          )
+        ),
+        personagemAtual,
       );
 
       personagemAtual.vida_atual =

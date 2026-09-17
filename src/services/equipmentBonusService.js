@@ -20,7 +20,7 @@ Item.hasOne(ArmorProperties, { foreignKey: "id_item" });
 ArmorProperties.belongsTo(Item, { foreignKey: "id_item" });
 
 function bonusZerado() {
-  return { forca: 0, vitalidade: 0, agilidade: 0, inteligencia: 0, velocidade: 0 };
+  return { forca: 0, vitalidade: 0, agilidade: 0, inteligencia: 0, velocidade: 0, defesa: 0 };
 }
 
 // Retorna a soma dos bônus de todos os itens equipados pelo personagem.
@@ -51,6 +51,11 @@ async function buscarBonusDeAtributos(idPersonagem) {
       bonus.agilidade += item.ArmorProperty.bonus_agilidade || 0;
       bonus.inteligencia += item.ArmorProperty.bonus_inteligencia || 0;
       bonus.velocidade += item.ArmorProperty.bonus_velocidade || 0;
+      // Essa soma existia até aqui e morria: a "defesa" do item nunca saía
+      // desse laço nem chegava a personagemComBonus, então equipar
+      // armadura não reduzia dano nenhum — ver aplicarMitigacaoDeDefesa em
+      // combatFormulas.js pra onde esse valor passa a ser usado de fato.
+      bonus.defesa += item.ArmorProperty.defesa || 0;
     }
 
     if (item.WeaponProperty?.bonus_atributo) {
@@ -92,6 +97,9 @@ function personagemComBonus(personagemBase, bonus) {
     agilidade: Math.round((personagemBase.agilidade || 0) + (b.agilidade || 0)),
     inteligencia: Math.round((personagemBase.inteligencia || 0) + (b.inteligencia || 0)),
     velocidade: Math.round((personagemBase.velocidade || 0) + (b.velocidade || 0)),
+    // Personagem não tem "defesa" base própria (não é um atributo
+    // distribuível) — vem inteiramente do equipamento.
+    defesa: Math.round(b.defesa || 0),
     arma_equipada: b.arma ?? null,
   };
 }
