@@ -18,7 +18,6 @@ exports.createWeaponProperties = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Erro ao criar propriedades de arma:", error);
     if (error.name === "SequelizeUniqueConstraintError") {
       return res
         .status(409)
@@ -27,6 +26,12 @@ exports.createWeaponProperties = async (req, res) => {
             "Já existem propriedades de arma para este item (ID já em uso).",
         });
     }
+    if (error.name === "SequelizeValidationError") {
+      return res.status(400).json({
+        message: error.errors.map((validationError) => validationError.message),
+      });
+    }
+    console.error("Erro ao criar propriedades de arma:", error);
     res
       .status(500)
       .json({
@@ -135,6 +140,11 @@ exports.updateWeaponProperties = async (req, res) => {
       },
     });
   } catch (error) {
+    if (error.name === "SequelizeValidationError") {
+      return res.status(400).json({
+        message: error.errors.map((validationError) => validationError.message),
+      });
+    }
     console.error("Erro ao atualizar propriedades de arma:", error);
     res
       .status(500)

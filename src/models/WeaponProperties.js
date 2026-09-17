@@ -16,11 +16,13 @@ const WeaponProperties = sequelize.define("WeaponProperties", {
     type: DataTypes.INTEGER,
     defaultValue: 0,
     allowNull: false,
+    validate: { min: 0 },
   },
   dano_max: {
     type: DataTypes.INTEGER,
     defaultValue: 0,
     allowNull: false,
+    validate: { min: 0 },
   },
   tipo_dano: {
     type: DataTypes.ENUM("Fisico", "Magico"),

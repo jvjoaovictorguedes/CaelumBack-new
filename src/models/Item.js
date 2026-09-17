@@ -47,16 +47,19 @@ const Item = sequelize.define("Item", {
     type: DataTypes.INTEGER,
     allowNull: false,
     defaultValue: 0,
+    validate: { min: 0 },
   },
   valor_venda: {
     type: DataTypes.INTEGER,
     allowNull: false,
     defaultValue: 0,
+    validate: { min: 0 },
   },
   peso: {
     type: DataTypes.FLOAT,
     allowNull: false,
     defaultValue: 0.0,
+    validate: { min: 0 },
   },
   imagem_url: {
     type: DataTypes.STRING(255),

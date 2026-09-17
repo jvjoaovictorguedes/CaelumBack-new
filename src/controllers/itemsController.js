@@ -13,12 +13,17 @@ exports.createItem = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Erro ao criar item:", error);
     if (error.name === "SequelizeUniqueConstraintError") {
       return res
         .status(409)
         .json({ message: "Já existe um item com este nome." });
     }
+    if (error.name === "SequelizeValidationError") {
+      return res.status(400).json({
+        message: error.errors.map((validationError) => validationError.message),
+      });
+    }
+    console.error("Erro ao criar item:", error);
     res
       .status(500)
       .json({ message: "Erro interno do servidor ao criar item." });
@@ -89,12 +94,17 @@ exports.updateItem = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Erro ao atualizar item:", error);
     if (error.name === "SequelizeUniqueConstraintError") {
       return res
         .status(409)
         .json({ message: "Já existe um item com este nome." });
     }
+    if (error.name === "SequelizeValidationError") {
+      return res.status(400).json({
+        message: error.errors.map((validationError) => validationError.message),
+      });
+    }
+    console.error("Erro ao atualizar item:", error);
     res
       .status(500)
       .json({ message: "Erro interno do servidor ao atualizar item." });
