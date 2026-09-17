@@ -22,8 +22,20 @@ const authMiddleware = (req, res, next) => {
     req.user = decoded;
     next();
   } catch (error) {
-    console.error("Erro na verificação do token:", error);
-    return res.status(403).json({ message: "Token inválido ou expirado." });
+    // 401 (não 403) pra QUALQUER falha de autenticação — token ausente,
+    // malformado ou expirado. Reserva 403 pra quando o usuário está
+    // autenticado mas não tem permissão pra uma ação específica (ex.:
+    // ownershipMiddleware, adminMiddleware). Essa distinção é o que
+    // permite o frontend detectar "sua sessão expirou, faça login de
+    // novo" (401) sem confundir com um 403 de "esse personagem/guilda/
+    // item não é seu" no meio de uma sessão válida.
+    const expirado = error.name === "TokenExpiredError";
+    return res.status(401).json({
+      message: expirado
+        ? "Sua sessão expirou. Faça login novamente."
+        : "Token inválido. Faça login novamente.",
+      sessionExpired: true,
+    });
   }
 };
 
