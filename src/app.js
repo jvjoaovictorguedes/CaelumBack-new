@@ -24,6 +24,11 @@ const ConsumableProperties = require("./models/ConsumableProperties");
 const RaceAbilities = require("./models/RaceAbilities");
 const WeaponProperties = require("./models/WeaponProperties");
 
+// Associações Item<->WeaponProperties/ArmorProperties/ConsumableProperties
+// (com alias explícito) — fonte única, carregada aqui no boot em vez de
+// espalhada/duplicada por controller (ver models/associations.js).
+require("./models/associations");
+
 // Importa as rotas
 const userRoutes = require("./routes/userRoutes");
 const raceRoutes = require("./routes/raceRoutes");
@@ -96,6 +101,29 @@ const corsOptions =
   origensPermitidas.length > 0
     ? { origin: origensPermitidas, credentials: true }
     : undefined;
+
+// SMTP_HOST ausente fora de produção só loga o link de reset no console
+// (ver emailService.js) — jeito válido de testar o fluxo sem provedor
+// configurado. Em produção isso significaria "esqueci minha senha"
+// nunca entregando e-mail nenhum pra ninguém, silenciosamente, e o
+// console.warn de fallback vazaria o token de reset em texto puro no
+// log de produção — falha melhor detectada aqui, no boot, do que só
+// quando alguém tentar resetar a senha (e nunca souber por quê não
+// chegou). FRONTEND_URL é exigido junto porque o link de reset é
+// montado a partir dela; sem ela o e-mail (quando enviado) leva um link
+// quebrado.
+if (emProducao && !process.env.SMTP_HOST) {
+  throw new Error(
+    "SMTP_HOST é obrigatório em produção (NODE_ENV=production) — sem ele, \"esqueci minha senha\" nunca entrega e-mail nenhum. " +
+      "Configure SMTP_HOST (e SMTP_PORT/SMTP_USER/SMTP_PASSWORD/SMTP_FROM conforme o provedor) antes de subir o servidor.",
+  );
+}
+if (emProducao && !process.env.FRONTEND_URL) {
+  throw new Error(
+    "FRONTEND_URL é obrigatório em produção (NODE_ENV=production) — é usado pra montar o link de redefinição de senha no e-mail. " +
+      'Defina FRONTEND_URL="https://seusite.com" antes de subir o servidor.',
+  );
+}
 
 // Helmet cobre um conjunto de headers de segurança padrão (X-Content-
 // Type-Options, X-Frame-Options, HSTS, etc.) que não custam nada manter

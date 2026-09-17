@@ -14,6 +14,35 @@ function salaDaGuild(idGuild) {
   return `guild:${idGuild}`;
 }
 
+// O frontend só limitava maxLength=500 — nada impedia um cliente
+// forjado disparar "guild:message" em loop pelo socket direto. Mesmo
+// padrão de janela deslizante em memória do rateLimitMiddleware HTTP,
+// adaptado aqui (socket não passa por middleware Express), chaveado por
+// characterId — 10 mensagens a cada 10 segundos.
+const JANELA_RATE_LIMIT_MS = 10 * 1000;
+const MAX_MENSAGENS_NA_JANELA = 10;
+const contadorMensagensPorPersonagem = new Map();
+
+function excedeuRateLimit(characterId) {
+  const agora = Date.now();
+  const registro = contadorMensagensPorPersonagem.get(characterId);
+
+  if (!registro || agora > registro.resetAt) {
+    contadorMensagensPorPersonagem.set(characterId, {
+      contagem: 1,
+      resetAt: agora + JANELA_RATE_LIMIT_MS,
+    });
+    return false;
+  }
+
+  if (registro.contagem >= MAX_MENSAGENS_NA_JANELA) {
+    return true;
+  }
+
+  registro.contagem += 1;
+  return false;
+}
+
 // Guardado pra permitir que o guildController emita eventos (entrada,
 // saída, doação) sem precisar passar `io` por injeção de dependência em
 // toda a cadeia de chamadas — mesmo processo, só um require a mais.
@@ -58,7 +87,15 @@ module.exports = function registerGuildHandlers(io) {
     socket.on("guild:message", async ({ texto } = {}) => {
       const characterId = socket.characterId;
       if (!characterId || !socket.guildRoom) return;
-      const mensagem = String(texto ?? "").trim().slice(0, 500);
+
+      if (excedeuRateLimit(characterId)) {
+        return socket.emit("guild:erro", {
+          mensagem: "Muitas mensagens em pouco tempo. Aguarde um instante.",
+        });
+      }
+
+      if (typeof texto !== "string") return;
+      const mensagem = texto.trim().slice(0, 500);
       if (!mensagem) return;
 
       try {

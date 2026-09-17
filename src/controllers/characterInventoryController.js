@@ -97,6 +97,21 @@ exports.useItem = async (req, res) => {
         throw error;
       }
 
+      // Consumível vira cura de graça fora da economia de turnos se
+      // puder ser usado livremente durante um combate PvE ativo: o
+      // jogador ataca, o inimigo ataca, e antes do próximo turno o
+      // jogador usa a poção quantas vezes quiser por este endpoint —
+      // sem que o inimigo receba um turno correspondente. Enquanto
+      // houver encontro_pve ativo, consumíveis só podem ser usados como
+      // ação de combate (POST /combat/action com { type: "item" }).
+      if (character.encontro_pve) {
+        const error = new Error(
+          "Durante um combate, consumíveis devem ser utilizados como ação de combate.",
+        );
+        error.statusCode = 409;
+        throw error;
+      }
+
       // Precisa considerar o bônus de equipamento e o multiplicador da
       // classe aqui também — senão a vida/mana máxima "de verdade" fica
       // menor do que devia só dentro dessa conta, e a poção nunca cura

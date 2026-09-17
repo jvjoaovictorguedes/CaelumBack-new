@@ -70,10 +70,22 @@ async function obterTransporter() {
 
 async function enviarEmailRedefinicaoSenha({ paraEmail, link }) {
   if (!smtpConfigurado()) {
-    console.warn(
-      "[email] SMTP_HOST não configurado — e-mail de redefinição de senha NÃO foi enviado de verdade. " +
-        `Link de redefinição (válido por tempo limitado) pra ${paraEmail}: ${link}`,
-    );
+    // O boot já derruba o processo em produção sem SMTP_HOST (ver
+    // app.js) — este branch só deveria ser alcançável em dev/staging.
+    // Ainda assim, nunca registra o token de reset em log de produção:
+    // segunda camada de defesa caso a variável de ambiente que define
+    // NODE_ENV mude sem passar pelo boot (ex.: hot-swap de config).
+    if (process.env.NODE_ENV === "production") {
+      console.warn(
+        "[email] SMTP_HOST não configurado — e-mail de redefinição de senha NÃO foi enviado. " +
+          "Link de reset omitido do log por estar em produção.",
+      );
+    } else {
+      console.warn(
+        "[email] SMTP_HOST não configurado — e-mail de redefinição de senha NÃO foi enviado de verdade. " +
+          `Link de redefinição (válido por tempo limitado) pra ${paraEmail}: ${link}`,
+      );
+    }
     return { enviado: false };
   }
 

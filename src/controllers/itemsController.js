@@ -3,23 +3,14 @@ const Item = require("../models/Item");
 const WeaponProperties = require("../models/WeaponProperties");
 const ArmorProperties = require("../models/ArmorProperties");
 const ConsumableProperties = require("../models/ConsumableProperties");
-
-// As associações Item<->propriedades já são registradas em outros
-// controllers (equipmentBonusService.js, consumablePropertiesController.js)
-// que sempre são carregados no boot — Sequelize ignora um segundo
-// hasOne/belongsTo idêntico entre o mesmo par de models, então repetir
-// aqui é seguro e deixa este arquivo não depender de quem rodou primeiro.
-Item.hasOne(WeaponProperties, { foreignKey: "id_item" });
-WeaponProperties.belongsTo(Item, { foreignKey: "id_item" });
-Item.hasOne(ArmorProperties, { foreignKey: "id_item" });
-ArmorProperties.belongsTo(Item, { foreignKey: "id_item" });
-Item.hasOne(ConsumableProperties, { foreignKey: "id_item" });
-ConsumableProperties.belongsTo(Item, { foreignKey: "id_item" });
+// Fonte única das associações Item<->propriedades (com alias explícito)
+// — ver models/associations.js. Só o require garante que já rodaram.
+require("../models/associations");
 
 const INCLUDE_PROPRIEDADES = [
-  { model: WeaponProperties },
-  { model: ArmorProperties },
-  { model: ConsumableProperties },
+  { model: WeaponProperties, as: "weaponProperties" },
+  { model: ArmorProperties, as: "armorProperties" },
+  { model: ConsumableProperties, as: "consumableProperties" },
 ];
 
 // Criar um novo item

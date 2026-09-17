@@ -1,6 +1,9 @@
 // src/controllers/characterController.js
 const { Op } = require("sequelize");
+const { sequelize } = require("../config/database");
 const Character = require("../models/Character");
+const Guild = require("../models/Guild");
+const GuildMember = require("../models/GuildMember");
 const User = require("../models/User");
 const Race = require("../models/Race");
 const Class = require("../models/Class");
@@ -313,6 +316,10 @@ async function carregarRespostaDoPersonagem(character) {
   };
 }
 
+// GET /api/characters/:id — dados COMPLETOS (dinheiro, vida, mana, XP,
+// equipamento) de um personagem. Só o dono (ou um admin) pode ver isso —
+// ver exigirDonoOuAdmin na rota. Pra ver dados de OUTRO jogador (perfil
+// público, alvo de PvP, membro de guilda), use GET /:id/public abaixo.
 exports.getCharacterById = async (req, res) => {
   try {
     const character = await Character.findByPk(req.params.id, {
@@ -328,6 +335,58 @@ exports.getCharacterById = async (req, res) => {
     });
   } catch (error) {
     console.error("Erro ao buscar personagem por ID:", error);
+    res
+      .status(500)
+      .json({ message: "Erro interno do servidor ao buscar personagem." });
+  }
+};
+
+// GET /api/characters/:id/public — versão enxuta, segura de expor pra
+// QUALQUER jogador autenticado (nunca dinheiro/vida/mana/XP/inventário
+// de outra conta). Sem checagem de dono de propósito — é isso que a
+// torna diferente de getCharacterById.
+exports.getCharacterPublico = async (req, res) => {
+  try {
+    const character = await Character.findByPk(req.params.id, {
+      attributes: ["id", "nome", "nivel", "genero", "rank"],
+      include: [
+        { model: Race, attributes: ["nome_masculino", "nome_feminino"] },
+        { model: Class, attributes: ["nome"] },
+      ],
+    });
+    if (!character) {
+      return res.status(404).json({ message: "Personagem não encontrado." });
+    }
+
+    const membroGuild = await GuildMember.findOne({
+      where: { id_personagem: character.id },
+      include: [{ model: Guild, attributes: ["id", "nome", "sigla"] }],
+    });
+
+    res.status(200).json({
+      status: "success",
+      data: {
+        character: {
+          id: character.id,
+          nome: character.nome,
+          nivel: character.nivel,
+          genero: character.genero,
+          rank: character.rank,
+          raca: character.Race
+            ? {
+                nome_masculino: character.Race.nome_masculino,
+                nome_feminino: character.Race.nome_feminino,
+              }
+            : null,
+          classe: character.Class ? { nome: character.Class.nome } : null,
+          guilda: membroGuild?.Guild
+            ? { id: membroGuild.Guild.id, nome: membroGuild.Guild.nome, sigla: membroGuild.Guild.sigla }
+            : null,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Erro ao buscar personagem público:", error);
     res
       .status(500)
       .json({ message: "Erro interno do servidor ao buscar personagem." });
@@ -412,13 +471,45 @@ exports.updateCharacter = async (req, res) => {
 
 exports.deleteCharacter = async (req, res) => {
   try {
-    const deletedRows = await Character.destroy({
-      where: { id: req.params.id },
-    });
+    await sequelize.transaction(async (transaction) => {
+      const character = await Character.findByPk(req.params.id, {
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+      if (!character) {
+        throw Object.assign(new Error("Personagem não encontrado."), { statusCode: 404 });
+      }
 
-    if (deletedRows === 0) {
-      return res.status(404).json({ message: "Personagem não encontrado." });
-    }
+      // Guild.id_fundador/id_lider referenciam Characters sem
+      // onDelete configurado (NO ACTION) — excluir o líder/fundador de
+      // uma guilda ainda ativa deixava a regra da guilda inconsistente
+      // (quem lidera uma guilda sem dono?) e, sem essa checagem, só
+      // estourava como erro 500 genérico de violação de chave
+      // estrangeira na hora do DELETE.
+      const guildComoLiderOuFundador = await Guild.findOne({
+        where: {
+          status: "Ativa",
+          [Op.or]: [{ id_fundador: character.id }, { id_lider: character.id }],
+        },
+        transaction,
+      });
+      if (guildComoLiderOuFundador) {
+        throw Object.assign(
+          new Error(
+            "Transfira a liderança ou dissolva a guilda antes de excluir o personagem.",
+          ),
+          { statusCode: 409 },
+        );
+      }
+
+      // Mesmo problema de FK pra um membro comum (GuildMember.id_personagem
+      // também referencia Characters sem onDelete) — sai da guilda antes
+      // de excluir, em vez de deixar qualquer membro de guilda nem
+      // conseguir excluir o próprio personagem.
+      await GuildMember.destroy({ where: { id_personagem: character.id }, transaction });
+
+      await character.destroy({ transaction });
+    });
 
     res.status(204).json({
       status: "success",
@@ -426,9 +517,10 @@ exports.deleteCharacter = async (req, res) => {
       data: null,
     });
   } catch (error) {
-    console.error("Erro ao deletar personagem:", error);
+    const statusCode = error.statusCode || 500;
+    if (statusCode === 500) console.error("Erro ao deletar personagem:", error);
     res
-      .status(500)
-      .json({ message: "Erro interno do servidor ao deletar personagem." });
+      .status(statusCode)
+      .json({ message: error.statusCode ? error.message : "Erro interno do servidor ao deletar personagem." });
   }
 };
