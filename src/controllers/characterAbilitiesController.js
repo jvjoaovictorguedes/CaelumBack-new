@@ -152,6 +152,55 @@ exports.updateCharacterAbility = async (req, res) => {
   }
 };
 
+// Ativar/desativar um poder já aprendido — uso direto do jogador (não
+// admin), pela aba de Habilidades: "aparecerá todas pra ele, mas se ele
+// não tiver nível não pode usar, só ver" — poderes ainda não aprendidos
+// nem têm linha em CharacterAbilities (ver getPoderesDisponiveis), então
+// chegar aqui já implica que o personagem tem o nível necessário. Só
+// falta impedir: (1) mexer no poder de outra pessoa, (2) mandar qualquer
+// coisa que não seja um boolean de verdade (mesmo bug de coerção do item
+// 18 — guildas), (3) desativar um poder Passivo (não é escolha do
+// jogador, é sempre ativo).
+exports.toggleCharacterAbility = async (req, res) => {
+  try {
+    const { is_active } = req.body;
+    if (typeof is_active !== "boolean") {
+      return res.status(400).json({ message: "is_active deve ser boolean." });
+    }
+
+    const characterAbility = await CharacterAbilities.findByPk(req.params.id, {
+      include: [
+        { model: Character, attributes: ["id", "id_usuario"] },
+        { model: Power, attributes: ["id", "tipo_poder"] },
+      ],
+    });
+    if (!characterAbility) {
+      return res.status(404).json({ message: "Habilidade de personagem não encontrada." });
+    }
+    if (characterAbility.Character?.id_usuario !== req.user.id) {
+      return res.status(403).json({ message: "Essa habilidade não pertence a você." });
+    }
+    if (characterAbility.Power?.tipo_poder !== "Ativo") {
+      return res.status(400).json({
+        message: "Poderes passivos não podem ser desativados.",
+      });
+    }
+
+    characterAbility.is_active = is_active;
+    await characterAbility.save();
+
+    res.status(200).json({
+      status: "success",
+      data: { characterAbility },
+    });
+  } catch (error) {
+    console.error("Erro ao alternar habilidade de personagem:", error);
+    res
+      .status(500)
+      .json({ message: "Erro interno do servidor ao alternar habilidade." });
+  }
+};
+
 // Deletar uma habilidade de personagem por ID
 exports.deleteCharacterAbility = async (req, res) => {
   try {
