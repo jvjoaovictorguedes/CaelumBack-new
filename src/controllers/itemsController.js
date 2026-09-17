@@ -1,5 +1,26 @@
 // src/controllers/itemController.js
 const Item = require("../models/Item");
+const WeaponProperties = require("../models/WeaponProperties");
+const ArmorProperties = require("../models/ArmorProperties");
+const ConsumableProperties = require("../models/ConsumableProperties");
+
+// As associações Item<->propriedades já são registradas em outros
+// controllers (equipmentBonusService.js, consumablePropertiesController.js)
+// que sempre são carregados no boot — Sequelize ignora um segundo
+// hasOne/belongsTo idêntico entre o mesmo par de models, então repetir
+// aqui é seguro e deixa este arquivo não depender de quem rodou primeiro.
+Item.hasOne(WeaponProperties, { foreignKey: "id_item" });
+WeaponProperties.belongsTo(Item, { foreignKey: "id_item" });
+Item.hasOne(ArmorProperties, { foreignKey: "id_item" });
+ArmorProperties.belongsTo(Item, { foreignKey: "id_item" });
+Item.hasOne(ConsumableProperties, { foreignKey: "id_item" });
+ConsumableProperties.belongsTo(Item, { foreignKey: "id_item" });
+
+const INCLUDE_PROPRIEDADES = [
+  { model: WeaponProperties },
+  { model: ArmorProperties },
+  { model: ConsumableProperties },
+];
 
 // Criar um novo item
 exports.createItem = async (req, res) => {
@@ -33,7 +54,10 @@ exports.createItem = async (req, res) => {
 // Obter todos os itens
 exports.getAllItems = async (req, res) => {
   try {
-    const items = await Item.findAll();
+    // Inclui as propriedades específicas (dano de arma, defesa/atributos
+    // de armadura, efeito de consumível) — sem isso o frontend só recebia
+    // nome/preço/raridade e não tinha como mostrar os status do item.
+    const items = await Item.findAll({ include: INCLUDE_PROPRIEDADES });
     res.status(200).json({
       status: "success",
       results: items.length,
@@ -52,7 +76,7 @@ exports.getAllItems = async (req, res) => {
 // Obter um item por ID
 exports.getItemById = async (req, res) => {
   try {
-    const item = await Item.findByPk(req.params.id);
+    const item = await Item.findByPk(req.params.id, { include: INCLUDE_PROPRIEDADES });
     if (!item) {
       return res.status(404).json({ message: "Item não encontrado." });
     }
