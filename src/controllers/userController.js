@@ -150,14 +150,17 @@ exports.forgotPassword = async (req, res) => {
     const urlFrontend = (process.env.FRONTEND_URL || "").replace(/\/$/, "");
     const link = `${urlFrontend}/reset-password?token=${tokenBruto}`;
 
-    try {
-      await enviarEmailRedefinicaoSenha({ paraEmail: user.email, link });
-    } catch (erroEmail) {
-      // Não vaza pro cliente se o envio de e-mail falhou (isso também
-      // permitiria inferir se o e-mail existe pela diferença de
-      // comportamento) — só loga pra investigação.
+    // Não faz `await` aqui: o handshake SMTP pode demorar vários segundos
+    // (provedor lento, TLS, etc.) e nada no fluxo de "esqueci minha senha"
+    // depende do e-mail já ter saído pra responder ao cliente — travar a
+    // resposta nisso só arrisca estourar o timeout do frontend e o
+    // usuário achar que deu erro mesmo quando o e-mail seria enviado
+    // normalmente logo em seguida. O catch continua só logando (nunca
+    // vaza falha de envio pro cliente, senão dá pra inferir se o e-mail
+    // existe pela diferença de comportamento).
+    enviarEmailRedefinicaoSenha({ paraEmail: user.email, link }).catch((erroEmail) => {
       console.error("Erro ao enviar e-mail de redefinição de senha:", erroEmail);
-    }
+    });
 
     return res.status(200).json({ status: "success", message: mensagemGenerica });
   } catch (error) {
