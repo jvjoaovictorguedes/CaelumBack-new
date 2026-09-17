@@ -12,6 +12,9 @@ const Character = require("../models/Character");
 const Class = require("../models/Class");
 const CharacterAbilities = require("../models/CharacterAbilities");
 const Power = require("../models/Power");
+const CharacterInventory = require("../models/CharacterInventory");
+const Item = require("../models/Item");
+const ConsumableProperties = require("../models/ConsumableProperties");
 const { adicionarExperiencia } = require("../services/experienceService");
 const {
   calcularDanoBasico,
@@ -19,6 +22,7 @@ const {
   calcularEfeitoPoder,
   chanceDeEsquiva,
   vidaMaximaDe,
+  manaMaximaDe,
   danoBasicoEsperado,
   comMultiplicadoresDeClasse,
 } = require("../services/combatFormulas");
@@ -27,6 +31,7 @@ const {
   personagemComBonus,
 } = require("../services/equipmentBonusService");
 const { sincronizarRegeneracaoDeVida } = require("../services/regenService");
+const { encontroValido, limparEncontroExpirado } = require("../services/pveEncounterService");
 
 const NOMES_INIMIGOS = [
   "Lobo das Sombras",
@@ -57,23 +62,9 @@ function sortear(lista) {
 //
 // O inimigo nunca vem do cliente — só o servidor sabe o estado real.
 // Qualquer `enemy` que o corpo da requisição ainda contenha é ignorado.
-const VALIDADE_ENCONTRO_MS = 30 * 60 * 1000;
-
-// Expira sozinho depois de um tempo (encontro abandonado) — devolve uma
-// CÓPIA do encontro válido (ou null), nunca a referência crua de
-// character.encontro_pve: o resto do turno muta esse objeto in-place
-// (inimigoAtual.vida_atual -= dano) conforme o combate avança, e se
-// fosse a mesma referência guardada em character.dataValues, o
-// Sequelize não detectaria diferença nenhuma na hora de reatribuir
-// `character.encontro_pve = inimigoAtual` no final (mesmo objeto,
-// "nada mudou" do ponto de vista do dirty-check) — o campo simplesmente
-// não seria salvo.
-function encontroValido(character) {
-  const encontro = character.encontro_pve;
-  if (!encontro) return null;
-  if (Date.now() - encontro.criadoEm > VALIDADE_ENCONTRO_MS) return null;
-  return { ...encontro };
-}
+// (VALIDADE_ENCONTRO_MS/encontroValido/limparEncontroExpirado agora vêm
+// de pveEncounterService.js — ver comentário lá sobre o motivo de terem
+// saído daqui.)
 
 // Quantos turnos de ataque básico, em média, cada lado precisa pra matar
 // o outro. O do inimigo é maior de propósito: o jogador sai na frente
@@ -149,6 +140,20 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
     if (!character) {
       return res.status(404).json({
         message: "Personagem não encontrado.",
+      });
+    }
+
+    // Se já existe um encontro em andamento (não expirado), devolve ELE
+    // — nunca sorteia um novo. Sem essa checagem, chamar GET
+    // /combat/enemy de novo no meio de uma luta ruim descartava o
+    // inimigo atual (com o dano já sofrido) e sorteava outro do zero,
+    // com vida cheia — um reroll de graça pra fugir de um inimigo difícil.
+    const encontroEmAndamento = encontroValido(character);
+    if (encontroEmAndamento) {
+      const { criadoEm, statsPersonagem, ...inimigoAtual } = encontroEmAndamento;
+      return res.status(200).json({
+        status: "success",
+        data: { enemy: inimigoAtual },
       });
     }
 
@@ -360,6 +365,43 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       }
     }
 
+    // Consumível como ação de combate — a peça que faltava pro bloqueio
+    // em characterInventoryController.js fazer sentido de verdade (antes
+    // dele, "usar poção só como ação de combate" bloqueava a poção fora
+    // do combate mas não abria nenhum jeito de usá-la DENTRO dele: o
+    // jogador ficava sem cura nenhuma durante uma luta). Gasta o turno
+    // igual um ataque ou poder — o inimigo ainda ataca depois.
+    let inventoryEntry = null;
+    let itemConsumivel = null;
+    let efeitoConsumivel = null;
+
+    if (action.type === "item") {
+      inventoryEntry = await CharacterInventory.findOne({
+        where: { id_personagem: characterId, id_item: action.itemId },
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+      if (!inventoryEntry || inventoryEntry.quantidade < 1) {
+        return res.status(400).json({
+          message: "Você não possui esse item no inventário.",
+        });
+      }
+
+      itemConsumivel = await Item.findByPk(action.itemId, { transaction });
+      if (!itemConsumivel || itemConsumivel.tipo_item !== "Consumivel") {
+        return res.status(400).json({
+          message: "Este item não pode ser usado em combate.",
+        });
+      }
+
+      efeitoConsumivel = await ConsumableProperties.findByPk(action.itemId, { transaction });
+      if (!efeitoConsumivel) {
+        return res.status(400).json({
+          message: "Este item não possui efeito configurado.",
+        });
+      }
+    }
+
     // ==========================================================
     // PODER
     // ==========================================================
@@ -406,6 +448,43 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
         log.push(
           `Você usou ${poderUsado.nome} e recuperou ${cura} de vida.`
         );
+      }
+    }
+
+    // ==========================================================
+    // ITEM (consome o turno — não causa dano nenhum no inimigo)
+    // ==========================================================
+
+    else if (efeitoConsumivel) {
+      // Mesma fórmula (percentual da vida/mana MÁXIMA, não pontos
+      // fixos) do uso fora de combate em characterInventoryController.js
+      // — usa vidaMaximaDe/manaMaximaDe sobre personagemAtual, que já
+      // reflete o snapshot congelado do encontro (bônus de equipamento,
+      // multiplicador de classe), pro valor curado bater com o mesmo
+      // teto de vida/mana que o resto do combate está usando.
+      if (efeitoConsumivel.efeito_vida) {
+        const cura = Math.round(vidaMaximaDe(personagemAtual) * (efeitoConsumivel.efeito_vida / 100));
+        personagemAtual.vida_atual = Math.min(
+          vidaMaximaDe(personagemAtual),
+          personagemAtual.vida_atual + cura,
+        );
+        log.push(`Você usou ${itemConsumivel.nome} e recuperou ${cura} de vida.`);
+      }
+
+      if (efeitoConsumivel.efeito_mana) {
+        const curaMana = Math.round(manaMaximaDe(personagemAtual) * (efeitoConsumivel.efeito_mana / 100));
+        personagemAtual.mana_atual = Math.min(
+          manaMaximaDe(personagemAtual),
+          personagemAtual.mana_atual + curaMana,
+        );
+        log.push(`Você usou ${itemConsumivel.nome} e recuperou ${curaMana} de mana.`);
+      }
+
+      inventoryEntry.quantidade -= 1;
+      if (inventoryEntry.quantidade <= 0) {
+        await inventoryEntry.destroy({ transaction });
+      } else {
+        await inventoryEntry.save({ transaction });
       }
     }
 

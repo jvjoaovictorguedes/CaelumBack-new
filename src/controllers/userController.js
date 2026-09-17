@@ -214,6 +214,10 @@ exports.resetPassword = async (req, res) => {
     user.passwordHash = password; // hook beforeUpdate faz o hash
     user.resetPasswordTokenHash = null;
     user.resetPasswordExpires = null;
+    // Invalida qualquer JWT emitido antes de agora (ver authMiddleware) —
+    // sem isso, um token roubado antes do reset continuava valendo
+    // normalmente até expirar sozinho, mesmo com a senha já trocada.
+    user.senhaAlteradaEm = new Date();
     await user.save();
 
     return res.status(200).json({

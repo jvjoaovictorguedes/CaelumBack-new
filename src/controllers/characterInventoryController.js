@@ -15,6 +15,7 @@ const {
   buscarBonusDeAtributos,
   personagemComBonus,
 } = require("../services/equipmentBonusService");
+const { limparEncontroExpirado } = require("../services/pveEncounterService");
 
 // Sem essas associações, qualquer include: [{model: Character}, {model: Item}]
 // abaixo derruba a chamada com "CharacterInventory is not associated to X!".
@@ -45,6 +46,30 @@ exports.useItem = async (req, res) => {
 
   try {
     const result = await sequelize.transaction(async (transaction) => {
+      // Ordem de locks PADRONIZADA em todo fluxo que trava mais de uma
+      // linha (Character → CharacterInventory) — equipItem/unequipItem
+      // (CharacterEquipmentController.js) já travavam Character primeiro.
+      // Aqui era o contrário (Inventory primeiro, Character depois): duas
+      // transações concorrentes, uma equipando e outra usando item pro
+      // mesmo personagem, podiam travar uma linha cada e ficar cada uma
+      // esperando a linha que a outra já tem — deadlock de verdade,
+      // detectado (e abortado) pelo Postgres. Mesma ordem nos dois
+      // fluxos elimina esse ciclo.
+      //
+      // "FOR UPDATE" não pode se aplicar ao lado nullable de um LEFT
+      // OUTER JOIN (é o que o include de Class gera) — o Postgres recusa
+      // a query inteira se não escopar o lock só pra tabela Character.
+      const character = await Character.findByPk(id_personagem, {
+        include: [{ model: Class }],
+        transaction,
+        lock: { level: transaction.LOCK.UPDATE, of: Character },
+      });
+      if (!character) {
+        const error = new Error("Personagem não encontrado.");
+        error.statusCode = 404;
+        throw error;
+      }
+
       const inventoryEntry = await CharacterInventory.findOne({
         where: { id_personagem, id_item },
         transaction,
@@ -83,28 +108,25 @@ exports.useItem = async (req, res) => {
         throw error;
       }
 
-      // "FOR UPDATE" não pode se aplicar ao lado nullable de um LEFT
-      // OUTER JOIN (é o que o include de Class gera) — o Postgres recusa
-      // a query inteira se não escopar o lock só pra tabela Character.
-      const character = await Character.findByPk(id_personagem, {
-        include: [{ model: Class }],
-        transaction,
-        lock: { level: transaction.LOCK.UPDATE, of: Character },
-      });
-      if (!character) {
-        const error = new Error("Personagem não encontrado.");
-        error.statusCode = 404;
-        throw error;
-      }
-
       // Consumível vira cura de graça fora da economia de turnos se
       // puder ser usado livremente durante um combate PvE ativo: o
       // jogador ataca, o inimigo ataca, e antes do próximo turno o
       // jogador usa a poção quantas vezes quiser por este endpoint —
       // sem que o inimigo receba um turno correspondente. Enquanto
-      // houver encontro_pve ativo, consumíveis só podem ser usados como
+      // houver encontro_pve ativo (e ainda válido — ver
+      // pveEncounterService.js), consumíveis só podem ser usados como
       // ação de combate (POST /combat/action com { type: "item" }).
-      if (character.encontro_pve) {
+      //
+      // Usa encontroValido, não o campo cru: um encontro abandonado que
+      // já passou dos 30min de validade não conta como "combate ativo"
+      // (o próprio combatController já trata como inexistente) — sem
+      // isso, a poção ficava bloqueada pra sempre depois do encontro
+      // expirar, porque nada além de gerar um inimigo novo limpava esse
+      // campo. Já aproveita e persiste a limpeza aqui, já que a
+      // transação (com o Character travado) já está aberta.
+      if (limparEncontroExpirado(character)) {
+        await character.save({ transaction });
+      } else if (character.encontro_pve) {
         const error = new Error(
           "Durante um combate, consumíveis devem ser utilizados como ação de combate.",
         );

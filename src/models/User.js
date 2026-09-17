@@ -56,6 +56,19 @@ const User = sequelize.define(
       allowNull: true,
       field: "reset_password_expires",
     },
+    // Marca o momento da última troca de senha — authMiddleware rejeita
+    // qualquer JWT emitido ANTES desse instante (decoded.iat), mesmo que
+    // a assinatura/expiração continuem válidas. Sem isso, redefinir a
+    // senha (ex.: porque a conta foi comprometida) não invalidava
+    // nenhum token já emitido: um JWT roubado antes da troca continuava
+    // funcionando normalmente até expirar sozinho (até 7 dias com
+    // "lembrar-me"). null = nunca trocada por aqui, nenhum token é
+    // rejeitado por este motivo.
+    senhaAlteradaEm: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: "senha_alterada_em",
+    },
   },
   {
     tableName: "users",

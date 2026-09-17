@@ -4,6 +4,7 @@
 // (o oponente não precisa estar online) e devolvido como uma lista de
 // turnos pro front reproduzir a animação, igual ao combate PvE.
 
+const crypto = require("crypto");
 const { Op } = require("sequelize");
 const { sequelize } = require("../config/database");
 const Character = require("../models/Character");
@@ -54,7 +55,16 @@ async function buscarPoderesDoPersonagem(idPersonagem) {
     where: { id_personagem: idPersonagem, is_active: true },
     include: [{ model: Power }],
   });
-  return habilidades.map((h) => h.Power).filter(Boolean);
+  // Poder Passivo nasce com is_active:true (e nem pode ser desativado —
+  // ver characterAbilitiesController.toggleCharacterAbility), então
+  // filtrar só por is_active não bastava: sem o filtro por tipo_poder
+  // aqui, todo consumidor desta lista (escolha automática do PvP
+  // assíncrono e a ação escolhida pelo jogador no PvP ao vivo) também
+  // enxergava poderes passivos como "usáveis" — o combate PvE sempre
+  // barrou isso explicitamente, mas nada correspondente existia no PvP.
+  return habilidades
+    .map((h) => h.Power)
+    .filter((poder) => poder && poder.tipo_poder === "Ativo");
 }
 
 // Escolhe a ação de cada turno: usa o poder ofensivo mais forte que
@@ -141,7 +151,16 @@ function simularDuelo({ desafiante, desafiado, poderesDesafiante, poderesDesafia
   } else {
     const percA = estadoA.vida_atual / vidaMaxA;
     const percB = estadoB.vida_atual / vidaMaxB;
-    vencedorKey = percA >= percB ? "A" : "B";
+    // `percA >= percB` sempre favorecia o desafiante A num empate exato
+    // de porcentagem de vida (ex.: os dois zerando a MAX_RODADAS com a
+    // vida cheia) — o desafiado nunca ganhava um empate, só quem abriu o
+    // duelo. Empate de verdade sorteia com CSPRNG em vez de decidir por
+    // ordem de parâmetro.
+    if (percA === percB) {
+      vencedorKey = crypto.randomInt(2) === 0 ? "A" : "B";
+    } else {
+      vencedorKey = percA > percB ? "A" : "B";
+    }
     log.push("O tempo da arena se esgotou! O combate foi decidido pela vida restante.");
   }
 
