@@ -77,6 +77,14 @@ const Guild = sequelize.define(
       type: DataTypes.STRING(1000),
       allowNull: true,
     },
+    // Mesma escada de Character.rank (F...S++) — ver rankService.js.
+    // Sobe derrotando coletivamente o chefe do Portal de Guilda do
+    // ranque atual (ver GuildRankGate/guildGateController.js).
+    rank: {
+      type: DataTypes.STRING(10),
+      allowNull: false,
+      defaultValue: "F",
+    },
     meta_ativa: {
       type: DataTypes.STRING(255),
       allowNull: true,

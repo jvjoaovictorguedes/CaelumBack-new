@@ -1,6 +1,7 @@
 const express = require("express");
 
 const characterController = require("../controllers/characterController");
+const rankGateController = require("../controllers/rankGateController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const adminMiddleware = require("../middlewares/adminMiddleware");
 const {
@@ -43,6 +44,16 @@ router
 router
   .route("/:id/evolutions/:evolutionId/purchase")
   .post(authMiddleware, exigirDonoDoPersonagem("id"), characterController.comprarEvolucao);
+
+// Portal de Ranque — chefe fixo do ranque atual, vencer promove pro
+// próximo da escada (ver rankService.js/rankGateController.js).
+router
+  .route("/:id/rank-gate")
+  .get(authMiddleware, exigirDonoOuAdmin("id"), rankGateController.getPortalAtual);
+
+router
+  .route("/:id/rank-gate/attempt")
+  .post(authMiddleware, exigirDonoDoPersonagem("id"), rankGateController.tentarPortal);
 
 router
   .route("/:id")

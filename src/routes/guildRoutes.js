@@ -1,5 +1,6 @@
 const express = require("express");
 const guildController = require("../controllers/guildController");
+const guildGateController = require("../controllers/guildGateController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const { carregarPersonagemAtual } = require("../middlewares/currentCharacterMiddleware");
 const { exigirMembroDaGuild } = require("../middlewares/guildMembershipMiddleware");
@@ -118,6 +119,29 @@ router.get(
   carregarPersonagemAtual,
   exigirMembroDaGuild("id"),
   guildController.listarContribuicoes,
+);
+
+// Portal de Guilda (ver rankService.js/guildGateController.js) — só
+// membro vê status/ataca; iniciar exige a permissão "iniciar_portal"
+// (checada dentro do controller, igual autorizar_gastos).
+router.get(
+  "/:id/rank-gate",
+  authMiddleware,
+  carregarPersonagemAtual,
+  exigirMembroDaGuild("id"),
+  guildGateController.getStatus,
+);
+router.post(
+  "/:id/rank-gate/start",
+  authMiddleware,
+  carregarPersonagemAtual,
+  guildGateController.iniciarPortal,
+);
+router.post(
+  "/:id/rank-gate/attack",
+  authMiddleware,
+  carregarPersonagemAtual,
+  guildGateController.atacarPortal,
 );
 
 router.get(

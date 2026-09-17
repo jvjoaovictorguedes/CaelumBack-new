@@ -17,6 +17,7 @@ const PADRAO = {
     editar_identidade: true,
     editar_cargos: true,
     autorizar_gastos: true,
+    iniciar_portal: true,
   },
   Oficial: {
     convidar: true,
@@ -26,6 +27,7 @@ const PADRAO = {
     editar_identidade: true,
     editar_cargos: false,
     autorizar_gastos: false,
+    iniciar_portal: false,
   },
   Veterano: {
     convidar: true,
@@ -35,6 +37,7 @@ const PADRAO = {
     editar_identidade: false,
     editar_cargos: false,
     autorizar_gastos: false,
+    iniciar_portal: false,
   },
   Membro: {
     convidar: false,
@@ -44,6 +47,7 @@ const PADRAO = {
     editar_identidade: false,
     editar_cargos: false,
     autorizar_gastos: false,
+    iniciar_portal: false,
   },
   Recruta: {
     convidar: false,
@@ -53,6 +57,7 @@ const PADRAO = {
     editar_identidade: false,
     editar_cargos: false,
     autorizar_gastos: false,
+    iniciar_portal: false,
   },
 };
 
