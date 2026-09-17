@@ -1,21 +1,20 @@
 // src/routes/consumablePropertiesRoutes.js
 const express = require("express");
 const consumablePropertiesController = require("../controllers/consumablePropertiesController");
+const authMiddleware = require("../middlewares/authMiddleware");
+const adminMiddleware = require("../middlewares/adminMiddleware");
 
 const router = express.Router();
 
-// Rotas para ConsumableProperties
-// Note que POST e GET ALL usam a rota base, enquanto os outros usam o id_item na URL
 router
   .route("/")
-  .post(consumablePropertiesController.createConsumableProperties) // Criar propriedades para um item consumível
-  .get(consumablePropertiesController.getAllConsumableProperties); // Obter todas as propriedades de consumíveis
+  .post(authMiddleware, adminMiddleware, consumablePropertiesController.createConsumableProperties)
+  .get(consumablePropertiesController.getAllConsumableProperties);
 
-// Rotas para operações por id_item (que é a PK)
 router
   .route("/:id_item")
-  .get(consumablePropertiesController.getConsumablePropertiesById) // Obter propriedades de um item consumível específico
-  .patch(consumablePropertiesController.updateConsumableProperties) // Atualizar propriedades
-  .delete(consumablePropertiesController.deleteConsumableProperties); // Deletar propriedades
+  .get(consumablePropertiesController.getConsumablePropertiesById)
+  .patch(authMiddleware, adminMiddleware, consumablePropertiesController.updateConsumableProperties)
+  .delete(authMiddleware, adminMiddleware, consumablePropertiesController.deleteConsumableProperties);
 
 module.exports = router;

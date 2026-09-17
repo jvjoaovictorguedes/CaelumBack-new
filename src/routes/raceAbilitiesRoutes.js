@@ -1,20 +1,20 @@
 // src/routes/raceAbilitiesRoutes.js
 const express = require("express");
 const raceAbilitiesController = require("../controllers/raceAbilitiesController");
+const authMiddleware = require("../middlewares/authMiddleware");
+const adminMiddleware = require("../middlewares/adminMiddleware");
 
 const router = express.Router();
 
-// Rotas para RaceAbilities
 router
   .route("/")
-  .post(raceAbilitiesController.createRaceAbility) // POST para registrar uma nova habilidade de raça
-  .get(raceAbilitiesController.getAllRaceAbilities); // GET para obter todas as habilidades de raça
+  .post(authMiddleware, adminMiddleware, raceAbilitiesController.createRaceAbility)
+  .get(raceAbilitiesController.getAllRaceAbilities);
 
-// Rotas para operações que usam a chave primária composta (id_raca e id_power)
 router
   .route("/:id_raca/:id_power")
-  .get(raceAbilitiesController.getRaceAbilityByRaceAndPowerId) // GET por combinação de IDs
-  .patch(raceAbilitiesController.updateRaceAbility) // PATCH por combinação de IDs
-  .delete(raceAbilitiesController.deleteRaceAbility); // DELETE por combinação de IDs
+  .get(raceAbilitiesController.getRaceAbilityByRaceAndPowerId)
+  .patch(authMiddleware, adminMiddleware, raceAbilitiesController.updateRaceAbility)
+  .delete(authMiddleware, adminMiddleware, raceAbilitiesController.deleteRaceAbility);
 
 module.exports = router;

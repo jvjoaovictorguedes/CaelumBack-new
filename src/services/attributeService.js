@@ -7,7 +7,7 @@ const ATRIBUTOS_VALIDOS = [
 ];
 
 // Distribuição escolhida pelo jogador
-async function distribuirPontos(personagem, atributo, quantidade) {
+async function distribuirPontos(personagem, atributo, quantidade, transaction) {
 const pontosDisponiveis = personagem.pontos_distribuir || 0;
 
 if (pontosDisponiveis <= 0) {
@@ -29,13 +29,13 @@ throw new Error("O personagem não possui pontos suficientes.");
 personagem[atributo] += quantidade;
 personagem.pontos_distribuir -= quantidade;
 
-await personagem.save();
+await personagem.save({ transaction });
 
 return personagem;
 }
 
 // Distribuição aleatória
-async function distribuirPontosAleatoriamente(personagem) {
+async function distribuirPontosAleatoriamente(personagem, transaction) {
 const pontosDisponiveis = personagem.pontos_distribuir || 0;
 
 if (pontosDisponiveis <= 0) {
@@ -54,7 +54,7 @@ personagem[atributoAleatorio] += 1;
 
 personagem.pontos_distribuir = 0;
 
-await personagem.save();
+await personagem.save({ transaction });
 
 return personagem;
 }

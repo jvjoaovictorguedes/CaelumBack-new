@@ -7,6 +7,8 @@ const CharacterInventory = require("../models/CharacterInventory");
 // POST /api/shop/purchase
 // body: { id_personagem, id_item, quantidade }
 exports.purchaseItem = async (req, res) => {
+  // TODO(auth): trocar por req.personagemAtual.id quando o front puder
+  // mandar o JWT.
   const { id_personagem, id_item } = req.body;
   const quantidade =
     req.body.quantidade === undefined ? 1 : Number(req.body.quantidade);

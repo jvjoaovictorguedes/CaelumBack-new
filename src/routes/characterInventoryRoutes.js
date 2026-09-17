@@ -1,19 +1,25 @@
 // src/routes/characterInventoryRoutes.js
 const express = require("express");
 const characterInventoryController = require("../controllers/characterInventoryController");
+const authMiddleware = require("../middlewares/authMiddleware");
+const adminMiddleware = require("../middlewares/adminMiddleware");
 
 const router = express.Router();
 
-// Rotas para CharacterInventory
+// Conceder item diretamente (sem passar pela loja) é operação
+// administrativa — nenhuma tela de jogador chama isso; era um POST
+// público que dava item de graça pra quem soubesse o endpoint. As
+// leituras continuam abertas por enquanto (o front ainda não manda o
+// JWT nessas chamadas).
 router
   .route("/")
-  .post(characterInventoryController.createCharacterInventory) // POST para adicionar item ao inventário
-  .get(characterInventoryController.getAllCharacterInventory); // GET para obter todas as entradas de inventário (ou por personagemId)
+  .post(authMiddleware, adminMiddleware, characterInventoryController.createCharacterInventory)
+  .get(characterInventoryController.getAllCharacterInventory);
 
 router
   .route("/:id") // id aqui refere-se a id_personagem_inventario
-  .get(characterInventoryController.getCharacterInventoryById) // GET por ID da entrada
-  .patch(characterInventoryController.updateCharacterInventory) // PATCH por ID da entrada
-  .delete(characterInventoryController.deleteCharacterInventory); // DELETE por ID da entrada
+  .get(characterInventoryController.getCharacterInventoryById)
+  .patch(authMiddleware, adminMiddleware, characterInventoryController.updateCharacterInventory)
+  .delete(authMiddleware, adminMiddleware, characterInventoryController.deleteCharacterInventory);
 
 module.exports = router;

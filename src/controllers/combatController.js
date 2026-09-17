@@ -7,6 +7,7 @@
 // A lógica de progressão de XP/level/pontos fica no
 // experienceService.js.
 
+const { sequelize } = require("../config/database");
 const Character = require("../models/Character");
 const Class = require("../models/Class");
 const CharacterAbilities = require("../models/CharacterAbilities");
@@ -39,6 +40,30 @@ const NOMES_INIMIGOS = [
 
 function sortear(lista) {
   return lista[Math.floor(Math.random() * lista.length)];
+}
+
+// Estado do inimigo ativo por personagem, guardado no servidor —
+// characterId (string) -> inimigo. Sem isso, o cliente tinha que devolver
+// o objeto `enemy` inteiro a cada turno (POST /combat/turn), e nada
+// impedia ele de mandar um inimigo forjado (vida_atual: 1, nivel:
+// 999999, dano_base negativo) e "vencer" sem lutar de verdade. Agora o
+// servidor é a única fonte de verdade sobre o HP/nível/dano do inimigo;
+// qualquer `enemy` que o cliente ainda mande no corpo é ignorado.
+//
+// Expira sozinho depois de um tempo (encontro abandonado) pra não vazar
+// memória indefinidamente num processo de longa duração.
+const ENCONTROS_ATIVOS = new Map();
+const VALIDADE_ENCONTRO_MS = 30 * 60 * 1000;
+
+function encontroAtivoDe(characterId) {
+  const chave = String(characterId);
+  const encontro = ENCONTROS_ATIVOS.get(chave);
+  if (!encontro) return null;
+  if (Date.now() - encontro.criadoEm > VALIDADE_ENCONTRO_MS) {
+    ENCONTROS_ATIVOS.delete(chave);
+    return null;
+  }
+  return encontro;
 }
 
 // Quantos turnos de ataque básico, em média, cada lado precisa pra matar
@@ -105,6 +130,8 @@ function gerarInimigo(jogador) {
 // Gera um inimigo compatível com o nível do personagem.
 exports.gerarInimigoParaPersonagem = async (req, res) => {
   try {
+    // TODO(auth): trocar por req.personagemAtual.id quando o front puder
+    // mandar o JWT.
     const character = await Character.findByPk(req.params.characterId, {
       include: [{ model: Class }],
     });
@@ -121,6 +148,7 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       character.Class,
     );
     const inimigo = gerarInimigo(jogadorEfetivo);
+    ENCONTROS_ATIVOS.set(String(character.id), { ...inimigo, criadoEm: Date.now() });
 
     res.status(200).json({
       status: "success",
@@ -140,12 +168,25 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
 
 exports.executarTurno = async (req, res) => {
   try {
-    const { characterId, enemy, action } = req.body;
+    // TODO(auth): trocar por req.personagemAtual.id quando o front puder
+    // mandar o JWT.
+    const { characterId, action } = req.body;
 
-    if (!characterId || !enemy || !action) {
+    if (!characterId || !action) {
       return res.status(400).json({
         message:
           "Dados insuficientes para resolver o turno de combate.",
+      });
+    }
+
+    // O inimigo nunca vem do cliente — só o servidor sabe o estado real
+    // (ver ENCONTROS_ATIVOS acima). Qualquer `enemy` que o corpo da
+    // requisição ainda contenha é ignorado de propósito.
+    const inimigoAtual = encontroAtivoDe(characterId);
+    if (!inimigoAtual) {
+      return res.status(400).json({
+        message:
+          "Nenhum combate ativo para esse personagem. Busque um inimigo antes de atacar.",
       });
     }
 
@@ -166,10 +207,6 @@ exports.executarTurno = async (req, res) => {
       personagemComBonus(character.toJSON(), bonusEquipamento),
       character.Class,
     );
-
-    const inimigoAtual = {
-      ...enemy,
-    };
 
     if (personagemAtual.vida_atual <= 0) {
       return res.status(400).json({
@@ -304,11 +341,26 @@ exports.executarTurno = async (req, res) => {
 
       const dinheiroGanho =
         5 + inimigoAtual.nivel * 4;
-      const resultadoXP =
-        await adicionarExperiencia(
-          characterId,
-          xpGanho
-        );
+
+      // Tudo numa transação com o personagem travado (LOCK.UPDATE): XP,
+      // dinheiro, vida e mana saem num único save — evita perder uma
+      // recompensa se duas vitórias do mesmo personagem forem
+      // processadas ao mesmo tempo (double-click, duas abas).
+      const resultadoXP = await sequelize.transaction(async (transaction) => {
+        const characterTravado = await Character.findByPk(characterId, {
+          transaction,
+          lock: transaction.LOCK.UPDATE,
+        });
+        characterTravado.dinheiro += dinheiroGanho;
+        characterTravado.vida_atual = personagemAtual.vida_atual;
+        characterTravado.mana_atual = personagemAtual.mana_atual;
+        return adicionarExperiencia(characterId, xpGanho, {
+          transaction,
+          personagem: characterTravado,
+        });
+      });
+
+      ENCONTROS_ATIVOS.delete(String(characterId));
 
       // Se houve level up, adiciona ao log.
       if (resultadoXP.niveisGanhos > 0) {
@@ -328,18 +380,6 @@ exports.executarTurno = async (req, res) => {
         }
       }
 
-      await character.update({
-        dinheiro:
-          character.dinheiro +
-          dinheiroGanho,
-
-        vida_atual:
-          character.vida_atual,
-
-        mana_atual:
-          personagemAtual.mana_atual,
-      });
-
       log.push(
         `${inimigoAtual.nome} foi derrotado! Você ganhou ${xpGanho} de experiência e ${dinheiroGanho} moedas.`
       );
@@ -355,7 +395,7 @@ exports.executarTurno = async (req, res) => {
 
           character: {
             vida_atual:
-              character.vida_atual,
+              personagemAtual.vida_atual,
 
             mana_atual:
               personagemAtual.mana_atual,
@@ -429,6 +469,7 @@ exports.executarTurno = async (req, res) => {
       log.push(
         "Você foi derrotado e precisa se recuperar antes de lutar de novo."
       );
+      ENCONTROS_ATIVOS.delete(String(characterId));
     }
 
     await character.update({

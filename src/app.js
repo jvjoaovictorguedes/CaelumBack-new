@@ -58,8 +58,28 @@ connectDB().catch((error) => {
   console.error("Erro fatal e inesperado ao conectar ao banco de dados:", error);
 });
 
+// CORS_ORIGIN é opcional de propósito: sem ele, o comportamento
+// continua exatamente igual a antes (qualquer origem) pra não quebrar
+// um deploy que ainda não configurou a variável — mas com ela, restringe
+// só ao(s) domínio(s) do frontend, em vez de aceitar qualquer site.
+const origensPermitidas = (process.env.CORS_ORIGIN || "")
+  .split(",")
+  .map((origem) => origem.trim())
+  .filter(Boolean);
+
+if (origensPermitidas.length === 0) {
+  console.warn(
+    '[cors] CORS_ORIGIN não configurado — aceitando requisições de qualquer origem. Defina CORS_ORIGIN="https://seusite.com" (separado por vírgula se houver mais de um) pra restringir.',
+  );
+}
+
+const corsOptions =
+  origensPermitidas.length > 0
+    ? { origin: origensPermitidas, credentials: true }
+    : undefined;
+
 app.use(express.json());
-app.use(cors());
+app.use(cors(corsOptions));
 
 app.use((req, res, next) => {
   if (req.path === "/" || isDatabaseReady()) {
@@ -102,7 +122,10 @@ app.use("/api/guilds", guildRoutes);
 // upgrade da conexão — por isso o app não usa mais app.listen direto.
 const server = http.createServer(app);
 const io = new SocketIOServer(server, {
-  cors: { origin: "*" },
+  cors:
+    origensPermitidas.length > 0
+      ? { origin: origensPermitidas, credentials: true }
+      : { origin: "*" },
 });
 registerPvpLiveHandlers(io);
 registerGuildHandlers(io);

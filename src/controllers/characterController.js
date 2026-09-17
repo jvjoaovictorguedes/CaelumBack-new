@@ -36,7 +36,11 @@ CharacterEquipment.belongsTo(Character, { foreignKey: "id_personagem" });
 CharacterEquipment.belongsTo(Item, { foreignKey: "id_item", as: "item" });
 
 const CHARACTER_INCLUDES = [
-  { model: User, attributes: ["id", "username", "email"] },
+  // Sem email aqui de propósito: esse include entra em toda leitura de
+  // personagem (inclusive quando um jogador olha o personagem de outro,
+  // ex.: alvo de PvP) — devolver email vazava o contato de qualquer
+  // jogador pra qualquer outro.
+  { model: User, attributes: ["id", "username"] },
   { model: Race },
   { model: Class },
   {
@@ -90,7 +94,60 @@ async function concederPoderesIniciais(character) {
 
 exports.createCharacter = async (req, res) => {
   try {
-    const newCharacter = await Character.create(req.body);
+    // TODO(auth): assim que o front conseguir mandar o token JWT, trocar
+    // por `req.user.id` em vez de confiar no id_usuario do corpo — hoje
+    // ainda não dá pra exigir isso sem quebrar a criação de personagem.
+    const { id_usuario, nome, genero, id_raca, id_classe, natureza_magica } = req.body;
+    if (!id_usuario || !nome || !genero || !id_raca || !id_classe) {
+      return res.status(400).json({
+        message: "id_usuario, nome, genero, id_raca e id_classe são obrigatórios.",
+      });
+    }
+
+    const jaTemPersonagem = await Character.findOne({ where: { id_usuario } });
+    if (jaTemPersonagem) {
+      return res.status(409).json({ message: "Sua conta já tem um personagem." });
+    }
+
+    const raca = await Race.findByPk(id_raca);
+    if (!raca) {
+      return res.status(400).json({ message: "Raça inválida." });
+    }
+    const classe = await Class.findByPk(id_classe);
+    if (!classe) {
+      return res.status(400).json({ message: "Classe inválida." });
+    }
+
+    // Nível, dinheiro, atributos e vida/mana NUNCA vêm do corpo da
+    // requisição: são sempre os valores iniciais fixos do jogo (nível 1,
+    // 15 de ouro) mais os bônus da raça escolhida — sem isso, um cliente
+    // podia criar um personagem já rico, de nível alto ou com atributos
+    // arbitrários só editando o payload.
+    const forca = raca.bonus_forca ?? 0;
+    const vitalidade = raca.bonus_vitalidade ?? 0;
+    const agilidade = raca.bonus_agilidade ?? 0;
+    const inteligencia = raca.bonus_inteligencia ?? 0;
+    const velocidade = raca.bonus_velocidade ?? 0;
+
+    const newCharacter = await Character.create({
+      id_usuario,
+      nome,
+      genero,
+      id_raca,
+      id_classe,
+      natureza_magica: natureza_magica ?? null,
+      nivel: 1,
+      experiencia: 0,
+      dinheiro: 15,
+      pontos_distribuir: 0,
+      forca,
+      vitalidade,
+      agilidade,
+      inteligencia,
+      velocidade,
+      vida_atual: 30 + vitalidade * 6,
+      mana_atual: 20 + inteligencia * 5,
+    });
 
     try {
       await concederPoderesIniciais(newCharacter);
@@ -211,9 +268,23 @@ exports.getCharacterById = async (req, res) => {
   }
 };
 
+// Único uso legítimo hoje é a troca de sexo (GenderToggleButton). Sem
+// uma lista explícita, esse PATCH aceitava qualquer coluna do modelo —
+// dinheiro, nivel, stats, id_usuario — vindo direto do corpo da
+// requisição.
+const CAMPOS_EDITAVEIS = ["genero"];
+
 exports.updateCharacter = async (req, res) => {
   try {
-    const [updatedRows] = await Character.update(req.body, {
+    const dadosPermitidos = {};
+    for (const campo of CAMPOS_EDITAVEIS) {
+      if (req.body[campo] !== undefined) dadosPermitidos[campo] = req.body[campo];
+    }
+    if (Object.keys(dadosPermitidos).length === 0) {
+      return res.status(400).json({ message: "Nenhum campo editável foi enviado." });
+    }
+
+    const [updatedRows] = await Character.update(dadosPermitidos, {
       where: { id: req.params.id },
     });
 

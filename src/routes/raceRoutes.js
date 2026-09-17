@@ -1,19 +1,23 @@
 // src/routes/raceRoutes.js
 const express = require("express");
 const raceController = require("../controllers/raceController");
+const authMiddleware = require("../middlewares/authMiddleware");
+const adminMiddleware = require("../middlewares/adminMiddleware");
 
 const router = express.Router();
 
-// Rotas para Raças
+// Dado de jogo: leitura continua aberta (o front lê direto sem JWT
+// ainda), só criar/editar/remover exige admin — nenhuma tela de jogador
+// chama essas escritas.
 router
   .route("/")
-  .post(raceController.createRace) // POST para criar uma nova raça, com validação
-  .get(raceController.getAllRaces); // GET para obter todas as raças
+  .post(authMiddleware, adminMiddleware, raceController.createRace)
+  .get(raceController.getAllRaces);
 
 router
   .route("/:id")
-  .get(raceController.getRaceById) // GET para obter uma raça específica por ID
-  .patch(raceController.updateRace) // PATCH para atualizar uma raça, com validação
-  .delete(raceController.deleteRace); // DELETE para deletar uma raça
+  .get(raceController.getRaceById)
+  .patch(authMiddleware, adminMiddleware, raceController.updateRace)
+  .delete(authMiddleware, adminMiddleware, raceController.deleteRace);
 
 module.exports = router;

@@ -1,3 +1,4 @@
+const { sequelize } = require("../config/database");
 const Character = require("../models/Character");
 
 const {
@@ -8,23 +9,26 @@ distribuirPontosAleatoriamente,
 // Distribuição escolhida pelo jogador
 const distribuir = async (req, res) => {
 try {
+// TODO(auth): trocar por req.personagemAtual.id quando o front puder
+// mandar o JWT.
 const { id } = req.params;
 const { atributo, quantidade } = req.body;
 
-
-const personagem = await Character.findByPk(id);
-
-if (!personagem) {
-  return res.status(404).json({
-    message: "Personagem não encontrado.",
+// Trava a linha do personagem: sem isso, duas requisições concorrentes
+// pra distribuir pontos liam o mesmo `pontos_distribuir` antes de
+// qualquer uma salvar e conseguiam gastar o mesmo ponto duas vezes.
+const personagemAtualizado = await sequelize.transaction(async (transaction) => {
+  const personagem = await Character.findByPk(id, {
+    transaction,
+    lock: transaction.LOCK.UPDATE,
   });
-}
 
-const personagemAtualizado = await distribuirPontos(
-  personagem,
-  atributo,
-  quantidade
-);
+  if (!personagem) {
+    throw Object.assign(new Error("Personagem não encontrado."), { statusCode: 404 });
+  }
+
+  return distribuirPontos(personagem, atributo, quantidade, transaction);
+});
 
 return res.status(200).json({
   message: `Pontos distribuídos em ${atributo}.`,
@@ -32,10 +36,10 @@ return res.status(200).json({
 });
 
 } catch (error) {
-console.error("Erro ao distribuir pontos:", error);
+const statusCode = error.statusCode || 400;
+if (statusCode >= 500) console.error("Erro ao distribuir pontos:", error);
 
-
-return res.status(400).json({
+return res.status(statusCode).json({
   message: error.message,
 });
 
@@ -47,17 +51,18 @@ const distribuirAleatoriamente = async (req, res) => {
 try {
 const { id } = req.params;
 
-
-const personagem = await Character.findByPk(id);
-
-if (!personagem) {
-  return res.status(404).json({
-    message: "Personagem não encontrado.",
+const personagemAtualizado = await sequelize.transaction(async (transaction) => {
+  const personagem = await Character.findByPk(id, {
+    transaction,
+    lock: transaction.LOCK.UPDATE,
   });
-}
 
-const personagemAtualizado =
-  await distribuirPontosAleatoriamente(personagem);
+  if (!personagem) {
+    throw Object.assign(new Error("Personagem não encontrado."), { statusCode: 404 });
+  }
+
+  return distribuirPontosAleatoriamente(personagem, transaction);
+});
 
 return res.status(200).json({
   message: "Pontos distribuídos aleatoriamente.",
@@ -65,13 +70,12 @@ return res.status(200).json({
 });
 
 } catch (error) {
-console.error("Erro ao distribuir pontos aleatoriamente:", error);
+const statusCode = error.statusCode || 400;
+if (statusCode >= 500) console.error("Erro ao distribuir pontos aleatoriamente:", error);
 
-
-return res.status(400).json({
+return res.status(statusCode).json({
   message: error.message,
 });
-
 
 }
 };

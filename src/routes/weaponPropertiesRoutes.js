@@ -1,21 +1,20 @@
 // src/routes/weaponPropertiesRoutes.js
 const express = require("express");
 const weaponPropertiesController = require("../controllers/weaponPropertiesController");
+const authMiddleware = require("../middlewares/authMiddleware");
+const adminMiddleware = require("../middlewares/adminMiddleware");
 
 const router = express.Router();
 
-// Rotas para WeaponProperties
-// Note que POST e GET ALL usam a rota base, enquanto os outros usam o id_item na URL
 router
   .route("/")
-  .post(weaponPropertiesController.createWeaponProperties) // Criar propriedades para um item arma
-  .get(weaponPropertiesController.getAllWeaponProperties); // Obter todas as propriedades de armas
+  .post(authMiddleware, adminMiddleware, weaponPropertiesController.createWeaponProperties)
+  .get(weaponPropertiesController.getAllWeaponProperties);
 
-// Rotas para operações por id_item (que é a PK)
 router
   .route("/:id_item")
-  .get(weaponPropertiesController.getWeaponPropertiesById) // Obter propriedades de um item arma específico
-  .patch(weaponPropertiesController.updateWeaponProperties) // Atualizar propriedades
-  .delete(weaponPropertiesController.deleteWeaponProperties); // Deletar propriedades
+  .get(weaponPropertiesController.getWeaponPropertiesById)
+  .patch(authMiddleware, adminMiddleware, weaponPropertiesController.updateWeaponProperties)
+  .delete(authMiddleware, adminMiddleware, weaponPropertiesController.deleteWeaponProperties);
 
 module.exports = router;

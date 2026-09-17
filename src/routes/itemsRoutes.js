@@ -1,19 +1,20 @@
 // src/routes/itemRoutes.js
 const express = require("express");
 const itemController = require("../controllers/itemsController");
+const authMiddleware = require("../middlewares/authMiddleware");
+const adminMiddleware = require("../middlewares/adminMiddleware");
 
 const router = express.Router();
 
-// Rotas para Itens
 router
   .route("/")
-  .post(itemController.createItem) // POST para criar um novo item, com validação
-  .get(itemController.getAllItems); // GET para obter todos os itens
+  .post(authMiddleware, adminMiddleware, itemController.createItem)
+  .get(itemController.getAllItems);
 
 router
   .route("/:id")
-  .get(itemController.getItemById) // GET para obter um item específico por ID
-  .patch(itemController.updateItem) // PATCH para atualizar um item, com validação
-  .delete(itemController.deleteItem); // DELETE para deletar um item
+  .get(itemController.getItemById)
+  .patch(authMiddleware, adminMiddleware, itemController.updateItem)
+  .delete(authMiddleware, adminMiddleware, itemController.deleteItem);
 
 module.exports = router;

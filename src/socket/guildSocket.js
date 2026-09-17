@@ -57,6 +57,16 @@ module.exports = function registerGuildHandlers(io) {
       if (!mensagem) return;
 
       try {
+        // Reconfere o vínculo a cada mensagem, não só no join: sem isso,
+        // um personagem expulso/que saiu continuava falando e ouvindo o
+        // chat da guilda antiga até desconectar o socket.
+        const membro = await GuildMember.findOne({ where: { id_personagem: characterId } });
+        if (!membro || salaDaGuild(membro.id_guild) !== socket.guildRoom) {
+          socket.leave(socket.guildRoom);
+          socket.guildRoom = null;
+          return;
+        }
+
         const personagem = await Character.findByPk(characterId, { attributes: ["id", "nome"] });
         if (!personagem) return;
         io.to(socket.guildRoom).emit("guild:message:new", {

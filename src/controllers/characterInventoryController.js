@@ -27,6 +27,8 @@ CharacterInventory.belongsTo(Item, { foreignKey: "id_item" });
 // POST /api/character-items/use
 // body: { id_personagem, id_item, quantidade }
 exports.useItem = async (req, res) => {
+  // TODO(auth): trocar por req.personagemAtual.id quando o front puder
+  // mandar o JWT.
   const { id_personagem, id_item } = req.body;
   const quantidade =
     req.body.quantidade === undefined ? 1 : Number(req.body.quantidade);
@@ -167,14 +169,26 @@ exports.useItem = async (req, res) => {
 // Criar uma nova entrada no inventário
 exports.createCharacterInventory = async (req, res) => {
   try {
-    const { id_personagem, id_item, quantidade } = req.body;
+    const { id_personagem, id_item } = req.body;
+    const quantidade = req.body.quantidade === undefined ? 1 : Number(req.body.quantidade);
+
+    if (!id_personagem || !id_item) {
+      return res.status(400).json({ message: "id_personagem e id_item são obrigatórios." });
+    }
+    if (!Number.isInteger(quantidade) || quantidade <= 0) {
+      return res.status(400).json({ message: "Quantidade inválida." });
+    }
 
     let existingEntry = await CharacterInventory.findOne({
       where: { id_personagem, id_item },
     });
 
     if (existingEntry) {
-      existingEntry.quantidade += quantidade || 1;
+      // Antes: `quantidade || 1` tratava quantidade:0 como "some 1" (bug
+      // silencioso) e um valor não numérico virava NaN persistido na
+      // coluna, corrompendo a linha pra sempre — por isso a validação
+      // acima garante um inteiro positivo antes de chegar aqui.
+      existingEntry.quantidade += quantidade;
       await existingEntry.save();
       return res.status(200).json({
         status: "success",
@@ -185,7 +199,11 @@ exports.createCharacterInventory = async (req, res) => {
       });
     }
 
-    const newInventoryEntry = await CharacterInventory.create(req.body);
+    const newInventoryEntry = await CharacterInventory.create({
+      id_personagem,
+      id_item,
+      quantidade,
+    });
     res.status(201).json({
       status: "success",
       message: "Item adicionado ao inventário com sucesso!",
@@ -266,9 +284,18 @@ exports.getCharacterInventoryById = async (req, res) => {
 // Atualizar uma entrada de inventário por ID
 exports.updateCharacterInventory = async (req, res) => {
   try {
-    const [updatedRows] = await CharacterInventory.update(req.body, {
-      where: { id_personagem_inventario: req.params.id },
-    });
+    // Só quantidade é editável por aqui — id_personagem/id_item não, pra
+    // não dar pra "mover" uma pilha de item pra outro personagem só
+    // reescrevendo o corpo da requisição.
+    const quantidade = Number(req.body.quantidade);
+    if (!Number.isInteger(quantidade) || quantidade <= 0) {
+      return res.status(400).json({ message: "Quantidade inválida." });
+    }
+
+    const [updatedRows] = await CharacterInventory.update(
+      { quantidade },
+      { where: { id_personagem_inventario: req.params.id } },
+    );
 
     if (updatedRows === 0) {
       return res.status(404).json({

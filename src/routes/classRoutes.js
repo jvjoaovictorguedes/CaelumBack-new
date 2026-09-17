@@ -1,19 +1,20 @@
 // src/routes/classRoutes.js
 const express = require("express");
 const classController = require("../controllers/classController");
+const authMiddleware = require("../middlewares/authMiddleware");
+const adminMiddleware = require("../middlewares/adminMiddleware");
 
 const router = express.Router();
 
-// Rotas para Classes
 router
   .route("/")
-  .post(classController.createClass) // POST para criar uma nova classe, com validação
-  .get(classController.getAllClasses); // GET para obter todas as classes
+  .post(authMiddleware, adminMiddleware, classController.createClass)
+  .get(classController.getAllClasses);
 
 router
   .route("/:id")
-  .get(classController.getClassById) // GET para obter uma classe específica por ID
-  .patch(classController.updateClass) // PATCH para atualizar uma classe, com validação
-  .delete(classController.deleteClass); // DELETE para deletar uma classe
+  .get(classController.getClassById)
+  .patch(authMiddleware, adminMiddleware, classController.updateClass)
+  .delete(authMiddleware, adminMiddleware, classController.deleteClass);
 
 module.exports = router;

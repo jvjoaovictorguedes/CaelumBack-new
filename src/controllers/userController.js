@@ -3,7 +3,7 @@ const jwt = require("jsonwebtoken");
 const Character = require("../models/Character");
 
 require("dotenv").config();
-const JWT_SECRET = process.env.JWT_SECRET || "supersecretjwtkey";
+const { JWT_SECRET } = require("../config/jwt");
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "1h";
 
 const signToken = (id) => {

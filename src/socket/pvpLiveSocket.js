@@ -92,9 +92,24 @@ module.exports = function registerPvpLiveHandlers(io) {
   io.on("connection", (socket) => {
     socket.on("identificar", ({ characterId } = {}) => {
       if (!characterId) return;
-      socket.characterId = String(characterId);
-      online.set(socket.characterId, socket.id);
-      socket.broadcast.emit("pvp:ficou-online", { characterId: socket.characterId });
+      const chave = chaveOnline(characterId);
+
+      // Se esse characterId já tinha outro socket identificado (aba
+      // antiga, reconexão, ou alguém tentando "roubar" o turno de um
+      // duelo ao vivo agindo por um personagem que não é o seu), derruba
+      // o socket antigo em vez de deixar os dois agirem como o mesmo
+      // personagem — nenhum dos dois falaria pelo personagem errado, mas
+      // sem isso dava pra ter duas conexões controlando o mesmo lado de
+      // um duelo em andamento.
+      const socketIdAntigo = online.get(chave);
+      if (socketIdAntigo && socketIdAntigo !== socket.id) {
+        const socketAntigo = io.sockets.sockets.get(socketIdAntigo);
+        socketAntigo?.disconnect(true);
+      }
+
+      socket.characterId = chave;
+      online.set(chave, socket.id);
+      socket.broadcast.emit("pvp:ficou-online", { characterId: chave });
     });
 
     socket.on("pvp:listar-online", (_payload, callback) => {
@@ -255,8 +270,15 @@ module.exports = function registerPvpLiveHandlers(io) {
     socket.on("disconnect", () => {
       if (!socket.characterId) return;
       const characterId = socket.characterId;
-      online.delete(characterId);
-      socket.broadcast.emit("pvp:ficou-offline", { characterId });
+      // Só limpa o mapeamento se ele ainda apontar pra ESTE socket — ao
+      // forçar a desconexão do socket antigo em "identificar" (acima), o
+      // evento de disconnect dele dispara depois que o novo socket já
+      // assumiu o characterId, e sem essa checagem ele apagava a entrada
+      // que já era do socket novo.
+      if (online.get(characterId) === socket.id) {
+        online.delete(characterId);
+        socket.broadcast.emit("pvp:ficou-offline", { characterId });
+      }
 
       limparDesafioPendente(characterId);
       for (const [idDesafiado, pendente] of desafiosPendentes.entries()) {

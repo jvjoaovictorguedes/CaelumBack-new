@@ -5,6 +5,7 @@
 // turnos pro front reproduzir a animação, igual ao combate PvE.
 
 const { Op } = require("sequelize");
+const { sequelize } = require("../config/database");
 const Character = require("../models/Character");
 const Race = require("../models/Race");
 const Class = require("../models/Class");
@@ -140,6 +141,7 @@ async function garantirStatus(idPersonagem, transaction) {
     where: { id_personagem: idPersonagem },
     defaults: { sistema_classificacao: "Vitorias" },
     transaction,
+    lock: transaction?.LOCK?.UPDATE,
   });
   return status;
 }
@@ -147,47 +149,78 @@ async function garantirStatus(idPersonagem, transaction) {
 // Credita a recompensa, atualiza PvpStatus dos dois lados e registra a
 // partida em PvpMatches. Usado tanto pelo duelo assíncrono (challenge,
 // abaixo) quanto pelo duelo ao vivo (pvpLiveSocket).
+//
+// Tudo numa única transação com o personagem vencedor travado
+// (LOCK.UPDATE): sem isso, dois créditos de recompensa concorrentes pro
+// mesmo personagem (ex.: um duelo assíncrono terminando bem na hora de
+// um duelo ao vivo) liam o mesmo saldo antes de qualquer um salvar e uma
+// das recompensas se perdia — e um crash no meio do caminho podia
+// deixar o dinheiro creditado sem o PvpMatches correspondente.
 async function aplicarResultadoDuelo({ vencedor, perdedor, rodadas }) {
   const recompensa = {
     dinheiro: 5 + perdedor.nivel * 2,
     experiencia: 10 + perdedor.nivel * 5,
   };
 
-  await vencedor.update({ dinheiro: vencedor.dinheiro + recompensa.dinheiro });
-  const resultadoXP = await adicionarExperiencia(vencedor.id, recompensa.experiencia);
+  const resultadoXP = await sequelize.transaction(async (transaction) => {
+    const vencedorTravado = await Character.findByPk(vencedor.id, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    if (!vencedorTravado) {
+      throw new Error("Personagem vencedor não encontrado.");
+    }
+    vencedorTravado.dinheiro += recompensa.dinheiro;
 
-  const [statusVencedor, statusPerdedor] = await Promise.all([
-    garantirStatus(vencedor.id),
-    garantirStatus(perdedor.id),
-  ]);
+    const resultado = await adicionarExperiencia(vencedor.id, recompensa.experiencia, {
+      transaction,
+      personagem: vencedorTravado,
+    });
 
-  const novaSequenciaVencedor = statusVencedor.sequencia_vitorias + 1;
-  await statusVencedor.update({
-    total_batalhas: statusVencedor.total_batalhas + 1,
-    vitorias: statusVencedor.vitorias + 1,
-    sequencia_vitorias: novaSequenciaVencedor,
-    maximo_sequencia_vitorias: Math.max(
-      statusVencedor.maximo_sequencia_vitorias,
-      novaSequenciaVencedor,
-    ),
-    ultima_batalha_dia: new Date(),
-  });
+    const [statusVencedor, statusPerdedor] = await Promise.all([
+      garantirStatus(vencedor.id, transaction),
+      garantirStatus(perdedor.id, transaction),
+    ]);
 
-  await statusPerdedor.update({
-    total_batalhas: statusPerdedor.total_batalhas + 1,
-    derrotas: statusPerdedor.derrotas + 1,
-    sequencia_vitorias: 0,
-    ultima_batalha_dia: new Date(),
-  });
+    const novaSequenciaVencedor = statusVencedor.sequencia_vitorias + 1;
+    await statusVencedor.update(
+      {
+        total_batalhas: statusVencedor.total_batalhas + 1,
+        vitorias: statusVencedor.vitorias + 1,
+        sequencia_vitorias: novaSequenciaVencedor,
+        maximo_sequencia_vitorias: Math.max(
+          statusVencedor.maximo_sequencia_vitorias,
+          novaSequenciaVencedor,
+        ),
+        ultima_batalha_dia: new Date(),
+      },
+      { transaction },
+    );
 
-  await PvpMatches.create({
-    id_vencedor: vencedor.id,
-    id_perdedor: perdedor.id,
-    nome_arena: NOME_ARENA,
-    duracao_segundos: rodadas,
-    vencedor_pontos: 1,
-    perdedor_pontos: 0,
-    tempo_final_combate: new Date(),
+    await statusPerdedor.update(
+      {
+        total_batalhas: statusPerdedor.total_batalhas + 1,
+        derrotas: statusPerdedor.derrotas + 1,
+        sequencia_vitorias: 0,
+        ultima_batalha_dia: new Date(),
+      },
+      { transaction },
+    );
+
+    await PvpMatches.create(
+      {
+        id_vencedor: vencedor.id,
+        id_perdedor: perdedor.id,
+        nome_arena: NOME_ARENA,
+        duracao_segundos: rodadas,
+        vencedor_pontos: 1,
+        perdedor_pontos: 0,
+        tempo_final_combate: new Date(),
+      },
+      { transaction },
+    );
+
+    return resultado;
   });
 
   return { recompensa, nivelAposVitoria: resultadoXP.nivel };
