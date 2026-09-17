@@ -63,6 +63,10 @@ const Power = sequelize.define("Power", {
     defaultValue: 0.0,
     allowNull: false,
   },
+  imagem_url: {
+    type: DataTypes.STRING(255),
+    allowNull: true,
+  },
 });
 
 module.exports = Power;
