@@ -25,6 +25,7 @@ const {
   buscarBonusDeAtributos,
   personagemComBonus,
 } = require("../services/equipmentBonusService");
+const { sincronizarRegeneracaoDeVida } = require("../services/regenService");
 
 const NOMES_INIMIGOS = [
   "Lobo das Sombras",
@@ -148,6 +149,14 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       personagemComBonus(character.toJSON(), bonusEquipamento),
       character.Class,
     );
+
+    // Aplica a regeneração passiva acumulada antes de calibrar/entrar
+    // em combate — sem isso, um jogador que ficou horas offline entrava
+    // na luta com a vida velha (baixa), mesmo já tendo regenerado.
+    if (sincronizarRegeneracaoDeVida(character, jogadorEfetivo)) {
+      await character.save();
+    }
+
     const inimigo = gerarInimigo(jogadorEfetivo);
     ENCONTROS_ATIVOS.set(String(character.id), { ...inimigo, criadoEm: Date.now() });
 
@@ -207,6 +216,12 @@ exports.executarTurno = async (req, res) => {
       personagemComBonus(character.toJSON(), bonusEquipamento),
       character.Class,
     );
+
+    // Mesma regeneração passiva do início do combate — evita bloquear
+    // "derrotado" quem já regenerou o suficiente enquanto estava longe.
+    if (sincronizarRegeneracaoDeVida(character, personagemAtual)) {
+      await character.save();
+    }
 
     if (personagemAtual.vida_atual <= 0) {
       return res.status(400).json({

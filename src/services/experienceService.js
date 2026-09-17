@@ -1,4 +1,11 @@
 const Character = require("../models/Character");
+const Class = require("../models/Class");
+const {
+  vidaMaximaDe,
+  manaMaximaDe,
+  comMultiplicadoresDeClasse,
+} = require("./combatFormulas");
+const { buscarBonusDeAtributos, personagemComBonus } = require("./equipmentBonusService");
 
 const XP_POR_NIVEL = 100;
 const PONTOS_POR_NIVEL = 1;
@@ -41,6 +48,24 @@ while (novaExperiencia >= novoNivel * XP_POR_NIVEL) {
 character.experiencia = novaExperiencia;
 character.nivel = novoNivel;
 character.pontos_distribuir = novosPontos;
+
+// Subir de nível recalcula vida/mana máxima (vidaMaximaDe/manaMaximaDe
+// já escalam por nível + classe) e enche vida_atual/mana_atual até lá
+// — sem isso, o "escalamento por nível" só existia como um teto
+// invisível: o jogador subia de nível e a vida/mana ATUAL (o que
+// realmente é mostrado e usado em combate) continuava exatamente a
+// mesma de antes, então parecia que nada tinha mudado.
+if (novoNivel > nivelInicial) {
+  const classe = character.Class ?? (await Class.findByPk(character.id_classe, { transaction }));
+  const bonusEquipamento = await buscarBonusDeAtributos(character.id);
+  const personagemEfetivo = comMultiplicadoresDeClasse(
+    personagemComBonus(character.toJSON(), bonusEquipamento),
+    classe,
+  );
+  character.vida_atual = vidaMaximaDe(personagemEfetivo);
+  character.mana_atual = manaMaximaDe(personagemEfetivo);
+  character.ultima_atualizacao_vida = new Date();
+}
 
 await character.save({ transaction });
 

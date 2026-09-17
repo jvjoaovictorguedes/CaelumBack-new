@@ -19,6 +19,7 @@ const {
   comMultiplicadoresDeClasse,
 } = require("../services/combatFormulas");
 const { sortearNaturezaMagica } = require("../services/naturezaMagicaService");
+const { sincronizarRegeneracaoDeVida, msAteRegenCompleta } = require("../services/regenService");
 
 User.hasMany(Character, { foreignKey: "id_usuario" });
 Character.belongsTo(User, { foreignKey: "id_usuario" });
@@ -131,6 +132,17 @@ exports.createCharacter = async (req, res) => {
     const inteligencia = raca.bonus_inteligencia ?? 0;
     const velocidade = raca.bonus_velocidade ?? 0;
 
+    // vida_atual/mana_atual iniciais precisam do multiplicador da
+    // Classe igual a vidaMaximaDe/manaMaximaDe usam em todo o resto do
+    // jogo — sem isso, um Mago recém-criado nascia com vida_atual MAIOR
+    // que o próprio vida_maxima calculado (o multiplicador 0.8 só
+    // aparecia depois, na leitura), e um Guerreiro nascia com mana
+    // sobrando que não deveria caber no teto dele (0.7).
+    const personagemEfetivoInicial = comMultiplicadoresDeClasse(
+      { nivel: 1, vitalidade, inteligencia },
+      classe,
+    );
+
     const newCharacter = await Character.create({
       id_usuario,
       nome,
@@ -150,8 +162,8 @@ exports.createCharacter = async (req, res) => {
       agilidade,
       inteligencia,
       velocidade,
-      vida_atual: 30 + vitalidade * 6,
-      mana_atual: 20 + inteligencia * 5,
+      vida_atual: vidaMaximaDe(personagemEfetivoInicial),
+      mana_atual: manaMaximaDe(personagemEfetivoInicial),
     });
 
     try {
@@ -254,14 +266,24 @@ exports.getCharacterById = async (req, res) => {
       personagemComBonus(character.toJSON(), bonus_atributos),
       character.Class,
     );
+
+    // Regeneração passiva: calcula sob demanda quanto tempo real
+    // passou desde a última mudança de vida e aplica o que já
+    // regenerou. Só grava no banco quando há progresso de verdade.
+    if (sincronizarRegeneracaoDeVida(character, personagemEfetivo)) {
+      await character.save();
+    }
+
     res.status(200).json({
       status: "success",
       data: {
         character: {
           ...character.toJSON(),
+          vida_atual: personagemEfetivo.vida_atual,
           bonus_atributos,
           vida_maxima: vidaMaximaDe(personagemEfetivo),
           mana_maxima: manaMaximaDe(personagemEfetivo),
+          regen_vida_restante_ms: msAteRegenCompleta(personagemEfetivo),
         },
       },
     });

@@ -46,6 +46,17 @@ const Character = sequelize.define("Character", {
     type: DataTypes.INTEGER,
     allowNull: false,
   },
+  // Marca o instante em que vida_atual foi uma verdade conhecida pela
+  // última vez (dano, cura, level-up, ou a última vez que a
+  // regeneração passiva foi calculada e aplicada). regenService usa
+  // isso pra saber quanto tempo real se passou e quanto regenerar —
+  // não tem job/cron rodando sozinho, o cálculo é sob demanda toda vez
+  // que o personagem é lido ou entra em combate.
+  ultima_atualizacao_vida: {
+    type: DataTypes.DATE,
+    allowNull: false,
+    defaultValue: DataTypes.NOW,
+  },
   forca: {
     type: DataTypes.INTEGER,
     allowNull: false,
