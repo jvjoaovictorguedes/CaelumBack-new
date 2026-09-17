@@ -78,7 +78,18 @@ const connectDB = async () => {
     try {
       await sequelize.authenticate();
       console.log("Conexão com o banco de dados estabelecida com sucesso.");
-      await sequelize.sync({ alter: true });
+      // NUNCA `alter: true` aqui — isso rodava sozinho, sem confirmação
+      // nenhuma, TODA VEZ que o servidor subia (todo deploy, todo
+      // restart), comparando os models atuais com o banco e tentando
+      // "corrigir" a diferença na hora. Pra colunas ENUM (ex:
+      // natureza_magica) o Sequelize faz isso recriando o tipo inteiro,
+      // e é um processo conhecidamente frágil no Postgres — em caso de
+      // divergência entre o que o banco tinha e o que o model esperava,
+      // dava pra perder dado de verdade sem ninguém ter pedido. Schema
+      // agora é sempre por migration (`npm run migrate`), nunca
+      // automático. `sync()` sem opções só cria tabela que ainda não
+      // existe — nunca toca em tabela/coluna que já existe.
+      await sequelize.sync();
       console.log("Modelos sincronizados com o banco de dados.");
       databaseReady = true;
       return;
