@@ -146,8 +146,11 @@ exports.getSocketTicket = async (req, res) => {
 
 exports.getAllUsers = async (req, res) => {
   try {
+    // Só id/username — é usado pra montar a lista de "iniciar conversa"
+    // nas mensagens (frontend nem lê os outros campos). E-mail de todo
+    // usuário cadastrado não devia vazar aqui.
     const users = await User.findAll({
-      attributes: { exclude: ["passwordHash"] },
+      attributes: ["id", "username"],
     });
 
     res.status(200).json({

@@ -49,6 +49,11 @@ const guildRoutes = require("./routes/guildRoutes");
 const app = express();
 const port = process.env.PORT || 3001;
 
+// Necessário pra req.ip refletir o IP real do cliente atrás do proxy do
+// Railway (senão todo mundo cai no mesmo IP do proxy e o rate limit de
+// login/registro trava geral em vez de por pessoa).
+app.set("trust proxy", 1);
+
 // Conecta ao banco de dados e sincroniza os modelos
 // connectDB já chama sequelize.sync()
 // O .catch() é essencial: connectDB() roda sem await, e uma promise
