@@ -11,11 +11,17 @@
 // em mais de uma instância, troque isto por um limitador com storage
 // compartilhado (ex.: Redis — `rate-limit-redis` + `express-rate-limit`,
 // ou equivalente) pra a contagem valer pra todas as instâncias juntas.
-function criarLimitador({ janelaMs, maxTentativas }) {
+// obterChave: de onde tirar a identidade pra contar tentativas — por
+// padrão o IP (rotas públicas, sem usuário autenticado ainda), mas rotas
+// já autenticadas podem passar `(req) => req.user.id` pra limitar por
+// CONTA em vez de por IP (evita que trocar de rede/proxy resete o
+// contador, e evita que várias contas atrás do mesmo IP/NAT dividam o
+// mesmo limite de propósito).
+function criarLimitador({ janelaMs, maxTentativas, obterChave = (req) => req.ip }) {
   const tentativasPorChave = new Map();
 
   return (req, res, next) => {
-    const chave = req.ip;
+    const chave = obterChave(req);
     const agora = Date.now();
     const registro = tentativasPorChave.get(chave);
 

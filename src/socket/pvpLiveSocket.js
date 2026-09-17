@@ -25,6 +25,10 @@ const {
   personagemComBonus,
 } = require("../services/equipmentBonusService");
 const { personagemViaTicket } = require("./socketAuth");
+const {
+  verificarCooldownDesafiante,
+  verificarAntifarmPar,
+} = require("../services/pvpAntifarmService");
 
 const NOME_ARENA = "Arena de Caelum";
 const PRAZO_ACEITAR_MS = 20000;
@@ -33,8 +37,16 @@ const MAX_ACOES = 80;
 
 // characterId (string) -> socket.id
 const online = new Map();
-// characterId do desafiado (string) -> { desafianteId, timeoutHandle }
+// characterId do desafiado (string) -> { idDesafiante, socketIdDesafiante, timeoutHandle }
 const desafiosPendentes = new Map();
+// characterId do desafiante (string) -> characterId do desafiado (string)
+// Antes só o lado que RECEBE um desafio era limitado a um por vez
+// (desafiosPendentes, chaveado pelo alvo) — nada impedia um único
+// personagem de desafiar vários alvos diferentes ao mesmo tempo. Esse
+// mapa espelha o mesmo desafio pelo lado do desafiante, então dá pra
+// rejeitar um segundo "pvp:desafiar" enquanto o primeiro ainda não foi
+// respondido/expirado.
+const desafiosEnviadosPor = new Map();
 // duelId -> duelo
 const duelos = new Map();
 // characterId (string) -> duelId
@@ -72,10 +84,14 @@ async function carregarLutador(characterId) {
 }
 
 function limparDesafioPendente(desafiadoId) {
-  const pendente = desafiosPendentes.get(chaveOnline(desafiadoId));
+  const chave = chaveOnline(desafiadoId);
+  const pendente = desafiosPendentes.get(chave);
   if (pendente) {
     clearTimeout(pendente.timeoutHandle);
-    desafiosPendentes.delete(chaveOnline(desafiadoId));
+    desafiosPendentes.delete(chave);
+    if (desafiosEnviadosPor.get(pendente.idDesafiante) === chave) {
+      desafiosEnviadosPor.delete(pendente.idDesafiante);
+    }
   }
 }
 
@@ -140,6 +156,25 @@ module.exports = function registerPvpLiveHandlers(io) {
       if (desafiosPendentes.has(chaveOnline(idDesafiado))) {
         return socket.emit("pvp:erro", { mensagem: "Esse jogador já tem um desafio pendente." });
       }
+      if (desafiosEnviadosPor.has(idDesafiante)) {
+        return socket.emit("pvp:erro", {
+          mensagem: "Você já tem um desafio pendente. Aguarde ele ser respondido ou expirar.",
+        });
+      }
+
+      // Mesmas regras de cooldown/antifarm do duelo assíncrono — o duelo
+      // ao vivo usava o mesmo aplicarResultadoDuelo (e portanto o mesmo
+      // PvpStatus.ultima_batalha_dia) mas nunca checava nada disso antes
+      // de deixar o duelo começar, então dava pra viver inteiramente fora
+      // do cooldown/antifarm só usando o modo ao vivo.
+      const erroCooldown = await verificarCooldownDesafiante(idDesafiante);
+      if (erroCooldown) {
+        return socket.emit("pvp:erro", { mensagem: erroCooldown });
+      }
+      const erroAntifarmPar = await verificarAntifarmPar(idDesafiante, idDesafiado);
+      if (erroAntifarmPar) {
+        return socket.emit("pvp:erro", { mensagem: erroAntifarmPar });
+      }
 
       const desafiante = await Character.findByPk(idDesafiante);
       if (!desafiante) {
@@ -148,7 +183,7 @@ module.exports = function registerPvpLiveHandlers(io) {
 
       const socketIdDesafiado = online.get(chaveOnline(idDesafiado));
       const timeoutHandle = setTimeout(() => {
-        desafiosPendentes.delete(chaveOnline(idDesafiado));
+        limparDesafioPendente(idDesafiado);
         socket.emit("pvp:desafio-expirado", { idDesafiado });
         io.to(socketIdDesafiado).emit("pvp:desafio-cancelado", { idDesafiante });
       }, PRAZO_ACEITAR_MS);
@@ -158,6 +193,7 @@ module.exports = function registerPvpLiveHandlers(io) {
         socketIdDesafiante: socket.id,
         timeoutHandle,
       });
+      desafiosEnviadosPor.set(idDesafiante, chaveOnline(idDesafiado));
 
       socket.emit("pvp:desafio-enviado", { idDesafiado, prazoSegundos: PRAZO_ACEITAR_MS / 1000 });
       io.to(socketIdDesafiado).emit("pvp:desafio-recebido", {
@@ -293,10 +329,9 @@ module.exports = function registerPvpLiveHandlers(io) {
       socket.broadcast.emit("pvp:ficou-offline", { characterId });
 
       limparDesafioPendente(characterId);
-      for (const [idDesafiado, pendente] of desafiosPendentes.entries()) {
+      for (const [idDesafiado, pendente] of Array.from(desafiosPendentes.entries())) {
         if (pendente.idDesafiante === characterId) {
-          clearTimeout(pendente.timeoutHandle);
-          desafiosPendentes.delete(idDesafiado);
+          limparDesafioPendente(idDesafiado);
           const socketIdDesafiado = online.get(idDesafiado);
           if (socketIdDesafiado) {
             io.to(socketIdDesafiado).emit("pvp:desafio-cancelado", { idDesafiante: characterId });

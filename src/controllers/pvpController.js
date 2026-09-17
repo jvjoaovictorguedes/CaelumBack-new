@@ -24,6 +24,10 @@ const {
   buscarBonusDeAtributos,
   personagemComBonus,
 } = require("../services/equipmentBonusService");
+const {
+  verificarCooldownDesafiante,
+  verificarAntifarmPar,
+} = require("../services/pvpAntifarmService");
 
 // Primeira vez que PvpStatus é consultado com include — nunca teve
 // associação registrada em lugar nenhum.
@@ -32,7 +36,18 @@ PvpStatus.belongsTo(Character, { foreignKey: "id_personagem" });
 
 const NOME_ARENA = "Arena de Caelum";
 const MAX_RODADAS = 40;
-const COOLDOWN_DESAFIO_SEGUNDOS = 10;
+
+// Trava em memória (por processo, mesmo padrão já usado no combate PvE
+// via ENCONTROS_ATIVOS) pra impedir que DOIS POST /pvp/challenge do
+// mesmo personagem — desafiante ou desafiado — sejam processados ao
+// mesmo tempo. Sem isso, duas requisições disparadas quase juntas (ex.:
+// duplo-clique, retry de rede) liam o mesmo cooldown/estado ANTES de
+// qualquer uma commitar, e as duas simulavam e aplicavam um duelo
+// completo — o lock por linha dentro de aplicarResultadoDuelo evita
+// perder crédito entre elas, mas não evita as DUAS acontecerem (o que já
+// é, sozinho, ouro/XP em dobro). Aqui a segunda requisição concorrente é
+// simplesmente rejeitada em vez de reprocessada.
+const personagensProcessandoDesafio = new Set();
 
 async function buscarPoderesDoPersonagem(idPersonagem) {
   const habilidades = await CharacterAbilities.findAll({
@@ -298,36 +313,56 @@ exports.getRanking = async (req, res) => {
 // valor vindo do body, senão qualquer um podia desafiar em nome de outro
 // personagem só informando o ID.
 exports.challenge = async (req, res) => {
+  const id_desafiante = req.personagemAtual.id;
+  const { id_desafiado } = req.body;
+
+  if (!id_desafiado) {
+    return res.status(400).json({
+      message: "id_desafiado é obrigatório.",
+    });
+  }
+
+  // Comparar como string em vez de Number(): dois valores inválidos
+  // (ex.: strings não-numéricas) viravam NaN dos dois lados, e
+  // NaN === NaN é false — a checagem "não pode duelar contra si
+  // mesmo" passava batido pra entrada malformada.
+  if (String(id_desafiante) === String(id_desafiado)) {
+    return res.status(400).json({ message: "Não é possível duelar contra si mesmo." });
+  }
+
+  const chaveDesafiante = String(id_desafiante);
+  const chaveDesafiado = String(id_desafiado);
+
+  // Ver comentário em personagensProcessandoDesafio acima: se qualquer
+  // um dos dois personagens já tem um /challenge em andamento agora,
+  // rejeita na hora em vez de deixar rodar em paralelo.
+  if (
+    personagensProcessandoDesafio.has(chaveDesafiante) ||
+    personagensProcessandoDesafio.has(chaveDesafiado)
+  ) {
+    return res.status(429).json({
+      message: "Já existe um duelo sendo processado para um dos personagens. Aguarde.",
+    });
+  }
+  personagensProcessandoDesafio.add(chaveDesafiante);
+  personagensProcessandoDesafio.add(chaveDesafiado);
+
   try {
-    const id_desafiante = req.personagemAtual.id;
-    const { id_desafiado } = req.body;
-
-    if (!id_desafiado) {
-      return res.status(400).json({
-        message: "id_desafiado é obrigatório.",
-      });
-    }
-
-    // Comparar como string em vez de Number(): dois valores inválidos
-    // (ex.: strings não-numéricas) viravam NaN dos dois lados, e
-    // NaN === NaN é false — a checagem "não pode duelar contra si
-    // mesmo" passava batido pra entrada malformada.
-    if (String(id_desafiante) === String(id_desafiado)) {
-      return res.status(400).json({ message: "Não é possível duelar contra si mesmo." });
-    }
-
     // Cooldown curto por personagem: sem isso, dava pra scriptar
     // POST /pvp/challenge em loop contra um personagem fraco (ex.: um
     // alt de nível baixo) e farmar ouro/XP sem risco nenhum.
-    const statusDesafiante = await PvpStatus.findOne({ where: { id_personagem: id_desafiante } });
-    if (statusDesafiante?.ultima_batalha_dia) {
-      const segundosDesdeUltima =
-        (Date.now() - new Date(statusDesafiante.ultima_batalha_dia).getTime()) / 1000;
-      if (segundosDesdeUltima < COOLDOWN_DESAFIO_SEGUNDOS) {
-        return res.status(429).json({
-          message: `Aguarde ${Math.ceil(COOLDOWN_DESAFIO_SEGUNDOS - segundosDesdeUltima)}s para duelar de novo.`,
-        });
-      }
+    const erroCooldown = await verificarCooldownDesafiante(id_desafiante);
+    if (erroCooldown) {
+      return res.status(429).json({ message: erroCooldown });
+    }
+
+    // Antifarm por PAR: mesmo respeitando o cooldown acima, nada
+    // impedia duas contas combinadas se desafiarem repetidamente uma à
+    // outra pra farmar ouro/XP sem risco de perder pra um oponente de
+    // verdade.
+    const erroAntifarmPar = await verificarAntifarmPar(id_desafiante, id_desafiado);
+    if (erroAntifarmPar) {
+      return res.status(429).json({ message: erroAntifarmPar });
     }
 
     const [desafiante, desafiado] = await Promise.all([
@@ -400,6 +435,9 @@ exports.challenge = async (req, res) => {
     return res
       .status(500)
       .json({ message: "Erro interno do servidor ao processar o duelo." });
+  } finally {
+    personagensProcessandoDesafio.delete(chaveDesafiante);
+    personagensProcessandoDesafio.delete(chaveDesafiado);
   }
 };
 
