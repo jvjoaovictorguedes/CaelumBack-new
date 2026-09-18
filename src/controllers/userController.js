@@ -8,7 +8,13 @@ const { enviarEmailRedefinicaoSenha } = require("../services/emailService");
 
 require("dotenv").config();
 const { JWT_SECRET } = require("../config/jwt");
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "1h";
+// 1h era curto demais pra uma sessão de jogo de verdade — um jogador
+// ativo que esquecia de marcar "lembrar-me" caía sem aviso no meio de
+// uma partida. POST /users/refresh (abaixo) já resolve isso de vez pra
+// quem continua ativo (o frontend renova sozinho em segundo plano),
+// mas o valor padrão sobe mesmo assim como rede de segurança pra quem
+// ficar um tempo sem interagir (aba minimizada, throttle do navegador).
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "6h";
 // Usado só quando o login pede "lembrar-me" — sem isso o cookie do
 // frontend dizia "7 dias" mas o token dentro dele morria em 1h de
 // qualquer jeito, e "lembrar-me" nunca funcionava de verdade.
@@ -25,7 +31,12 @@ const JWT_EXPIRES_IN_REMEMBER_ME = process.env.JWT_EXPIRES_IN_REMEMBER_ME || "7d
 const PROPOSITO_SESSAO = "session";
 
 const signToken = (id, { rememberMe = false } = {}) => {
-  return jwt.sign({ id, proposito: PROPOSITO_SESSAO }, JWT_SECRET, {
+  // rememberMe embutido no próprio payload (não só usado pra decidir a
+  // duração aqui) — sem isso, POST /users/refresh (abaixo) não tinha
+  // como saber se deve reemitir um token de 1h ou de 7 dias: só teria
+  // acesso ao token JÁ assinado, sem contexto de qual política de
+  // duração o login original escolheu.
+  return jwt.sign({ id, proposito: PROPOSITO_SESSAO, rememberMe }, JWT_SECRET, {
     expiresIn: rememberMe ? JWT_EXPIRES_IN_REMEMBER_ME : JWT_EXPIRES_IN,
   });
 };
@@ -258,6 +269,29 @@ exports.getUserById = async (req, res) => {
 // authMiddleware já garantiu req.user.id via JWT. O ticket é o que o
 // cliente manda no "identificar" do Socket.IO — de vida curta (30s) e
 // só serve pra isso, então mesmo vazando não dá pra reusar como sessão.
+// POST /users/refresh — reemite o JWT de sessão com o relógio zerado,
+// mantendo a mesma política de duração (rememberMe) do login original.
+// Chamado periodicamente pelo frontend enquanto o jogador está com uma
+// tela do dashboard aberta (ver SessionKeepAlive.tsx) — sessão vira
+// "deslizante" pra quem está de fato jogando: só quem fica realmente
+// inativo (aba fechada/sem chamadas) chega a expirar de verdade.
+// Exige authMiddleware — reaproveita a mesma validação de token de
+// qualquer rota autenticada (assinatura, proposito, senha não trocada
+// depois de emitido).
+exports.refreshToken = async (req, res) => {
+  try {
+    const token = signToken(req.user.id, { rememberMe: Boolean(req.user.rememberMe) });
+    res.status(200).json({
+      status: "success",
+      token,
+      rememberMe: Boolean(req.user.rememberMe),
+    });
+  } catch (error) {
+    console.error("Erro ao renovar sessão:", error);
+    res.status(500).json({ message: "Erro interno do servidor ao renovar sessão." });
+  }
+};
+
 exports.getSocketTicket = async (req, res) => {
   try {
     const ticket = emitirTicket(req.user.id);

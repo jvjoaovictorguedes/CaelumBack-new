@@ -19,6 +19,7 @@ router.post("/login", limitadorLogin, userController.loginUser);
 router.post("/forgot-password", limitadorResetSenha, userController.forgotPassword);
 router.post("/reset-password", limitadorResetSenha, userController.resetPassword);
 router.get("/socket-ticket", authMiddleware, userController.getSocketTicket);
+router.post("/refresh", authMiddleware, userController.refreshToken);
 router.get("/", authMiddleware, userController.getAllUsers);
 
 module.exports = router;

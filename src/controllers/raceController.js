@@ -31,9 +31,12 @@ exports.createRace = async (req, res) => {
   }
 };
 
+// Só as NÃO raras — mesmo raciocínio de classController.getAllClasses:
+// raça rara (Celestial etc.) só entra via ticket do sorteio, nunca na
+// lista normal.
 exports.getAllRaces = async (req, res) => {
   try {
-    const races = await Race.findAll();
+    const races = await Race.findAll({ where: { raro: false } });
     res.status(200).json({
       status: "success",
       results: races.length,

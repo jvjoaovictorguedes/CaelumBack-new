@@ -34,9 +34,15 @@ exports.createClass = async (req, res) => {
 };
 
 // Obter todas as classes
+// Só as NÃO raras — classes raras (Primordial etc.) nunca aparecem na
+// criação normal, só via ticket do sorteio (POST /sortear-raro). Sem
+// esse filtro aqui, a migration que corrige o campo `raro` no banco
+// (20260919040000-fix-raro-backfill-primordial-celestial.js) não
+// adianta nada: o dado fica certo, mas esse endpoint devolvia todo
+// mundo pro front do mesmo jeito.
 exports.getAllClasses = async (req, res) => {
   try {
-    const classes = await Class.findAll();
+    const classes = await Class.findAll({ where: { raro: false } });
     res.status(200).json({
       status: "success",
       results: classes.length,
