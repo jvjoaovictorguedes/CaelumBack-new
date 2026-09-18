@@ -135,92 +135,108 @@ function gerarInimigo(jogador) {
 
 // GET /api/combat/enemy/:characterId
 // Gera um inimigo compatível com o nível do personagem.
+//
+// Roda inteira dentro de uma transação com o personagem travado
+// (LOCK.UPDATE), do mesmo jeito que executarTurno — sem isso, duas
+// chamadas concorrentes a esta rota (duplo clique, duas abas, ou o
+// React re-executando o carregamento da tela de Aventura) liam
+// encontro_pve como "vazio" ao mesmo tempo, cada uma gerava e SALVAVA
+// um inimigo diferente, e a última a salvar vencia — a tela do jogador
+// podia ficar mostrando um inimigo (da resposta que chegou primeiro)
+// que já não é mais o que está de fato em encontro_pve no banco. Daí
+// em diante, qualquer ataque batia em "Nenhum combate ativo" mesmo com
+// a tela mostrando um inimigo na cara do jogador. Não inclui Class no
+// SELECT travado (FOR UPDATE não pode se aplicar ao lado nullable de um
+// LEFT JOIN) — busca a classe à parte, sem lock, como o resto da base
+// já faz nesse mesmo contorno.
 exports.gerarInimigoParaPersonagem = async (req, res) => {
   try {
-    // Sempre o personagem do usuário autenticado, nunca o :characterId da
-    // URL — mantido na rota só por compatibilidade, o valor em si é
-    // ignorado.
-    const character = await Character.findByPk(req.personagemAtual.id, {
-      include: [{ model: Class }],
-    });
-
-    if (!character) {
-      return res.status(404).json({
-        message: "Personagem não encontrado.",
+    return await sequelize.transaction(async (transaction) => {
+      const character = await Character.findByPk(req.personagemAtual.id, {
+        transaction,
+        lock: { level: transaction.LOCK.UPDATE, of: Character },
       });
-    }
 
-    // Se já existe um encontro em andamento (não expirado), devolve ELE
-    // — nunca sorteia um novo. Sem essa checagem, chamar GET
-    // /combat/enemy de novo no meio de uma luta ruim descartava o
-    // inimigo atual (com o dano já sofrido) e sorteava outro do zero,
-    // com vida cheia — um reroll de graça pra fugir de um inimigo difícil.
-    const encontroEmAndamento = encontroValido(character);
-    if (encontroEmAndamento) {
-      const { criadoEm, statsPersonagem, ...inimigoAtual } = encontroEmAndamento;
-      return res.status(200).json({
+      if (!character) {
+        return res.status(404).json({
+          message: "Personagem não encontrado.",
+        });
+      }
+
+      // Se já existe um encontro em andamento (não expirado), devolve ELE
+      // — nunca sorteia um novo. Sem essa checagem, chamar GET
+      // /combat/enemy de novo no meio de uma luta ruim descartava o
+      // inimigo atual (com o dano já sofrido) e sorteava outro do zero,
+      // com vida cheia — um reroll de graça pra fugir de um inimigo difícil.
+      const encontroEmAndamento = encontroValido(character);
+      if (encontroEmAndamento) {
+        const { criadoEm, statsPersonagem, ...inimigoAtual } = encontroEmAndamento;
+        return res.status(200).json({
+          status: "success",
+          data: { enemy: inimigoAtual },
+        });
+      }
+
+      // Não dá pra abrir uma Aventura nova com um Portal de Ranque em
+      // andamento — mesma exclusão mútua que o Portal já aplica no
+      // sentido contrário (ver rankGateController.iniciarPortal).
+      if (encontroDoCampoValido(character, "encontro_rank_gate")) {
+        return res.status(409).json({
+          message: "Termine o combate do Portal de Ranque em andamento antes de partir para a Aventura.",
+        });
+      }
+
+      const classe = await Class.findByPk(character.id_classe, { transaction });
+      const bonusEquipamento = await buscarBonusDeAtributos(character.id, transaction);
+      const jogadorEfetivo = comMultiplicadoresDeClasse(
+        personagemComBonus(character.toJSON(), bonusEquipamento),
+        classe,
+      );
+
+      // Aplica a regeneração passiva acumulada antes de calibrar/entrar
+      // em combate — sem isso, um jogador que ficou horas offline entrava
+      // na luta com a vida velha (baixa), mesmo já tendo regenerado.
+      // Muta `character`/`jogadorEfetivo` em memória; persistido junto
+      // com encontro_pve no save abaixo, que já é obrigatório de
+      // qualquer jeito.
+      sincronizarRegeneracaoDeVida(character, jogadorEfetivo);
+
+      const inimigo = gerarInimigo(jogadorEfetivo);
+
+      // Snapshot dos atributos ESTRUTURAIS do personagem no exato momento
+      // em que o encontro começa (força/vitalidade/etc já com bônus de
+      // equipamento, arma equipada, defesa, multiplicadores de classe) —
+      // sem isso, /combat/action recalculava esses valores A CADA TURNO a
+      // partir do equipamento ATUAL, e o inimigo continuava calibrado pro
+      // equipamento de quando foi gerado: trocar pra um equipamento mais
+      // fraco só pra gerar um inimigo fácil e depois voltar ao
+      // equipamento forte pra lutar (ou o inverso) virava trivial. Só HP/
+      // mana atuais continuam vivos/atualizáveis turno a turno — o resto
+      // fica congelado até o encontro terminar (vitória ou derrota).
+      const statsPersonagem = {
+        nivel: character.nivel,
+        forca: jogadorEfetivo.forca,
+        vitalidade: jogadorEfetivo.vitalidade,
+        agilidade: jogadorEfetivo.agilidade,
+        inteligencia: jogadorEfetivo.inteligencia,
+        velocidade: jogadorEfetivo.velocidade,
+        defesa: jogadorEfetivo.defesa,
+        arma_equipada: jogadorEfetivo.arma_equipada,
+        multiplicador_vida_por_nivel: jogadorEfetivo.multiplicador_vida_por_nivel,
+        multiplicador_mana_por_nivel: jogadorEfetivo.multiplicador_mana_por_nivel,
+        multiplicador_dano_fisico: jogadorEfetivo.multiplicador_dano_fisico,
+        multiplicador_dano_magico: jogadorEfetivo.multiplicador_dano_magico,
+      };
+
+      character.encontro_pve = { ...inimigo, criadoEm: Date.now(), statsPersonagem };
+      await character.save({ transaction });
+
+      res.status(200).json({
         status: "success",
-        data: { enemy: inimigoAtual },
+        data: {
+          enemy: inimigo,
+        },
       });
-    }
-
-    // Não dá pra abrir uma Aventura nova com um Portal de Ranque em
-    // andamento — mesma exclusão mútua que o Portal já aplica no
-    // sentido contrário (ver rankGateController.iniciarPortal).
-    if (encontroDoCampoValido(character, "encontro_rank_gate")) {
-      return res.status(409).json({
-        message: "Termine o combate do Portal de Ranque em andamento antes de partir para a Aventura.",
-      });
-    }
-
-    const bonusEquipamento = await buscarBonusDeAtributos(character.id);
-    const jogadorEfetivo = comMultiplicadoresDeClasse(
-      personagemComBonus(character.toJSON(), bonusEquipamento),
-      character.Class,
-    );
-
-    // Aplica a regeneração passiva acumulada antes de calibrar/entrar
-    // em combate — sem isso, um jogador que ficou horas offline entrava
-    // na luta com a vida velha (baixa), mesmo já tendo regenerado.
-    if (sincronizarRegeneracaoDeVida(character, jogadorEfetivo)) {
-      await character.save();
-    }
-
-    const inimigo = gerarInimigo(jogadorEfetivo);
-
-    // Snapshot dos atributos ESTRUTURAIS do personagem no exato momento
-    // em que o encontro começa (força/vitalidade/etc já com bônus de
-    // equipamento, arma equipada, defesa, multiplicadores de classe) —
-    // sem isso, /combat/action recalculava esses valores A CADA TURNO a
-    // partir do equipamento ATUAL, e o inimigo continuava calibrado pro
-    // equipamento de quando foi gerado: trocar pra um equipamento mais
-    // fraco só pra gerar um inimigo fácil e depois voltar ao
-    // equipamento forte pra lutar (ou o inverso) virava trivial. Só HP/
-    // mana atuais continuam vivos/atualizáveis turno a turno — o resto
-    // fica congelado até o encontro terminar (vitória ou derrota).
-    const statsPersonagem = {
-      nivel: character.nivel,
-      forca: jogadorEfetivo.forca,
-      vitalidade: jogadorEfetivo.vitalidade,
-      agilidade: jogadorEfetivo.agilidade,
-      inteligencia: jogadorEfetivo.inteligencia,
-      velocidade: jogadorEfetivo.velocidade,
-      defesa: jogadorEfetivo.defesa,
-      arma_equipada: jogadorEfetivo.arma_equipada,
-      multiplicador_vida_por_nivel: jogadorEfetivo.multiplicador_vida_por_nivel,
-      multiplicador_mana_por_nivel: jogadorEfetivo.multiplicador_mana_por_nivel,
-      multiplicador_dano_fisico: jogadorEfetivo.multiplicador_dano_fisico,
-      multiplicador_dano_magico: jogadorEfetivo.multiplicador_dano_magico,
-    };
-
-    character.encontro_pve = { ...inimigo, criadoEm: Date.now(), statsPersonagem };
-    await character.save();
-
-    res.status(200).json({
-      status: "success",
-      data: {
-        enemy: inimigo,
-      },
     });
   } catch (error) {
     console.error("Erro ao gerar inimigo:", error);
