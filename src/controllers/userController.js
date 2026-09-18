@@ -78,7 +78,12 @@ exports.registerUser = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("Erro ao registrar usuário:", error);
+    // Usuário tentando um username/e-mail que já existe é uma entrada
+    // inválida esperada, não uma falha do servidor — sem essa checagem
+    // ANTES do console.error, todo registro rejeitado (o caso mais comum
+    // de erro aqui) despejava o stack trace inteiro do driver do
+    // Postgres/Sequelize no log, poluindo tudo com "erros" que na
+    // verdade já foram tratados e responderam certo pro cliente.
     if (error.name === "SequelizeUniqueConstraintError") {
       return res
         .status(409)
@@ -89,6 +94,7 @@ exports.registerUser = async (req, res) => {
         message: error.errors.map((validationError) => validationError.message),
       });
     }
+    console.error("Erro ao registrar usuário:", error);
     res.status(500).json({ message: "Erro interno do servidor ao registrar." });
   }
 };
