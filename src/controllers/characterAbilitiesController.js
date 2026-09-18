@@ -10,6 +10,8 @@ const {
   NIVEL_MAXIMO_HABILIDADE,
   custoParaEvoluir,
   marcoDoNivel,
+  multiplicadorEfeito,
+  multiplicadorCustoMana,
 } = require("../services/abilityLevelService");
 
 // Sem essas associações, qualquer include: [{model: Character}, {model: Power}]
@@ -75,11 +77,34 @@ exports.getAllCharacterAbilities = async (req, res) => {
         { model: Power }, // Inclui todos os dados do poder (dano, cura, custo de mana etc.)
       ],
     });
+
+    // dano_base/cura_base/custo_mana aqui já saem com o multiplicador do
+    // nível da habilidade aplicado (mesmo critério de
+    // characterController.montarEntrada) — esta é a lista que a tela de
+    // combate (CombatArena.tsx/RankGatePanel.tsx) usa pros botões de
+    // poder, então sem isso o número mostrado ali nunca batia com o que
+    // combatController.js de fato aplicava (que já usa
+    // custoManaEfetivo/calcularEfeitoPoder com o nível certo).
+    const comEfeitoAjustado = characterAbilities.map((linha) => {
+      const plano = linha.get({ plain: true });
+      if (!plano.Power) return plano;
+      const multiplicador = multiplicadorEfeito(plano.nivel_habilidade);
+      return {
+        ...plano,
+        Power: {
+          ...plano.Power,
+          custo_mana: Math.round(plano.Power.custo_mana * multiplicadorCustoMana(plano.nivel_habilidade)),
+          dano_base: plano.Power.dano_base ? Math.round(plano.Power.dano_base * multiplicador) : plano.Power.dano_base,
+          cura_base: plano.Power.cura_base ? Math.round(plano.Power.cura_base * multiplicador) : plano.Power.cura_base,
+        },
+      };
+    });
+
     res.status(200).json({
       status: "success",
-      results: characterAbilities.length,
+      results: comEfeitoAjustado.length,
       data: {
-        characterAbilities,
+        characterAbilities: comEfeitoAjustado,
       },
     });
   } catch (error) {

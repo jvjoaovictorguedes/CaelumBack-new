@@ -30,6 +30,8 @@ const {
   NIVEL_MAXIMO_HABILIDADE,
   custoParaEvoluir,
   marcoDoNivel,
+  multiplicadorEfeito,
+  multiplicadorCustoMana,
 } = require("../services/abilityLevelService");
 const { requisitoDaClasse } = require("../services/classEvolutionService");
 const { sincronizarRegeneracaoDeVida, msAteRegenCompleta } = require("../services/regenService");
@@ -650,14 +652,22 @@ exports.getPoderesDisponiveis = async (req, res) => {
     function montarEntrada(poder, nivelNecessario, origem) {
       const linhaAprendida = aprendidoPorPoder.get(poder.id);
       const nivelHabilidade = linhaAprendida?.nivel_habilidade ?? 1;
+      // Mostra o valor JÁ COM o multiplicador do nível da habilidade
+      // aplicado (mesmo multiplicadorEfeito/multiplicadorCustoMana que
+      // combatFormulas.calcularEfeitoPoder/custoManaEfetivo usam de
+      // verdade no combate) — sem isso a tela sempre mostrava o
+      // dano_base/cura_base/custo_mana CRU da tabela Power, então
+      // evoluir a habilidade nunca parecia mudar nada aqui, mesmo o
+      // combate já aplicando o bônus corretamente por baixo dos panos.
+      const multiplicador = multiplicadorEfeito(nivelHabilidade);
       return {
         id_power: poder.id,
         nome: poder.nome,
         descricao: poder.descricao,
         tipo_poder: poder.tipo_poder,
-        custo_mana: poder.custo_mana,
-        dano_base: poder.dano_base,
-        cura_base: poder.cura_base,
+        custo_mana: Math.round(poder.custo_mana * multiplicadorCustoMana(nivelHabilidade)),
+        dano_base: poder.dano_base ? Math.round(poder.dano_base * multiplicador) : poder.dano_base,
+        cura_base: poder.cura_base ? Math.round(poder.cura_base * multiplicador) : poder.cura_base,
         cooldown: poder.cooldown,
         escala_atributo: poder.escala_atributo,
         valor_escala: poder.valor_escala,
