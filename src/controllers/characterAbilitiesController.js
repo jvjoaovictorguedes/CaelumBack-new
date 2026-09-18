@@ -1,7 +1,16 @@
 // src/controllers/characterAbilitiesController.js
+const { sequelize } = require("../config/database");
 const CharacterAbilities = require("../models/CharacterAbilities");
 const Character = require("../models/Character"); // Importa Character para inclusão
 const Power = require("../models/Power"); // Importa Power para inclusão
+const Item = require("../models/Item");
+const CharacterInventory = require("../models/CharacterInventory");
+const {
+  NOME_ITEM_FRAGMENTO,
+  NIVEL_MAXIMO_HABILIDADE,
+  custoParaEvoluir,
+  marcoDoNivel,
+} = require("../services/abilityLevelService");
 
 // Sem essas associações, qualquer include: [{model: Character}, {model: Power}]
 // abaixo derruba a chamada com "CharacterAbilities is not associated to X!".
@@ -198,6 +207,106 @@ exports.toggleCharacterAbility = async (req, res) => {
     res
       .status(500)
       .json({ message: "Erro interno do servidor ao alternar habilidade." });
+  }
+};
+
+// Evoluir uma habilidade já aprendida de nível 1 até NIVEL_MAXIMO_HABILIDADE
+// (10) — gasta ouro do personagem + Fragmento de Grimório do inventário
+// (ver abilityLevelService.js pra tabela de custo/efeito). Tudo dentro de
+// uma transaction com lock nas duas linhas que perdem recurso (Character
+// e a entrada do fragmento no inventário) — mesmo padrão de
+// characterInventoryController/marketController pra não permitir gastar
+// o mesmo ouro/fragmento duas vezes com dois cliques rápidos.
+exports.evolveCharacterAbility = async (req, res) => {
+  try {
+    // Sequelize não deixa combinar `lock` com `include` (o JOIN vira LEFT
+    // OUTER, que o Postgres recusa com FOR UPDATE) — mesma restrição já
+    // contornada em market/characterInventoryController: busca sem lock
+    // só pra achar o dono/o poder, e trava cada linha que perde recurso
+    // separadamente, na ordem em que são lidas.
+    const characterAbilityInfo = await CharacterAbilities.findByPk(req.params.id, {
+      include: [
+        { model: Character, attributes: ["id", "id_usuario"] },
+        { model: Power, attributes: ["id", "nome"] },
+      ],
+    });
+    if (!characterAbilityInfo) {
+      return res.status(404).json({ message: "Habilidade de personagem não encontrada." });
+    }
+    if (characterAbilityInfo.Character?.id_usuario !== req.user.id) {
+      return res.status(403).json({ message: "Essa habilidade não pertence a você." });
+    }
+
+    const nomePoder = characterAbilityInfo.Power?.nome ?? "Esta habilidade";
+    const idPersonagem = characterAbilityInfo.id_personagem;
+
+    const resultado = await sequelize.transaction(async (transaction) => {
+      const characterAbility = await CharacterAbilities.findByPk(req.params.id, {
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+
+      const custo = custoParaEvoluir(characterAbility.nivel_habilidade);
+      if (!custo) {
+        return { erro: { status: 400, message: `${nomePoder} já está no nível máximo.` } };
+      }
+
+      const personagem = await Character.findByPk(idPersonagem, {
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+      if (personagem.dinheiro < custo.ouro) {
+        return { erro: { status: 400, message: "Ouro insuficiente para evoluir essa habilidade." } };
+      }
+
+      const itemFragmento = await Item.findOne({ where: { nome: NOME_ITEM_FRAGMENTO }, transaction });
+      const entradaFragmento = itemFragmento
+        ? await CharacterInventory.findOne({
+            where: { id_personagem: idPersonagem, id_item: itemFragmento.id },
+            transaction,
+            lock: transaction.LOCK.UPDATE,
+          })
+        : null;
+
+      if (!entradaFragmento || entradaFragmento.quantidade < custo.fragmentos) {
+        return {
+          erro: {
+            status: 400,
+            message: `Você precisa de ${custo.fragmentos}x ${NOME_ITEM_FRAGMENTO} pra evoluir essa habilidade.`,
+          },
+        };
+      }
+
+      personagem.dinheiro -= custo.ouro;
+      entradaFragmento.quantidade -= custo.fragmentos;
+      characterAbility.nivel_habilidade += 1;
+
+      await personagem.save({ transaction });
+      if (entradaFragmento.quantidade > 0) {
+        await entradaFragmento.save({ transaction });
+      } else {
+        await entradaFragmento.destroy({ transaction });
+      }
+      await characterAbility.save({ transaction });
+
+      return { characterAbility };
+    });
+
+    if (resultado.erro) {
+      return res.status(resultado.erro.status).json({ message: resultado.erro.message });
+    }
+
+    res.status(200).json({
+      status: "success",
+      data: {
+        characterAbility: resultado.characterAbility,
+        marco: marcoDoNivel(resultado.characterAbility.nivel_habilidade),
+        proxima_evolucao: custoParaEvoluir(resultado.characterAbility.nivel_habilidade),
+      },
+    });
+  } catch (error) {
+    console.error("Erro ao evoluir habilidade de personagem:", error);
+    res.status(500).json({ message: "Erro interno do servidor ao evoluir habilidade." });
   }
 };
 

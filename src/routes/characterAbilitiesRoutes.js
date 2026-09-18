@@ -24,4 +24,9 @@ router
 // do controller).
 router.patch("/:id/toggle", authMiddleware, characterAbilitiesController.toggleCharacterAbility);
 
+// Evoluir o nível da habilidade (1→10, gastando ouro + Fragmento de
+// Grimório) — dono do personagem, não precisa ser admin (mesma validação
+// de ownership do toggle, dentro do controller).
+router.post("/:id/evolve", authMiddleware, characterAbilitiesController.evolveCharacterAbility);
+
 module.exports = router;

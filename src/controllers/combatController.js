@@ -20,6 +20,7 @@ const {
   calcularDanoBasico,
   aplicarMitigacaoDeDefesa,
   calcularEfeitoPoder,
+  custoManaEfetivo,
   chanceDeEsquiva,
   vidaMaximaDe,
   manaMaximaDe,
@@ -330,6 +331,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
     // ==========================================================
 
     let poderUsado = null;
+    let nivelHabilidadeUsada = 1;
 
     if (action.type === "power") {
       poderUsado = await Power.findByPk(action.powerId);
@@ -370,9 +372,11 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
         });
       }
 
+      nivelHabilidadeUsada = aprendeu.nivel_habilidade;
+
       if (
         personagemAtual.mana_atual <
-        poderUsado.custo_mana
+        custoManaEfetivo(poderUsado, nivelHabilidadeUsada)
       ) {
         return res.status(400).json({
           message: "Mana insuficiente.",
@@ -423,12 +427,13 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
 
     if (poderUsado) {
       personagemAtual.mana_atual -=
-        poderUsado.custo_mana;
+        custoManaEfetivo(poderUsado, nivelHabilidadeUsada);
 
       const { dano, cura } =
         calcularEfeitoPoder(
           poderUsado,
-          personagemAtual
+          personagemAtual,
+          nivelHabilidadeUsada
         );
 
       if (dano > 0) {

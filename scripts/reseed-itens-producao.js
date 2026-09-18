@@ -421,6 +421,10 @@ const MATERIAIS = [
   { nome: "Núcleo Arcano Instável", descricao: "Pulsa fracamente — melhor não carregar muitos ao mesmo tempo.", raridade: "Raro", valor_compra: 0, valor_venda: 35, peso: 0.2, disponivel_loja: false },
   { nome: "Fragmento de Meteorito", descricao: "Ainda um pouco quente, mesmo dias depois de ter caído.", raridade: "Epico", valor_compra: 0, valor_venda: 90, peso: 1.5, disponivel_loja: false },
   { nome: "Pó de Estrela", descricao: "Ninguém sabe explicar de onde vem — só que some se ficar exposto à luz do sol por tempo demais.", raridade: "Lendario", valor_compra: 0, valor_venda: 250, peso: 0.05, disponivel_loja: false },
+  // Recurso do sistema de evolução de habilidades (ver
+  // abilityLevelService.js) — dropa em combate PvE igual qualquer outro
+  // Material, e também circula pelo mercado entre jogadores.
+  { nome: "Fragmento de Grimório", descricao: "Um pedaço de página arrancada, ainda pulsando com o poder de quem a escreveu. Consumido pra evoluir uma habilidade.", raridade: "Raro", valor_compra: 0, valor_venda: 20, peso: 0.05, disponivel_loja: false },
 ];
 
 async function limparTudo(transaction) {

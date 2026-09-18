@@ -20,6 +20,7 @@ const {
   calcularDanoBasico,
   aplicarMitigacaoDeDefesa,
   calcularEfeitoPoder,
+  custoManaEfetivo,
   chanceDeEsquiva,
   vidaMaximaDe,
   manaMaximaDe,
@@ -285,6 +286,7 @@ exports.atacarPortal = async (req, res) => {
       }
 
       let poderUsado = null;
+      let nivelHabilidadeUsada = 1;
       if (action.type === "power") {
         poderUsado = await Power.findByPk(action.powerId);
         if (!poderUsado) {
@@ -302,7 +304,8 @@ exports.atacarPortal = async (req, res) => {
         if (poderUsado.tipo_poder !== "Ativo") {
           return res.status(403).json({ message: "Este poder não pode ser usado manualmente em combate." });
         }
-        if (personagemAtual.mana_atual < poderUsado.custo_mana) {
+        nivelHabilidadeUsada = aprendeu.nivel_habilidade;
+        if (personagemAtual.mana_atual < custoManaEfetivo(poderUsado, nivelHabilidadeUsada)) {
           return res.status(400).json({ message: "Mana insuficiente." });
         }
       }
@@ -331,8 +334,8 @@ exports.atacarPortal = async (req, res) => {
 
       // ================= TURNO DO JOGADOR =================
       if (poderUsado) {
-        personagemAtual.mana_atual -= poderUsado.custo_mana;
-        const { dano, cura } = calcularEfeitoPoder(poderUsado, personagemAtual);
+        personagemAtual.mana_atual -= custoManaEfetivo(poderUsado, nivelHabilidadeUsada);
+        const { dano, cura } = calcularEfeitoPoder(poderUsado, personagemAtual, nivelHabilidadeUsada);
         if (dano > 0) {
           if (chanceDeEsquiva(chefeAtual, personagemAtual)) {
             log.push(`${chefeAtual.nome} esquivou de ${poderUsado.nome}!`);

@@ -8,6 +8,7 @@ const User = require("../models/User");
 const Race = require("../models/Race");
 const Class = require("../models/Class");
 const Item = require("../models/Item");
+const CharacterInventory = require("../models/CharacterInventory");
 const CharacterEquipment = require("../models/CharacterEquipment");
 const ClassAbilities = require("../models/ClassAbilities");
 const RaceAbilities = require("../models/RaceAbilities");
@@ -24,6 +25,12 @@ const {
   comMultiplicadoresDeClasse,
 } = require("../services/combatFormulas");
 const { sortearNaturezaMagica } = require("../services/naturezaMagicaService");
+const {
+  NOME_ITEM_FRAGMENTO,
+  NIVEL_MAXIMO_HABILIDADE,
+  custoParaEvoluir,
+  marcoDoNivel,
+} = require("../services/abilityLevelService");
 const { sincronizarRegeneracaoDeVida, msAteRegenCompleta } = require("../services/regenService");
 const {
   PROPOSITO_RACA,
@@ -501,7 +508,7 @@ exports.updateCharacter = async (req, res) => {
 exports.getPoderesDisponiveis = async (req, res) => {
   try {
     const character = await Character.findByPk(req.params.id, {
-      attributes: ["id", "id_classe", "id_raca", "nivel"],
+      attributes: ["id", "id_classe", "id_raca", "nivel", "dinheiro"],
     });
     if (!character) {
       return res.status(404).json({ message: "Personagem não encontrado." });
@@ -513,7 +520,7 @@ exports.getPoderesDisponiveis = async (req, res) => {
     // carregado desde subir de nível.
     await concederPoderesIniciais(character);
 
-    const [poderesClasse, poderesRaca, aprendidos] = await Promise.all([
+    const [poderesClasse, poderesRaca, aprendidos, itemFragmento] = await Promise.all([
       ClassAbilities.findAll({
         where: { id_classe: character.id_classe },
         include: [{ model: Power }],
@@ -525,7 +532,16 @@ exports.getPoderesDisponiveis = async (req, res) => {
       CharacterAbilities.findAll({
         where: { id_personagem: character.id },
       }),
+      Item.findOne({ where: { nome: NOME_ITEM_FRAGMENTO } }),
     ]);
+
+    const fragmentosDisponiveis = itemFragmento
+      ? (
+          await CharacterInventory.findOne({
+            where: { id_personagem: character.id, id_item: itemFragmento.id },
+          })
+        )?.quantidade ?? 0
+      : 0;
 
     const aprendidoPorPoder = new Map(
       aprendidos.map((linha) => [linha.id_power, linha]),
@@ -533,6 +549,7 @@ exports.getPoderesDisponiveis = async (req, res) => {
 
     function montarEntrada(poder, nivelNecessario, origem) {
       const linhaAprendida = aprendidoPorPoder.get(poder.id);
+      const nivelHabilidade = linhaAprendida?.nivel_habilidade ?? 1;
       return {
         id_power: poder.id,
         nome: poder.nome,
@@ -550,6 +567,12 @@ exports.getPoderesDisponiveis = async (req, res) => {
         aprendido: Boolean(linhaAprendida),
         ativo: linhaAprendida?.is_active ?? false,
         id_character_ability: linhaAprendida?.id ?? null,
+        // Nível 1-10 da habilidade em si (ver abilityLevelService.js) —
+        // só faz sentido pra quem já aprendeu o poder.
+        nivel_habilidade: linhaAprendida ? nivelHabilidade : null,
+        nivel_maximo_habilidade: NIVEL_MAXIMO_HABILIDADE,
+        marco_atual: linhaAprendida ? marcoDoNivel(nivelHabilidade) : null,
+        proxima_evolucao: linhaAprendida ? custoParaEvoluir(nivelHabilidade) : null,
       };
     }
 
@@ -564,7 +587,14 @@ exports.getPoderesDisponiveis = async (req, res) => {
 
     res.status(200).json({
       status: "success",
-      data: { poderes },
+      data: {
+        poderes,
+        recursos_evolucao: {
+          ouro: character.dinheiro,
+          fragmentos: fragmentosDisponiveis,
+          nome_fragmento: NOME_ITEM_FRAGMENTO,
+        },
+      },
     });
   } catch (error) {
     console.error("Erro ao buscar poderes disponíveis:", error);

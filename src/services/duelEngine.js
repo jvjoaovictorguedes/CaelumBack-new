@@ -9,11 +9,15 @@
 const {
   calcularDanoBasico,
   calcularEfeitoPoder,
+  custoManaEfetivo,
   aplicarMitigacaoDeDefesa,
   chanceDeEsquiva,
 } = require("./combatFormulas");
 
-// acao: { tipo: "attack" } ou { tipo: "power", power: <Power> }
+// acao: { tipo: "attack" } ou { tipo: "power", power: <Power> }. Quando o
+// poder vem de buscarPoderesDoPersonagem (pvpController.js) ele já traz
+// `power.nivel_habilidade` grudado — sem isso o duelo assíncrono e o PVP
+// ao vivo ignorariam totalmente o nível investido na habilidade.
 function aplicarAcao({ atacante, defensor, acao, vidaMaxAtacante }) {
   let dano = 0;
   let cura = 0;
@@ -21,9 +25,10 @@ function aplicarAcao({ atacante, defensor, acao, vidaMaxAtacante }) {
   let nomeAcao = "Ataque básico";
 
   if (acao.tipo === "power" && acao.power) {
+    const nivelHabilidade = acao.power.nivel_habilidade ?? 1;
     nomeAcao = acao.power.nome;
-    atacante.mana_atual -= acao.power.custo_mana;
-    const efeito = calcularEfeitoPoder(acao.power, atacante);
+    atacante.mana_atual -= custoManaEfetivo(acao.power, nivelHabilidade);
+    const efeito = calcularEfeitoPoder(acao.power, atacante, nivelHabilidade);
     dano = efeito.dano;
     cura = efeito.cura;
   }

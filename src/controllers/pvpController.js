@@ -20,6 +20,7 @@ const {
   vidaMaximaDe,
   manaMaximaDe,
   comMultiplicadoresDeClasse,
+  custoManaEfetivo,
 } = require("../services/combatFormulas");
 const { aplicarAcao } = require("../services/duelEngine");
 const {
@@ -63,9 +64,14 @@ async function buscarPoderesDoPersonagem(idPersonagem) {
   // assíncrono e a ação escolhida pelo jogador no PvP ao vivo) também
   // enxergava poderes passivos como "usáveis" — o combate PvE sempre
   // barrou isso explicitamente, mas nada correspondente existia no PvP.
+  //
+  // `nivel_habilidade` grudado no objeto plano do Power (não no model
+  // Sequelize) — é o único jeito de carregar o nível investido até
+  // duelEngine.aplicarAcao sem esse precisar saber nada de
+  // CharacterAbilities.
   return habilidades
-    .map((h) => h.Power)
-    .filter((poder) => poder && poder.tipo_poder === "Ativo");
+    .filter((h) => h.Power && h.Power.tipo_poder === "Ativo")
+    .map((h) => ({ ...h.Power.get({ plain: true }), nivel_habilidade: h.nivel_habilidade }));
 }
 
 // Escolhe a ação de cada turno: usa o poder ofensivo mais forte que
@@ -77,7 +83,9 @@ async function buscarPoderesDoPersonagem(idPersonagem) {
 // dois personagens, em vez de sempre repetir a mesma sequência ótima.
 function escolherAcao(personagemAtual, poderes) {
   const usaveis = poderes.filter(
-    (p) => p.custo_mana <= personagemAtual.mana_atual && p.dano_base > 0,
+    (p) =>
+      custoManaEfetivo(p, p.nivel_habilidade ?? 1) <= personagemAtual.mana_atual &&
+      p.dano_base > 0,
   );
   if (usaveis.length === 0) return { tipo: "attack" };
 

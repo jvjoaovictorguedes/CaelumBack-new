@@ -18,6 +18,7 @@ const {
   vidaMaximaDe,
   manaMaximaDe,
   comMultiplicadoresDeClasse,
+  custoManaEfetivo,
 } = require("../services/combatFormulas");
 const { aplicarAcao } = require("../services/duelEngine");
 const { buscarPoderesDoPersonagem, aplicarResultadoDuelo } = require("../controllers/pvpController");
@@ -100,9 +101,10 @@ function poderesPublicos(poderes) {
   return poderes.map((p) => ({
     id: p.id,
     nome: p.nome,
-    custo_mana: p.custo_mana,
+    custo_mana: custoManaEfetivo(p, p.nivel_habilidade ?? 1),
     dano_base: p.dano_base,
     cura_base: p.cura_base,
+    nivel_habilidade: p.nivel_habilidade ?? 1,
   }));
 }
 
@@ -312,7 +314,7 @@ module.exports = function registerPvpLiveHandlers(io) {
         if (power.tipo_poder !== "Ativo") {
           return socket.emit("pvp:erro", { mensagem: "Este poder não pode ser usado manualmente em combate." });
         }
-        if (power.custo_mana > lutadorAtacante.estado.mana_atual) {
+        if (custoManaEfetivo(power, power.nivel_habilidade ?? 1) > lutadorAtacante.estado.mana_atual) {
           return socket.emit("pvp:erro", { mensagem: "Mana insuficiente para esse poder." });
         }
         acao = { tipo: "power", power };

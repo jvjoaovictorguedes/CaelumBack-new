@@ -36,6 +36,15 @@ const CharacterAbilities = sequelize.define("CharacterAbilities", {
     defaultValue: false,
     allowNull: false,
   },
+  // Nível da HABILIDADE em si (1 a 10, ver abilityLevelService.js) — não
+  // confundir com level_learned (nível do PERSONAGEM quando ela foi
+  // liberada). Evolui gastando ouro + Fragmento de Grimório, deixando o
+  // mesmo poder mais forte pro personagem que investir nele.
+  nivel_habilidade: {
+    type: DataTypes.INTEGER,
+    defaultValue: 1,
+    allowNull: false,
+  },
 }, {
   indexes: [
     {

@@ -2,6 +2,11 @@
 // (pvpController). Mantidas num só lugar pra não desbalancear um sem
 // perceber que o outro também mudou.
 
+const {
+  multiplicadorEfeito: multiplicadorEfeitoPorNivelHabilidade,
+  multiplicadorCustoMana: multiplicadorCustoManaPorNivelHabilidade,
+} = require("./abilityLevelService");
+
 const ATRIBUTO_PARA_CAMPO = {
   Forca: "forca",
   Vitalidade: "vitalidade",
@@ -85,25 +90,48 @@ function calcularDanoBasico(atacante) {
   return Math.max(1, Math.round(base * variacao * multiplicador));
 }
 
-function calcularEfeitoPoder(power, personagem) {
+// `nivelHabilidade` (1 a 10, default 1 pra quem chama sem passar nada —
+// ex.: inimigo de PvE, que não tem CharacterAbilities) vem de
+// abilityLevelService.js: cada nível investido multiplica dano/cura por
+// cima de tudo (atributo, bônus de nível de personagem, classe).
+function calcularEfeitoPoder(power, personagem, nivelHabilidade = 1) {
   const campoAtributo = ATRIBUTO_PARA_CAMPO[power.escala_atributo] || "forca";
   const valorAtributo = personagem[campoAtributo] || 0;
   const variacao = 0.9 + Math.random() * 0.2;
   const bonusNivel = bonusPorNivel(personagem, DANO_MAGICO_BASE_POR_NIVEL);
+  const multiplicadorNivelHabilidade = multiplicadorEfeitoPorNivelHabilidade(nivelHabilidade);
   // multiplicador_dano_magico só afeta o dano do poder, não a cura —
   // um mago forte em dano não devia automaticamente curar mais forte
   // só por isso.
   const multiplicadorMagico = personagem.multiplicador_dano_magico ?? 1;
 
   const dano = power.dano_base
-    ? Math.round((power.dano_base + valorAtributo * power.valor_escala + bonusNivel) * variacao * multiplicadorMagico)
+    ? Math.round(
+        (power.dano_base + valorAtributo * power.valor_escala + bonusNivel) *
+          variacao *
+          multiplicadorMagico *
+          multiplicadorNivelHabilidade,
+      )
     : 0;
 
   const cura = power.cura_base
-    ? Math.round((power.cura_base + valorAtributo * power.valor_escala + bonusNivel) * variacao)
+    ? Math.round(
+        (power.cura_base + valorAtributo * power.valor_escala + bonusNivel) *
+          variacao *
+          multiplicadorNivelHabilidade,
+      )
     : 0;
 
   return { dano, cura };
+}
+
+// Custo de mana efetivo da habilidade, já considerando o desconto que os
+// marcos de nível 5/10 dão (ver abilityLevelService.js) — usado tanto pra
+// checar "tem mana suficiente?" quanto pra descontar de verdade, sempre
+// os dois com a MESMA conta (senão um poder nível 10 mais barato podia
+// ficar bloqueado por um check que ainda olhava o custo cheio).
+function custoManaEfetivo(power, nivelHabilidade = 1) {
+  return Math.round(power.custo_mana * multiplicadorCustoManaPorNivelHabilidade(nivelHabilidade));
 }
 
 // Constante de "diminishing returns" da mitigação por defesa — cada
@@ -168,6 +196,7 @@ module.exports = {
   calcularDanoBasico,
   danoBasicoEsperado,
   calcularEfeitoPoder,
+  custoManaEfetivo,
   aplicarMitigacaoDeDefesa,
   chanceDeEsquiva,
   vidaMaximaDe,
