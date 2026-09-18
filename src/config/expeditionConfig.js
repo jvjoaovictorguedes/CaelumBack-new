@@ -91,8 +91,14 @@ function aplicarTetoDeQualidade(quantidadeBase, qualidade) {
 
 // Duração mínima entre duas coletas da MESMA profissão, em ms —
 // persistida no banco (character_professions.proxima_coleta_em), não
-// em memória (seção 14).
-const TEMPO_COLETA_MS = 6000;
+// em memória (seção 14). Independente por profissão: coletar em
+// Mineração só bloqueia novas coletas em Mineração, nunca em
+// Silvicultura/Exploração (cada uma tem sua própria linha em
+// character_professions com seu próprio proxima_coleta_em).
+//
+// Baixado pra 3s a pedido do jogador pra agilizar teste no beta —
+// reverter pra um valor de produção antes do lançamento de verdade.
+const TEMPO_COLETA_MS = 3000;
 
 module.exports = {
   NIVEL_MAXIMO,
