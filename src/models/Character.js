@@ -75,6 +75,24 @@ const Character = sequelize.define("Character", {
     type: DataTypes.DATE,
     allowNull: true,
   },
+  // Combate do Portal de Ranque em andamento — mesmo raciocínio de
+  // encontro_pve (persistido, não só em memória), mas separado dele:
+  // um personagem pode ter os dois campos com valores diferentes se
+  // fizer sentido no futuro, e as regras de vitória/derrota do portal
+  // (pontos, dificuldade) são diferentes das da Aventura comum.
+  encontro_rank_gate: {
+    type: DataTypes.JSONB,
+    allowNull: true,
+  },
+  // Progresso acumulado pra vencer o portal do ranque ATUAL — zera
+  // sempre que promove de ranque. Vencer no Fácil dá poucos pontos,
+  // Muito Difícil dá o suficiente pra promover numa luta só (ver
+  // PONTOS_POR_DIFICULDADE em rankGateService.js).
+  pontos_portal_atual: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    defaultValue: 0,
+  },
   forca: {
     type: DataTypes.INTEGER,
     allowNull: false,

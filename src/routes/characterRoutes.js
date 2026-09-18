@@ -46,15 +46,20 @@ router
   .route("/:id/evolutions/:evolutionId/purchase")
   .post(authMiddleware, exigirDonoDoPersonagem("id"), characterController.comprarEvolucao);
 
-// Portal de Ranque — chefe fixo do ranque atual, vencer promove pro
-// próximo da escada (ver rankService.js/rankGateController.js).
+// Portal de Ranque — combate interativo (dificuldade escolhida pelo
+// jogador, turno a turno) contra o chefe do ranque atual; promove só
+// depois de acumular pontos suficientes (ver rankGateService.js).
 router
   .route("/:id/rank-gate")
   .get(authMiddleware, exigirDonoOuAdmin("id"), rankGateController.getPortalAtual);
 
 router
-  .route("/:id/rank-gate/attempt")
-  .post(authMiddleware, exigirDonoDoPersonagem("id"), rankGateController.tentarPortal);
+  .route("/:id/rank-gate/start")
+  .post(authMiddleware, exigirDonoDoPersonagem("id"), rankGateController.iniciarPortal);
+
+router
+  .route("/:id/rank-gate/action")
+  .post(authMiddleware, exigirDonoDoPersonagem("id"), rankGateController.atacarPortal);
 
 // Missões diárias/únicas — catálogo fixo (ver seeder), progresso
 // individual por personagem (ver missionService.js).
