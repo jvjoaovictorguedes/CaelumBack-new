@@ -22,6 +22,11 @@ const MarketListing = require("./MarketListing");
 const CraftingRecipe = require("./CraftingRecipe");
 const CraftingRecipeIngredient = require("./CraftingRecipeIngredient");
 const CharacterCraftingQueue = require("./CharacterCraftingQueue");
+const CharacterProfession = require("./CharacterProfession");
+const ExpeditionRegion = require("./ExpeditionRegion");
+const ExpeditionResource = require("./ExpeditionResource");
+const ExpeditionRegionResource = require("./ExpeditionRegionResource");
+const ExpeditionResourceItem = require("./ExpeditionResourceItem");
 
 Item.hasOne(WeaponProperties, { foreignKey: "id_item", as: "weaponProperties" });
 WeaponProperties.belongsTo(Item, { foreignKey: "id_item" });
@@ -54,5 +59,15 @@ CraftingRecipe.hasMany(CraftingRecipeIngredient, { foreignKey: "id_receita", as:
 CraftingRecipeIngredient.belongsTo(CraftingRecipe, { foreignKey: "id_receita" });
 CraftingRecipeIngredient.belongsTo(Item, { foreignKey: "id_item_material", as: "material" });
 CharacterCraftingQueue.belongsTo(CraftingRecipe, { foreignKey: "id_receita", as: "receita" });
+
+// Expedição — região tem N recursos possíveis (peso relativo), cada
+// recurso tem até 6 Items (1 por qualidade).
+CharacterProfession.belongsTo(Character, { foreignKey: "id_personagem" });
+ExpeditionRegion.hasMany(ExpeditionRegionResource, { foreignKey: "id_regiao", as: "recursosDaRegiao" });
+ExpeditionRegionResource.belongsTo(ExpeditionRegion, { foreignKey: "id_regiao" });
+ExpeditionRegionResource.belongsTo(ExpeditionResource, { foreignKey: "id_recurso", as: "recurso" });
+ExpeditionResource.hasMany(ExpeditionResourceItem, { foreignKey: "id_recurso", as: "itensPorQualidade" });
+ExpeditionResourceItem.belongsTo(ExpeditionResource, { foreignKey: "id_recurso" });
+ExpeditionResourceItem.belongsTo(Item, { foreignKey: "id_item", as: "item" });
 
 module.exports = {};
