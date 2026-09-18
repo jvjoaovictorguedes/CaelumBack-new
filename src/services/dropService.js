@@ -92,4 +92,4 @@ async function rolarDropDeVitoria(character, inimigo, transaction) {
   return null;
 }
 
-module.exports = { rolarDropDeVitoria };
+module.exports = { rolarDropDeVitoria, concederItem };

@@ -47,6 +47,17 @@ const PONTOS_POR_DIFICULDADE = {
 };
 const PONTOS_NECESSARIOS = 10;
 
+// Fragmento de Grimório garantido a cada chefe derrotado (ver
+// abilityLevelService.js) — diferente do drop de PvE comum (que é por
+// sorte), aqui é certo, e a quantidade acompanha o risco escolhido, dando
+// ao Portal um motivo a mais pra arriscar a dificuldade mais alta além
+// de ouro/xp/pontos de ranque.
+const FRAGMENTOS_POR_DIFICULDADE = {
+  Facil: 1,
+  Dificil: 2,
+  MuitoDificil: 4,
+};
+
 function ehDificuldadeValida(dificuldade) {
   return DIFICULDADES.includes(dificuldade);
 }
@@ -95,6 +106,7 @@ module.exports = {
   MULTIPLICADOR_RECOMPENSA,
   PONTOS_POR_DIFICULDADE,
   PONTOS_NECESSARIOS,
+  FRAGMENTOS_POR_DIFICULDADE,
   ehDificuldadeValida,
   gerarChefeComDificuldade,
   recompensaComDificuldade,

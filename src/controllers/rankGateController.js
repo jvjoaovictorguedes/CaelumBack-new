@@ -40,10 +40,13 @@ const {
   DIFICULDADES,
   PONTOS_POR_DIFICULDADE,
   PONTOS_NECESSARIOS,
+  FRAGMENTOS_POR_DIFICULDADE,
   ehDificuldadeValida,
   gerarChefeComDificuldade,
   recompensaComDificuldade,
 } = require("../services/rankGateService");
+const { concederItem } = require("../services/dropService");
+const { NOME_ITEM_FRAGMENTO } = require("../services/abilityLevelService");
 
 const CAMPO_ENCONTRO = "encontro_rank_gate";
 const COOLDOWN_DERROTA_MS = 5 * 60 * 1000;
@@ -401,6 +404,17 @@ exports.atacarPortal = async (req, res) => {
           resultadoXP = await adicionarExperiencia(character.id, recompensa.xp, { transaction, personagem: character });
         }
         await registrarProgresso(character, "GanharOuro", recompensa.dinheiro, transaction);
+
+        // Fragmento de Grimório garantido por vitória (não é sorteio como
+        // o drop de PvE comum) — dá ao Portal um motivo extra pra arriscar
+        // a dificuldade mais alta, além de ouro/xp/pontos de ranque.
+        const fragmentosGanhos = FRAGMENTOS_POR_DIFICULDADE[dificuldade];
+        const itemFragmento = await Item.findOne({ where: { nome: NOME_ITEM_FRAGMENTO }, transaction });
+        if (itemFragmento) {
+          await concederItem(character.id, itemFragmento.id, fragmentosGanhos, transaction);
+          log.push(`Você encontrou ${fragmentosGanhos}x ${NOME_ITEM_FRAGMENTO}!`);
+        }
+
         await character.save({ transaction });
 
         if (resultadoXP?.niveisGanhos > 0) {
