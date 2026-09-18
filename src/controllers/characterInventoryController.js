@@ -7,6 +7,7 @@ const Class = require("../models/Class");
 const Item = require("../models/Item");
 const ConsumableProperties = require("../models/ConsumableProperties");
 const ArmorProperties = require("../models/ArmorProperties");
+const WeaponProperties = require("../models/WeaponProperties");
 const {
   vidaMaximaDe,
   manaMaximaDe,
@@ -282,8 +283,13 @@ exports.getAllCharacterInventory = async (req, res) => {
           // slot_equipamento é o que diferencia Tronco de Pé (os dois são
           // tipo_item "Armadura") — sem isso a tela de inventário
           // categorizado (Meus Equipamentos) não tinha como separar as
-          // duas seções sem adivinhar.
-          include: [{ model: ArmorProperties, as: "armorProperties", attributes: ["slot_equipamento"] }],
+          // duas seções sem adivinhar. Os bônus/defesa/dano vêm junto pra
+          // dar pro EquipmentPanel mostrar um tooltip com os atributos ao
+          // passar o mouse, sem precisar de uma chamada extra por item.
+          include: [
+            { model: ArmorProperties, as: "armorProperties" },
+            { model: WeaponProperties, as: "weaponProperties" },
+          ],
         },
       ],
     });

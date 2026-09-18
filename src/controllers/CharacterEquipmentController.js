@@ -6,6 +6,7 @@ const Character = require("../models/Character");
 const Class = require("../models/Class");
 const Item = require("../models/Item");
 const ArmorProperties = require("../models/ArmorProperties");
+const WeaponProperties = require("../models/WeaponProperties");
 const {
   buscarBonusDeAtributos,
   personagemComBonus,
@@ -279,7 +280,18 @@ exports.getEquipmentByCharacter = async (req, res) => {
 
     const equipamentos = await CharacterEquipment.findAll({
       where: { id_personagem: req.params.characterId },
-      include: [{ model: Item, as: "item" }],
+      include: [
+        {
+          model: Item,
+          as: "item",
+          // Bônus/defesa/dano vêm junto pro EquipmentPanel mostrar um
+          // tooltip com os atributos ao passar o mouse no item equipado.
+          include: [
+            { model: ArmorProperties, as: "armorProperties" },
+            { model: WeaponProperties, as: "weaponProperties" },
+          ],
+        },
+      ],
     });
 
     return res.status(200).json({
