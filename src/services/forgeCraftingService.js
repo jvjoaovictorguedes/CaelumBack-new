@@ -34,10 +34,18 @@ async function resolverIngredientesResolvidos(blueprint, qualidade, transaction)
       transaction,
     );
     if (!idItem) return null;
+    // Nome do Item de VERDADE (ex.: "Barra de Ferro — Raro" ou "Tronco
+    // de Carvalho — Raro"), não só o nome do recurso base — sem isso a
+    // tela de Fabricação mostrava "Barra de Ferro" pra qualquer
+    // qualidade selecionada, sem deixar claro qual das 6 versões o
+    // jogador precisa ter.
+    const item = await Item.findByPk(idItem, { attributes: ["nome", "imagem_url"], transaction });
     resolvidos.push({
       id_item: idItem,
       quantidade_necessaria: ingrediente.quantidade_base,
       nome_recurso: ingrediente.recurso?.nome,
+      nome_item: item?.nome ?? ingrediente.recurso?.nome,
+      imagem_url: item?.imagem_url ?? null,
       tipo_insumo: ingrediente.tipo_insumo,
     });
   }

@@ -13,7 +13,7 @@ const ExpeditionResource = require("../models/ExpeditionResource");
 const ExpeditionResourceItem = require("../models/ExpeditionResourceItem");
 const CharacterInventory = require("../models/CharacterInventory");
 const Item = require("../models/Item");
-const { TEMPO_COLETA_MS } = require("../config/expeditionConfig");
+const { TEMPO_COLETA_MS, CHANCE_POR_NIVEL_PPM, BASE_SORTEIO, NIVEL_MAXIMO } = require("../config/expeditionConfig");
 const { sortearQualidade, sortearRecurso, sortearQuantidade } = require("./expeditionRollService");
 const { nivelPorXpTotal, xpParaProximoNivel, aplicarGanhoDeXp } = require("./expeditionProgressionService");
 
@@ -59,6 +59,20 @@ async function listarProfissoes(id_personagem) {
     .map(formatarProfissao);
 }
 
+// Tabela de qualidade da Expedição não depende da região, só do nível
+// da profissão (ver expeditionConfig.js) — reaproveitada aqui só pra
+// EXIBIR ao jogador o que ele pode encontrar, nunca pra decidir nada
+// (o sorteio de verdade continua isolado em expeditionRollService.js).
+function chancesDeQualidadePorNivel(nivel) {
+  const nivelValido = Math.max(1, Math.min(NIVEL_MAXIMO, nivel));
+  const chances = CHANCE_POR_NIVEL_PPM[nivelValido] ?? {};
+  const somaPpm = Object.values(chances).reduce((soma, ppm) => soma + ppm, 0);
+  const qualidades = Object.entries(chances)
+    .filter(([, ppm]) => ppm > 0)
+    .map(([qualidade, ppm]) => ({ qualidade, chance_percentual: ppm / 10_000 }));
+  return { qualidades, chance_nada_percentual: (BASE_SORTEIO - somaPpm) / 10_000 };
+}
+
 async function listarRegioes(id_personagem, profissaoFiltro) {
   const profissoes = await garantirProfissoes(id_personagem);
   const nivelPorProfissao = new Map(profissoes.map((p) => [p.tipo, nivelPorXpTotal(p.experiencia)]));
@@ -66,10 +80,29 @@ async function listarRegioes(id_personagem, profissaoFiltro) {
   const where = { ativo: true };
   if (profissaoFiltro) where.profissao = profissaoFiltro;
 
-  const regioes = await ExpeditionRegion.findAll({ where, order: [["ordem", "ASC"]] });
+  const regioes = await ExpeditionRegion.findAll({
+    where,
+    order: [["ordem", "ASC"]],
+    include: [
+      {
+        model: ExpeditionRegionResource,
+        as: "recursosDaRegiao",
+        include: [{ model: ExpeditionResource, as: "recurso" }],
+      },
+    ],
+  });
 
   return regioes.map((regiao) => {
     const nivelPersonagem = nivelPorProfissao.get(regiao.profissao) ?? 1;
+    const pesoTotal = regiao.recursosDaRegiao.reduce((soma, r) => soma + r.peso, 0);
+    const recursos = regiao.recursosDaRegiao
+      .map((r) => ({
+        id_recurso: r.id_recurso,
+        nome: r.recurso.nome,
+        peso_percentual: pesoTotal > 0 ? Math.round((r.peso / pesoTotal) * 1000) / 10 : 0,
+      }))
+      .sort((a, b) => b.peso_percentual - a.peso_percentual);
+
     return {
       id: regiao.id,
       nome: regiao.nome,
@@ -78,6 +111,8 @@ async function listarRegioes(id_personagem, profissaoFiltro) {
       descricao: regiao.descricao,
       imagem_url: regiao.imagem_url,
       desbloqueada: nivelPersonagem >= regiao.nivel_minimo,
+      recursos,
+      ...chancesDeQualidadePorNivel(nivelPersonagem),
     };
   });
 }
