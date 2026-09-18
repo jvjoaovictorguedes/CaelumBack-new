@@ -93,6 +93,26 @@ const CONSUMIVEIS = [
     propriedades: { efeito_mana: 80 },
   },
   {
+    nome: "Bandagem Improvisada",
+    descricao: "Pano e um pouco de sorte — estanca o sangramento, não faz milagre.",
+    raridade: "Comum",
+    valor_compra: 4,
+    valor_venda: 1,
+    peso: 0.2,
+    disponivel_loja: true,
+    propriedades: { efeito_vida: 10 },
+  },
+  {
+    nome: "Tônico Revigorante",
+    descricao: "Recupera vida e mana em quantidade modesta — mais barato que o Elixir, mas cobre o básico.",
+    raridade: "Incomum",
+    valor_compra: 40,
+    valor_venda: 14,
+    peso: 0.4,
+    disponivel_loja: true,
+    propriedades: { efeito_vida: 30, efeito_mana: 30 },
+  },
+  {
     nome: "Elixir do Aventureiro",
     descricao: "Cura vida e mana ao mesmo tempo — caro, mas vale cada moeda numa emergência.",
     raridade: "Epico",
@@ -101,6 +121,16 @@ const CONSUMIVEIS = [
     peso: 0.8,
     disponivel_loja: true,
     propriedades: { efeito_vida: 50, efeito_mana: 50 },
+  },
+  {
+    nome: "Poção da Fênix",
+    descricao: "Dizem que uma pena de verdade foi dissolvida nesse frasco — cura quase todo o corpo de uma vez.",
+    raridade: "Lendario",
+    valor_compra: 400,
+    valor_venda: 140,
+    peso: 0.5,
+    disponivel_loja: false,
+    propriedades: { efeito_vida: 100 },
   },
 ];
 
@@ -214,6 +244,76 @@ const ARMAS = [
     disponivel_loja: false,
     propriedades: { dano_min: 20, dano_max: 28, tipo_dano: "Magico", tipo_arma: "Cajado", bonus_atributo: "Inteligencia", valor_bonus_atributo: 10 },
   },
+  {
+    nome: "Espada Curta de Bronze",
+    descricao: "Comum nos treinos de recrutas — leve, direta, sem segredos.",
+    raridade: "Comum",
+    valor_compra: 20,
+    valor_venda: 7,
+    peso: 2,
+    disponivel_loja: true,
+    propriedades: { dano_min: 4, dano_max: 7, tipo_dano: "Fisico", tipo_arma: "Espada", bonus_atributo: "Forca", valor_bonus_atributo: 1 },
+  },
+  {
+    nome: "Cajado Sussurrante",
+    descricao: "Ecoa um murmúrio constante — dizem que os magos antigos conseguiam entender o que ele diz.",
+    raridade: "Incomum",
+    valor_compra: 100,
+    valor_venda: 34,
+    peso: 2,
+    disponivel_loja: true,
+    propriedades: { dano_min: 6, dano_max: 10, tipo_dano: "Magico", tipo_arma: "Cajado", bonus_atributo: "Inteligencia", valor_bonus_atributo: 4 },
+  },
+  {
+    nome: "Machado Rúnico",
+    descricao: "Runas gravadas na lâmina brilham fracamente a cada golpe certeiro.",
+    raridade: "Raro",
+    valor_compra: 250,
+    valor_venda: 85,
+    peso: 6,
+    disponivel_loja: true,
+    propriedades: { dano_min: 15, dano_max: 22, tipo_dano: "Fisico", tipo_arma: "Machado", bonus_atributo: "Forca", valor_bonus_atributo: 6 },
+  },
+  {
+    nome: "Lança Perfurante do Abismo",
+    descricao: "A ponta parece absorver a luz ao redor — perfura o que quer que seja preciso.",
+    raridade: "Epico",
+    valor_compra: 480,
+    valor_venda: 160,
+    peso: 4,
+    disponivel_loja: false,
+    propriedades: { dano_min: 21, dano_max: 30, tipo_dano: "Fisico", tipo_arma: "Lança", bonus_atributo: "Vitalidade", valor_bonus_atributo: 8 },
+  },
+  {
+    nome: "Espada do Rei Adormecido",
+    descricao: "Repousou num túmulo por séculos — ainda lembra como cortar através de qualquer armadura.",
+    raridade: "Lendario",
+    valor_compra: 900,
+    valor_venda: 310,
+    peso: 3,
+    disponivel_loja: false,
+    propriedades: { dano_min: 30, dano_max: 42, tipo_dano: "Fisico", tipo_arma: "Espada", bonus_atributo: "Forca", valor_bonus_atributo: 14 },
+  },
+  {
+    nome: "Cajado das Mil Tempestades",
+    descricao: "Cada relâmpago que já caiu perto dele deixou um pouco de energia presa na madeira.",
+    raridade: "Lendario",
+    valor_compra: 920,
+    valor_venda: 315,
+    peso: 2,
+    disponivel_loja: false,
+    propriedades: { dano_min: 28, dano_max: 40, tipo_dano: "Magico", tipo_arma: "Cajado", bonus_atributo: "Inteligencia", valor_bonus_atributo: 15 },
+  },
+  {
+    nome: "Fragmento da Lâmina Celestial",
+    descricao: "Um caco de algo que não deveria existir neste mundo — corta como se a matéria não oferecesse resistência nenhuma.",
+    raridade: "Mitico",
+    valor_compra: 2000,
+    valor_venda: 700,
+    peso: 1,
+    disponivel_loja: false,
+    propriedades: { dano_min: 45, dano_max: 60, tipo_dano: "Fisico", tipo_arma: "Adaga", bonus_atributo: "Agilidade", valor_bonus_atributo: 20 },
+  },
 ];
 
 // ---------------------------------------------------------------------
@@ -254,6 +354,26 @@ const ESCUDOS = [
     disponivel_loja: true,
     propriedades: { slot_equipamento: "Maos", defesa: 16, bonus_vitalidade: 3 },
   },
+  {
+    nome: "Bastião Inabalável",
+    descricao: "Nem um exército inteiro empurraria quem segura isso um passo pra trás.",
+    raridade: "Epico",
+    valor_compra: 520,
+    valor_venda: 175,
+    peso: 8,
+    disponivel_loja: false,
+    propriedades: { slot_equipamento: "Maos", defesa: 26, bonus_vitalidade: 6 },
+  },
+  {
+    nome: "Escudo do Último Baluarte",
+    descricao: "O último a cair em toda batalha em que já esteve — ninguém sabe explicar como.",
+    raridade: "Lendario",
+    valor_compra: 950,
+    valor_venda: 320,
+    peso: 9,
+    disponivel_loja: false,
+    propriedades: { slot_equipamento: "Maos", defesa: 40, bonus_vitalidade: 10 },
+  },
 ];
 
 // ---------------------------------------------------------------------
@@ -280,6 +400,27 @@ const ARMADURAS = [
   { nome: "Manto Élfico", descricao: "Tecido que parece se mover sozinho, sempre um passo à frente do vento.", raridade: "Raro", valor_compra: 260, valor_venda: 88, peso: 1.5, disponivel_loja: true, tipo_item: "Armadura", propriedades: { slot_equipamento: "Torso", defesa: 11, bonus_inteligencia: 6, bonus_agilidade: 2 } },
   { nome: "Luvas Élficas", descricao: "Precisas o bastante pra não perder um único fio de mana.", raridade: "Raro", valor_compra: 120, valor_venda: 40, peso: 0.3, disponivel_loja: true, tipo_item: "Armadura", propriedades: { slot_equipamento: "Maos", defesa: 4, bonus_inteligencia: 3 } },
   { nome: "Botas Élficas", descricao: "Quase não tocam o chão — feitas pra quem nunca devia ser alcançado.", raridade: "Raro", valor_compra: 140, valor_venda: 47, peso: 0.4, disponivel_loja: true, tipo_item: "Armadura", propriedades: { slot_equipamento: "Pes", defesa: 4, bonus_velocidade: 4, bonus_agilidade: 2 } },
+
+  // --- Set Dracônico (Lendário) — fora da loja, só via drop/mercado ---
+  { nome: "Elmo Dracônico", descricao: "Moldado a partir da escama da fronte de um dragão — quase impossível de rachar.", raridade: "Lendario", valor_compra: 380, valor_venda: 130, peso: 3, disponivel_loja: false, tipo_item: "Capacete", propriedades: { slot_equipamento: "Cabeca", defesa: 14, bonus_forca: 4, bonus_vitalidade: 4 } },
+  { nome: "Peitoral Dracônico", descricao: "Escamas sobrepostas que já resistiram a fogo de verdade.", raridade: "Lendario", valor_compra: 620, valor_venda: 210, peso: 8, disponivel_loja: false, tipo_item: "Armadura", propriedades: { slot_equipamento: "Torso", defesa: 24, bonus_forca: 6, bonus_vitalidade: 8 } },
+  { nome: "Manoplas Dracônicas", descricao: "Garras adaptadas em luvas — o golpe vem com peso de verdade.", raridade: "Lendario", valor_compra: 340, valor_venda: 115, peso: 4, disponivel_loja: false, tipo_item: "Armadura", propriedades: { slot_equipamento: "Maos", defesa: 12, bonus_forca: 7 } },
+  { nome: "Botas Dracônicas", descricao: "Cada passo pesa como o de algo muito maior do que um humano.", raridade: "Lendario", valor_compra: 360, valor_venda: 120, peso: 5, disponivel_loja: false, tipo_item: "Armadura", propriedades: { slot_equipamento: "Pes", defesa: 12, bonus_vitalidade: 6 } },
+];
+
+// ---------------------------------------------------------------------
+// Materiais — troféus de monstro/mundo, sem propriedade própria (não
+// são equipáveis nem consumíveis): existem pra dar mais variedade de
+// drop e pra vender no Mercado entre jogadores. Fora da loja de
+// propósito — só se consegue via combate ou comprando de outro jogador.
+// ---------------------------------------------------------------------
+const MATERIAIS = [
+  { nome: "Pelo de Lobo", descricao: "Ainda cheira a floresta. Curtidores pagam bem por um lote inteiro.", raridade: "Comum", valor_compra: 0, valor_venda: 3, peso: 0.2, disponivel_loja: false },
+  { nome: "Presa Afiada", descricao: "Guardada como lembrança por quem sobreviveu ao dono dela.", raridade: "Comum", valor_compra: 0, valor_venda: 4, peso: 0.1, disponivel_loja: false },
+  { nome: "Escama de Réptil", descricao: "Reflete a luz num verde metálico incomum.", raridade: "Incomum", valor_compra: 0, valor_venda: 12, peso: 0.3, disponivel_loja: false },
+  { nome: "Núcleo Arcano Instável", descricao: "Pulsa fracamente — melhor não carregar muitos ao mesmo tempo.", raridade: "Raro", valor_compra: 0, valor_venda: 35, peso: 0.2, disponivel_loja: false },
+  { nome: "Fragmento de Meteorito", descricao: "Ainda um pouco quente, mesmo dias depois de ter caído.", raridade: "Epico", valor_compra: 0, valor_venda: 90, peso: 1.5, disponivel_loja: false },
+  { nome: "Pó de Estrela", descricao: "Ninguém sabe explicar de onde vem — só que some se ficar exposto à luz do sol por tempo demais.", raridade: "Lendario", valor_compra: 0, valor_venda: 250, peso: 0.05, disponivel_loja: false },
 ];
 
 async function limparTudo(transaction) {
@@ -348,6 +489,16 @@ async function criarArmaduras(transaction) {
   return criados;
 }
 
+async function criarMateriais(transaction) {
+  let criados = 0;
+  for (const dadosItem of MATERIAIS) {
+    const item = await Item.create({ ...dadosItem, tipo_item: "Material" }, { transaction });
+    console.log(`  [Material] ${item.nome}`);
+    criados += 1;
+  }
+  return criados;
+}
+
 async function main() {
   await sequelize.authenticate();
   console.log("Conectado ao banco.\n");
@@ -372,6 +523,9 @@ async function main() {
 
     console.log("\nCriando armaduras:");
     totalCriados += await criarArmaduras(transaction);
+
+    console.log("\nCriando materiais:");
+    totalCriados += await criarMateriais(transaction);
   });
 
   console.log(`\nPronto! ${totalCriados} itens criados.`);
