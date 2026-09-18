@@ -27,6 +27,16 @@ const ExpeditionRegion = require("./ExpeditionRegion");
 const ExpeditionResource = require("./ExpeditionResource");
 const ExpeditionRegionResource = require("./ExpeditionRegionResource");
 const ExpeditionResourceItem = require("./ExpeditionResourceItem");
+const CharacterForgeProgress = require("./CharacterForgeProgress");
+const CharacterEquipmentInstance = require("./CharacterEquipmentInstance");
+const CharacterEquipment = require("./CharacterEquipment");
+const ForgeBlueprint = require("./ForgeBlueprint");
+const ForgeBlueprintIngredient = require("./ForgeBlueprintIngredient");
+const ForgeBlueprintResult = require("./ForgeBlueprintResult");
+const ForgeBarItem = require("./ForgeBarItem");
+const ForgeScroll = require("./ForgeScroll");
+const ForgeScrollIngredient = require("./ForgeScrollIngredient");
+const CharacterForgeQueue = require("./CharacterForgeQueue");
 
 Item.hasOne(WeaponProperties, { foreignKey: "id_item", as: "weaponProperties" });
 WeaponProperties.belongsTo(Item, { foreignKey: "id_item" });
@@ -69,5 +79,33 @@ ExpeditionRegionResource.belongsTo(ExpeditionResource, { foreignKey: "id_recurso
 ExpeditionResource.hasMany(ExpeditionResourceItem, { foreignKey: "id_recurso", as: "itensPorQualidade" });
 ExpeditionResourceItem.belongsTo(ExpeditionResource, { foreignKey: "id_recurso" });
 ExpeditionResourceItem.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+
+// Forja v3 — instâncias de equipamento (refinamento individual),
+// blueprints (equipamento-base -> Item por qualidade) e a fila com
+// slots Fundicao/Forja. Ver 20260930300000-forge-v3-progress-and-
+// instances.js pro motivo de character_equipment.id_instancia ser
+// nullable (equipamento fora da Forja v3 continua sem instância).
+CharacterForgeProgress.belongsTo(Character, { foreignKey: "id_personagem" });
+
+CharacterEquipmentInstance.belongsTo(Character, { foreignKey: "id_personagem" });
+CharacterEquipmentInstance.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+CharacterEquipment.belongsTo(CharacterEquipmentInstance, { foreignKey: "id_instancia", as: "instancia" });
+
+ForgeBlueprint.hasMany(ForgeBlueprintIngredient, { foreignKey: "id_blueprint", as: "ingredientes" });
+ForgeBlueprintIngredient.belongsTo(ForgeBlueprint, { foreignKey: "id_blueprint" });
+ForgeBlueprintIngredient.belongsTo(ExpeditionResource, { foreignKey: "id_recurso", as: "recurso" });
+ForgeBlueprint.hasMany(ForgeBlueprintResult, { foreignKey: "id_blueprint", as: "resultados" });
+ForgeBlueprintResult.belongsTo(ForgeBlueprint, { foreignKey: "id_blueprint" });
+ForgeBlueprintResult.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+
+ForgeBarItem.belongsTo(ExpeditionResource, { foreignKey: "id_recurso", as: "recurso" });
+ForgeBarItem.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+
+ForgeScroll.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+ForgeScroll.hasMany(ForgeScrollIngredient, { foreignKey: "id_scroll_item", as: "ingredientes" });
+ForgeScrollIngredient.belongsTo(ForgeScroll, { foreignKey: "id_scroll_item" });
+ForgeScrollIngredient.belongsTo(Item, { foreignKey: "id_item_material", as: "material" });
+
+CharacterForgeQueue.belongsTo(Character, { foreignKey: "id_personagem" });
 
 module.exports = {};
