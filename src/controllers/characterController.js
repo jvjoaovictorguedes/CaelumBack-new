@@ -94,12 +94,16 @@ async function concederPoderesIniciais(character) {
       where: {
         id_classe: character.id_classe,
         nivel_aprendizagem: { [Op.lte]: character.nivel },
+        // custo_ouro marcado = precisa comprar na aba Habilidades, não
+        // libera de graça só por bater o nível (ver comprarPoder).
+        custo_ouro: { [Op.is]: null },
       },
     }),
     RaceAbilities.findAll({
       where: {
         id_raca: character.id_raca,
         nivel_aprendizado: { [Op.lte]: character.nivel },
+        custo_ouro: { [Op.is]: null },
       },
     }),
   ]);
@@ -649,7 +653,7 @@ exports.getPoderesDisponiveis = async (req, res) => {
       aprendidos.map((linha) => [linha.id_power, linha]),
     );
 
-    function montarEntrada(poder, nivelNecessario, origem) {
+    function montarEntrada(poder, nivelNecessario, origem, custoOuro) {
       const linhaAprendida = aprendidoPorPoder.get(poder.id);
       const nivelHabilidade = linhaAprendida?.nivel_habilidade ?? 1;
       // Mostra o valor JÁ COM o multiplicador do nível da habilidade
@@ -677,6 +681,11 @@ exports.getPoderesDisponiveis = async (req, res) => {
         aprendido: Boolean(linhaAprendida),
         ativo: linhaAprendida?.is_active ?? false,
         id_character_ability: linhaAprendida?.id ?? null,
+        // custo_ouro = precisa comprar (não libera de graça por nível) —
+        // pode_comprar só fica true quando falta comprar E o nível já foi
+        // alcançado, pra aba de Habilidades saber quando mostrar o botão.
+        custo_ouro: custoOuro ?? null,
+        pode_comprar: !linhaAprendida && Boolean(custoOuro) && character.nivel >= nivelNecessario,
         // Nível 1-10 da habilidade em si (ver abilityLevelService.js) —
         // só faz sentido pra quem já aprendeu o poder.
         nivel_habilidade: linhaAprendida ? nivelHabilidade : null,
@@ -688,10 +697,10 @@ exports.getPoderesDisponiveis = async (req, res) => {
 
     const poderes = [
       ...poderesClasse.map((linha) =>
-        montarEntrada(linha.Power, linha.nivel_aprendizagem, "classe"),
+        montarEntrada(linha.Power, linha.nivel_aprendizagem, "classe", linha.custo_ouro),
       ),
       ...poderesRaca.map((linha) =>
-        montarEntrada(linha.Power, linha.nivel_aprendizado, "raca"),
+        montarEntrada(linha.Power, linha.nivel_aprendizado, "raca", linha.custo_ouro),
       ),
     ];
 
@@ -711,6 +720,100 @@ exports.getPoderesDisponiveis = async (req, res) => {
     res
       .status(500)
       .json({ message: "Erro interno do servidor ao buscar poderes." });
+  }
+};
+
+// Compra um poder marcado com custo_ouro (hoje só os Passivos novos) —
+// diferente dos poderes de sempre, que concederPoderesIniciais libera de
+// graça só por bater o nível, esses exigem essa compra explícita antes de
+// entrarem em CharacterAbilities. Mesmo padrão de lock de comprarEvolucao
+// (Character sempre existe, então travar ele direto já serializa duas
+// compras simultâneas do mesmo poder).
+exports.comprarPoder = async (req, res) => {
+  try {
+    const idPower = Number(req.params.idPower);
+
+    const resultado = await sequelize.transaction(async (transaction) => {
+      const character = await Character.findByPk(req.params.id, {
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+      if (!character) {
+        throw Object.assign(new Error("Personagem não encontrado."), { statusCode: 404 });
+      }
+
+      const [vinculoClasse, vinculoRaca] = await Promise.all([
+        ClassAbilities.findOne({
+          where: { id_classe: character.id_classe, id_poder: idPower },
+          transaction,
+        }),
+        RaceAbilities.findOne({
+          where: { id_raca: character.id_raca, id_power: idPower },
+          transaction,
+        }),
+      ]);
+      const vinculo = vinculoClasse ?? vinculoRaca;
+      if (!vinculo) {
+        throw Object.assign(
+          new Error("Esse poder não pertence à classe/raça deste personagem."),
+          { statusCode: 404 },
+        );
+      }
+
+      const nivelNecessario = vinculoClasse ? vinculo.nivel_aprendizagem : vinculo.nivel_aprendizado;
+      const custoOuro = vinculo.custo_ouro;
+      if (!custoOuro) {
+        throw Object.assign(
+          new Error("Esse poder é liberado automaticamente pelo nível, não precisa comprar."),
+          { statusCode: 400 },
+        );
+      }
+      if (character.nivel < nivelNecessario) {
+        throw Object.assign(new Error(`Esse poder exige nível ${nivelNecessario}.`), {
+          statusCode: 400,
+        });
+      }
+
+      const jaAprendido = await CharacterAbilities.findOne({
+        where: { id_personagem: character.id, id_power: idPower },
+        transaction,
+      });
+      if (jaAprendido) {
+        throw Object.assign(new Error("Você já aprendeu esse poder."), { statusCode: 409 });
+      }
+
+      if (character.dinheiro < custoOuro) {
+        throw Object.assign(new Error("Ouro insuficiente para comprar esse poder."), {
+          statusCode: 400,
+        });
+      }
+
+      character.dinheiro -= custoOuro;
+      await character.save({ transaction });
+
+      const characterAbility = await CharacterAbilities.create(
+        {
+          id_personagem: character.id,
+          id_power: idPower,
+          level_learned: nivelNecessario,
+          is_active: true,
+        },
+        { transaction },
+      );
+
+      return { characterAbility, dinheiro: character.dinheiro };
+    });
+
+    res.status(201).json({
+      status: "success",
+      data: resultado,
+    });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    console.error("Erro ao comprar poder:", error);
+    res.status(500).json({ message: "Erro interno do servidor ao comprar poder." });
   }
 };
 

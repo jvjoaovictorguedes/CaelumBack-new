@@ -32,6 +32,22 @@ function indiceQualidadeMaxima(nivelForja) {
   return ORDEM_QUALIDADE.indexOf(qualidadeMaxima);
 }
 
+// Menor nível de Forja que já funde essa qualidade — inverte
+// QUALIDADE_MAXIMA_FUNDICAO_POR_NIVEL (que é "maior qualidade POR nível")
+// pra achar "menor nível QUE libera essa qualidade", pra tela de Fundição
+// poder mostrar o requisito de cada qualidade ainda travada, não só a
+// que já está liberada.
+function nivelForjaMinimoParaQualidade(qualidade) {
+  const indiceAlvo = ORDEM_QUALIDADE.indexOf(qualidade);
+  const niveis = Object.keys(QUALIDADE_MAXIMA_FUNDICAO_POR_NIVEL)
+    .map(Number)
+    .sort((a, b) => a - b);
+  for (const nivel of niveis) {
+    if (indiceQualidadeMaxima(nivel) >= indiceAlvo) return nivel;
+  }
+  return niveis[niveis.length - 1];
+}
+
 async function garantirProgresso(characterId, transaction) {
   const [progresso] = await CharacterForgeProgress.findOrCreate({
     where: { id_personagem: characterId },
@@ -53,9 +69,13 @@ async function listarOpcoes(characterId) {
   const inventario = await CharacterInventory.findAll({ where: { id_personagem: characterId } });
   const quantidadePorItem = new Map(inventario.map((entrada) => [entrada.id_item, entrada.quantidade]));
 
+  // Lista TODAS as 6 qualidades por minério (não só as já desbloqueadas)
+  // — as travadas vêm com desbloqueada:false + nivel_forja_necessario,
+  // pra tela de Fundição mostrar o requisito de cada uma em vez de só
+  // sumir com o que o jogador ainda não alcançou.
   const opcoes = [];
   for (const recurso of recursos) {
-    for (let indice = 0; indice <= indiceMax; indice += 1) {
+    for (let indice = 0; indice < ORDEM_QUALIDADE.length; indice += 1) {
       const qualidade = ORDEM_QUALIDADE[indice];
       const fragmento = await ExpeditionResourceItem.findOne({
         where: { id_recurso: recurso.id, qualidade },
@@ -67,13 +87,18 @@ async function listarOpcoes(characterId) {
       });
       if (!fragmento || !barra) continue;
 
+      const desbloqueada = indice <= indiceMax;
       opcoes.push({
         id_recurso: recurso.id,
         nome_recurso: recurso.nome,
         qualidade,
-        fragmentos_disponiveis: quantidadePorItem.get(fragmento.id_item) ?? 0,
+        desbloqueada,
+        nivel_forja_necessario: nivelForjaMinimoParaQualidade(qualidade),
+        fragmentos_disponiveis: desbloqueada ? (quantidadePorItem.get(fragmento.id_item) ?? 0) : 0,
         fragmentos_por_barra: FRAGMENTOS_POR_BARRA[qualidade],
-        bonus_chance_percentual: (CHANCE_BARRA_BONUS_PPM_POR_NIVEL[nivelForja] ?? 0) / 10_000,
+        bonus_chance_percentual: desbloqueada ? (CHANCE_BARRA_BONUS_PPM_POR_NIVEL[nivelForja] ?? 0) / 10_000 : 0,
+        nome_fragmento: fragmento.item.nome,
+        imagem_fragmento: fragmento.item.imagem_url,
         nome_barra: barra.item.nome,
         imagem_barra: barra.item.imagem_url,
       });

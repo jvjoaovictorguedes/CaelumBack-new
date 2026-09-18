@@ -12,6 +12,10 @@ const ForgeBlueprint = require("../models/ForgeBlueprint");
 const ForgeBlueprintIngredient = require("../models/ForgeBlueprintIngredient");
 const ForgeBlueprintResult = require("../models/ForgeBlueprintResult");
 const Item = require("../models/Item");
+const WeaponProperties = require("../models/WeaponProperties");
+// Só o require garante que a associação Item<->WeaponProperties (alias
+// "weaponProperties") já foi declarada — ver models/associations.js.
+require("../models/associations");
 const {
   ORDEM_QUALIDADE,
   NOME_EXIBICAO_QUALIDADE,
@@ -63,7 +67,11 @@ async function listarBlueprints(characterId) {
       where: { ativo: true },
       include: [
         { model: ForgeBlueprintIngredient, as: "ingredientes", include: [{ model: require("../models/ExpeditionResource"), as: "recurso" }] },
-        { model: ForgeBlueprintResult, as: "resultados", include: [{ model: Item, as: "item" }] },
+        {
+          model: ForgeBlueprintResult,
+          as: "resultados",
+          include: [{ model: Item, as: "item", include: [{ model: WeaponProperties, as: "weaponProperties" }] }],
+        },
       ],
     }),
     CharacterInventory.findAll({ where: { id_personagem: characterId } }),
@@ -115,12 +123,17 @@ async function listarBlueprints(characterId) {
       });
     }
 
+    const itemComum = resultadoPorQualidade.get("Comum");
     dados.push({
       id: blueprint.id,
       nome: blueprint.nome,
       categoria_equipamento: blueprint.categoria_equipamento,
+      // Só existe pra categoria "Arma" — usado pra montar a subseção por
+      // tipo de arma (Espada/Cajado/etc.) na tela de Fabricação, já que
+      // um blueprint não guarda isso direto (vem do item resultado).
+      tipo_arma: itemComum?.weaponProperties?.tipo_arma ?? null,
       nivel_forja_minimo: blueprint.nivel_forja_minimo,
-      imagem_url: resultadoPorQualidade.get("Comum")?.imagem_url ?? null,
+      imagem_url: itemComum?.imagem_url ?? null,
       variantes,
     });
   }

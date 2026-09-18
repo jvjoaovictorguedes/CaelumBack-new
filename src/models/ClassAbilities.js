@@ -29,6 +29,13 @@ const ClassAbilities = sequelize.define(
       defaultValue: 1,
       allowNull: false,
     },
+    // NULL = libera de graça ao bater o nível (comportamento de sempre).
+    // Com valor = precisa comprar na aba Habilidades (ver comprarPoder em
+    // characterController.js) — usado pelos poderes Passivos novos.
+    custo_ouro: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
   },
   {
     tableName: "class_abilities",

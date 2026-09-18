@@ -35,6 +35,10 @@ router
   .route("/:id/powers")
   .get(authMiddleware, exigirDonoOuAdmin("id"), characterController.getPoderesDisponiveis);
 
+router
+  .route("/:id/powers/:idPower/purchase")
+  .post(authMiddleware, exigirDonoDoPersonagem("id"), characterController.comprarPoder);
+
 // Árvore de evoluções (ver comentário em characterController.getEvolucoesDisponiveis)
 // — ainda sem tela pública, mas a API já fica pronta e protegida do
 // mesmo jeito que o resto: leitura é dono-ou-admin, compra é só dono.

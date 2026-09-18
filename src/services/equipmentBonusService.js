@@ -9,7 +9,10 @@ const CharacterEquipment = require("../models/CharacterEquipment");
 const Item = require("../models/Item");
 const WeaponProperties = require("../models/WeaponProperties");
 const ArmorProperties = require("../models/ArmorProperties");
+const CharacterAbilities = require("../models/CharacterAbilities");
+const Power = require("../models/Power");
 const { ATRIBUTO_PARA_CAMPO } = require("./combatFormulas");
+const { multiplicadorEfeito } = require("./abilityLevelService");
 // Só o require garante que a associação (com alias explícito) já foi
 // declarada — ver models/associations.js pra fonte única.
 require("../models/associations");
@@ -26,23 +29,47 @@ function bonusZerado() {
 // rodaria numa conexão separada e não enxergaria a alteração ainda não
 // commitada).
 async function buscarBonusDeAtributos(idPersonagem, transaction) {
-  const equipamentos = await CharacterEquipment.findAll({
-    where: { id_personagem: idPersonagem },
-    include: [
-      {
-        model: Item,
-        as: "item",
-        include: [
-          { model: WeaponProperties, as: "weaponProperties" },
-          { model: ArmorProperties, as: "armorProperties" },
-        ],
-      },
-    ],
-    transaction,
-  });
+  const [equipamentos, passivasAtivas] = await Promise.all([
+    CharacterEquipment.findAll({
+      where: { id_personagem: idPersonagem },
+      include: [
+        {
+          model: Item,
+          as: "item",
+          include: [
+            { model: WeaponProperties, as: "weaponProperties" },
+            { model: ArmorProperties, as: "armorProperties" },
+          ],
+        },
+      ],
+      transaction,
+    }),
+    // Sem include (evita depender da associação CharacterAbilities<->Power
+    // já ter sido registrada por outro require) — busca as habilidades
+    // ativas e resolve o Power de cada uma à parte.
+    CharacterAbilities.findAll({
+      where: { id_personagem: idPersonagem, is_active: true },
+      transaction,
+    }),
+  ]);
 
   const bonus = bonusZerado();
   let arma = null;
+
+  if (passivasAtivas.length > 0) {
+    const poderes = await Power.findAll({
+      where: { id: passivasAtivas.map((p) => p.id_power), tipo_poder: "Passivo" },
+      transaction,
+    });
+    const poderPorId = new Map(poderes.map((p) => [p.id, p]));
+    for (const linha of passivasAtivas) {
+      const poder = poderPorId.get(linha.id_power);
+      if (!poder) continue;
+      const campo = ATRIBUTO_PARA_CAMPO[poder.escala_atributo];
+      if (!campo || !(campo in bonus)) continue;
+      bonus[campo] += (poder.valor_escala || 0) * multiplicadorEfeito(linha.nivel_habilidade);
+    }
+  }
 
   for (const equipamento of equipamentos) {
     const item = equipamento.item;
