@@ -161,15 +161,23 @@ exports.updateCharacterAbility = async (req, res) => {
   }
 };
 
+// Quantas habilidades ATIVAS um personagem pode ter marcadas pro combate
+// ao mesmo tempo — é esse mesmo is_active que combatController.js e
+// pvpController.js filtram pra decidir quais poderes aparecem numa luta,
+// então o limite aqui é o que efetivamente limita o loadout de combate
+// (ver aba Combate no frontend, "Habilidades em Combate").
+const MAX_HABILIDADES_ATIVAS_COMBATE = 5;
+
 // Ativar/desativar um poder já aprendido — uso direto do jogador (não
-// admin), pela aba de Habilidades: "aparecerá todas pra ele, mas se ele
+// admin), pela aba de Combate: "aparecerá todas pra ele, mas se ele
 // não tiver nível não pode usar, só ver" — poderes ainda não aprendidos
 // nem têm linha em CharacterAbilities (ver getPoderesDisponiveis), então
 // chegar aqui já implica que o personagem tem o nível necessário. Só
 // falta impedir: (1) mexer no poder de outra pessoa, (2) mandar qualquer
 // coisa que não seja um boolean de verdade (mesmo bug de coerção do item
 // 18 — guildas), (3) desativar um poder Passivo (não é escolha do
-// jogador, é sempre ativo).
+// jogador, é sempre ativo), (4) passar de MAX_HABILIDADES_ATIVAS_COMBATE
+// marcadas ao mesmo tempo.
 exports.toggleCharacterAbility = async (req, res) => {
   try {
     const { is_active } = req.body;
@@ -193,6 +201,18 @@ exports.toggleCharacterAbility = async (req, res) => {
       return res.status(400).json({
         message: "Poderes passivos não podem ser desativados.",
       });
+    }
+
+    if (is_active && !characterAbility.is_active) {
+      const jaAtivas = await CharacterAbilities.count({
+        where: { id_personagem: characterAbility.id_personagem, is_active: true },
+        include: [{ model: Power, attributes: [], where: { tipo_poder: "Ativo" } }],
+      });
+      if (jaAtivas >= MAX_HABILIDADES_ATIVAS_COMBATE) {
+        return res.status(400).json({
+          message: `Você já tem ${MAX_HABILIDADES_ATIVAS_COMBATE} habilidades marcadas pro combate. Desmarque uma antes de marcar essa.`,
+        });
+      }
     }
 
     characterAbility.is_active = is_active;

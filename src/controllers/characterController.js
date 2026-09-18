@@ -532,6 +532,73 @@ exports.updateCharacter = async (req, res) => {
   }
 };
 
+const MAX_SLOTS_CONSUMIVEIS_COMBATE = 5;
+
+// PATCH /api/characters/:id/combat-loadout/items — loadout de consumíveis
+// pro combate (aba Combate, "Consumíveis em Combate"). 5 posições fixas;
+// slot recebe id_item (precisa estar no inventário como Consumível) ou
+// null pra esvaziar. O mesmo item não pode ocupar dois slots ao mesmo
+// tempo — escolher um item que já está em outro slot MOVE ele pro slot
+// novo em vez de duplicar.
+exports.definirSlotConsumivelCombate = async (req, res) => {
+  try {
+    const { slot, id_item } = req.body;
+    if (!Number.isInteger(slot) || slot < 0 || slot >= MAX_SLOTS_CONSUMIVEIS_COMBATE) {
+      return res.status(400).json({
+        message: `slot deve ser um número entre 0 e ${MAX_SLOTS_CONSUMIVEIS_COMBATE - 1}.`,
+      });
+    }
+    if (id_item !== null && !Number.isInteger(id_item)) {
+      return res.status(400).json({ message: "id_item deve ser um número ou null." });
+    }
+
+    const character = await Character.findByPk(req.params.id);
+    if (!character) {
+      return res.status(404).json({ message: "Personagem não encontrado." });
+    }
+
+    if (id_item !== null) {
+      const noInventario = await CharacterInventory.findOne({
+        where: { id_personagem: character.id, id_item },
+        include: [{ model: Item, where: { tipo_item: "Consumivel" } }],
+      });
+      if (!noInventario) {
+        return res.status(400).json({
+          message: "Esse item não está no seu inventário como consumível.",
+        });
+      }
+    }
+
+    const slotsAtuais = Array.isArray(character.slots_consumiveis_combate)
+      ? character.slots_consumiveis_combate
+      : [];
+    const slots = Array.from(
+      { length: MAX_SLOTS_CONSUMIVEIS_COMBATE },
+      (_, i) => slotsAtuais[i] ?? null,
+    );
+
+    if (id_item !== null) {
+      for (let i = 0; i < slots.length; i += 1) {
+        if (slots[i] === id_item) slots[i] = null;
+      }
+    }
+    slots[slot] = id_item;
+
+    character.slots_consumiveis_combate = slots;
+    await character.save();
+
+    res.status(200).json({
+      status: "success",
+      data: { slots_consumiveis_combate: slots },
+    });
+  } catch (error) {
+    console.error("Erro ao definir slot de consumível de combate:", error);
+    res
+      .status(500)
+      .json({ message: "Erro interno do servidor ao definir slot de consumível." });
+  }
+};
+
 // Lista TODOS os poderes de classe/raça do personagem (mesmo os que o
 // nível ainda não libera) — a aba de Habilidades do front precisa
 // mostrar os bloqueados também (só visualização, "requer nível X"), não

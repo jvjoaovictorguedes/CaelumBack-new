@@ -161,6 +161,16 @@ const Character = sequelize.define("Character", {
     type: DataTypes.STRING(30),
     allowNull: true,
   },
+  // Loadout de combate — até 5 consumíveis escolhidos pelo jogador (ver
+  // characterController.definirSlotConsumivelCombate). As habilidades
+  // ativas selecionadas pra combate não precisam de campo próprio aqui:
+  // reaproveitam CharacterAbilities.is_active, já limitado a 5 no
+  // toggle (ver characterAbilitiesController.js).
+  slots_consumiveis_combate: {
+    type: DataTypes.JSONB,
+    allowNull: false,
+    defaultValue: [null, null, null, null, null],
+  },
   id_raca: {
     type: DataTypes.INTEGER,
     allowNull: false,

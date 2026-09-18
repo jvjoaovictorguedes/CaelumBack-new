@@ -71,6 +71,12 @@ router
 
 // Missões diárias/únicas — catálogo fixo (ver seeder), progresso
 // individual por personagem (ver missionService.js).
+// Loadout de consumíveis pra aba Combate — ver
+// characterController.definirSlotConsumivelCombate.
+router
+  .route("/:id/combat-loadout/items")
+  .patch(authMiddleware, exigirDonoDoPersonagem("id"), characterController.definirSlotConsumivelCombate);
+
 router
   .route("/:id/missions")
   .get(authMiddleware, exigirDonoOuAdmin("id"), missionController.getMissoes);
