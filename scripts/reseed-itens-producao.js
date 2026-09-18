@@ -151,7 +151,7 @@ const ARMAS = [
     valor_venda: 5,
     peso: 1,
     disponivel_loja: true,
-    propriedades: { dano_min: 3, dano_max: 6, tipo_dano: "Fisico", tipo_arma: "Adaga", bonus_atributo: "Agilidade", valor_bonus_atributo: 1 },
+    propriedades: { dano_min: 5, dano_max: 10, tipo_dano: "Fisico", tipo_arma: "Adaga", bonus_atributo: "Agilidade", valor_bonus_atributo: 1 },
   },
   {
     nome: "Espada de Ferro",
@@ -162,7 +162,7 @@ const ARMAS = [
     peso: 3,
     disponivel_loja: true,
     imagem_url: "/images/sword-basic.webp",
-    propriedades: { dano_min: 5, dano_max: 9, tipo_dano: "Fisico", tipo_arma: "Espada", bonus_atributo: "Forca", valor_bonus_atributo: 1 },
+    propriedades: { dano_min: 8, dano_max: 14, tipo_dano: "Fisico", tipo_arma: "Espada", bonus_atributo: "Forca", valor_bonus_atributo: 1 },
   },
   {
     nome: "Cajado do Aprendiz",
@@ -172,7 +172,7 @@ const ARMAS = [
     valor_venda: 12,
     peso: 2,
     disponivel_loja: true,
-    propriedades: { dano_min: 3, dano_max: 5, tipo_dano: "Magico", tipo_arma: "Cajado", bonus_atributo: "Inteligencia", valor_bonus_atributo: 2 },
+    propriedades: { dano_min: 5, dano_max: 9, tipo_dano: "Magico", tipo_arma: "Cajado", bonus_atributo: "Inteligencia", valor_bonus_atributo: 2 },
   },
   {
     nome: "Machado de Batalha",
@@ -182,7 +182,7 @@ const ARMAS = [
     valor_venda: 30,
     peso: 5,
     disponivel_loja: true,
-    propriedades: { dano_min: 8, dano_max: 14, tipo_dano: "Fisico", tipo_arma: "Machado", bonus_atributo: "Forca", valor_bonus_atributo: 3 },
+    propriedades: { dano_min: 13, dano_max: 22, tipo_dano: "Fisico", tipo_arma: "Machado", bonus_atributo: "Forca", valor_bonus_atributo: 3 },
   },
   {
     nome: "Adaga das Sombras",
@@ -192,7 +192,7 @@ const ARMAS = [
     valor_venda: 32,
     peso: 1,
     disponivel_loja: true,
-    propriedades: { dano_min: 7, dano_max: 11, tipo_dano: "Fisico", tipo_arma: "Adaga", bonus_atributo: "Agilidade", valor_bonus_atributo: 4 },
+    propriedades: { dano_min: 11, dano_max: 18, tipo_dano: "Fisico", tipo_arma: "Adaga", bonus_atributo: "Agilidade", valor_bonus_atributo: 4 },
   },
   {
     nome: "Lança do Guardião",
@@ -202,7 +202,7 @@ const ARMAS = [
     valor_venda: 75,
     peso: 4,
     disponivel_loja: true,
-    propriedades: { dano_min: 14, dano_max: 20, tipo_dano: "Fisico", tipo_arma: "Lança", bonus_atributo: "Vitalidade", valor_bonus_atributo: 5 },
+    propriedades: { dano_min: 22, dano_max: 32, tipo_dano: "Fisico", tipo_arma: "Lança", bonus_atributo: "Vitalidade", valor_bonus_atributo: 5 },
   },
   {
     nome: "Espada Élfica",
@@ -212,7 +212,7 @@ const ARMAS = [
     valor_venda: 78,
     peso: 2,
     disponivel_loja: true,
-    propriedades: { dano_min: 13, dano_max: 19, tipo_dano: "Fisico", tipo_arma: "Espada", bonus_atributo: "Agilidade", valor_bonus_atributo: 5 },
+    propriedades: { dano_min: 21, dano_max: 30, tipo_dano: "Fisico", tipo_arma: "Espada", bonus_atributo: "Agilidade", valor_bonus_atributo: 5 },
   },
   {
     nome: "Orbe de Cristal",
@@ -222,7 +222,7 @@ const ARMAS = [
     valor_venda: 80,
     peso: 1.5,
     disponivel_loja: true,
-    propriedades: { dano_min: 12, dano_max: 18, tipo_dano: "Magico", tipo_arma: "Orbe", bonus_atributo: "Inteligencia", valor_bonus_atributo: 6 },
+    propriedades: { dano_min: 19, dano_max: 28, tipo_dano: "Magico", tipo_arma: "Orbe", bonus_atributo: "Inteligencia", valor_bonus_atributo: 6 },
   },
   {
     nome: "Machado Brutal do Orc",
@@ -232,7 +232,7 @@ const ARMAS = [
     valor_venda: 170,
     peso: 7,
     disponivel_loja: false,
-    propriedades: { dano_min: 22, dano_max: 32, tipo_dano: "Fisico", tipo_arma: "Machado", bonus_atributo: "Forca", valor_bonus_atributo: 9 },
+    propriedades: { dano_min: 35, dano_max: 50, tipo_dano: "Fisico", tipo_arma: "Machado", bonus_atributo: "Forca", valor_bonus_atributo: 9 },
   },
   {
     nome: "Cajado do Arquimago",
@@ -242,7 +242,7 @@ const ARMAS = [
     valor_venda: 175,
     peso: 2,
     disponivel_loja: false,
-    propriedades: { dano_min: 20, dano_max: 28, tipo_dano: "Magico", tipo_arma: "Cajado", bonus_atributo: "Inteligencia", valor_bonus_atributo: 10 },
+    propriedades: { dano_min: 32, dano_max: 44, tipo_dano: "Magico", tipo_arma: "Cajado", bonus_atributo: "Inteligencia", valor_bonus_atributo: 10 },
   },
   {
     nome: "Espada Curta de Bronze",
@@ -252,7 +252,7 @@ const ARMAS = [
     valor_venda: 7,
     peso: 2,
     disponivel_loja: true,
-    propriedades: { dano_min: 4, dano_max: 7, tipo_dano: "Fisico", tipo_arma: "Espada", bonus_atributo: "Forca", valor_bonus_atributo: 1 },
+    propriedades: { dano_min: 6, dano_max: 11, tipo_dano: "Fisico", tipo_arma: "Espada", bonus_atributo: "Forca", valor_bonus_atributo: 1 },
   },
   {
     nome: "Cajado Sussurrante",
@@ -262,7 +262,7 @@ const ARMAS = [
     valor_venda: 34,
     peso: 2,
     disponivel_loja: true,
-    propriedades: { dano_min: 6, dano_max: 10, tipo_dano: "Magico", tipo_arma: "Cajado", bonus_atributo: "Inteligencia", valor_bonus_atributo: 4 },
+    propriedades: { dano_min: 10, dano_max: 16, tipo_dano: "Magico", tipo_arma: "Cajado", bonus_atributo: "Inteligencia", valor_bonus_atributo: 4 },
   },
   {
     nome: "Machado Rúnico",
@@ -272,7 +272,7 @@ const ARMAS = [
     valor_venda: 85,
     peso: 6,
     disponivel_loja: true,
-    propriedades: { dano_min: 15, dano_max: 22, tipo_dano: "Fisico", tipo_arma: "Machado", bonus_atributo: "Forca", valor_bonus_atributo: 6 },
+    propriedades: { dano_min: 24, dano_max: 35, tipo_dano: "Fisico", tipo_arma: "Machado", bonus_atributo: "Forca", valor_bonus_atributo: 6 },
   },
   {
     nome: "Lança Perfurante do Abismo",
@@ -282,7 +282,7 @@ const ARMAS = [
     valor_venda: 160,
     peso: 4,
     disponivel_loja: false,
-    propriedades: { dano_min: 21, dano_max: 30, tipo_dano: "Fisico", tipo_arma: "Lança", bonus_atributo: "Vitalidade", valor_bonus_atributo: 8 },
+    propriedades: { dano_min: 33, dano_max: 48, tipo_dano: "Fisico", tipo_arma: "Lança", bonus_atributo: "Vitalidade", valor_bonus_atributo: 8 },
   },
   {
     nome: "Espada do Rei Adormecido",
@@ -292,7 +292,7 @@ const ARMAS = [
     valor_venda: 310,
     peso: 3,
     disponivel_loja: false,
-    propriedades: { dano_min: 30, dano_max: 42, tipo_dano: "Fisico", tipo_arma: "Espada", bonus_atributo: "Forca", valor_bonus_atributo: 14 },
+    propriedades: { dano_min: 50, dano_max: 70, tipo_dano: "Fisico", tipo_arma: "Espada", bonus_atributo: "Forca", valor_bonus_atributo: 14 },
   },
   {
     nome: "Cajado das Mil Tempestades",
@@ -302,7 +302,7 @@ const ARMAS = [
     valor_venda: 315,
     peso: 2,
     disponivel_loja: false,
-    propriedades: { dano_min: 28, dano_max: 40, tipo_dano: "Magico", tipo_arma: "Cajado", bonus_atributo: "Inteligencia", valor_bonus_atributo: 15 },
+    propriedades: { dano_min: 46, dano_max: 65, tipo_dano: "Magico", tipo_arma: "Cajado", bonus_atributo: "Inteligencia", valor_bonus_atributo: 15 },
   },
   {
     nome: "Fragmento da Lâmina Celestial",
@@ -312,7 +312,7 @@ const ARMAS = [
     valor_venda: 700,
     peso: 1,
     disponivel_loja: false,
-    propriedades: { dano_min: 45, dano_max: 60, tipo_dano: "Fisico", tipo_arma: "Adaga", bonus_atributo: "Agilidade", valor_bonus_atributo: 20 },
+    propriedades: { dano_min: 75, dano_max: 100, tipo_dano: "Fisico", tipo_arma: "Adaga", bonus_atributo: "Agilidade", valor_bonus_atributo: 20 },
   },
 ];
 
