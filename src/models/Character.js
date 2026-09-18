@@ -154,6 +154,13 @@ const Character = sequelize.define("Character", {
     defaultValue: "F",
     allowNull: true,
   },
+  // Avatar de perfil escolhido pelo jogador (ver AVATARES_VALIDOS em
+  // characterController.js) — null significa "nunca escolheu", o
+  // frontend cai de volta na ilustração automática por raça/gênero.
+  avatar_key: {
+    type: DataTypes.STRING(30),
+    allowNull: true,
+  },
   id_raca: {
     type: DataTypes.INTEGER,
     allowNull: false,

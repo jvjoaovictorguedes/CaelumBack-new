@@ -292,6 +292,53 @@ exports.refreshToken = async (req, res) => {
   }
 };
 
+// POST /api/users/change-password (autenticado)
+// body: { senhaAtual, novaSenha }
+// Igual ao fluxo de "esqueci minha senha" na regra de força e em marcar
+// senhaAlteradaEm (derruba qualquer outro token emitido antes dessa
+// troca), mas aqui o jogador já está logado e confirma a senha atual em
+// vez de um link por e-mail. Reemite o token igual refreshToken faz —
+// senão o PRÓPRIO token que acabou de trocar a senha ficaria inválido
+// na resposta seguinte (authMiddleware compara iat com senhaAlteradaEm).
+exports.changePassword = async (req, res) => {
+  try {
+    const { senhaAtual, novaSenha } = req.body;
+    if (!senhaAtual || !novaSenha) {
+      return res.status(400).json({ message: "Informe a senha atual e a nova senha." });
+    }
+    if (novaSenha.length < SENHA_MIN_CARACTERES || !SENHA_REGEX.test(novaSenha)) {
+      return res.status(400).json({
+        message: `A nova senha deve ter pelo menos ${SENHA_MIN_CARACTERES} caracteres e incluir letras e números.`,
+      });
+    }
+
+    const user = await User.findByPk(req.user.id);
+    if (!user || !(await user.comparePassword(senhaAtual))) {
+      return res.status(401).json({ message: "Senha atual incorreta." });
+    }
+
+    user.passwordHash = novaSenha; // hook beforeUpdate faz o hash
+    // 1s no passado, não "agora": o token reemitido logo abaixo carrega
+    // iat em segundos (truncado pra baixo pelo JWT), então um
+    // senhaAlteradaEm com milissegundos "agora" podia cair DEPOIS do
+    // iat do próprio token novo (mesmo segundo, truncamento pra baixo)
+    // e invalidar a sessão que a troca deveria manter viva.
+    user.senhaAlteradaEm = new Date(Date.now() - 1000);
+    await user.save();
+
+    const token = signToken(user.id, { rememberMe: Boolean(req.user.rememberMe) });
+    res.status(200).json({
+      status: "success",
+      message: "Senha alterada com sucesso.",
+      token,
+      rememberMe: Boolean(req.user.rememberMe),
+    });
+  } catch (error) {
+    console.error("Erro ao trocar senha:", error);
+    res.status(500).json({ message: "Erro interno do servidor ao trocar a senha." });
+  }
+};
+
 exports.getSocketTicket = async (req, res) => {
   try {
     const ticket = emitirTicket(req.user.id);

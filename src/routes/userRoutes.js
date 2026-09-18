@@ -13,11 +13,15 @@ const limitadorRegistro = criarLimitador({ janelaMs: 60 * 60 * 1000, maxTentativ
 // /reset-password (embora isso já seja inviável por tamanho, o rate
 // limit é uma segunda camada barata).
 const limitadorResetSenha = criarLimitador({ janelaMs: 15 * 60 * 1000, maxTentativas: 5 });
+// Mesmo raciocínio do limitador de reset por e-mail — sem isso dava pra
+// tentar forçar bruta a senha atual de uma conta já logada em loop.
+const limitadorTrocaSenha = criarLimitador({ janelaMs: 15 * 60 * 1000, maxTentativas: 5 });
 
 router.post("/register", limitadorRegistro, userController.registerUser);
 router.post("/login", limitadorLogin, userController.loginUser);
 router.post("/forgot-password", limitadorResetSenha, userController.forgotPassword);
 router.post("/reset-password", limitadorResetSenha, userController.resetPassword);
+router.post("/change-password", limitadorTrocaSenha, authMiddleware, userController.changePassword);
 router.get("/socket-ticket", authMiddleware, userController.getSocketTicket);
 router.post("/refresh", authMiddleware, userController.refreshToken);
 router.get("/", authMiddleware, userController.getAllUsers);

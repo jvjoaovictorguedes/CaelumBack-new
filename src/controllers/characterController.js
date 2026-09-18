@@ -451,11 +451,35 @@ exports.getMeuPersonagem = async (req, res) => {
   }
 };
 
-// Único uso legítimo hoje é a troca de sexo (GenderToggleButton). Sem
-// uma lista explícita, esse PATCH aceitava qualquer coluna do modelo —
-// dinheiro, nivel, stats, id_usuario — vindo direto do corpo da
-// requisição.
-const CAMPOS_EDITAVEIS = ["genero"];
+// Catálogo fixo de avatares de perfil — todos reaproveitando arte que
+// já existe no jogo (ilustrações de raça/classe), sem depender de URL
+// arbitrária vinda do cliente (evita um jogador setar avatar_key pra
+// uma URL de fora e o app renderizar imagem de terceiro sem controle
+// nenhum). O frontend resolve cada chave pra um arquivo estático — ver
+// AVATAR_CATALOGO em media-url.ts, que precisa ficar em sincronia com
+// esta lista.
+const AVATARES_VALIDOS = [
+  "guerreiro",
+  "mago",
+  "humano",
+  "humana",
+  "elfo",
+  "elfa",
+  "anao",
+  "ana",
+  "orc",
+  "orca",
+  "celestial",
+  "minotauro",
+  "dragao",
+  "guardiao_celeste",
+];
+
+// Único uso legítimo hoje é a troca de sexo (GenderToggleButton) e a
+// troca de avatar (AvatarPickerModal). Sem uma lista explícita, esse
+// PATCH aceitava qualquer coluna do modelo — dinheiro, nivel, stats,
+// id_usuario — vindo direto do corpo da requisição.
+const CAMPOS_EDITAVEIS = ["genero", "avatar_key"];
 
 exports.updateCharacter = async (req, res) => {
   try {
@@ -465,6 +489,14 @@ exports.updateCharacter = async (req, res) => {
     }
     if (Object.keys(dadosPermitidos).length === 0) {
       return res.status(400).json({ message: "Nenhum campo editável foi enviado." });
+    }
+
+    if (
+      dadosPermitidos.avatar_key !== undefined &&
+      dadosPermitidos.avatar_key !== null &&
+      !AVATARES_VALIDOS.includes(dadosPermitidos.avatar_key)
+    ) {
+      return res.status(400).json({ message: "Avatar inválido." });
     }
 
     const [updatedRows] = await Character.update(dadosPermitidos, {
