@@ -46,6 +46,7 @@ const weaponPropertiesRoutes = require("./routes/weaponPropertiesRoutes");
 const combatRoutes = require("./routes/combatRoutes");
 const shopRoutes = require("./routes/shopRoutes");
 const craftingRoutes = require("./routes/craftingRoutes");
+const patchNotesRoutes = require("./routes/patchNotesRoutes");
 const characterUseItemRoutes = require("./routes/characterItemRoutes");
 const attributeRoutes = require("./routes/attributeRoutes");
 const characterEquipmentRoutes = require("./routes/CharacterEquipmentRoutes");
@@ -158,6 +159,7 @@ app.get("/", (req, res) => {
 
 app.use("/api/shop", shopRoutes);
 app.use("/api/crafting", craftingRoutes);
+app.use("/api/patch-notes", patchNotesRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/races", raceRoutes);
 app.use("/api/powers", powerRoutes);
