@@ -2,6 +2,7 @@ const express = require("express");
 
 const characterController = require("../controllers/characterController");
 const rankGateController = require("../controllers/rankGateController");
+const missionController = require("../controllers/missionController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const adminMiddleware = require("../middlewares/adminMiddleware");
 const {
@@ -54,6 +55,16 @@ router
 router
   .route("/:id/rank-gate/attempt")
   .post(authMiddleware, exigirDonoDoPersonagem("id"), rankGateController.tentarPortal);
+
+// Missões diárias/únicas — catálogo fixo (ver seeder), progresso
+// individual por personagem (ver missionService.js).
+router
+  .route("/:id/missions")
+  .get(authMiddleware, exigirDonoOuAdmin("id"), missionController.getMissoes);
+
+router
+  .route("/:id/missions/:missionId/claim")
+  .post(authMiddleware, exigirDonoDoPersonagem("id"), missionController.resgatarMissao);
 
 router
   .route("/:id")

@@ -15,6 +15,7 @@ const Power = require("../models/Power");
 const PvpStatus = require("../models/PvpStatus");
 const PvpMatches = require("../models/PvpMatches");
 const { adicionarExperiencia } = require("../services/experienceService");
+const { registrarProgresso } = require("../services/missionService");
 const {
   vidaMaximaDe,
   manaMaximaDe,
@@ -211,6 +212,9 @@ async function aplicarResultadoDuelo({ vencedor, perdedor, rodadas }) {
       transaction,
       personagem: vencedorTravado,
     });
+
+    await registrarProgresso(vencedorTravado, "VencerDuelos", 1, transaction);
+    await registrarProgresso(vencedorTravado, "GanharOuro", recompensa.dinheiro, transaction);
 
     const [statusVencedor, statusPerdedor] = await Promise.all([
       garantirStatus(vencedor.id, transaction),

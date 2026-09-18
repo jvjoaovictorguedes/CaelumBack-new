@@ -32,6 +32,8 @@ const {
 } = require("../services/equipmentBonusService");
 const { sincronizarRegeneracaoDeVida } = require("../services/regenService");
 const { encontroValido, limparEncontroExpirado } = require("../services/pveEncounterService");
+const { rolarDropDeVitoria } = require("../services/dropService");
+const { registrarProgresso } = require("../services/missionService");
 
 const NOMES_INIMIGOS = [
   "Lobo das Sombras",
@@ -568,6 +570,22 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
         `${inimigoAtual.nome} foi derrotado! Você ganhou ${xpGanho} de experiência e ${dinheiroGanho} moedas.`
       );
 
+      // Loot: rola DEPOIS do save de dinheiro/vida acima já estar
+      // decidido em memória (character.dinheiro já tem dinheiroGanho
+      // somado) — se cair ouro bônus, soma em cima do mesmo campo, e o
+      // character.save() abaixo persiste tudo junto numa vez só.
+      const drop = await rolarDropDeVitoria(character, inimigoAtual, transaction);
+      if (drop?.tipo === "item") {
+        log.push(`Você encontrou: ${drop.item.nome}!`);
+      } else if (drop?.tipo === "ouro") {
+        log.push(`Você também encontrou ${drop.dinheiro} moedas extras!`);
+      }
+
+      const dinheiroGanhoTotal = dinheiroGanho + (drop?.tipo === "ouro" ? drop.dinheiro : 0);
+      await registrarProgresso(character, "MatarInimigos", 1, transaction);
+      await registrarProgresso(character, "GanharOuro", dinheiroGanhoTotal, transaction);
+      await character.save({ transaction });
+
       return res.status(200).json({
         status: "success",
 
@@ -602,6 +620,8 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
             experiencia: xpGanho,
             dinheiro: dinheiroGanho,
           },
+
+          drop,
         },
       });
     }
