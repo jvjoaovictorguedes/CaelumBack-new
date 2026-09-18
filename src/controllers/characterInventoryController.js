@@ -289,6 +289,10 @@ exports.getAllCharacterInventory = async (req, res) => {
           include: [
             { model: ArmorProperties, as: "armorProperties" },
             { model: WeaponProperties, as: "weaponProperties" },
+            // Cura de vida/mana (% do máximo) — pro combate mostrar um
+            // tooltip com o efeito do consumível ao passar o mouse, sem
+            // precisar de uma chamada extra por item.
+            { model: ConsumableProperties, as: "consumableProperties" },
           ],
         },
       ],

@@ -14,13 +14,15 @@ const {
   chanceDeEsquiva,
 } = require("./combatFormulas");
 
-// acao: { tipo: "attack" } ou { tipo: "power", power: <Power> }. Quando o
-// poder vem de buscarPoderesDoPersonagem (pvpController.js) ele já traz
-// `power.nivel_habilidade` grudado — sem isso o duelo assíncrono e o PVP
-// ao vivo ignorariam totalmente o nível investido na habilidade.
-function aplicarAcao({ atacante, defensor, acao, vidaMaxAtacante }) {
+// acao: { tipo: "attack" }, { tipo: "power", power: <Power> } ou
+// { tipo: "item", item: <Item>, efeito: <ConsumableProperties> }. Quando
+// o poder vem de buscarPoderesDoPersonagem (pvpController.js) ele já
+// traz `power.nivel_habilidade` grudado — sem isso o duelo assíncrono e
+// o PVP ao vivo ignorariam totalmente o nível investido na habilidade.
+function aplicarAcao({ atacante, defensor, acao, vidaMaxAtacante, manaMaxAtacante }) {
   let dano = 0;
   let cura = 0;
+  let manaCurada = 0;
   let esquivou = false;
   let nomeAcao = "Ataque básico";
 
@@ -31,6 +33,19 @@ function aplicarAcao({ atacante, defensor, acao, vidaMaxAtacante }) {
     const efeito = calcularEfeitoPoder(acao.power, atacante, nivelHabilidade);
     dano = efeito.dano;
     cura = efeito.cura;
+  } else if (acao.tipo === "item" && acao.efeito) {
+    // Consumível como ação de duelo — consome o turno igual um ataque ou
+    // poder (o oponente ainda age depois) e usa a MESMA fórmula percentual
+    // (não pontos fixos) do PvE (combatController.js) e do uso fora de
+    // combate (characterInventoryController.js): sempre % da vida/mana
+    // MÁXIMA, nunca da atual.
+    nomeAcao = acao.item?.nome ?? "Usar item";
+    if (acao.efeito.efeito_vida) {
+      cura = Math.round((vidaMaxAtacante ?? atacante.vida_atual) * (acao.efeito.efeito_vida / 100));
+    }
+    if (acao.efeito.efeito_mana) {
+      manaCurada = Math.round((manaMaxAtacante ?? atacante.mana_atual) * (acao.efeito.efeito_mana / 100));
+    }
   }
 
   if (dano > 0 || acao.tipo === "attack") {
@@ -57,7 +72,12 @@ function aplicarAcao({ atacante, defensor, acao, vidaMaxAtacante }) {
     atacante.vida_atual = Math.min(teto, atacante.vida_atual + cura);
   }
 
-  return { nomeAcao, dano, cura, esquivou };
+  if (manaCurada > 0) {
+    const tetoMana = manaMaxAtacante ?? atacante.mana_atual + manaCurada;
+    atacante.mana_atual = Math.min(tetoMana, atacante.mana_atual + manaCurada);
+  }
+
+  return { nomeAcao, dano, cura, manaCurada, esquivou };
 }
 
 module.exports = { aplicarAcao };

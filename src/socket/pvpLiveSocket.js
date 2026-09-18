@@ -14,6 +14,9 @@
 const crypto = require("crypto");
 const Character = require("../models/Character");
 const Class = require("../models/Class");
+const CharacterInventory = require("../models/CharacterInventory");
+const Item = require("../models/Item");
+const ConsumableProperties = require("../models/ConsumableProperties");
 const {
   vidaMaximaDe,
   manaMaximaDe,
@@ -22,6 +25,7 @@ const {
 } = require("../services/combatFormulas");
 const { aplicarAcao } = require("../services/duelEngine");
 const { buscarPoderesDoPersonagem, aplicarResultadoDuelo } = require("../controllers/pvpController");
+const { listarConsumiveisDeCombate } = require("../services/combatConsumablesService");
 const {
   buscarBonusDeAtributos,
   personagemComBonus,
@@ -64,6 +68,7 @@ async function carregarLutador(characterId) {
   const personagem = await Character.findByPk(characterId, { include: [{ model: Class }] });
   if (!personagem) return null;
   const poderes = await buscarPoderesDoPersonagem(characterId);
+  const consumiveis = await listarConsumiveisDeCombate(characterId);
   const bonus = await buscarBonusDeAtributos(characterId);
   const base = comMultiplicadoresDeClasse(
     personagemComBonus(personagem.toJSON(), bonus),
@@ -75,6 +80,7 @@ async function carregarLutador(characterId) {
     genero: base.genero,
     classe: personagem.Class?.nome,
     poderes,
+    consumiveis,
     estado: {
       ...base,
       vida_atual: vidaMaximaDe(base),
@@ -101,6 +107,7 @@ function poderesPublicos(poderes) {
   return poderes.map((p) => ({
     id: p.id,
     nome: p.nome,
+    imagem_url: p.imagem_url ?? null,
     custo_mana: custoManaEfetivo(p, p.nivel_habilidade ?? 1),
     dano_base: p.dano_base,
     cura_base: p.cura_base,
@@ -270,6 +277,8 @@ module.exports = function registerPvpLiveHandlers(io) {
           manaB: lutadorB.estado.mana_atual,
           poderesA: poderesPublicos(lutadorA.poderes),
           poderesB: poderesPublicos(lutadorB.poderes),
+          consumiveisA: lutadorA.consumiveis,
+          consumiveisB: lutadorB.consumiveis,
           turnoDe: primeiro,
           prazoSegundos: PRAZO_TURNO_MS / 1000,
         });
@@ -281,7 +290,7 @@ module.exports = function registerPvpLiveHandlers(io) {
       }
     });
 
-    socket.on("pvp:acao", ({ tipo, idPoder } = {}) => {
+    socket.on("pvp:acao", async ({ tipo, idPoder, idItem } = {}) => {
       const characterId = socket.characterId;
       if (!characterId) return;
       const duelId = duelPorPersonagem.get(characterId);
@@ -289,6 +298,15 @@ module.exports = function registerPvpLiveHandlers(io) {
 
       const duelo = duelos.get(duelId);
       if (!duelo) return;
+
+      // Só o item consulta o banco (async) — attack/power resolvem tudo
+      // em memória e não têm gap nenhum pra correr risco de corrida.
+      // Ainda assim, essa trava cobre os três tipos: evita que um duplo
+      // clique durante o await do item dispare uma segunda ação (de
+      // qualquer tipo) antes da primeira terminar de processar.
+      if (duelo.processandoAcao) {
+        return socket.emit("pvp:erro", { mensagem: "Aguarde, sua última ação ainda está sendo processada." });
+      }
 
       const chave = duelo.a.id === Number(characterId) ? "A" : "B";
       if (duelo.turnoDe !== chave) {
@@ -318,6 +336,54 @@ module.exports = function registerPvpLiveHandlers(io) {
           return socket.emit("pvp:erro", { mensagem: "Mana insuficiente para esse poder." });
         }
         acao = { tipo: "power", power };
+      } else if (tipo === "item") {
+        // Consumível como ação de duelo — mesma regra de "gasta o turno
+        // inteiro" e o mesmo caminho de validação (inventário + tipo do
+        // item + efeito configurado) já usado no PvE (combatController.js)
+        // e no Portal de Ranque (rankGateController.js). Precisa de
+        // consulta ao banco (await), então trava o duelo pra ninguém
+        // mandar uma segunda ação enquanto essa resolve.
+        duelo.processandoAcao = true;
+        try {
+          const inventoryEntry = await CharacterInventory.findOne({
+            where: { id_personagem: characterId, id_item: idItem },
+          });
+          if (!inventoryEntry || inventoryEntry.quantidade < 1) {
+            return socket.emit("pvp:erro", { mensagem: "Você não possui esse item no inventário." });
+          }
+
+          const item = await Item.findByPk(idItem);
+          if (!item || item.tipo_item !== "Consumivel") {
+            return socket.emit("pvp:erro", { mensagem: "Este item não pode ser usado em combate." });
+          }
+
+          const efeito = await ConsumableProperties.findByPk(idItem);
+          if (!efeito) {
+            return socket.emit("pvp:erro", { mensagem: "Este item não possui efeito configurado." });
+          }
+
+          // Reconfirma que o duelo/turno continuam válidos depois do
+          // await acima — o timer de turno (ataque automático por tempo
+          // esgotado) pode ter disparado enquanto a consulta rodava.
+          const dueloAtual = duelos.get(duelId);
+          if (!dueloAtual || dueloAtual.turnoDe !== chave) {
+            return socket.emit("pvp:erro", { mensagem: "Esse turno não é mais válido." });
+          }
+
+          inventoryEntry.quantidade -= 1;
+          if (inventoryEntry.quantidade <= 0) {
+            await inventoryEntry.destroy();
+          } else {
+            await inventoryEntry.save();
+          }
+
+          acao = { tipo: "item", item, efeito };
+        } catch (error) {
+          console.error("Erro ao usar item em duelo ao vivo:", error);
+          return socket.emit("pvp:erro", { mensagem: "Não foi possível usar esse item agora." });
+        } finally {
+          duelo.processandoAcao = false;
+        }
       }
 
       executarTurno(io, duelId, chave, acao);
@@ -378,12 +444,14 @@ function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
   const atacanteInfo = chave === "A" ? duelo.a : duelo.b;
   const defensorInfo = chave === "A" ? duelo.b : duelo.a;
   const vidaMaxAtacante = chave === "A" ? duelo.a.vidaMax : duelo.b.vidaMax;
+  const manaMaxAtacante = chave === "A" ? duelo.a.manaMax : duelo.b.manaMax;
 
-  const { nomeAcao, dano, cura, esquivou } = aplicarAcao({
+  const { nomeAcao, dano, cura, manaCurada, esquivou } = aplicarAcao({
     atacante: atacanteInfo.estado,
     defensor: defensorInfo.estado,
     acao,
     vidaMaxAtacante,
+    manaMaxAtacante,
   });
 
   duelo.acoes += 1;
@@ -394,6 +462,7 @@ function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
     nomeAcao: foiAutomatico ? `${nomeAcao} (tempo esgotado)` : nomeAcao,
     dano,
     cura,
+    manaCurada,
     esquivou,
     vidaA: duelo.a.estado.vida_atual,
     vidaB: duelo.b.estado.vida_atual,
