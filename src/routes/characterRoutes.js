@@ -46,6 +46,14 @@ router
   .route("/:id/evolutions/:evolutionId/purchase")
   .post(authMiddleware, exigirDonoDoPersonagem("id"), characterController.comprarEvolucao);
 
+// Evolução de CLASSE — diferente da árvore de Evolution acima (aquela é
+// por natureza mágica). Nível alto + Relíquia de Ascensão específica da
+// classe (ver classEvolutionService.js), única e definitiva.
+router
+  .route("/:id/class-evolution")
+  .get(authMiddleware, exigirDonoOuAdmin("id"), characterController.getEvolucaoDeClasse)
+  .post(authMiddleware, exigirDonoDoPersonagem("id"), characterController.evolveClass);
+
 // Portal de Ranque — combate interativo (dificuldade escolhida pelo
 // jogador, turno a turno) contra o chefe do ranque atual; promove só
 // depois de acumular pontos suficientes (ver rankGateService.js).

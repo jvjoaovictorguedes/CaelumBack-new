@@ -6,6 +6,7 @@ const {
   multiplicadorEfeito: multiplicadorEfeitoPorNivelHabilidade,
   multiplicadorCustoMana: multiplicadorCustoManaPorNivelHabilidade,
 } = require("./abilityLevelService");
+const { MULTIPLICADOR_BONUS_EVOLUCAO } = require("./classEvolutionService");
 
 const ATRIBUTO_PARA_CAMPO = {
   Forca: "forca",
@@ -181,13 +182,19 @@ function manaMaximaDe(personagem) {
 // manaMaximaDe/calcularEfeitoPoder acima enxergarem. Sem classe (ou
 // campo não configurado), fica tudo em 1.0 — comportamento neutro,
 // igual a antes desses multiplicadores existirem.
+// personagem.classe_evoluida (ver classEvolutionService.js) soma +15%
+// em cima dos multiplicadores da classe — só liga quando o personagem
+// já evoluiu de verdade; se o campo não vier carregado (algum caller
+// com attributes restritos) o `?.` cai em falsy e o comportamento fica
+// idêntico a antes da evolução de classe existir.
 function comMultiplicadoresDeClasse(personagem, classe) {
+  const bonusEvolucao = personagem?.classe_evoluida ? MULTIPLICADOR_BONUS_EVOLUCAO : 1;
   return {
     ...personagem,
-    multiplicador_vida_por_nivel: classe?.multiplicador_vida_por_nivel ?? 1,
-    multiplicador_mana_por_nivel: classe?.multiplicador_mana_por_nivel ?? 1,
-    multiplicador_dano_fisico: classe?.multiplicador_dano_fisico ?? 1,
-    multiplicador_dano_magico: classe?.multiplicador_dano_magico ?? 1,
+    multiplicador_vida_por_nivel: (classe?.multiplicador_vida_por_nivel ?? 1) * bonusEvolucao,
+    multiplicador_mana_por_nivel: (classe?.multiplicador_mana_por_nivel ?? 1) * bonusEvolucao,
+    multiplicador_dano_fisico: (classe?.multiplicador_dano_fisico ?? 1) * bonusEvolucao,
+    multiplicador_dano_magico: (classe?.multiplicador_dano_magico ?? 1) * bonusEvolucao,
   };
 }
 

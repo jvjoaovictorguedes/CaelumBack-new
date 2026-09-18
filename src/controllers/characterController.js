@@ -31,6 +31,7 @@ const {
   custoParaEvoluir,
   marcoDoNivel,
 } = require("../services/abilityLevelService");
+const { requisitoDaClasse } = require("../services/classEvolutionService");
 const { sincronizarRegeneracaoDeVida, msAteRegenCompleta } = require("../services/regenService");
 const {
   PROPOSITO_RACA,
@@ -788,6 +789,138 @@ exports.comprarEvolucao = async (req, res) => {
     res
       .status(statusCode)
       .json({ message: error.statusCode ? error.message : "Erro interno do servidor ao comprar evolução." });
+  }
+};
+
+// GET status da evolução de classe — pra tela mostrar requisito, se já
+// tem a relíquia no inventário, e se já evoluiu. Não confundir com
+// getEvolucoesDisponiveis (aquele é o sistema de Evolution por natureza
+// mágica, já existente).
+exports.getEvolucaoDeClasse = async (req, res) => {
+  try {
+    const character = await Character.findByPk(req.params.id, {
+      attributes: ["id", "nivel", "classe_evoluida"],
+      include: [{ model: Class, attributes: ["id", "nome"] }],
+    });
+    if (!character) {
+      return res.status(404).json({ message: "Personagem não encontrado." });
+    }
+
+    const requisito = requisitoDaClasse(character.Class?.nome);
+    if (!requisito) {
+      return res.status(200).json({
+        status: "success",
+        data: { disponivel: false },
+      });
+    }
+
+    const itemRequisito = await Item.findOne({ where: { nome: requisito.nomeItem } });
+    const quantidadeNoInventario = itemRequisito
+      ? (
+          await CharacterInventory.findOne({
+            where: { id_personagem: character.id, id_item: itemRequisito.id },
+          })
+        )?.quantidade ?? 0
+      : 0;
+
+    res.status(200).json({
+      status: "success",
+      data: {
+        disponivel: true,
+        ja_evoluida: character.classe_evoluida,
+        nome_evoluido: requisito.nomeEvoluido,
+        nivel_minimo: requisito.nivelMinimo,
+        nivel_atual: character.nivel,
+        nome_item_requisito: requisito.nomeItem,
+        quantidade_no_inventario: quantidadeNoInventario,
+      },
+    });
+  } catch (error) {
+    console.error("Erro ao buscar evolução de classe:", error);
+    res.status(500).json({ message: "Erro interno do servidor ao buscar evolução de classe." });
+  }
+};
+
+// POST evolui a classe — consome a Relíquia de Ascensão exigida, exige
+// nível mínimo, e é definitivo (sem "desevoluir").
+exports.evolveClass = async (req, res) => {
+  try {
+    const resultado = await sequelize.transaction(async (transaction) => {
+      const character = await Character.findByPk(req.params.id, {
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+      if (!character) {
+        throw Object.assign(new Error("Personagem não encontrado."), { statusCode: 404 });
+      }
+
+      const classe = await Class.findByPk(character.id_classe, { transaction });
+      const requisito = requisitoDaClasse(classe?.nome);
+      if (!requisito) {
+        throw Object.assign(
+          new Error("Esta classe ainda não tem uma evolução configurada."),
+          { statusCode: 400 },
+        );
+      }
+
+      if (character.classe_evoluida) {
+        throw Object.assign(new Error("Este personagem já evoluiu de classe."), {
+          statusCode: 409,
+        });
+      }
+      if (character.nivel < requisito.nivelMinimo) {
+        throw Object.assign(
+          new Error(`Evoluir de classe exige nível ${requisito.nivelMinimo}.`),
+          { statusCode: 400 },
+        );
+      }
+
+      const itemRequisito = await Item.findOne({
+        where: { nome: requisito.nomeItem },
+        transaction,
+      });
+      const entradaInventario = itemRequisito
+        ? await CharacterInventory.findOne({
+            where: { id_personagem: character.id, id_item: itemRequisito.id },
+            transaction,
+            lock: transaction.LOCK.UPDATE,
+          })
+        : null;
+
+      if (!entradaInventario || entradaInventario.quantidade < 1) {
+        throw Object.assign(
+          new Error(`Você precisa de 1x ${requisito.nomeItem} pra evoluir de classe.`),
+          { statusCode: 400 },
+        );
+      }
+
+      entradaInventario.quantidade -= 1;
+      if (entradaInventario.quantidade > 0) {
+        await entradaInventario.save({ transaction });
+      } else {
+        await entradaInventario.destroy({ transaction });
+      }
+
+      character.classe_evoluida = true;
+      await character.save({ transaction });
+
+      return { character, nomeEvoluido: requisito.nomeEvoluido };
+    });
+
+    res.status(200).json({
+      status: "success",
+      message: `Seu personagem evoluiu para ${resultado.nomeEvoluido}!`,
+      data: {
+        classe_evoluida: resultado.character.classe_evoluida,
+        nome_evoluido: resultado.nomeEvoluido,
+      },
+    });
+  } catch (error) {
+    const statusCode = error.statusCode || 500;
+    if (statusCode === 500) console.error("Erro ao evoluir de classe:", error);
+    res
+      .status(statusCode)
+      .json({ message: error.statusCode ? error.message : "Erro interno do servidor ao evoluir de classe." });
   }
 };
 

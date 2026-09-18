@@ -425,6 +425,11 @@ const MATERIAIS = [
   // abilityLevelService.js) — dropa em combate PvE igual qualquer outro
   // Material, e também circula pelo mercado entre jogadores.
   { nome: "Fragmento de Grimório", descricao: "Um pedaço de página arrancada, ainda pulsando com o poder de quem a escreveu. Consumido pra evoluir uma habilidade.", raridade: "Raro", valor_compra: 0, valor_venda: 20, peso: 0.05, disponivel_loja: false },
+  // Relíquias de Ascensão — consumidas pra evoluir a CLASSE em si (nível
+  // alto, ver classEvolutionService.js). Uma por classe, Mítica (mais
+  // rara do jogo), nunca à venda — só drop.
+  { nome: "Coração de Titã", descricao: "Ainda pulsa, mesmo depois de arrancado do peito da besta. Quem o absorve nunca mais luta como antes.", raridade: "Mitico", valor_compra: 0, valor_venda: 800, peso: 2, disponivel_loja: false },
+  { nome: "Olho do Arcano Eterno", descricao: "Vê através do tecido da magia. Ninguém sabe dizer se ele observa quem o carrega, ou o contrário.", raridade: "Mitico", valor_compra: 0, valor_venda: 800, peso: 0.3, disponivel_loja: false },
 ];
 
 async function limparTudo(transaction) {
