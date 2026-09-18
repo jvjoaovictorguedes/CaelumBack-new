@@ -19,6 +19,9 @@ const Character = require("./Character");
 const Mission = require("./Mission");
 const CharacterMissionProgress = require("./CharacterMissionProgress");
 const MarketListing = require("./MarketListing");
+const CraftingRecipe = require("./CraftingRecipe");
+const CraftingRecipeIngredient = require("./CraftingRecipeIngredient");
+const CharacterCraftingQueue = require("./CharacterCraftingQueue");
 
 Item.hasOne(WeaponProperties, { foreignKey: "id_item", as: "weaponProperties" });
 WeaponProperties.belongsTo(Item, { foreignKey: "id_item" });
@@ -42,5 +45,14 @@ Mission.belongsTo(Item, { foreignKey: "recompensa_item_id", as: "itemRecompensa"
 MarketListing.belongsTo(Item, { foreignKey: "id_item", as: "item" });
 MarketListing.belongsTo(Character, { foreignKey: "id_personagem_vendedor", as: "vendedor" });
 MarketListing.belongsTo(Character, { foreignKey: "id_personagem_comprador", as: "comprador" });
+
+// Forja v2 — receita fixa por item (id_item), com N ingredientes
+// (materiais + quantidade) e no máximo 1 forja em andamento por
+// personagem.
+CraftingRecipe.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+CraftingRecipe.hasMany(CraftingRecipeIngredient, { foreignKey: "id_receita", as: "ingredientes" });
+CraftingRecipeIngredient.belongsTo(CraftingRecipe, { foreignKey: "id_receita" });
+CraftingRecipeIngredient.belongsTo(Item, { foreignKey: "id_item_material", as: "material" });
+CharacterCraftingQueue.belongsTo(CraftingRecipe, { foreignKey: "id_receita", as: "receita" });
 
 module.exports = {};

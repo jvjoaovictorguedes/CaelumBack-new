@@ -6,7 +6,9 @@ const { carregarPersonagemAtual } = require("../middlewares/currentCharacterMidd
 
 const router = express.Router();
 
-router.get("/options", authMiddleware, carregarPersonagemAtual, craftingController.getOpcoesDeForja);
-router.post("/craft", authMiddleware, carregarPersonagemAtual, craftingController.craftar);
+router.get("/recipes", authMiddleware, carregarPersonagemAtual, craftingController.getReceitas);
+router.get("/queue", authMiddleware, carregarPersonagemAtual, craftingController.getFila);
+router.post("/start", authMiddleware, carregarPersonagemAtual, craftingController.iniciarForja);
+router.post("/collect", authMiddleware, carregarPersonagemAtual, craftingController.coletarForja);
 
 module.exports = router;
