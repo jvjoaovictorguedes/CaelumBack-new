@@ -47,6 +47,7 @@ const PODERES_POR_CLASSE = {
       escala_atributo: "Forca",
       valor_escala: 1.2,
       nivel_aprendizagem: 1,
+      imagem_url: "/icons/skills/golpe-poderoso.png",
     },
     {
       nome: "Investida Brutal",
@@ -57,6 +58,7 @@ const PODERES_POR_CLASSE = {
       escala_atributo: "Forca",
       valor_escala: 1.25,
       nivel_aprendizagem: 5,
+      imagem_url: "/icons/skills/investida-brutal.png",
     },
     {
       nome: "Fúria de Aço",
@@ -67,6 +69,7 @@ const PODERES_POR_CLASSE = {
       escala_atributo: "Forca",
       valor_escala: 1.35,
       nivel_aprendizagem: 12,
+      imagem_url: "/icons/skills/furia-de-aco.png",
     },
     {
       nome: "Brado de Guerra",
@@ -77,6 +80,7 @@ const PODERES_POR_CLASSE = {
       escala_atributo: "Vitalidade",
       valor_escala: 1.0,
       nivel_aprendizagem: 20,
+      imagem_url: "/icons/skills/brado-de-guerra.png",
     },
     {
       nome: "Golpe Sísmico",
@@ -87,6 +91,7 @@ const PODERES_POR_CLASSE = {
       escala_atributo: "Forca",
       valor_escala: 1.55,
       nivel_aprendizagem: 30,
+      imagem_url: "/icons/skills/golpe-sismico.png",
     },
   ],
   Mago: [
@@ -195,6 +200,7 @@ const PODERES_POR_RACA = {
       escala_atributo: "Forca",
       valor_escala: 1.25,
       nivel_aprendizado: 8,
+      imagem_url: "/icons/skills/furia-ana.png",
     },
   ],
   Orc: [
@@ -207,6 +213,7 @@ const PODERES_POR_RACA = {
       escala_atributo: "Forca",
       valor_escala: 1.35,
       nivel_aprendizado: 10,
+      imagem_url: "/icons/skills/furia-selvagem.png",
     },
   ],
   Celestial: [

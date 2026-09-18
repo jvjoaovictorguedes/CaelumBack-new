@@ -332,6 +332,7 @@ const ESCUDOS = [
     valor_venda: 8,
     peso: 3,
     disponivel_loja: true,
+    imagem_url: "/icons/shields/escudo-madeira.png",
     propriedades: { slot_equipamento: "Maos", defesa: 4 },
   },
   {
@@ -342,6 +343,7 @@ const ESCUDOS = [
     valor_venda: 24,
     peso: 5,
     disponivel_loja: true,
+    imagem_url: "/icons/shields/escudo-ferro.png",
     propriedades: { slot_equipamento: "Maos", defesa: 9 },
   },
   {
@@ -352,6 +354,7 @@ const ESCUDOS = [
     valor_venda: 68,
     peso: 6,
     disponivel_loja: true,
+    imagem_url: "/icons/shields/escudo-guardiao.png",
     propriedades: { slot_equipamento: "Maos", defesa: 16, bonus_vitalidade: 3 },
   },
   {
@@ -362,6 +365,7 @@ const ESCUDOS = [
     valor_venda: 175,
     peso: 8,
     disponivel_loja: false,
+    imagem_url: "/icons/shields/bastiao-inabalavel.png",
     propriedades: { slot_equipamento: "Maos", defesa: 26, bonus_vitalidade: 6 },
   },
   {
@@ -372,6 +376,7 @@ const ESCUDOS = [
     valor_venda: 320,
     peso: 9,
     disponivel_loja: false,
+    imagem_url: "/icons/shields/escudo-ultimo-baluarte.png",
     propriedades: { slot_equipamento: "Maos", defesa: 40, bonus_vitalidade: 10 },
   },
 ];
