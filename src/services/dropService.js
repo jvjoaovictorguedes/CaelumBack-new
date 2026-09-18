@@ -15,7 +15,16 @@ const CHANCE_OURO_BONUS_BASE10000 = 2500; // 25% (checado só se não caiu no it
 
 // Pool de tipos que fazem sentido cair como loot de monstro — sem
 // QuestItem/Currencia (não são itens "de verdade" pra dropar assim).
-const TIPOS_DROPAVEIS = ["Armadura", "Capacete", "Escudo", "Arma", "Consumivel", "Material"];
+const TIPOS_DROPAVEIS = [
+  "Armadura",
+  "Capacete",
+  "Escudo",
+  "Arma",
+  "Consumivel",
+  "Material",
+  "Acessorio1",
+  "Acessorio2",
+];
 
 // Quanto mais raro, mais raro cair — pesos decrescem rápido pra dar de
 // fato a sensação de "achado" quando sai algo Épico+ de um mob comum.

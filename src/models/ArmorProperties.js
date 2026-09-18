@@ -13,7 +13,7 @@ const ArmorProperties = sequelize.define("ArmorProperties", {
     allowNull: false,
   },
   slot_equipamento: {
-    type: DataTypes.ENUM("Cabeca", "Torso", "Maos", "Pes"),
+    type: DataTypes.ENUM("Cabeca", "Torso", "Maos", "Pes", "Acessorio1", "Acessorio2"),
     allowNull: false,
   },
   defesa: {
