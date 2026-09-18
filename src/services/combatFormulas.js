@@ -6,7 +6,6 @@ const {
   multiplicadorEfeito: multiplicadorEfeitoPorNivelHabilidade,
   multiplicadorCustoMana: multiplicadorCustoManaPorNivelHabilidade,
 } = require("./abilityLevelService");
-const { MULTIPLICADOR_BONUS_EVOLUCAO } = require("./classEvolutionService");
 
 const ATRIBUTO_PARA_CAMPO = {
   Forca: "forca",
@@ -182,19 +181,20 @@ function manaMaximaDe(personagem) {
 // manaMaximaDe/calcularEfeitoPoder acima enxergarem. Sem classe (ou
 // campo não configurado), fica tudo em 1.0 — comportamento neutro,
 // igual a antes desses multiplicadores existirem.
-// personagem.classe_evoluida (ver classEvolutionService.js) soma +15%
-// em cima dos multiplicadores da classe — só liga quando o personagem
-// já evoluiu de verdade; se o campo não vier carregado (algum caller
-// com attributes restritos) o `?.` cai em falsy e o comportamento fica
-// idêntico a antes da evolução de classe existir.
+// A evolução de CLASSE (ver ClassEvolutionPath/classEvolutionService.js)
+// não mexe mais nos multiplicadores da classe — desde que virou uma
+// árvore de caminhos exclusivos, o bônus dela é aplicado direto nos
+// atributos do personagem (forca/vitalidade/etc, mesmo critério da
+// árvore de Evolution por natureza mágica) no momento de evoluir, então
+// já chega embutido em `personagem` antes daqui. Essa função só existe
+// pra anexar os multiplicadores da própria Classe (vida/mana/dano).
 function comMultiplicadoresDeClasse(personagem, classe) {
-  const bonusEvolucao = personagem?.classe_evoluida ? MULTIPLICADOR_BONUS_EVOLUCAO : 1;
   return {
     ...personagem,
-    multiplicador_vida_por_nivel: (classe?.multiplicador_vida_por_nivel ?? 1) * bonusEvolucao,
-    multiplicador_mana_por_nivel: (classe?.multiplicador_mana_por_nivel ?? 1) * bonusEvolucao,
-    multiplicador_dano_fisico: (classe?.multiplicador_dano_fisico ?? 1) * bonusEvolucao,
-    multiplicador_dano_magico: (classe?.multiplicador_dano_magico ?? 1) * bonusEvolucao,
+    multiplicador_vida_por_nivel: classe?.multiplicador_vida_por_nivel ?? 1,
+    multiplicador_mana_por_nivel: classe?.multiplicador_mana_por_nivel ?? 1,
+    multiplicador_dano_fisico: classe?.multiplicador_dano_fisico ?? 1,
+    multiplicador_dano_magico: classe?.multiplicador_dano_magico ?? 1,
   };
 }
 

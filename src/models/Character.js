@@ -93,13 +93,13 @@ const Character = sequelize.define("Character", {
     allowNull: false,
     defaultValue: 0,
   },
-  // Evolução de CLASSE (título novo + bônus permanente de combate) —
-  // diferente da Evolution por natureza mágica. Só liga uma vez, não
-  // reverte (ver classEvolutionService.js).
-  classe_evoluida: {
-    type: DataTypes.BOOLEAN,
-    allowNull: false,
-    defaultValue: false,
+  // Evolução de CLASSE — qual dos caminhos da árvore (ver
+  // ClassEvolutionPath/classEvolutionService.js) o personagem escolheu.
+  // NULL = ainda não evoluiu. Diferente da Evolution por natureza
+  // mágica. Só liga uma vez, não reverte nem troca de caminho.
+  id_evolucao_classe: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
   },
   forca: {
     type: DataTypes.INTEGER,

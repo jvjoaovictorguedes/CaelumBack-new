@@ -33,7 +33,11 @@ const {
   multiplicadorEfeito,
   multiplicadorCustoMana,
 } = require("../services/abilityLevelService");
-const { requisitoDaClasse } = require("../services/classEvolutionService");
+const {
+  listarCaminhosDaClasse,
+  buscarCaminho,
+  buscarItemRequisito,
+} = require("../services/classEvolutionService");
 const { sincronizarRegeneracaoDeVida, msAteRegenCompleta } = require("../services/regenService");
 const {
   PROPOSITO_RACA,
@@ -1004,47 +1008,72 @@ exports.comprarEvolucao = async (req, res) => {
   }
 };
 
-// GET status da evolução de classe — pra tela mostrar requisito, se já
-// tem a relíquia no inventário, e se já evoluiu. Não confundir com
-// getEvolucoesDisponiveis (aquele é o sistema de Evolution por natureza
-// mágica, já existente).
+// GET a árvore de evolução de CLASSE — todos os caminhos configurados
+// pra classe do personagem, cada um já com "pode_evoluir" calculado
+// (nível + item o suficiente + ainda não escolheu nenhum caminho). Não
+// confundir com getEvolucoesDisponiveis (aquele é o sistema de Evolution
+// por natureza mágica, já existente, mantido à parte).
 exports.getEvolucaoDeClasse = async (req, res) => {
   try {
     const character = await Character.findByPk(req.params.id, {
-      attributes: ["id", "nivel", "classe_evoluida"],
-      include: [{ model: Class, attributes: ["id", "nome"] }],
+      attributes: ["id", "nivel", "id_classe", "id_evolucao_classe"],
     });
     if (!character) {
       return res.status(404).json({ message: "Personagem não encontrado." });
     }
 
-    const requisito = requisitoDaClasse(character.Class?.nome);
-    if (!requisito) {
+    const caminhos = await listarCaminhosDaClasse(character.id_classe);
+    if (caminhos.length === 0) {
       return res.status(200).json({
         status: "success",
         data: { disponivel: false },
       });
     }
 
-    const itemRequisito = await Item.findOne({ where: { nome: requisito.nomeItem } });
-    const quantidadeNoInventario = itemRequisito
-      ? (
-          await CharacterInventory.findOne({
-            where: { id_personagem: character.id, id_item: itemRequisito.id },
-          })
-        )?.quantidade ?? 0
-      : 0;
+    const inventario = await CharacterInventory.findAll({ where: { id_personagem: character.id } });
+    const quantidadePorItem = new Map(inventario.map((entrada) => [entrada.id_item, entrada.quantidade]));
+
+    const caminhoEscolhido = character.id_evolucao_classe
+      ? caminhos.find((c) => c.id === character.id_evolucao_classe)
+      : null;
+
+    const caminhosMontados = await Promise.all(
+      caminhos.map(async (caminho) => {
+        const item = await buscarItemRequisito(caminho.id_item_requisito);
+        const quantidadeNoInventario = item ? (quantidadePorItem.get(item.id) ?? 0) : 0;
+        const nivelOk = character.nivel >= caminho.nivel_necessario;
+        const itemOk = quantidadeNoInventario >= caminho.quantidade_item_requisito;
+        return {
+          id: caminho.id,
+          nome: caminho.nome,
+          descricao: caminho.descricao,
+          nivel_necessario: caminho.nivel_necessario,
+          nome_item_requisito: item?.nome ?? null,
+          imagem_item_requisito: item?.imagem_url ?? null,
+          quantidade_item_requisito: caminho.quantidade_item_requisito,
+          quantidade_no_inventario: quantidadeNoInventario,
+          bonus_forca: caminho.bonus_forca,
+          bonus_vitalidade: caminho.bonus_vitalidade,
+          bonus_agilidade: caminho.bonus_agilidade,
+          bonus_inteligencia: caminho.bonus_inteligencia,
+          bonus_velocidade: caminho.bonus_velocidade,
+          imagem_url: caminho.imagem_url,
+          escolhido: character.id_evolucao_classe === caminho.id,
+          pode_evoluir: !character.id_evolucao_classe && nivelOk && itemOk,
+          nivel_ok: nivelOk,
+          item_ok: itemOk,
+        };
+      }),
+    );
 
     res.status(200).json({
       status: "success",
       data: {
         disponivel: true,
-        ja_evoluida: character.classe_evoluida,
-        nome_evoluido: requisito.nomeEvoluido,
-        nivel_minimo: requisito.nivelMinimo,
+        ja_evoluida: Boolean(character.id_evolucao_classe),
+        caminho_escolhido: caminhoEscolhido?.nome ?? null,
         nivel_atual: character.nivel,
-        nome_item_requisito: requisito.nomeItem,
-        quantidade_no_inventario: quantidadeNoInventario,
+        caminhos: caminhosMontados,
       },
     });
   } catch (error) {
@@ -1053,10 +1082,16 @@ exports.getEvolucaoDeClasse = async (req, res) => {
   }
 };
 
-// POST evolui a classe — consome a Relíquia de Ascensão exigida, exige
-// nível mínimo, e é definitivo (sem "desevoluir").
+// POST escolhe UM caminho da árvore de classe (body: { id_caminho }) —
+// consome a Relíquia de Ascensão específica desse caminho, exige nível
+// mínimo, e é definitivo (sem "desevoluir" nem trocar de caminho depois).
 exports.evolveClass = async (req, res) => {
   try {
+    const idCaminho = Number(req.body?.id_caminho);
+    if (!Number.isInteger(idCaminho)) {
+      return res.status(400).json({ message: "id_caminho é obrigatório." });
+    }
+
     const resultado = await sequelize.transaction(async (transaction) => {
       const character = await Character.findByPk(req.params.id, {
         transaction,
@@ -1066,64 +1101,64 @@ exports.evolveClass = async (req, res) => {
         throw Object.assign(new Error("Personagem não encontrado."), { statusCode: 404 });
       }
 
-      const classe = await Class.findByPk(character.id_classe, { transaction });
-      const requisito = requisitoDaClasse(classe?.nome);
-      if (!requisito) {
-        throw Object.assign(
-          new Error("Esta classe ainda não tem uma evolução configurada."),
-          { statusCode: 400 },
-        );
-      }
-
-      if (character.classe_evoluida) {
+      if (character.id_evolucao_classe) {
         throw Object.assign(new Error("Este personagem já evoluiu de classe."), {
           statusCode: 409,
         });
       }
-      if (character.nivel < requisito.nivelMinimo) {
+
+      const caminho = await buscarCaminho(idCaminho);
+      if (!caminho || caminho.id_classe !== character.id_classe) {
         throw Object.assign(
-          new Error(`Evoluir de classe exige nível ${requisito.nivelMinimo}.`),
+          new Error("Esse caminho de evolução não pertence à classe deste personagem."),
+          { statusCode: 404 },
+        );
+      }
+      if (character.nivel < caminho.nivel_necessario) {
+        throw Object.assign(
+          new Error(`Evoluir pra ${caminho.nome} exige nível ${caminho.nivel_necessario}.`),
           { statusCode: 400 },
         );
       }
 
-      const itemRequisito = await Item.findOne({
-        where: { nome: requisito.nomeItem },
+      const entradaInventario = await CharacterInventory.findOne({
+        where: { id_personagem: character.id, id_item: caminho.id_item_requisito },
         transaction,
+        lock: transaction.LOCK.UPDATE,
       });
-      const entradaInventario = itemRequisito
-        ? await CharacterInventory.findOne({
-            where: { id_personagem: character.id, id_item: itemRequisito.id },
-            transaction,
-            lock: transaction.LOCK.UPDATE,
-          })
-        : null;
-
-      if (!entradaInventario || entradaInventario.quantidade < 1) {
+      if (!entradaInventario || entradaInventario.quantidade < caminho.quantidade_item_requisito) {
+        const itemRequisito = await Item.findByPk(caminho.id_item_requisito, { transaction });
         throw Object.assign(
-          new Error(`Você precisa de 1x ${requisito.nomeItem} pra evoluir de classe.`),
+          new Error(
+            `Você precisa de ${caminho.quantidade_item_requisito}x ${itemRequisito?.nome ?? "item"} pra evoluir pra ${caminho.nome}.`,
+          ),
           { statusCode: 400 },
         );
       }
 
-      entradaInventario.quantidade -= 1;
+      entradaInventario.quantidade -= caminho.quantidade_item_requisito;
       if (entradaInventario.quantidade > 0) {
         await entradaInventario.save({ transaction });
       } else {
         await entradaInventario.destroy({ transaction });
       }
 
-      character.classe_evoluida = true;
+      character.id_evolucao_classe = caminho.id;
+      character.forca += caminho.bonus_forca;
+      character.vitalidade += caminho.bonus_vitalidade;
+      character.agilidade += caminho.bonus_agilidade;
+      character.inteligencia += caminho.bonus_inteligencia;
+      character.velocidade += caminho.bonus_velocidade;
       await character.save({ transaction });
 
-      return { character, nomeEvoluido: requisito.nomeEvoluido };
+      return { character, nomeEvoluido: caminho.nome };
     });
 
     res.status(200).json({
       status: "success",
       message: `Seu personagem evoluiu para ${resultado.nomeEvoluido}!`,
       data: {
-        classe_evoluida: resultado.character.classe_evoluida,
+        id_evolucao_classe: resultado.character.id_evolucao_classe,
         nome_evoluido: resultado.nomeEvoluido,
       },
     });

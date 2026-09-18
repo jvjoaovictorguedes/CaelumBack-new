@@ -129,15 +129,20 @@ async function coletar(id_personagem, id_regiao) {
       throw Object.assign(new Error("Região de expedição não encontrada."), { statusCode: 404 });
     }
 
-    // Lock "puro" (sem include) na linha de profissão que essa coleta
-    // afeta — impede duas coletas simultâneas da mesma profissão
-    // corromperem XP/cooldown (teste de 10 POSTs simultâneos da spec).
-    const profissao = await CharacterProfession.findOne({
-      where: { id_personagem, tipo: regiao.profissao },
+    // Cooldown é GLOBAL entre as 3 profissões (pedido do jogador: coletar
+    // em Mineração também deve travar Silvicultura/Exploração por 3s,
+    // não só a própria Mineração) — trava as 3 linhas de profissão do
+    // personagem de uma vez, sempre na mesma ordem (PROFISSOES), pra
+    // nunca dar deadlock entre duas coletas concorrentes de profissões
+    // diferentes.
+    const profissoesDoPersonagem = await CharacterProfession.findAll({
+      where: { id_personagem, tipo: PROFISSOES },
+      order: [["tipo", "ASC"]],
       transaction,
       lock: transaction.LOCK.UPDATE,
     });
-    if (!profissao) {
+    const profissao = profissoesDoPersonagem.find((p) => p.tipo === regiao.profissao);
+    if (!profissao || profissoesDoPersonagem.length < PROFISSOES.length) {
       throw Object.assign(new Error("Profissão não inicializada pra esse personagem."), { statusCode: 400 });
     }
 
@@ -220,8 +225,15 @@ async function coletar(id_personagem, id_regiao) {
 
     const progresso = aplicarGanhoDeXp(profissao.experiencia, resultado);
     profissao.experiencia = progresso.xpTotal;
-    profissao.proxima_coleta_em = new Date(agora + TEMPO_COLETA_MS);
-    await profissao.save({ transaction });
+
+    // Grava o mesmo cooldown nas 3 linhas (não só na que coletou agora)
+    // — é isso que faz o cooldown ser global entre profissões, não só
+    // "por profissão".
+    const proximaColetaEm = new Date(agora + TEMPO_COLETA_MS);
+    for (const p of profissoesDoPersonagem) {
+      p.proxima_coleta_em = proximaColetaEm;
+      await p.save({ transaction });
+    }
 
     return {
       resultado,

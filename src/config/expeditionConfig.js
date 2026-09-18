@@ -89,12 +89,12 @@ function aplicarTetoDeQualidade(quantidadeBase, qualidade) {
   }
 }
 
-// Duração mínima entre duas coletas da MESMA profissão, em ms —
-// persistida no banco (character_professions.proxima_coleta_em), não
-// em memória (seção 14). Independente por profissão: coletar em
-// Mineração só bloqueia novas coletas em Mineração, nunca em
-// Silvicultura/Exploração (cada uma tem sua própria linha em
-// character_professions com seu próprio proxima_coleta_em).
+// Duração mínima entre duas coletas, em ms — persistida no banco
+// (character_professions.proxima_coleta_em), não em memória (seção 14).
+// GLOBAL entre as 3 profissões (pedido do jogador): coletar em Mineração
+// também bloqueia Silvicultura/Exploração pelo mesmo tempo, não só a
+// Mineração — expeditionService.coletar() grava o mesmo cooldown nas 3
+// linhas de character_professions de uma vez.
 //
 // Baixado pra 3s a pedido do jogador pra agilizar teste no beta —
 // reverter pra um valor de produção antes do lançamento de verdade.
