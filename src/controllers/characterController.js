@@ -28,6 +28,7 @@ const { sortearNaturezaMagica } = require("../services/naturezaMagicaService");
 const {
   NOME_ITEM_FRAGMENTO,
   NIVEL_MAXIMO_HABILIDADE,
+  MAX_HABILIDADES_ATIVAS_COMBATE,
   custoParaEvoluir,
   marcoDoNivel,
   multiplicadorEfeito,
@@ -94,7 +95,7 @@ const CHARACTER_INCLUDES = [
 // e ficava restrito a ataque básico pra sempre, a menos que alguém
 // chamasse POST /character-abilities manualmente.
 async function concederPoderesIniciais(character) {
-  const [poderesClasse, poderesRaca] = await Promise.all([
+  const [poderesClasse, poderesRaca, aprendidos] = await Promise.all([
     ClassAbilities.findAll({
       where: {
         id_classe: character.id_classe,
@@ -111,22 +112,38 @@ async function concederPoderesIniciais(character) {
         custo_ouro: { [Op.is]: null },
       },
     }),
+    CharacterAbilities.findAll({ where: { id_personagem: character.id } }),
   ]);
 
-  const linhas = [
-    ...poderesClasse.map((poder) => ({
+  // Concedidos de graça por nível são sempre "Ativo" (custo_ouro NULL
+  // filtra os Passivos fora daqui) — sem esse limite, um personagem que
+  // batesse vários níveis de uma vez (ou uma classe/raça com mais de
+  // MAX_HABILIDADES_ATIVAS_COMBATE poderes) ganhava TODOS já marcados
+  // pra combate de uma vez, furando o limite que
+  // toggleCharacterAbility.jamais deixaria alcançar manualmente — é
+  // exatamente o motivo de "aparece muito mais poder em combate do que
+  // os 5 marcados" reportado depois do lote de poderes novos.
+  const idsJaAprendidos = new Set(aprendidos.map((linha) => linha.id_power));
+  let vagasAtivasRestantes = Math.max(
+    0,
+    MAX_HABILIDADES_ATIVAS_COMBATE - aprendidos.filter((linha) => linha.is_active).length,
+  );
+
+  const candidatos = [
+    ...poderesClasse.map((poder) => ({ id_power: poder.id_poder, level_learned: poder.nivel_aprendizagem })),
+    ...poderesRaca.map((poder) => ({ id_power: poder.id_power, level_learned: poder.nivel_aprendizado })),
+  ].filter((candidato) => !idsJaAprendidos.has(candidato.id_power));
+
+  const linhas = candidatos.map((candidato) => {
+    const ativar = vagasAtivasRestantes > 0;
+    if (ativar) vagasAtivasRestantes -= 1;
+    return {
       id_personagem: character.id,
-      id_power: poder.id_poder,
-      level_learned: poder.nivel_aprendizagem,
-      is_active: true,
-    })),
-    ...poderesRaca.map((poder) => ({
-      id_personagem: character.id,
-      id_power: poder.id_power,
-      level_learned: poder.nivel_aprendizado,
-      is_active: true,
-    })),
-  ];
+      id_power: candidato.id_power,
+      level_learned: candidato.level_learned,
+      is_active: ativar,
+    };
+  });
 
   if (linhas.length > 0) {
     await CharacterAbilities.bulkCreate(linhas, { ignoreDuplicates: true });

@@ -14,6 +14,14 @@
 const NOME_ITEM_FRAGMENTO = "Fragmento de Grimório";
 const NIVEL_MAXIMO_HABILIDADE = 10;
 
+// Quantas habilidades ATIVAS um personagem pode ter marcadas pro combate
+// ao mesmo tempo (ver toggleCharacterAbility em
+// characterAbilitiesController.js e concederPoderesIniciais em
+// characterController.js — os dois precisam do mesmo número: o segundo
+// nunca pode conceder mais poderes já ativos do que o primeiro permite
+// manter ativos).
+const MAX_HABILIDADES_ATIVAS_COMBATE = 5;
+
 // índice = nível ATUAL da habilidade (1 a 9) — custo pra ir pro próximo.
 const CUSTO_EVOLUCAO_POR_NIVEL = {
   1: { ouro: 50, fragmentos: 2 },
@@ -84,6 +92,7 @@ function custoParaEvoluir(nivelAtual) {
 module.exports = {
   NOME_ITEM_FRAGMENTO,
   NIVEL_MAXIMO_HABILIDADE,
+  MAX_HABILIDADES_ATIVAS_COMBATE,
   multiplicadorEfeito,
   multiplicadorCustoMana,
   marcoDoNivel,

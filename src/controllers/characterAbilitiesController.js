@@ -8,6 +8,7 @@ const CharacterInventory = require("../models/CharacterInventory");
 const {
   NOME_ITEM_FRAGMENTO,
   NIVEL_MAXIMO_HABILIDADE,
+  MAX_HABILIDADES_ATIVAS_COMBATE,
   custoParaEvoluir,
   marcoDoNivel,
   multiplicadorEfeito,
@@ -186,12 +187,11 @@ exports.updateCharacterAbility = async (req, res) => {
   }
 };
 
-// Quantas habilidades ATIVAS um personagem pode ter marcadas pro combate
-// ao mesmo tempo — é esse mesmo is_active que combatController.js e
-// pvpController.js filtram pra decidir quais poderes aparecem numa luta,
-// então o limite aqui é o que efetivamente limita o loadout de combate
-// (ver aba Combate no frontend, "Habilidades em Combate").
-const MAX_HABILIDADES_ATIVAS_COMBATE = 5;
+// MAX_HABILIDADES_ATIVAS_COMBATE (ver abilityLevelService.js) é esse
+// mesmo is_active que combatController.js e pvpController.js filtram
+// pra decidir quais poderes aparecem numa luta, então o limite aqui é o
+// que efetivamente limita o loadout de combate (ver aba Combate no
+// frontend, "Habilidades em Combate").
 
 // Ativar/desativar um poder já aprendido — uso direto do jogador (não
 // admin), pela aba de Combate: "aparecerá todas pra ele, mas se ele
