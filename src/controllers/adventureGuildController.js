@@ -103,6 +103,11 @@ function listarMissoesLivresPorCategoria(categoria) {
 exports.listarDiarias = listarMissoesLivresPorCategoria("Diaria");
 exports.listarSemanais = listarMissoesLivresPorCategoria("Semanal");
 exports.listarMensais = listarMissoesLivresPorCategoria("Mensal");
+// §36 — as missões "Unica" (AlcancarNivel) do sistema antigo continuam
+// funcionando exatamente como antes; decisão de migração: mantidas
+// dentro da própria Guilda como uma seção de Marcos, em vez de criar um
+// sistema de conquistas à parte só pra isso.
+exports.listarMarcos = listarMissoesLivresPorCategoria("Unica");
 
 // POST /api/adventure-guild/missions/:missionId/claim — resgate das
 // missões livres (Diária/Semanal/Mensal), mesmo fluxo de sempre.

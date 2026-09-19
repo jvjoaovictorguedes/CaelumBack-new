@@ -11,6 +11,7 @@ router.get("/", controller.obterVisaoGeral);
 router.get("/daily", controller.listarDiarias);
 router.get("/weekly", controller.listarSemanais);
 router.get("/monthly", controller.listarMensais);
+router.get("/milestones", controller.listarMarcos);
 router.post("/missions/:missionId/claim", controller.resgatarMissaoLivre);
 
 router.get("/rank", controller.obterQuadroDeRank);
