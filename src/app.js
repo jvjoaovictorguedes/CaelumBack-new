@@ -8,6 +8,7 @@ const { connectDB, isDatabaseReady } = require("./config/database");
 const registerPvpLiveHandlers = require("./socket/pvpLiveSocket");
 const registerRankedLiveHandlers = require("./socket/rankedLiveSocket");
 const registerGuildHandlers = require("./socket/guildSocket");
+const registerMessagesHandlers = require("./socket/messagesSocket");
 
 // Importa TODOS os modelos primeiro.
 // A ordem de importação dos modelos aqui geralmente não importa,
@@ -210,8 +211,11 @@ const io = new SocketIOServer(server, {
 registerPvpLiveHandlers(io);
 registerRankedLiveHandlers(io);
 registerGuildHandlers(io);
+registerMessagesHandlers(io);
 // rankedController usa isso pra emitir ranked:queue:update fora do
-// ciclo de socket (join/leave da fila são rotas REST, não eventos).
+// ciclo de socket (join/leave da fila são rotas REST, não eventos), e
+// messageController faz o mesmo pra message:new/inbox:update quando a
+// mensagem é enviada por REST em vez de socket.
 app.set("io", io);
 
 server.listen(port, () => {

@@ -18,4 +18,20 @@ async function personagemViaTicket(ticket) {
   return personagem ? String(personagem.id) : null;
 }
 
-module.exports = { personagemViaTicket };
+// Mensagens (§4 da spec "Mensagens em Tempo Real v2") são por USUÁRIO,
+// não por personagem — diferente de PvP/Guilda. O ticket já carrega o
+// id do usuário (ver socketTicketService.emitirTicket), então isso
+// nem precisa ir ao banco: só decodifica e confere o propósito. Ao
+// contrário de personagemViaTicket, nunca retorna null por "usuário sem
+// personagem" — mensagens funcionam pra qualquer conta autenticada.
+async function usuarioViaTicket(ticket) {
+  if (!ticket) return null;
+  try {
+    const decoded = verificarTicket(ticket);
+    return decoded?.id ? String(decoded.id) : null;
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { personagemViaTicket, usuarioViaTicket };

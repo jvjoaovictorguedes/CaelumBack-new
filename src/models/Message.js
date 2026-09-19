@@ -30,6 +30,13 @@ const Message = sequelize.define(
       defaultValue: false,
       allowNull: false,
     },
+    // Idempotência de envio (spec Mensagens v2 §6) — gerado pelo
+    // cliente, único por remetente. Mensagens antigas/via REST sem esse
+    // campo ficam null (índice único é parcial, ver migration).
+    client_message_id: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
   },
   {
     tableName: "messages",

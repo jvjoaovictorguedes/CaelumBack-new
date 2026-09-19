@@ -5,58 +5,39 @@ const User = require("../models/User");
 Message.belongsTo(User, { foreignKey: "id_remetente", as: "remetente" });
 Message.belongsTo(User, { foreignKey: "id_destinatario", as: "destinatario" });
 
+const { enviarMensagem, marcarConversaComoLida } = require("../services/messageDeliveryService");
+
 // POST /api/messages
-// body: { id_remetente, id_destinatario, conteudo }
+// body: { id_destinatario, conteudo, client_message_id? }
+// Fallback REST do mesmo caminho do socket "message:send" (Mensagens v2
+// §3) — sempre persiste primeiro; se o socket estiver disponível
+// (app.set("io", io) em app.js), notifica em tempo real também daqui,
+// então enviar por REST com o destinatário online ainda entrega ao vivo.
 exports.sendMessage = async (req, res) => {
   try {
     // Quem manda é sempre o usuário autenticado — nunca o id_remetente
     // que o corpo mandar, senão qualquer um enviava mensagem se passando
     // por outra pessoa.
     const id_remetente = req.user.id;
-    const { id_destinatario, conteudo } = req.body;
+    const { id_destinatario, conteudo, client_message_id } = req.body;
 
-    if (!id_destinatario || !conteudo?.trim()) {
-      return res.status(400).json({
-        message: "id_destinatario e conteudo são obrigatórios.",
-      });
-    }
-
-    // String() em vez de Number(): duas entradas não-numéricas viravam
-    // NaN dos dois lados e NaN === NaN é false, deixando passar o
-    // "mandar mensagem pra si mesmo" com id malformado.
-    if (String(id_remetente) === String(id_destinatario)) {
-      return res.status(400).json({
-        message: "Não é possível enviar mensagem para si mesmo.",
-      });
-    }
-
-    if (conteudo.length > 2000) {
-      return res.status(400).json({
-        message: "Mensagem muito longa (máximo 2000 caracteres).",
-      });
-    }
-
-    const [remetente, destinatario] = await Promise.all([
-      User.findByPk(id_remetente),
-      User.findByPk(id_destinatario),
-    ]);
-    if (!remetente) {
-      return res.status(404).json({ message: "Remetente não encontrado." });
-    }
-    if (!destinatario) {
-      return res.status(404).json({ message: "Destinatário não encontrado." });
-    }
-
-    const mensagem = await Message.create({
-      id_remetente,
-      id_destinatario,
-      conteudo: conteudo.trim(),
+    const resultado = await enviarMensagem({
+      idRemetente: id_remetente,
+      idDestinatario: id_destinatario,
+      conteudo,
+      clientMessageId: client_message_id,
+      io: req.app.get("io"),
     });
+
+    if (resultado.erro) {
+      const status = resultado.erro.includes("não encontrado") ? 404 : 400;
+      return res.status(status).json({ message: resultado.erro });
+    }
 
     return res.status(201).json({
       status: "success",
-      message: "Mensagem enviada com sucesso!",
-      data: { mensagem },
+      message: resultado.duplicada ? "Mensagem já enviada anteriormente." : "Mensagem enviada com sucesso!",
+      data: { mensagem: resultado.mensagem },
     });
   } catch (error) {
     console.error("Erro ao enviar mensagem:", error);
@@ -110,16 +91,11 @@ exports.getConversation = async (req, res) => {
     });
     const mensagens = maisRecentesPrimeiro.reverse();
 
-    await Message.update(
-      { lida: true },
-      {
-        where: {
-          id_remetente: otherUserId,
-          id_destinatario: userId,
-          lida: false,
-        },
-      },
-    );
+    await marcarConversaComoLida({
+      idUsuario: userId,
+      idOutroUsuario: otherUserId,
+      io: req.app.get("io"),
+    });
 
     return res.status(200).json({
       status: "success",
