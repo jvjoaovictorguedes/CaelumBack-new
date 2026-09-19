@@ -5,19 +5,21 @@ const { sequelize } = require("../config/database");
 const Character = require("../models/Character");
 const {
   listarZonas,
+  monstrosDaZona,
   obterSessaoAtiva,
   entrarNaZona,
   sairDaZona,
 } = require("../services/adventureService");
 const { encontroDoCampoValido } = require("../services/pveEncounterService");
 
-function sessaoParaResposta(sessao) {
+async function sessaoParaResposta(sessao) {
   if (!sessao) return null;
+  const monstros = sessao.id_area ? await monstrosDaZona(sessao.id_area) : [];
   return {
     id: sessao.id,
     id_area: sessao.id_area,
     area: sessao.area
-      ? { id: sessao.area.id, nome: sessao.area.nome, imagem_url: sessao.area.imagem_url }
+      ? { id: sessao.area.id, nome: sessao.area.nome, imagem_url: sessao.area.imagem_url, monstros }
       : null,
     iniciado_em: sessao.iniciado_em,
     monstros_derrotados: sessao.monstros_derrotados,
@@ -43,7 +45,7 @@ exports.listarZonasDisponiveis = async (req, res) => {
 exports.obterSessaoAtual = async (req, res) => {
   try {
     const sessao = await obterSessaoAtiva(req.personagemAtual.id);
-    res.status(200).json({ status: "success", data: { sessao: sessaoParaResposta(sessao) } });
+    res.status(200).json({ status: "success", data: { sessao: await sessaoParaResposta(sessao) } });
   } catch (error) {
     console.error("Erro ao obter sessão de caça:", error);
     res.status(500).json({ message: "Erro interno do servidor ao obter sessão de caça." });
@@ -83,7 +85,7 @@ exports.entrarNaAreaDeCaca = async (req, res) => {
       const { sessao, zona } = await entrarNaZona(character.id, idZona, transaction);
       res.status(201).json({
         status: "success",
-        data: { sessao: sessaoParaResposta({ ...sessao.toJSON(), area: zona }) },
+        data: { sessao: await sessaoParaResposta({ ...sessao.toJSON(), area: zona }) },
       });
     });
   } catch (error) {
@@ -115,7 +117,7 @@ exports.sairDaAreaDeCaca = async (req, res) => {
       }
 
       const sessao = await sairDaZona(character.id, transaction);
-      res.status(200).json({ status: "success", data: { resumo: sessaoParaResposta(sessao) } });
+      res.status(200).json({ status: "success", data: { resumo: await sessaoParaResposta(sessao) } });
     });
   } catch (error) {
     if (error.status) {

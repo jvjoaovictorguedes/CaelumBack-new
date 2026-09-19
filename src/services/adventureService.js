@@ -2,6 +2,8 @@
 // Controller só valida a requisição e chama isto aqui (§25/§26) — nada
 // de regra de negócio em adventureController.js.
 const AdventureZone = require("../models/AdventureZone");
+const AdventureZoneMonster = require("../models/AdventureZoneMonster");
+const AdventureMonster = require("../models/AdventureMonster");
 const CharacterAdventureSession = require("../models/CharacterAdventureSession");
 const { calcularPerigo } = require("../config/adventureConfig");
 
@@ -24,6 +26,18 @@ async function listarZonas(nivelPersonagem) {
     nivel_recomendado: `${zona.nivel_monstro_min}-${zona.nivel_monstro_max}`,
     perigo: calcularPerigo(nivelPersonagem, zona.nivel_monstro_min, zona.nivel_monstro_max),
   }));
+}
+
+// Nomes dos monstros de uma zona (§27) — só o suficiente pro frontend
+// montar o seletor de "caçar um alvo específico" sem precisar inventar
+// a própria lista (era hardcoded igual dos dois lados antes da zona
+// existir, ver HuntTargetSelector.tsx).
+async function monstrosDaZona(idArea) {
+  const vinculos = await AdventureZoneMonster.findAll({
+    where: { id_area: idArea, ativo: true },
+    include: [{ model: AdventureMonster, as: "monstro" }],
+  });
+  return vinculos.map((v) => ({ nome: v.monstro.nome, tipo_aparicao: v.tipo_aparicao }));
 }
 
 // Devolve a sessão ativa do personagem (ou null) — usada tanto pro
@@ -100,6 +114,7 @@ async function sairDaZona(idPersonagem, transaction) {
 
 module.exports = {
   listarZonas,
+  monstrosDaZona,
   obterSessaoAtiva,
   entrarNaZona,
   sairDaZona,
