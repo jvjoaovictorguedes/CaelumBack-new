@@ -39,6 +39,7 @@ const {
 } = require("../services/pveEncounterService");
 const { rolarDropDeVitoria } = require("../services/dropService");
 const { registrarProgresso } = require("../services/missionService");
+const { registrarMorte } = require("../services/monsterKillService");
 
 const NOMES_INIMIGOS = [
   "Lobo das Sombras",
@@ -92,7 +93,12 @@ const RODADAS_PARA_INIMIGO_MATAR_JOGADOR = 4.2;
 // você é frágil, o inimigo bate mais fraco, mas ainda ameaça em ~6
 // turnos) — o resultado da luta depende do seu build de verdade, não
 // de uma média que talvez nem seja a sua.
-function gerarInimigo(jogador) {
+// `nomeAlvo` é opcional — pedido do jogador: poder "caçar" um monstro
+// específico (ex.: Minotauro pro requisito de Evolução de Classe) em vez
+// de só depender do sorteio aleatório entre os 9 nomes. Só é aceito se
+// já estiver em NOMES_INIMIGOS (validado no controller antes de chegar
+// aqui) — nunca um nome arbitrário vindo do cliente.
+function gerarInimigo(jogador, nomeAlvo) {
   const nivel = Math.max(1, jogador.nivel || 1);
   const variacao = () => 0.9 + Math.random() * 0.2; // ±10%
 
@@ -121,7 +127,7 @@ function gerarInimigo(jogador) {
   const vitalidade = Math.max(1, Math.round((vidaMaxima - 20) / 5));
 
   return {
-    nome: sortear(NOMES_INIMIGOS),
+    nome: nomeAlvo ?? sortear(NOMES_INIMIGOS),
     nivel,
     forca,
     vitalidade,
@@ -201,7 +207,13 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       // qualquer jeito.
       sincronizarRegeneracaoDeVida(character, jogadorEfetivo);
 
-      const inimigo = gerarInimigo(jogadorEfetivo);
+      // Query param opcional (?alvo=Minotauro) pra "caçar" um monstro
+      // específico — ver comentário em gerarInimigo. Nome inválido é
+      // ignorado silenciosamente (cai no sorteio aleatório de sempre)
+      // em vez de dar erro, já que é só uma conveniência de farm.
+      const alvoPedido = typeof req.query.alvo === "string" ? req.query.alvo : null;
+      const nomeAlvo = alvoPedido && NOMES_INIMIGOS.includes(alvoPedido) ? alvoPedido : null;
+      const inimigo = gerarInimigo(jogadorEfetivo, nomeAlvo);
 
       // Snapshot dos atributos ESTRUTURAIS do personagem no exato momento
       // em que o encontro começa (força/vitalidade/etc já com bônus de
@@ -618,6 +630,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       const dinheiroGanhoTotal = dinheiroGanho + (drop?.tipo === "ouro" ? drop.dinheiro : 0);
       await registrarProgresso(character, "MatarInimigos", 1, transaction);
       await registrarProgresso(character, "GanharOuro", dinheiroGanhoTotal, transaction);
+      await registrarMorte(character.id, inimigoAtual.nome, transaction);
       await character.save({ transaction });
 
       return res.status(200).json({

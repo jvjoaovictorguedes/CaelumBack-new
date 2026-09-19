@@ -37,6 +37,7 @@ const {
   listarCaminhosDaClasse,
   buscarCaminho,
   buscarItemRequisito,
+  contarMortesDoAlvo,
 } = require("../services/classEvolutionService");
 const { sincronizarRegeneracaoDeVida, msAteRegenCompleta } = require("../services/regenService");
 const {
@@ -1043,6 +1044,14 @@ exports.getEvolucaoDeClasse = async (req, res) => {
         const quantidadeNoInventario = item ? (quantidadePorItem.get(item.id) ?? 0) : 0;
         const nivelOk = character.nivel >= caminho.nivel_necessario;
         const itemOk = quantidadeNoInventario >= caminho.quantidade_item_requisito;
+
+        // Requisito de caça é opcional (nome_monstro_alvo pode ser NULL)
+        // — caminho sem ele não trava por monstroOk (fica sempre true).
+        const mortesAtuais = caminho.nome_monstro_alvo
+          ? await contarMortesDoAlvo(character.id, caminho.nome_monstro_alvo)
+          : 0;
+        const monstroOk = !caminho.nome_monstro_alvo || mortesAtuais >= caminho.quantidade_monstro_necessaria;
+
         return {
           id: caminho.id,
           nome: caminho.nome,
@@ -1052,6 +1061,9 @@ exports.getEvolucaoDeClasse = async (req, res) => {
           imagem_item_requisito: item?.imagem_url ?? null,
           quantidade_item_requisito: caminho.quantidade_item_requisito,
           quantidade_no_inventario: quantidadeNoInventario,
+          nome_monstro_alvo: caminho.nome_monstro_alvo,
+          quantidade_monstro_necessaria: caminho.quantidade_monstro_necessaria,
+          quantidade_monstro_atual: mortesAtuais,
           bonus_forca: caminho.bonus_forca,
           bonus_vitalidade: caminho.bonus_vitalidade,
           bonus_agilidade: caminho.bonus_agilidade,
@@ -1059,9 +1071,10 @@ exports.getEvolucaoDeClasse = async (req, res) => {
           bonus_velocidade: caminho.bonus_velocidade,
           imagem_url: caminho.imagem_url,
           escolhido: character.id_evolucao_classe === caminho.id,
-          pode_evoluir: !character.id_evolucao_classe && nivelOk && itemOk,
+          pode_evoluir: !character.id_evolucao_classe && nivelOk && itemOk && monstroOk,
           nivel_ok: nivelOk,
           item_ok: itemOk,
+          monstro_ok: monstroOk,
         };
       }),
     );
@@ -1119,6 +1132,18 @@ exports.evolveClass = async (req, res) => {
           new Error(`Evoluir pra ${caminho.nome} exige nível ${caminho.nivel_necessario}.`),
           { statusCode: 400 },
         );
+      }
+
+      if (caminho.nome_monstro_alvo) {
+        const mortes = await contarMortesDoAlvo(character.id, caminho.nome_monstro_alvo, transaction);
+        if (mortes < caminho.quantidade_monstro_necessaria) {
+          throw Object.assign(
+            new Error(
+              `Evoluir pra ${caminho.nome} exige ter derrotado ${caminho.quantidade_monstro_necessaria}x ${caminho.nome_monstro_alvo} (você já derrotou ${mortes}).`,
+            ),
+            { statusCode: 400 },
+          );
+        }
       }
 
       const entradaInventario = await CharacterInventory.findOne({

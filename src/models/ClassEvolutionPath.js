@@ -42,6 +42,16 @@ const ClassEvolutionPath = sequelize.define(
       allowNull: false,
       defaultValue: 1,
     },
+    // Requisito de caça opcional (ver migration 20260930540000) — NULL
+    // = caminho não exige matar nenhum monstro específico.
+    nome_monstro_alvo: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+    quantidade_monstro_necessaria: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
     bonus_forca: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
     bonus_vitalidade: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
     bonus_agilidade: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },

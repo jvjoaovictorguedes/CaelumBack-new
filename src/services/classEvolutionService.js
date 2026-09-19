@@ -7,6 +7,7 @@
 // escolha única e maior, tipo "capstone" de fim de progressão.
 const ClassEvolutionPath = require("../models/ClassEvolutionPath");
 const Item = require("../models/Item");
+const { contarMortes } = require("./monsterKillService");
 
 async function listarCaminhosDaClasse(idClasse) {
   return ClassEvolutionPath.findAll({
@@ -27,4 +28,5 @@ module.exports = {
   listarCaminhosDaClasse,
   buscarCaminho,
   buscarItemRequisito,
+  contarMortesDoAlvo: contarMortes,
 };
