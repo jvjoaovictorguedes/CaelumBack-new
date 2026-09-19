@@ -1,0 +1,30 @@
+const { DataTypes } = require("sequelize");
+const { sequelize } = require("../config/database");
+
+// Rank de Aventureiro (§9/§25 da spec) — 1:1 com Character, mesmo
+// padrão de PvpStatus/CharacterForgeProgress. Deliberadamente SEM
+// prefixo "guild"/"GuildRank" no nome da tabela/model — ver comentário
+// em adventureGuildConfig.js sobre a colisão com GuildRankGate (Portal
+// de Ranque coletivo da guilda de verdade).
+const CharacterAdventureGuildProgress = sequelize.define(
+  "CharacterAdventureGuildProgress",
+  {
+    id_personagem: { type: DataTypes.INTEGER, primaryKey: true, allowNull: false },
+    rank: { type: DataTypes.STRING(10), allowNull: false, defaultValue: "F" },
+    // Contratos de Rank efetivamente concluídos E resgatados no rank
+    // ATUAL (§25) — nunca zera ao tentar/falhar Provação, só ao promover
+    // (nesse momento volta a 0 pro próximo rank).
+    missoes_concluidas_no_rank: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    // §28/§29 — true assim que o requisito é atingido; a partir daqui
+    // não se geram/aceitam mais ofertas normais do rank atual pra esse
+    // personagem, só a Provação.
+    apto_para_promocao: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    // §30 — cooldown depois de uma tentativa de Provação falhada.
+    ultima_falha_provacao_em: { type: DataTypes.DATE, allowNull: true },
+  },
+  {
+    tableName: "character_adventure_guild_progress",
+  },
+);
+
+module.exports = CharacterAdventureGuildProgress;

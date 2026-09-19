@@ -42,6 +42,11 @@ const AdventureMonster = require("./AdventureMonster");
 const AdventureZoneMonster = require("./AdventureZoneMonster");
 const AdventureZoneLoot = require("./AdventureZoneLoot");
 const CharacterAdventureSession = require("./CharacterAdventureSession");
+const CharacterAdventureGuildProgress = require("./CharacterAdventureGuildProgress");
+const AdventureGuildMission = require("./AdventureGuildMission");
+const AdventureGuildMissionReward = require("./AdventureGuildMissionReward");
+const AdventureGuildOffer = require("./AdventureGuildOffer");
+const CharacterAdventureGuildContract = require("./CharacterAdventureGuildContract");
 
 Item.hasOne(WeaponProperties, { foreignKey: "id_item", as: "weaponProperties" });
 WeaponProperties.belongsTo(Item, { foreignKey: "id_item" });
@@ -126,5 +131,25 @@ AdventureZoneLoot.belongsTo(Item, { foreignKey: "id_item", as: "item" });
 
 CharacterAdventureSession.belongsTo(Character, { foreignKey: "id_personagem" });
 CharacterAdventureSession.belongsTo(AdventureZone, { foreignKey: "id_area", as: "area" });
+
+// Guilda dos Aventureiros — catálogo (AdventureGuildMission) com N
+// recompensas e objetivo estruturado (monstro/área/item opcionais);
+// ofertas de uma rotação apontam pra uma missão do catálogo; contrato
+// aceito por um personagem referencia a oferta (quando não é Provação)
+// e sempre a missão em si.
+CharacterAdventureGuildProgress.belongsTo(Character, { foreignKey: "id_personagem" });
+
+AdventureGuildMission.belongsTo(AdventureMonster, { foreignKey: "id_monstro_alvo", as: "monstroAlvo" });
+AdventureGuildMission.belongsTo(AdventureZone, { foreignKey: "id_area_alvo", as: "areaAlvo" });
+AdventureGuildMission.belongsTo(Item, { foreignKey: "id_item_alvo", as: "itemAlvo" });
+AdventureGuildMission.hasMany(AdventureGuildMissionReward, { foreignKey: "id_mission", as: "recompensas" });
+AdventureGuildMissionReward.belongsTo(AdventureGuildMission, { foreignKey: "id_mission" });
+AdventureGuildMissionReward.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+
+AdventureGuildOffer.belongsTo(AdventureGuildMission, { foreignKey: "id_mission", as: "missao" });
+
+CharacterAdventureGuildContract.belongsTo(Character, { foreignKey: "id_personagem" });
+CharacterAdventureGuildContract.belongsTo(AdventureGuildOffer, { foreignKey: "id_offer", as: "oferta" });
+CharacterAdventureGuildContract.belongsTo(AdventureGuildMission, { foreignKey: "id_mission", as: "missao" });
 
 module.exports = {};
