@@ -31,6 +31,7 @@ function montarPayloadInicio(duelo, ehResync = false) {
   return {
     duelId: duelo.id,
     arena: NOME_ARENA_RANKED,
+    ranked: true,
     temporada: { id: duelo.seasonId },
     a: { id: duelo.a.id, nome: duelo.a.nome, genero: duelo.a.genero, classe: duelo.a.classe, chave: "A" },
     b: { id: duelo.b.id, nome: duelo.b.nome, genero: duelo.b.genero, classe: duelo.b.classe, chave: "B" },
