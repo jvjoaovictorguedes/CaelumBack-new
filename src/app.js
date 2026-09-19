@@ -57,6 +57,7 @@ const messageRoutes = require("./routes/messageRoutes");
 const pvpRoutes = require("./routes/pvpRoutes");
 const guildRoutes = require("./routes/guildRoutes");
 const evolutionRoutes = require("./routes/evolutionRoutes");
+const onboardingRoutes = require("./routes/onboardingRoutes");
 const marketRoutes = require("./routes/marketRoutes");
 const adventureRoutes = require("./routes/adventureRoutes");
 const bestiaryRoutes = require("./routes/bestiaryRoutes");
@@ -198,6 +199,31 @@ app.use("/api/adventure", adventureRoutes);
 app.use("/api/bestiary", bestiaryRoutes);
 app.use("/api/ranking", rankingRoutes);
 app.use("/api/adventure-guild", adventureGuildRoutes);
+app.use("/api/onboarding", onboardingRoutes);
+
+// Nenhuma rota acima bateu — sem isso, o Express respondia com a página
+// de erro padrão dele (texto puro tipo "Cannot GET /api/xyz"), que o
+// frontend não sabe interpretar como JSON e acaba mostrando cru pro
+// jogador. Sempre depois de TODAS as rotas, senão intercepta tudo.
+app.use((req, res) => {
+  res.status(404).json({
+    message: "Essa página ou recurso não existe. Verifique o link e tente de novo.",
+  });
+});
+
+// Rede de segurança final — captura qualquer exceção que escapou do
+// try/catch de um controller (ou um erro síncrono em middleware) antes
+// que o Express derrube a conexão sem resposta nenhuma pro cliente.
+// Precisa ser o ÚLTIMO app.use e ter exatamente 4 parâmetros (é assim
+// que o Express reconhece um error handler).
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  console.error("Erro não tratado:", err);
+  if (res.headersSent) return;
+  res.status(500).json({
+    message: "Algo deu errado no servidor. Tente novamente em instantes.",
+  });
+});
 
 // PVP ao vivo (Socket.io) precisa do servidor HTTP cru pra fazer o
 // upgrade da conexão — por isso o app não usa mais app.listen direto.

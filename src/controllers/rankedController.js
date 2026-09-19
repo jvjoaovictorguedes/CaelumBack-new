@@ -43,10 +43,10 @@ async function entrarFila(req, res) {
       });
     }
     if (pvpLiveSocket.duelPorPersonagem.has(chave)) {
-      return res.status(409).json({ erro: "Você já está em um duelo." });
+      return res.status(409).json({ message: "Você já está em um duelo." });
     }
     if (rankedMatchmakingService.estaNaFila(chave)) {
-      return res.status(409).json({ erro: "Você já está na fila ranqueada." });
+      return res.status(409).json({ message: "Você já está na fila ranqueada." });
     }
 
     const temporada = await rankedSeasonService.obterOuIniciarTemporadaAtiva();
@@ -69,7 +69,7 @@ async function entrarFila(req, res) {
     });
   } catch (error) {
     console.error("Erro ao entrar na fila ranqueada:", error);
-    return res.status(500).json({ erro: "Erro ao entrar na fila ranqueada." });
+    return res.status(500).json({ message: "Erro ao entrar na fila ranqueada." });
   }
 }
 
@@ -87,7 +87,7 @@ async function sairFila(req, res) {
     return res.json({ emFila: false, saiu });
   } catch (error) {
     console.error("Erro ao sair da fila ranqueada:", error);
-    return res.status(500).json({ erro: "Erro ao sair da fila ranqueada." });
+    return res.status(500).json({ message: "Erro ao sair da fila ranqueada." });
   }
 }
 
@@ -116,7 +116,7 @@ async function status(req, res) {
     });
   } catch (error) {
     console.error("Erro ao consultar status ranqueado:", error);
-    return res.status(500).json({ erro: "Erro ao consultar status ranqueado." });
+    return res.status(500).json({ message: "Erro ao consultar status ranqueado." });
   }
 }
 
@@ -126,7 +126,7 @@ async function season(req, res) {
     return res.json({ temporada: temporadaPublica(temporada) });
   } catch (error) {
     console.error("Erro ao consultar temporada ranqueada:", error);
-    return res.status(500).json({ erro: "Erro ao consultar temporada ranqueada." });
+    return res.status(500).json({ message: "Erro ao consultar temporada ranqueada." });
   }
 }
 
@@ -173,7 +173,7 @@ async function leaderboard(req, res) {
     });
   } catch (error) {
     console.error("Erro ao consultar leaderboard ranqueado:", error);
-    return res.status(500).json({ erro: "Erro ao consultar leaderboard ranqueado." });
+    return res.status(500).json({ message: "Erro ao consultar leaderboard ranqueado." });
   }
 }
 
