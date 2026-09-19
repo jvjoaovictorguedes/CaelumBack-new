@@ -6,6 +6,7 @@ const http = require("http");
 const { Server: SocketIOServer } = require("socket.io");
 const { connectDB, isDatabaseReady } = require("./config/database");
 const registerPvpLiveHandlers = require("./socket/pvpLiveSocket");
+const registerRankedLiveHandlers = require("./socket/rankedLiveSocket");
 const registerGuildHandlers = require("./socket/guildSocket");
 
 // Importa TODOS os modelos primeiro.
@@ -207,7 +208,11 @@ const io = new SocketIOServer(server, {
       : { origin: "*" },
 });
 registerPvpLiveHandlers(io);
+registerRankedLiveHandlers(io);
 registerGuildHandlers(io);
+// rankedController usa isso pra emitir ranked:queue:update fora do
+// ciclo de socket (join/leave da fila são rotas REST, não eventos).
+app.set("io", io);
 
 server.listen(port, () => {
   console.log(`Servidor rodando em http://localhost:${port}`);

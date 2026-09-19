@@ -20,6 +20,9 @@ const Mission = require("./Mission");
 const CharacterMissionProgress = require("./CharacterMissionProgress");
 const MarketListing = require("./MarketListing");
 const MarketTransaction = require("./MarketTransaction");
+const PvPSeason = require("./PvPSeason");
+const CharacterPvpSeason = require("./CharacterPvpSeason");
+const RankedMatch = require("./RankedMatch");
 const CraftingRecipe = require("./CraftingRecipe");
 const CraftingRecipeIngredient = require("./CraftingRecipeIngredient");
 const CharacterCraftingQueue = require("./CharacterCraftingQueue");
@@ -192,5 +195,18 @@ GuildBossAttempt.belongsTo(GuildBossConfig, { foreignKey: "id_guild_boss_config"
 GuildBossAttempt.belongsTo(Guild, { foreignKey: "id_guild" });
 GuildBossContribution.belongsTo(GuildBossAttempt, { foreignKey: "id_guild_boss_attempt" });
 GuildBossContribution.belongsTo(Character, { foreignKey: "id_personagem" });
+
+// Arena Ranqueada (PvP Competitivo v1) — separado do Duelo
+// casual/PvpStatus/Ranking PvP v2, ver rankedConfig.js.
+PvPSeason.hasMany(CharacterPvpSeason, { foreignKey: "season_id", as: "participacoes" });
+CharacterPvpSeason.belongsTo(PvPSeason, { foreignKey: "season_id", as: "temporada" });
+CharacterPvpSeason.belongsTo(Character, { foreignKey: "character_id", as: "personagem" });
+Character.hasMany(CharacterPvpSeason, { foreignKey: "character_id", as: "temporadasRanked" });
+
+PvPSeason.hasMany(RankedMatch, { foreignKey: "season_id", as: "partidas" });
+RankedMatch.belongsTo(PvPSeason, { foreignKey: "season_id", as: "temporada" });
+RankedMatch.belongsTo(Character, { foreignKey: "id_jogador1", as: "jogador1" });
+RankedMatch.belongsTo(Character, { foreignKey: "id_jogador2", as: "jogador2" });
+RankedMatch.belongsTo(Character, { foreignKey: "id_vencedor", as: "vencedor" });
 
 module.exports = {};

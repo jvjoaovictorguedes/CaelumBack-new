@@ -60,6 +60,12 @@ const duelPorPersonagem = new Map();
 
 let proximoDuelId = 1;
 
+// Exportado pra rankedLiveSocket.js poder alocar duelIds no MESMO
+// espaço de contagem, sem duplicar o contador (§ integração ranked).
+function alocarDuelId() {
+  return proximoDuelId++;
+}
+
 function chaveOnline(id) {
   return String(id);
 }
@@ -142,6 +148,18 @@ module.exports = function registerPvpLiveHandlers(io) {
       socket.characterId = chave;
       online.set(chave, socket.id);
       socket.broadcast.emit("pvp:ficou-online", { characterId: chave });
+
+      // Arena Ranqueada (§9 — reconexão): se esse personagem estava numa
+      // partida ranqueada em andamento com uma janela de reconexão aberta
+      // (aoReconectar setado pelo rankedLiveSocket.js na criação do
+      // duelo), avisa o hook pra cancelar o timer de abandono e
+      // ressincronizar o estado com este socket novo. Duelos casuais nunca
+      // setam `aoReconectar`, então isso é um no-op pra eles.
+      const duelIdAtivo = duelPorPersonagem.get(chave);
+      if (duelIdAtivo) {
+        const duelo = duelos.get(duelIdAtivo);
+        duelo?.aoReconectar?.(io, socket, duelIdAtivo);
+      }
     });
 
     socket.on("pvp:listar-online", (_payload, callback) => {
@@ -420,7 +438,15 @@ module.exports = function registerPvpLiveHandlers(io) {
 
       const duelId = duelPorPersonagem.get(characterId);
       if (duelId) {
-        finalizarDueloPorDesistencia(io, duelId, characterId);
+        // Arena Ranqueada tem janela de reconexão própria (§9) — quando o
+        // duelo é ranked (aoDesconectar setado pelo rankedLiveSocket.js),
+        // a desistência imediata do duelo casual não se aplica.
+        const duelo = duelos.get(duelId);
+        if (duelo?.aoDesconectar) {
+          duelo.aoDesconectar(io, duelId, characterId);
+        } else {
+          finalizarDueloPorDesistencia(io, duelId, characterId);
+        }
       }
     });
   });
@@ -488,7 +514,11 @@ function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
       }
     }
     io.to(duelo.sala).emit("pvp:turno-resultado", { ...payloadTurno, turnoDe: null });
-    finalizarDuelo(io, duelId, vencedorChave, "combate");
+    // Duelos ranked setam `duelo.finalizar` (rankedLiveSocket.js) pra
+    // persistir rating em vez de PvpStatus/PvpMatches — casual continua
+    // usando finalizarDuelo direto, sem essa propriedade.
+    const finalizar = duelo.finalizar || finalizarDuelo;
+    finalizar(io, duelId, vencedorChave, "combate");
     return;
   }
 
@@ -559,3 +589,17 @@ function estaOnline(idPersonagem) {
 }
 
 module.exports.estaOnline = estaOnline;
+
+// Exports adicionais só pra rankedLiveSocket.js reaproveitar a MESMA
+// infraestrutura de presença/duelo ao vivo (§3 da spec — "usar a
+// infraestrutura do duelo ao vivo"), sem duplicar motor de turno,
+// carregamento de lutador ou mapas de presença/duelo em andamento.
+module.exports.duelos = duelos;
+module.exports.duelPorPersonagem = duelPorPersonagem;
+module.exports.online = online;
+module.exports.carregarLutador = carregarLutador;
+module.exports.poderesPublicos = poderesPublicos;
+module.exports.iniciarTimerDeTurno = iniciarTimerDeTurno;
+module.exports.chaveOnline = chaveOnline;
+module.exports.alocarDuelId = alocarDuelId;
+module.exports.PRAZO_TURNO_MS = PRAZO_TURNO_MS;
