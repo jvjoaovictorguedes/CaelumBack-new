@@ -37,6 +37,11 @@ const ForgeBarItem = require("./ForgeBarItem");
 const ForgeScroll = require("./ForgeScroll");
 const ForgeScrollIngredient = require("./ForgeScrollIngredient");
 const CharacterForgeQueue = require("./CharacterForgeQueue");
+const AdventureZone = require("./AdventureZone");
+const AdventureMonster = require("./AdventureMonster");
+const AdventureZoneMonster = require("./AdventureZoneMonster");
+const AdventureZoneLoot = require("./AdventureZoneLoot");
+const CharacterAdventureSession = require("./CharacterAdventureSession");
 
 Item.hasOne(WeaponProperties, { foreignKey: "id_item", as: "weaponProperties" });
 WeaponProperties.belongsTo(Item, { foreignKey: "id_item" });
@@ -107,5 +112,19 @@ ForgeScrollIngredient.belongsTo(ForgeScroll, { foreignKey: "id_scroll_item" });
 ForgeScrollIngredient.belongsTo(Item, { foreignKey: "id_item_material", as: "material" });
 
 CharacterForgeQueue.belongsTo(Character, { foreignKey: "id_personagem" });
+
+// Modo Aventura v1 — área tem N monstros vinculados (peso + tipo) e N
+// entradas de espólio; sessão de caça referencia área + personagem.
+AdventureZone.hasMany(AdventureZoneMonster, { foreignKey: "id_area", as: "monstros" });
+AdventureZoneMonster.belongsTo(AdventureZone, { foreignKey: "id_area" });
+AdventureZoneMonster.belongsTo(AdventureMonster, { foreignKey: "id_monstro", as: "monstro" });
+AdventureMonster.hasMany(AdventureZoneMonster, { foreignKey: "id_monstro" });
+
+AdventureZone.hasMany(AdventureZoneLoot, { foreignKey: "id_area", as: "espolios" });
+AdventureZoneLoot.belongsTo(AdventureZone, { foreignKey: "id_area" });
+AdventureZoneLoot.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+
+CharacterAdventureSession.belongsTo(Character, { foreignKey: "id_personagem" });
+CharacterAdventureSession.belongsTo(AdventureZone, { foreignKey: "id_area", as: "area" });
 
 module.exports = {};

@@ -40,6 +40,11 @@ const {
 const { rolarDropDeVitoria } = require("../services/dropService");
 const { registrarProgresso } = require("../services/missionService");
 const { registrarMorte } = require("../services/monsterKillService");
+const AdventureZoneMonster = require("../models/AdventureZoneMonster");
+const AdventureMonster = require("../models/AdventureMonster");
+const { obterSessaoAtiva } = require("../services/adventureService");
+const { sortearMonstroDaZona, sortearNivelMonstro } = require("../services/adventureRollService");
+const { concederRecompensaDeZona } = require("../services/adventureRewardService");
 
 const NOMES_INIMIGOS = [
   "Lobo das Sombras",
@@ -98,8 +103,23 @@ const RODADAS_PARA_INIMIGO_MATAR_JOGADOR = 4.2;
 // de só depender do sorteio aleatório entre os 9 nomes. Só é aceito se
 // já estiver em NOMES_INIMIGOS (validado no controller antes de chegar
 // aqui) — nunca um nome arbitrário vindo do cliente.
-function gerarInimigo(jogador, nomeAlvo) {
-  const nivel = Math.max(1, jogador.nivel || 1);
+//
+// `opcoes.nivelForcado` e `opcoes.multiplicadores` vêm do Modo Aventura
+// (§8/§9/§10 da spec, ver gerarInimigoParaPersonagem): o nível do
+// monstro sorteado pela zona substitui o nível do PRÓPRIO jogador (uma
+// zona de nível baixo precisa gerar monstro de nível baixo mesmo pra um
+// personagem de nível alto caçando lá), e os multiplicadores do
+// AdventureMonster dão identidade de combate própria a cada criatura em
+// cima da MESMA calibração — nunca uma escala nova.
+function gerarInimigo(jogador, nomeAlvo, opcoes = {}) {
+  const { nivelForcado, multiplicadores } = opcoes;
+  const mult = {
+    vida: multiplicadores?.vida ?? 1,
+    dano: multiplicadores?.dano ?? 1,
+    agilidade: multiplicadores?.agilidade ?? 1,
+    velocidade: multiplicadores?.velocidade ?? 1,
+  };
+  const nivel = Math.max(1, nivelForcado ?? jogador.nivel ?? 1);
   const variacao = () => 0.9 + Math.random() * 0.2; // ±10%
 
   const vidaJogador = vidaMaximaDe(jogador);
@@ -107,18 +127,18 @@ function gerarInimigo(jogador, nomeAlvo) {
 
   const vidaMaxima = Math.max(
     20,
-    Math.round(ataqueJogador * RODADAS_PARA_MATAR_INIMIGO * variacao()),
+    Math.round(ataqueJogador * RODADAS_PARA_MATAR_INIMIGO * variacao() * mult.vida),
   );
   const danoBase = Math.max(
     1,
-    Math.round((vidaJogador / RODADAS_PARA_INIMIGO_MATAR_JOGADOR) * variacao()),
+    Math.round((vidaJogador / RODADAS_PARA_INIMIGO_MATAR_JOGADOR) * variacao() * mult.dano),
   );
 
   // Agilidade/velocidade espelham as do próprio jogador (com variação),
   // pra esquiva e ordem de turno ficarem parelhas com o que ele tem —
   // em vez de, de novo, assumir uma agilidade "média" pro nível.
-  const agilidade = Math.max(1, Math.round((jogador.agilidade || 1) * variacao()));
-  const velocidade = Math.max(1, Math.round((jogador.velocidade || 1) * variacao()));
+  const agilidade = Math.max(1, Math.round((jogador.agilidade || 1) * variacao() * mult.agilidade));
+  const velocidade = Math.max(1, Math.round((jogador.velocidade || 1) * variacao() * mult.velocidade));
 
   // forca/vitalidade do inimigo aqui são só pra manter o formato da
   // resposta (a API sempre devolveu esses campos) — quem decide o
@@ -192,6 +212,30 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
         });
       }
 
+      // §1/§17/§29/§31 da spec do Modo Aventura: combate PvE não pode
+      // mais começar fora de uma Área de Caça — validado aqui no
+      // servidor (dentro da MESMA transação que trava o Character),
+      // nunca só no frontend. Sem sessão ativa, nem chega a sortear
+      // monstro nenhum.
+      const sessaoAtiva = await obterSessaoAtiva(character.id, { transaction });
+      if (!sessaoAtiva) {
+        return res.status(409).json({
+          message: "Entre em uma Área de Caça antes de procurar uma criatura.",
+        });
+      }
+
+      const zona = sessaoAtiva.area;
+      const monstrosDaZona = await AdventureZoneMonster.findAll({
+        where: { id_area: zona.id, ativo: true },
+        include: [{ model: AdventureMonster, as: "monstro" }],
+        transaction,
+      });
+      if (monstrosDaZona.length === 0) {
+        return res.status(500).json({
+          message: "Área de Caça sem monstros configurados.",
+        });
+      }
+
       const classe = await Class.findByPk(character.id_classe, { transaction });
       const bonusEquipamento = await buscarBonusDeAtributos(character.id, transaction);
       const jogadorEfetivo = comMultiplicadoresDeClasse(
@@ -208,12 +252,28 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       sincronizarRegeneracaoDeVida(character, jogadorEfetivo);
 
       // Query param opcional (?alvo=Minotauro) pra "caçar" um monstro
-      // específico — ver comentário em gerarInimigo. Nome inválido é
-      // ignorado silenciosamente (cai no sorteio aleatório de sempre)
-      // em vez de dar erro, já que é só uma conveniência de farm.
+      // específico — ver comentário em gerarInimigo. Só é aceito se o
+      // nome pertencer à ZONA ATUAL (nunca um nome arbitrário vindo do
+      // cliente, e nunca um monstro de fora desta Área de Caça); nome
+      // inválido/fora da zona é ignorado silenciosamente e cai no
+      // sorteio ponderado normal (§6/§7), em vez de dar erro.
       const alvoPedido = typeof req.query.alvo === "string" ? req.query.alvo : null;
-      const nomeAlvo = alvoPedido && NOMES_INIMIGOS.includes(alvoPedido) ? alvoPedido : null;
-      const inimigo = gerarInimigo(jogadorEfetivo, nomeAlvo);
+      const escolhido =
+        (alvoPedido &&
+          monstrosDaZona.find((zm) => zm.monstro && zm.monstro.nome === alvoPedido)) ||
+        sortearMonstroDaZona(monstrosDaZona);
+
+      const nivelSorteado = sortearNivelMonstro(escolhido, zona);
+      const multiplicadores = {
+        vida: escolhido.monstro.multiplicador_vida,
+        dano: escolhido.monstro.multiplicador_dano,
+        agilidade: escolhido.monstro.multiplicador_agilidade,
+        velocidade: escolhido.monstro.multiplicador_velocidade,
+      };
+      const inimigo = gerarInimigo(jogadorEfetivo, escolhido.monstro.nome, {
+        nivelForcado: nivelSorteado,
+        multiplicadores,
+      });
 
       // Snapshot dos atributos ESTRUTURAIS do personagem no exato momento
       // em que o encontro começa (força/vitalidade/etc já com bônus de
@@ -240,7 +300,18 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
         multiplicador_dano_magico: jogadorEfetivo.multiplicador_dano_magico,
       };
 
-      character.encontro_pve = { ...inimigo, criadoEm: Date.now(), statsPersonagem };
+      // Metadados da zona/monstro ficam junto no mesmo JSONB (§28-§30) —
+      // é o que executarTurno usa depois pra decidir recompensa/espólio
+      // de zona e atualizar os contadores da sessão (ver
+      // adventureRewardService.js).
+      character.encontro_pve = {
+        ...inimigo,
+        criadoEm: Date.now(),
+        statsPersonagem,
+        id_area: zona.id,
+        id_monstro: escolhido.id_monstro,
+        tipo_aparicao: escolhido.tipo_aparicao,
+      };
       await character.save({ transaction });
 
       res.status(200).json({
@@ -572,11 +643,25 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
     // ==========================================================
 
     if (inimigoAtual.vida_atual <= 0) {
-      const xpGanho =
-        15 + inimigoAtual.nivel * 8;
+      // Encontro do Modo Aventura (tem id_area, ver
+      // gerarInimigoParaPersonagem) usa recompensa/espólio de ZONA
+      // (§11/§12/§13), com contadores de sessão persistidos por kill
+      // (§16) — nunca o pool genérico. Encontro antigo (sem id_area,
+      // criado antes deste deploy) cai no fallback de sempre.
+      const ehEncontroDeZona = Boolean(inimigoAtual.id_area);
+      let xpGanho;
+      let dinheiroGanho;
+      let espolioDeZona = null;
 
-      const dinheiroGanho =
-        5 + inimigoAtual.nivel * 4;
+      if (ehEncontroDeZona) {
+        const recompensa = await concederRecompensaDeZona(character, inimigoAtual, transaction);
+        xpGanho = recompensa.xpGanho;
+        dinheiroGanho = recompensa.dinheiroGanho;
+        espolioDeZona = recompensa.espolio;
+      } else {
+        xpGanho = 15 + inimigoAtual.nivel * 8;
+        dinheiroGanho = 5 + inimigoAtual.nivel * 4;
+      }
 
       // O personagem já está travado (LOCK.UPDATE) desde o início desta
       // mesma transação, em executarTurno — XP, dinheiro, vida, mana e o
@@ -620,11 +705,19 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       // decidido em memória (character.dinheiro já tem dinheiroGanho
       // somado) — se cair ouro bônus, soma em cima do mesmo campo, e o
       // character.save() abaixo persiste tudo junto numa vez só.
-      const drop = await rolarDropDeVitoria(character, inimigoAtual, transaction);
+      // Encontro de zona já resolveu o espólio próprio dentro de
+      // concederRecompensaDeZona (§14 — Aventura não deve puxar do
+      // mesmo pool genérico de Material/drop).
+      const drop = ehEncontroDeZona
+        ? null
+        : await rolarDropDeVitoria(character, inimigoAtual, transaction);
       if (drop?.tipo === "item") {
         log.push(`Você encontrou: ${drop.item.nome}!`);
       } else if (drop?.tipo === "ouro") {
         log.push(`Você também encontrou ${drop.dinheiro} moedas extras!`);
+      }
+      if (espolioDeZona) {
+        log.push(`Você recolheu: ${espolioDeZona.nome} x${espolioDeZona.quantidade}!`);
       }
 
       const dinheiroGanhoTotal = dinheiroGanho + (drop?.tipo === "ouro" ? drop.dinheiro : 0);
@@ -669,6 +762,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
           },
 
           drop,
+          espolio: espolioDeZona,
         },
       });
     }
