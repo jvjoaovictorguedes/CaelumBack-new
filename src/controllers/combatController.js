@@ -98,11 +98,9 @@ const RODADAS_PARA_INIMIGO_MATAR_JOGADOR = 4.2;
 // você é frágil, o inimigo bate mais fraco, mas ainda ameaça em ~6
 // turnos) — o resultado da luta depende do seu build de verdade, não
 // de uma média que talvez nem seja a sua.
-// `nomeAlvo` é opcional — pedido do jogador: poder "caçar" um monstro
-// específico (ex.: Minotauro pro requisito de Evolução de Classe) em vez
-// de só depender do sorteio aleatório entre os 9 nomes. Só é aceito se
-// já estiver em NOMES_INIMIGOS (validado no controller antes de chegar
-// aqui) — nunca um nome arbitrário vindo do cliente.
+// `nomeAlvo` é só o nome do monstro já sorteado (por
+// sortearMonstroDaZona, no controller) — nunca uma escolha do jogador
+// (removida a pedido dele: a Aventura agora é sempre 100% aleatória).
 //
 // `opcoes.nivelForcado` e `opcoes.multiplicadores` vêm do Modo Aventura
 // (§8/§9/§10 da spec, ver gerarInimigoParaPersonagem): o nível do
@@ -242,17 +240,10 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       // qualquer jeito.
       sincronizarRegeneracaoDeVida(character, jogadorEfetivo);
 
-      // Query param opcional (?alvo=Minotauro) pra "caçar" um monstro
-      // específico — ver comentário em gerarInimigo. Só é aceito se o
-      // nome pertencer à ZONA ATUAL (nunca um nome arbitrário vindo do
-      // cliente, e nunca um monstro de fora desta Área de Caça); nome
-      // inválido/fora da zona é ignorado silenciosamente e cai no
-      // sorteio ponderado normal (§6/§7), em vez de dar erro.
-      const alvoPedido = typeof req.query.alvo === "string" ? req.query.alvo : null;
-      const escolhido =
-        (alvoPedido &&
-          monstrosDaZona.find((zm) => zm.monstro && zm.monstro.nome === alvoPedido)) ||
-        sortearMonstroDaZona(monstrosDaZona);
+      // Escolha de alvo removida (pedido do jogador) — sempre sorteio
+      // ponderado normal da zona (§6/§7), nunca mais "caçar" um monstro
+      // específico.
+      const escolhido = sortearMonstroDaZona(monstrosDaZona);
 
       const nivelSorteado = sortearNivelMonstro(escolhido, zona);
       const multiplicadores = {

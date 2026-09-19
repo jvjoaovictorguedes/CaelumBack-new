@@ -5,21 +5,22 @@ const { sequelize } = require("../config/database");
 const Character = require("../models/Character");
 const {
   listarZonas,
-  monstrosDaZona,
   obterSessaoAtiva,
   entrarNaZona,
   sairDaZona,
 } = require("../services/adventureService");
 const { encontroDoCampoValido } = require("../services/pveEncounterService");
 
+// Sem lista de monstros na resposta — a Aventura sempre sorteia
+// aleatoriamente (removida a escolha manual de alvo, pedido do
+// jogador), então o frontend não precisa mais dessa lista aqui.
 async function sessaoParaResposta(sessao) {
   if (!sessao) return null;
-  const monstros = sessao.id_area ? await monstrosDaZona(sessao.id_area) : [];
   return {
     id: sessao.id,
     id_area: sessao.id_area,
     area: sessao.area
-      ? { id: sessao.area.id, nome: sessao.area.nome, imagem_url: sessao.area.imagem_url, monstros }
+      ? { id: sessao.area.id, nome: sessao.area.nome, imagem_url: sessao.area.imagem_url }
       : null,
     iniciado_em: sessao.iniciado_em,
     monstros_derrotados: sessao.monstros_derrotados,

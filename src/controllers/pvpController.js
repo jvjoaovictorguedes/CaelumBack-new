@@ -292,8 +292,27 @@ exports.getOpponents = async (req, res) => {
       where: { id: { [Op.ne]: req.params.characterId } },
       attributes: ["id", "nome", "nivel", "genero"],
       include: [{ model: Race, attributes: ["nome_masculino", "nome_feminino"] }, { model: Class, attributes: ["nome"] }],
-      limit: 20,
-      order: [["nivel", "ASC"]],
+      limit: 100,
+      order: [["nivel", "DESC"]],
+    });
+
+    // Online primeiro, depois por nível — mesmo critério que o
+    // frontend reaplica ao vivo (PvpClient.tsx) conforme o socket
+    // atualiza quem está online, mas já chega assim no primeiro
+    // carregamento (antes do socket conectar) em vez de uma ordem
+    // arbitrária de 20 personagens de nível baixo.
+    //
+    // require() tardio (não no topo do arquivo) de propósito: esse
+    // módulo já importa pvpController pra pegar
+    // buscarPoderesDoPersonagem/aplicarResultadoDuelo — um require no
+    // topo aqui criaria um ciclo em que pvpLiveSocket carrega no meio
+    // da carga de pvpController e recebe undefined pras duas funções.
+    const { estaOnline } = require("../socket/pvpLiveSocket");
+    oponentes.sort((a, b) => {
+      const aOnline = estaOnline(a.id);
+      const bOnline = estaOnline(b.id);
+      if (aOnline !== bOnline) return aOnline ? -1 : 1;
+      return b.nivel - a.nivel;
     });
 
     return res.status(200).json({

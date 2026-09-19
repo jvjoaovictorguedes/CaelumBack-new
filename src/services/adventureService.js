@@ -28,10 +28,10 @@ async function listarZonas(nivelPersonagem) {
   }));
 }
 
-// Nomes dos monstros de uma zona (§27) — só o suficiente pro frontend
-// montar o seletor de "caçar um alvo específico" sem precisar inventar
-// a própria lista (era hardcoded igual dos dois lados antes da zona
-// existir, ver HuntTargetSelector.tsx).
+// Nomes dos monstros de uma zona (§27) — usado pelo Bestiário
+// (masteryService.js) pra montar a lista de progresso por monstro da
+// região. Não é mais usado pra escolha manual de alvo na Aventura (a
+// caça é sempre 100% aleatória, pedido do jogador).
 async function monstrosDaZona(idArea, transaction) {
   const vinculos = await AdventureZoneMonster.findAll({
     where: { id_area: idArea, ativo: true },
