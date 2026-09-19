@@ -10,14 +10,12 @@ const GuildTreasuryTransaction = require("../models/GuildTreasuryTransaction");
 const GuildContribution = require("../models/GuildContribution");
 const Character = require("../models/Character");
 const { temPermissao, podeGerenciarCargo, PADRAO, HIERARQUIA } = require("../services/guildPermissionService");
-const { concederExperiencia } = require("../services/guildXpService");
-const { emitParaGuild } = require("../socket/guildSocket");
+const { pontuarContribuicao, pontosPorDoacao } = require("../services/guildContributionService");
+const { emitParaGuild, removerDaSalaDeGuild } = require("../socket/guildSocket");
 
 const CUSTO_CRIACAO = 500;
 const NIVEL_MINIMO_CRIACAO = 5;
 const CONVITE_VALIDADE_HORAS = 72;
-const OURO_POR_XP_DOACAO = 100;
-const TETO_XP_DOACAO_DIARIO = 50;
 
 Character.hasOne(GuildMember, { foreignKey: "id_personagem" });
 GuildMember.belongsTo(Character, { foreignKey: "id_personagem" });
@@ -54,11 +52,13 @@ function guildPublica(guild) {
     mural: guild.mural,
     meta_ativa: guild.meta_ativa,
     totalMembros: guild.membros ? guild.membros.length : undefined,
-    // Ranque de guilda (F...S++, ver rankService.js/guildGateController.js)
-    // — faltava aqui desde que a coluna foi adicionada, então o front
-    // nunca via o ranque real da guilda nesta resposta (só no
-    // GET /guilds/:id/rank-gate dedicado).
+    // Rank da guilda — escada própria F..S (guildConfig.js), sobe só
+    // por Missões de Rank (guildRankProgressionService), nunca mais
+    // pelo Boss (ver guildBossController.js).
     rank: guild.rank,
+    missoes_rank_concluidas_no_rank_atual: guild.missoes_rank_concluidas_no_rank_atual,
+    experiencia_total_ganha: guild.experiencia_total_ganha,
+    bosses_derrotados_total: guild.bosses_derrotados_total,
   };
 }
 
@@ -635,6 +635,10 @@ exports.sair = async (req, res) => {
     await membro.destroy();
     await registrarLog(guild.id, "saida", { responsavel: idPersonagem });
     emitParaGuild(guild.id, "guild:member:update", { tipo: "saida", idPersonagem: Number(idPersonagem) });
+    // §51 — tira o socket da sala JÁ, não espera ele tentar mandar
+    // mensagem de novo (a checagem em "guild:message" continua existindo
+    // como segunda camada, pra sockets que nunca chamaram join-room).
+    removerDaSalaDeGuild(Number(idPersonagem));
     return res.status(200).json({ status: "success", message: "Você saiu da guilda." });
   } catch (error) {
     console.error("Erro ao sair da guilda:", error);
@@ -660,6 +664,7 @@ exports.expulsar = async (req, res) => {
     await alvo.destroy();
     await registrarLog(guild.id, "expulsao", { responsavel: idResponsavel, alvo: idAlvo });
     emitParaGuild(guild.id, "guild:member:update", { tipo: "expulsao", idPersonagem: Number(idAlvo) });
+    removerDaSalaDeGuild(Number(idAlvo));
     return res.status(200).json({ status: "success", message: "Jogador expulso da guilda." });
   } catch (error) {
     const statusCode = error.statusCode || 500;
@@ -795,9 +800,13 @@ exports.doar = async (req, res) => {
 
       // Servidor é a única autoridade sobre o saldo — nunca confia em
       // saldo final calculado no frontend (seção 7 do documento).
+      // §15 — doação não gera mais XP de Guilda, só financia o Tesouro
+      // (Buffs/Boss, ver guildBuffService.js/guildBossService.js). O
+      // valor econômico da doação agora é isso, não "comprar nível".
       personagem.dinheiro -= valorNumerico;
       guild.tesouro += valorNumerico;
       await personagem.save({ transaction });
+      await guild.save({ transaction });
 
       const [contribuicao] = await GuildContribution.findOrCreate({
         where: { id_guild: guild.id, id_personagem: idPersonagem },
@@ -805,19 +814,10 @@ exports.doar = async (req, res) => {
         transaction,
       });
       contribuicao.ouro_doado_total += valorNumerico;
-
-      const hoje = new Date().toISOString().slice(0, 10);
-      if (contribuicao.data_ultimo_xp_doacao !== hoje) {
-        contribuicao.xp_doacao_hoje = 0;
-        contribuicao.data_ultimo_xp_doacao = hoje;
-      }
-      const xpBruto = Math.floor(valorNumerico / OURO_POR_XP_DOACAO);
-      const xpDisponivelHoje = Math.max(0, TETO_XP_DOACAO_DIARIO - contribuicao.xp_doacao_hoje);
-      const xpConcedido = Math.min(xpBruto, xpDisponivelHoje);
-      contribuicao.xp_doacao_hoje += xpConcedido;
-      contribuicao.contribuicao_total += valorNumerico;
-      contribuicao.contribuicao_temporada += valorNumerico;
       await contribuicao.save({ transaction });
+
+      // §43/§44 — contribuição normalizada, não o Gold cru.
+      await pontuarContribuicao(guild.id, idPersonagem, pontosPorDoacao(valorNumerico), transaction);
 
       await GuildTreasuryTransaction.create(
         {
@@ -831,11 +831,6 @@ exports.doar = async (req, res) => {
         { transaction },
       );
 
-      const { subiuNivel, niveisGanhos } = xpConcedido > 0
-        ? await concederExperiencia(guild, xpConcedido)
-        : { subiuNivel: false, niveisGanhos: 0 };
-      await guild.save({ transaction });
-
       await registrarLog(guild.id, "doacao", {
         responsavel: idPersonagem,
         detalhes: `Doou ${valorNumerico} de ouro.`,
@@ -845,10 +840,6 @@ exports.doar = async (req, res) => {
       return {
         saldoPersonagem: personagem.dinheiro,
         tesouro: guild.tesouro,
-        xpConcedido,
-        subiuNivel,
-        niveisGanhos,
-        nivelGuild: guild.nivel,
       };
     });
 

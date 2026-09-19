@@ -47,6 +47,14 @@ const AdventureGuildMission = require("./AdventureGuildMission");
 const AdventureGuildMissionReward = require("./AdventureGuildMissionReward");
 const AdventureGuildOffer = require("./AdventureGuildOffer");
 const CharacterAdventureGuildContract = require("./CharacterAdventureGuildContract");
+const Guild = require("./Guild");
+const GuildBuff = require("./GuildBuff");
+const GuildMission = require("./GuildMission");
+const GuildMissionCycle = require("./GuildMissionCycle");
+const GuildMemberMissionProgress = require("./GuildMemberMissionProgress");
+const GuildBossConfig = require("./GuildBossConfig");
+const GuildBossAttempt = require("./GuildBossAttempt");
+const GuildBossContribution = require("./GuildBossContribution");
 
 Item.hasOne(WeaponProperties, { foreignKey: "id_item", as: "weaponProperties" });
 WeaponProperties.belongsTo(Item, { foreignKey: "id_item" });
@@ -151,5 +159,25 @@ AdventureGuildOffer.belongsTo(AdventureGuildMission, { foreignKey: "id_mission",
 CharacterAdventureGuildContract.belongsTo(Character, { foreignKey: "id_personagem" });
 CharacterAdventureGuildContract.belongsTo(AdventureGuildOffer, { foreignKey: "id_offer", as: "oferta" });
 CharacterAdventureGuildContract.belongsTo(AdventureGuildMission, { foreignKey: "id_mission", as: "missao" });
+
+// Aprimoramento do Sistema de Guildas — Buffs (1 linha por tipo/guilda),
+// Missões da Guilda (catálogo -> ciclo ativo -> progresso individual) e
+// Boss da Guilda (config por rank -> tentativa semanal -> dano por
+// membro), ver guildMissionService.js/guildBossService.js.
+Guild.hasMany(GuildBuff, { foreignKey: "id_guild", as: "buffs" });
+GuildBuff.belongsTo(Guild, { foreignKey: "id_guild" });
+
+GuildMissionCycle.belongsTo(Guild, { foreignKey: "id_guild" });
+GuildMissionCycle.belongsTo(GuildMission, { foreignKey: "id_guild_mission", as: "missao" });
+GuildMission.hasMany(GuildMissionCycle, { foreignKey: "id_guild_mission" });
+
+GuildMemberMissionProgress.belongsTo(GuildMissionCycle, { foreignKey: "id_guild_mission_cycle", as: "ciclo" });
+GuildMissionCycle.hasMany(GuildMemberMissionProgress, { foreignKey: "id_guild_mission_cycle", as: "progressos" });
+GuildMemberMissionProgress.belongsTo(Character, { foreignKey: "id_personagem" });
+
+GuildBossAttempt.belongsTo(GuildBossConfig, { foreignKey: "id_guild_boss_config", as: "chefe" });
+GuildBossAttempt.belongsTo(Guild, { foreignKey: "id_guild" });
+GuildBossContribution.belongsTo(GuildBossAttempt, { foreignKey: "id_guild_boss_attempt" });
+GuildBossContribution.belongsTo(Character, { foreignKey: "id_personagem" });
 
 module.exports = {};

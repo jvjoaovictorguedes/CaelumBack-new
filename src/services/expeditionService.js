@@ -19,6 +19,7 @@ const { sortearQualidade, sortearRecurso, sortearQuantidade } = require("./exped
 const { nivelPorXpTotal, xpParaProximoNivel, aplicarGanhoDeXp } = require("./expeditionProgressionService");
 const { registrarProgresso } = require("./missionService");
 const { registrarProgressoContrato } = require("./adventureGuildObjectiveService");
+const { registrarProgressoMissaoGuilda } = require("./guildMissionService");
 
 const PROFISSOES = ["Mineracao", "Silvicultura", "Exploracao"];
 
@@ -249,6 +250,7 @@ async function coletar(id_personagem, id_regiao) {
     if (personagem) {
       await registrarProgresso(personagem, "CompletarExpedicoes", 1, transaction);
       await registrarProgressoContrato(personagem, "CompletarExpedicoes", 1, {}, transaction);
+      await registrarProgressoMissaoGuilda(personagem, "CompletarExpedicoes", 1, transaction);
     }
 
     return {

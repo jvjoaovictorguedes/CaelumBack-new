@@ -18,6 +18,7 @@ const { adicionarExperiencia } = require("../services/experienceService");
 const { registrarProgresso } = require("../services/missionService");
 const { concederOuro } = require("../services/goldService");
 const { registrarProgressoContrato } = require("../services/adventureGuildObjectiveService");
+const { registrarProgressoMissaoGuilda } = require("../services/guildMissionService");
 const {
   vidaMaximaDe,
   manaMaximaDe,
@@ -232,6 +233,8 @@ async function aplicarResultadoDuelo({ vencedor, perdedor, rodadas }) {
     // proteções anti-farm de sempre.
     await registrarProgressoContrato(vencedorTravado, "VencerDuelos", 1, {}, transaction);
     await registrarProgressoContrato(vencedorTravado, "GanharOuro", recompensa.dinheiro, {}, transaction);
+    await registrarProgressoMissaoGuilda(vencedorTravado, "VencerDuelos", 1, transaction);
+    await registrarProgressoMissaoGuilda(vencedorTravado, "GanharOuro", recompensa.dinheiro, transaction);
 
     const [statusVencedor, statusPerdedor] = await Promise.all([
       garantirStatus(vencedor.id, transaction),

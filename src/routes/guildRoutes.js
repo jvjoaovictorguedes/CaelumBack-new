@@ -1,6 +1,8 @@
 const express = require("express");
 const guildController = require("../controllers/guildController");
-const guildGateController = require("../controllers/guildGateController");
+const guildBossController = require("../controllers/guildBossController");
+const guildMissionController = require("../controllers/guildMissionController");
+const guildBenefitController = require("../controllers/guildBenefitController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const { carregarPersonagemAtual } = require("../middlewares/currentCharacterMiddleware");
 const { exigirMembroDaGuild } = require("../middlewares/guildMembershipMiddleware");
@@ -121,27 +123,44 @@ router.get(
   guildController.listarContribuicoes,
 );
 
-// Portal de Guilda (ver rankService.js/guildGateController.js) — só
-// membro vê status/ataca; iniciar exige a permissão "iniciar_portal"
-// (checada dentro do controller, igual autorizar_gastos).
+// Boss da Guilda (guildBossController.js/guildBossService.js) — só
+// membro vê status/ataca; liberar é líder-only (checado dentro do
+// service, §48 da spec: regra fixa nesta versão, não delega pra
+// permissão customizável).
 router.get(
-  "/:id/rank-gate",
+  "/:id/boss",
   authMiddleware,
   carregarPersonagemAtual,
   exigirMembroDaGuild("id"),
-  guildGateController.getStatus,
+  guildBossController.getStatus,
 );
-router.post(
-  "/:id/rank-gate/start",
+router.post("/:id/boss/liberar", authMiddleware, carregarPersonagemAtual, guildBossController.liberar);
+router.post("/:id/boss/atacar", authMiddleware, carregarPersonagemAtual, guildBossController.atacar);
+
+// Missões da Guilda (guildMissionController.js/guildMissionService.js)
+// — automáticas, sem etapa de aceitar (§7).
+router.get(
+  "/:id/missions",
   authMiddleware,
   carregarPersonagemAtual,
-  guildGateController.iniciarPortal,
+  exigirMembroDaGuild("id"),
+  guildMissionController.listar,
 );
-router.post(
-  "/:id/rank-gate/attack",
+
+// Benefícios/Buffs (guildBenefitController.js/guildBuffService.js) —
+// compra é líder-only (§25 da spec, mesma regra fixa do Boss).
+router.get(
+  "/:id/benefits",
   authMiddleware,
   carregarPersonagemAtual,
-  guildGateController.atacarPortal,
+  exigirMembroDaGuild("id"),
+  guildBenefitController.listar,
+);
+router.post(
+  "/:id/benefits/:tipo/upgrade",
+  authMiddleware,
+  carregarPersonagemAtual,
+  guildBenefitController.comprarNivel,
 );
 
 router.get(

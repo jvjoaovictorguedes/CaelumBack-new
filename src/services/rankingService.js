@@ -119,11 +119,15 @@ async function posicaoGold(idPersonagem) {
 // ---------------------------------------------------------------
 async function rankingGuilda(page) {
   const { pagina, offset, limite } = paginar(page);
+  // "Aprimoramento do Sistema de Guildas" §42 introduziu
+  // experiencia_total_ganha exatamente pra isso — nunca diminui (ao
+  // contrário de `experiencia`, que reseta a cada nível), então é o
+  // critério certo pra métrica histórica de ranking.
   const { count, rows } = await Guild.findAndCountAll({
     where: { status: "Ativa" },
-    attributes: ["id", "nome", "experiencia"],
+    attributes: ["id", "nome", "experiencia", "experiencia_total_ganha"],
     order: [
-      ["experiencia", "DESC"],
+      ["experiencia_total_ganha", "DESC"],
       ["id", "ASC"],
     ],
     limit: limite,
@@ -135,6 +139,7 @@ async function rankingGuilda(page) {
     id: g.id,
     nome: g.nome,
     experiencia: g.experiencia,
+    experiencia_total_ganha: g.experiencia_total_ganha,
   }));
 
   return paginaDeResposta(pagina, limite, count, itens);
@@ -142,12 +147,76 @@ async function rankingGuilda(page) {
 
 async function posicaoGuilda(idGuild) {
   if (!idGuild) return null;
-  const guild = await Guild.findByPk(idGuild, { attributes: ["experiencia", "status"] });
+  const guild = await Guild.findByPk(idGuild, { attributes: ["experiencia_total_ganha", "status"] });
   if (!guild || guild.status !== "Ativa") return null;
 
   const [linhas] = await sequelize.query(
-    `SELECT COUNT(*)::int AS count FROM "Guilds" WHERE status = 'Ativa' AND experiencia > :xp;`,
-    { replacements: { xp: guild.experiencia } },
+    `SELECT COUNT(*)::int AS count FROM "Guilds" WHERE status = 'Ativa' AND experiencia_total_ganha > :xp;`,
+    { replacements: { xp: guild.experiencia_total_ganha } },
+  );
+  return linhas[0].count + 1;
+}
+
+// ---------------------------------------------------------------
+// Boss da Guilda ("Aprimoramento do Sistema de Guildas" §40/§41) —
+// ordenado por bosses_derrotados_total; desempate: maior Rank atual >
+// maior XP total histórico > id (critério técnico determinístico).
+// Rank é string (F..S) — usa um CASE pra ordenar pela posição na
+// escada, não alfabeticamente (senão "S" < "A" na ordem errada).
+// ---------------------------------------------------------------
+const CASE_ORDEM_RANK = `CASE rank
+  WHEN 'S' THEN 6 WHEN 'A' THEN 5 WHEN 'B' THEN 4
+  WHEN 'C' THEN 3 WHEN 'D' THEN 2 WHEN 'E' THEN 1 ELSE 0 END`;
+
+async function rankingBoss(page) {
+  const { pagina, offset, limite } = paginar(page);
+
+  const [linhasContagem] = await sequelize.query(
+    `SELECT COUNT(*)::int AS count FROM "Guilds" WHERE status = 'Ativa' AND bosses_derrotados_total > 0;`,
+  );
+  const totalItens = linhasContagem[0].count;
+
+  const [linhas] = await sequelize.query(
+    `SELECT id, nome, rank, bosses_derrotados_total, experiencia_total_ganha
+     FROM "Guilds"
+     WHERE status = 'Ativa' AND bosses_derrotados_total > 0
+     ORDER BY bosses_derrotados_total DESC, ${CASE_ORDEM_RANK} DESC, experiencia_total_ganha DESC, id ASC
+     LIMIT :limite OFFSET :offset;`,
+    { replacements: { limite, offset } },
+  );
+
+  const itens = linhas.map((linha, indice) => ({
+    posicao: offset + indice + 1,
+    id: linha.id,
+    nome: linha.nome,
+    rank: linha.rank,
+    bosses_derrotados_total: linha.bosses_derrotados_total,
+  }));
+
+  return paginaDeResposta(pagina, limite, totalItens, itens);
+}
+
+async function posicaoBoss(idGuild) {
+  if (!idGuild) return null;
+  const guild = await Guild.findByPk(idGuild, {
+    attributes: ["rank", "bosses_derrotados_total", "experiencia_total_ganha", "status"],
+  });
+  if (!guild || guild.status !== "Ativa" || guild.bosses_derrotados_total <= 0) return null;
+
+  const [linhas] = await sequelize.query(
+    `SELECT COUNT(*)::int AS count FROM "Guilds"
+     WHERE status = 'Ativa' AND bosses_derrotados_total > 0 AND (
+       bosses_derrotados_total > :bosses
+       OR (bosses_derrotados_total = :bosses AND ${CASE_ORDEM_RANK} > :ordemRank)
+       OR (bosses_derrotados_total = :bosses AND ${CASE_ORDEM_RANK} = :ordemRank AND experiencia_total_ganha > :xp)
+     );`,
+    {
+      replacements: {
+        bosses: guild.bosses_derrotados_total,
+        ordemRank: ["F", "E", "D", "C", "B", "A", "S"].indexOf(guild.rank),
+        xp: guild.experiencia_total_ganha,
+      },
+    },
   );
   return linhas[0].count + 1;
 }
@@ -324,4 +393,6 @@ module.exports = {
   rankingPvp,
   posicaoPvp,
   pontuacaoPvp,
+  rankingBoss,
+  posicaoBoss,
 };

@@ -43,6 +43,8 @@ const { sortearMonstroDaZona, sortearNivelMonstro } = require("../services/adven
 const { concederRecompensaDeZona } = require("../services/adventureRewardService");
 const { concederOuro } = require("../services/goldService");
 const { registrarProgressoContrato } = require("../services/adventureGuildObjectiveService");
+const { registrarProgressoMissaoGuilda } = require("../services/guildMissionService");
+const { bonusesAtivosPara } = require("../services/guildBuffService");
 
 const NOMES_INIMIGOS = [
   "Lobo das Sombras",
@@ -652,6 +654,17 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
         dinheiroGanho = 5 + inimigoAtual.nivel * 4;
       }
 
+      // Buffs de Guilda (§19/§20) — só em recompensas de Aventura, nunca
+      // em transferências/vendas (§20). Bônus TOTAL do nível, não
+      // cumulativo entre níveis.
+      const bonusGuilda = await bonusesAtivosPara(character.id, transaction);
+      if (bonusGuilda.xpPercentual > 0) {
+        xpGanho = Math.round(xpGanho * (1 + bonusGuilda.xpPercentual / 100));
+      }
+      if (bonusGuilda.goldPercentual > 0) {
+        dinheiroGanho = Math.round(dinheiroGanho * (1 + bonusGuilda.goldPercentual / 100));
+      }
+
       // O personagem já está travado (LOCK.UPDATE) desde o início desta
       // mesma transação, em executarTurno — XP, dinheiro, vida, mana e o
       // fim do encontro saem todos num único save (dentro de
@@ -728,6 +741,8 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
         transaction,
       );
       await registrarProgressoContrato(character, "GanharOuro", dinheiroGanhoTotal, {}, transaction);
+      await registrarProgressoMissaoGuilda(character, "MatarInimigos", 1, transaction);
+      await registrarProgressoMissaoGuilda(character, "GanharOuro", dinheiroGanhoTotal, transaction);
 
       await character.save({ transaction });
 

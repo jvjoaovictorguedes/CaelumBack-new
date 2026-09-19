@@ -52,6 +52,37 @@ function emitParaGuild(idGuild, evento, payload) {
   ioRegistrado?.to(salaDaGuild(idGuild)).emit(evento, payload);
 }
 
+// characterId -> Set<socket> — permite ao guildController tirar um
+// membro da sala IMEDIATAMENTE ao sair/ser expulso (spec §51), em vez
+// de esperar ele tentar mandar mensagem de novo (checagem que já
+// existia em "guild:message"). Um personagem pode ter mais de um
+// socket (múltiplas abas), por isso é um Set, não um socket só.
+const socketsPorPersonagem = new Map();
+
+function registrarSocketDoPersonagem(characterId, socket) {
+  if (!socketsPorPersonagem.has(characterId)) socketsPorPersonagem.set(characterId, new Set());
+  socketsPorPersonagem.get(characterId).add(socket);
+}
+
+function removerRegistroDoSocket(characterId, socket) {
+  const conjunto = socketsPorPersonagem.get(characterId);
+  if (!conjunto) return;
+  conjunto.delete(socket);
+  if (conjunto.size === 0) socketsPorPersonagem.delete(characterId);
+}
+
+function removerDaSalaDeGuild(characterId) {
+  const conjunto = socketsPorPersonagem.get(characterId);
+  if (!conjunto) return;
+  for (const socket of conjunto) {
+    if (socket.guildRoom) {
+      socket.leave(socket.guildRoom);
+      socket.guildRoom = null;
+      socket.emit("guild:removido-da-sala");
+    }
+  }
+}
+
 module.exports = function registerGuildHandlers(io) {
   ioRegistrado = io;
   io.on("connection", (socket) => {
@@ -89,6 +120,7 @@ module.exports = function registerGuildHandlers(io) {
         if (socket.guildRoom) socket.leave(socket.guildRoom);
         socket.guildRoom = salaDaGuild(membro.id_guild);
         socket.join(socket.guildRoom);
+        registrarSocketDoPersonagem(characterId, socket);
         if (typeof callback === "function") callback({ idGuild: membro.id_guild });
       } catch (error) {
         console.error("Erro ao entrar na sala da guilda:", error);
@@ -136,9 +168,11 @@ module.exports = function registerGuildHandlers(io) {
 
     socket.on("disconnect", () => {
       if (socket.guildRoom) socket.leave(socket.guildRoom);
+      if (socket.characterId) removerRegistroDoSocket(socket.characterId, socket);
     });
   });
 };
 
 module.exports.salaDaGuild = salaDaGuild;
 module.exports.emitParaGuild = emitParaGuild;
+module.exports.removerDaSalaDeGuild = removerDaSalaDeGuild;

@@ -28,6 +28,7 @@ const {
 } = require("../config/forgeConfig");
 const { resolverIdItemDoInsumo } = require("./forgeMaterialsService");
 const { rolarDegrausQualidadeSuperior, qualidadeComDegraus } = require("./forgeRollService");
+const { bonusesAtivosPara } = require("./guildBuffService");
 const { nivelPorXpTotal } = require("./forgeProgressionService");
 
 async function resolverIngredientesResolvidos(blueprint, qualidade, transaction) {
@@ -218,8 +219,11 @@ async function iniciarFabricacao(characterId, { id_blueprint, qualidade }) {
       else await entrada.save({ transaction });
     }
 
-    // Resultado sorteado JÁ AGORA (spec §49) — nunca no collect.
-    const degraus = rolarDegrausQualidadeSuperior(nivelForja);
+    // Resultado sorteado JÁ AGORA (spec §49) — nunca no collect. Buff de
+    // Forja da Guilda (§21/§22) só afeta Fabricação, nunca Refinamento/
+    // Fundição/Pergaminhos.
+    const { forjaPontosPercentuais } = await bonusesAtivosPara(characterId, transaction);
+    const degraus = rolarDegrausQualidadeSuperior(nivelForja, forjaPontosPercentuais);
     const qualidadeFinal = qualidadeComDegraus(qualidade, degraus);
     const resultado = await ForgeBlueprintResult.findOne({
       where: { id_blueprint: blueprint.id, qualidade: qualidadeFinal },

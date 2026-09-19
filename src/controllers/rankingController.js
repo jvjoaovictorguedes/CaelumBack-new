@@ -6,7 +6,7 @@ const rankingService = require("../services/rankingService");
 const Character = require("../models/Character");
 const GuildMember = require("../models/GuildMember");
 
-const TIPOS_VALIDOS = ["level", "gold", "guild", "pvp", "forge"];
+const TIPOS_VALIDOS = ["level", "gold", "guild", "pvp", "forge", "boss"];
 
 // GET /api/ranking?type=level|gold|guild|pvp|forge&page=1
 exports.obterRanking = async (req, res) => {
@@ -66,6 +66,18 @@ exports.obterRanking = async (req, res) => {
         dados = await rankingService.rankingForja(page);
         if (idPersonagem) {
           dados.minhaPosicao = { posicao: await rankingService.posicaoForja(idPersonagem) };
+        }
+        break;
+
+      case "boss":
+        dados = await rankingService.rankingBoss(page);
+        if (idPersonagem) {
+          // Mesmo padrão do Ranking de Guilda (§17) — posição é da
+          // GUILDA do jogador, não dele individual.
+          const membro = await GuildMember.findOne({ where: { id_personagem: idPersonagem } });
+          dados.minhaPosicao = membro
+            ? { id_guilda: membro.id_guild, posicao: await rankingService.posicaoBoss(membro.id_guild) }
+            : { posicao: null, motivo: "Você ainda não pertence a uma guilda." };
         }
         break;
     }

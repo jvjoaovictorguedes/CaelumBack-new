@@ -14,6 +14,7 @@ const { nivelPorXpTotal, xpParaProximoNivel, aplicarGanhoDeXp } = require("./for
 const Character = require("../models/Character");
 const { registrarProgresso } = require("./missionService");
 const { registrarProgressoContrato } = require("./adventureGuildObjectiveService");
+const { registrarProgressoMissaoGuilda } = require("./guildMissionService");
 
 async function garantirProgresso(characterId, transaction) {
   const [progresso] = await CharacterForgeProgress.findOrCreate({
@@ -134,8 +135,10 @@ async function coletar(characterId, slot) {
     if (personagem && entrada.tipo_acao === TIPOS_ACAO_FORJA.FABRICACAO) {
       await registrarProgresso(personagem, "Fabricar", 1, transaction);
       await registrarProgressoContrato(personagem, "Fabricar", 1, {}, transaction);
+      await registrarProgressoMissaoGuilda(personagem, "Fabricar", 1, transaction);
     } else if (personagem && entrada.tipo_acao === TIPOS_ACAO_FORJA.REFINAMENTO && resultado.sucesso) {
       await registrarProgressoContrato(personagem, "Refinar", 1, {}, transaction);
+      await registrarProgressoMissaoGuilda(personagem, "Refinar", 1, transaction);
     }
 
     await entrada.destroy({ transaction });

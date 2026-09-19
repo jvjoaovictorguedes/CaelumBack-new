@@ -23,9 +23,29 @@ function rolarBarraBonus(nivelForja) {
 
 // Retorna quantos degraus ACIMA da qualidade-base o resultado da
 // Fabricação ficou (0 = mesma qualidade dos materiais).
-function rolarDegrausQualidadeSuperior(nivelForja) {
-  const chances = CHANCE_QUALIDADE_SUPERIOR_FABRICACAO_PPM_POR_NIVEL[nivelForja];
-  if (!chances) throw new Error(`Sem tabela de chance de fabricação pro nível de Forja ${nivelForja}.`);
+//
+// `bonusForjaGuildaPontosPercentuais` (Buff de Forja da Guilda, spec
+// "Aprimoramento do Sistema de Guildas" §21/§22) retira chance SÓ do
+// resultado "mesma qualidade" (a fatia implícita = BASE_SORTEIO menos a
+// soma de mais1..mais5) e transfere pra "+1" — nunca mexe em
+// mais2/mais3/mais4/mais5, e nunca deixa "mesma qualidade" ir negativa.
+function rolarDegrausQualidadeSuperior(nivelForja, bonusForjaGuildaPontosPercentuais = 0) {
+  const chancesBase = CHANCE_QUALIDADE_SUPERIOR_FABRICACAO_PPM_POR_NIVEL[nivelForja];
+  if (!chancesBase) throw new Error(`Sem tabela de chance de fabricação pro nível de Forja ${nivelForja}.`);
+
+  const chances = { ...chancesBase };
+  if (bonusForjaGuildaPontosPercentuais > 0) {
+    const somaDegraus = ["mais1", "mais2", "mais3", "mais4", "mais5"].reduce(
+      (soma, chave) => soma + (chancesBase[chave] ?? 0),
+      0,
+    );
+    const mesmaQualidadePpm = BASE_SORTEIO - somaDegraus;
+    const bonusPpm = Math.min(
+      mesmaQualidadePpm,
+      Math.round((bonusForjaGuildaPontosPercentuais / 100) * BASE_SORTEIO),
+    );
+    chances.mais1 = (chances.mais1 ?? 0) + bonusPpm;
+  }
 
   const sorteio = crypto.randomInt(0, BASE_SORTEIO);
   let acumulado = 0;

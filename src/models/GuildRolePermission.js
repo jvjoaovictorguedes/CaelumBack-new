@@ -30,6 +30,12 @@ const GuildRolePermission = sequelize.define(
       ),
       allowNull: false,
     },
+    // "iniciar_portal" existia aqui pro antigo Portal de Guilda — a spec
+    // "Aprimoramento do Sistema de Guildas" (§47) pede troca por
+    // permissões coerentes com o Boss/Benefícios que o substituem. O
+    // valor antigo continua válido no ENUM do banco (não dá pra remover
+    // um valor de ENUM do Postgres sem recriar o tipo), mas o código não
+    // lê/escreve mais nele a partir daqui.
     permissao: {
       type: DataTypes.ENUM(
         "convidar",
@@ -39,6 +45,8 @@ const GuildRolePermission = sequelize.define(
         "editar_identidade",
         "editar_cargos",
         "autorizar_gastos",
+        "liberar_boss",
+        "comprar_beneficios",
       ),
       allowNull: false,
     },

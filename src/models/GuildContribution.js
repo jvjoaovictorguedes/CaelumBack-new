@@ -1,6 +1,13 @@
 const { DataTypes } = require("sequelize");
 const { sequelize } = require("../config/database");
 
+// contribuicao_total deixou de ser "quase só Gold doado" (spec
+// "Aprimoramento do Sistema de Guildas" §43/§44) — agora é uma métrica
+// de PONTOS somando Missões da Guilda + Boss + Doação normalizada (ver
+// guildContributionService.pontuarContribuicao), nunca mais Gold cru
+// somado direto. Doação não gera mais XP de Guilda (§15) — por isso os
+// campos antigos xp_doacao_hoje/data_ultimo_xp_doacao (teto diário de
+// XP por doação) foram removidos.
 const GuildContribution = sequelize.define(
   "GuildContribution",
   {
@@ -34,17 +41,6 @@ const GuildContribution = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
       defaultValue: 0,
-    },
-    // Controla o teto diário de XP de guilda gerado por doação (100 ouro
-    // = 1 XP, até 50 XP/dia por personagem) sem precisar de outra tabela.
-    xp_doacao_hoje: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
-      defaultValue: 0,
-    },
-    data_ultimo_xp_doacao: {
-      type: DataTypes.DATEONLY,
-      allowNull: true,
     },
   },
   {
