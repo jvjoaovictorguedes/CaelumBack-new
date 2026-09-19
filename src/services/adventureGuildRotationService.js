@@ -9,6 +9,8 @@ const AdventureGuildMission = require("../models/AdventureGuildMission");
 const AdventureGuildMissionReward = require("../models/AdventureGuildMissionReward");
 const AdventureGuildOffer = require("../models/AdventureGuildOffer");
 const Item = require("../models/Item");
+const AdventureMonster = require("../models/AdventureMonster");
+const AdventureZone = require("../models/AdventureZone");
 const { OFERTAS_POR_ROTACAO, ROTACAO_MS, inicioDaJanelaAtual } = require("../config/adventureGuildConfig");
 
 function embaralhar(lista) {
@@ -80,6 +82,9 @@ async function obterOfertasDoRank(rank, transaction) {
           as: "missao",
           include: [
             { model: AdventureGuildMissionReward, as: "recompensas", include: [{ model: Item, as: "item" }] },
+            { model: AdventureMonster, as: "monstroAlvo" },
+            { model: AdventureZone, as: "areaAlvo" },
+            { model: Item, as: "itemAlvo" },
           ],
         },
       ],

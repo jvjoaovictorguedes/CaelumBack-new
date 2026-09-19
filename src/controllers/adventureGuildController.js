@@ -15,6 +15,39 @@ const { obterProvacaoAtiva, iniciarProvacao, falharProvacao } = require("../serv
 const { obterOuCriarProgresso } = require("../services/adventureGuildProgressionService");
 const { REQUISITOS_PROMOCAO, COOLDOWN_PROVACAO_MS } = require("../config/adventureGuildConfig");
 
+// Texto legível do objetivo pro jogador — nunca mostra o valor cru do
+// ENUM tipo_objetivo (era o bug: "5x (MatarMonstroEspecifico)" sem
+// nem dizer qual monstro).
+function formatarObjetivo(missao) {
+  const qtd = missao.quantidade_objetivo;
+  const sufixoQualidade = missao.qualidade_minima ? ` (qualidade mínima: ${missao.qualidade_minima})` : "";
+
+  switch (missao.tipo_objetivo) {
+    case "MatarMonstroEspecifico":
+      return `Matar ${qtd}x ${missao.monstroAlvo?.nome ?? "monstro desconhecido"}`;
+    case "MatarNaRegiao":
+      return `Matar ${qtd}x em ${missao.areaAlvo?.nome ?? "região desconhecida"}`;
+    case "MatarInimigos":
+      return `Matar ${qtd}x inimigos`;
+    case "VencerDuelos":
+      return `Vencer ${qtd}x duelos de PvP`;
+    case "GanharOuro":
+      return `Ganhar ${qtd} de ouro`;
+    case "CompletarExpedicoes":
+      return `Completar ${qtd}x Expedições`;
+    case "Fabricar":
+      return `Fabricar ${qtd}x itens${sufixoQualidade}`;
+    case "Refinar":
+      return `Refinar ${qtd}x itens${sufixoQualidade}`;
+    case "Entregar":
+      return `Entregar ${qtd}x ${missao.itemAlvo?.nome ?? "item"}`;
+    case "AlcancarNivel":
+      return `Alcançar nível ${qtd}`;
+    default:
+      return `${qtd}x ${missao.tipo_objetivo}`;
+  }
+}
+
 function formatarOferta(oferta) {
   return {
     id: oferta.id,
@@ -30,6 +63,7 @@ function formatarMissao(missao) {
     nome: missao.nome,
     descricao: missao.descricao,
     tipo_objetivo: missao.tipo_objetivo,
+    descricao_objetivo: formatarObjetivo(missao),
     quantidade_objetivo: missao.quantidade_objetivo,
     qualidade_minima: missao.qualidade_minima,
     id_item_alvo: missao.id_item_alvo,

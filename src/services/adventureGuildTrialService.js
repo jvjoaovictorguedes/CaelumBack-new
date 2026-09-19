@@ -9,6 +9,8 @@ const CharacterAdventureGuildContract = require("../models/CharacterAdventureGui
 const AdventureGuildMission = require("../models/AdventureGuildMission");
 const AdventureGuildMissionReward = require("../models/AdventureGuildMissionReward");
 const Item = require("../models/Item");
+const AdventureMonster = require("../models/AdventureMonster");
+const AdventureZone = require("../models/AdventureZone");
 const { obterOuCriarProgresso } = require("./adventureGuildProgressionService");
 const { COOLDOWN_PROVACAO_MS } = require("../config/adventureGuildConfig");
 
@@ -23,7 +25,12 @@ async function obterProvacaoAtiva(idPersonagem, transaction) {
       {
         model: AdventureGuildMission,
         as: "missao",
-        include: [{ model: AdventureGuildMissionReward, as: "recompensas", include: [{ model: Item, as: "item" }] }],
+        include: [
+          { model: AdventureGuildMissionReward, as: "recompensas", include: [{ model: Item, as: "item" }] },
+          { model: AdventureMonster, as: "monstroAlvo" },
+          { model: AdventureZone, as: "areaAlvo" },
+          { model: Item, as: "itemAlvo" },
+        ],
       },
     ],
     transaction,

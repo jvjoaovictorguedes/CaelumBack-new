@@ -9,6 +9,8 @@ const AdventureGuildMission = require("../models/AdventureGuildMission");
 const AdventureGuildMissionReward = require("../models/AdventureGuildMissionReward");
 const CharacterInventory = require("../models/CharacterInventory");
 const Item = require("../models/Item");
+const AdventureMonster = require("../models/AdventureMonster");
+const AdventureZone = require("../models/AdventureZone");
 const { adicionarExperiencia } = require("./experienceService");
 const { concederOuro } = require("./goldService");
 const { registrarProgresso } = require("./missionService");
@@ -202,7 +204,12 @@ async function listarContratosAtivos(idPersonagem, transaction) {
       {
         model: AdventureGuildMission,
         as: "missao",
-        include: [{ model: AdventureGuildMissionReward, as: "recompensas", include: [{ model: Item, as: "item" }] }],
+        include: [
+          { model: AdventureGuildMissionReward, as: "recompensas", include: [{ model: Item, as: "item" }] },
+          { model: AdventureMonster, as: "monstroAlvo" },
+          { model: AdventureZone, as: "areaAlvo" },
+          { model: Item, as: "itemAlvo" },
+        ],
       },
     ],
     order: [["aceito_em", "ASC"]],
