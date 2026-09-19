@@ -13,7 +13,11 @@ const MarketListing = sequelize.define(
     // reserveForMarket) até vender ou cancelar. Material/consumível
     // continua null e usa id_item+quantidade como sempre (stack).
     id_instancia: { type: DataTypes.INTEGER, allowNull: true },
-    quantidade: { type: DataTypes.INTEGER, allowNull: false },
+    // quantidade_total nunca muda depois de criado — é o "quanto foi
+    // anunciado". quantidade_restante decrementa a cada compra parcial de
+    // stack (equipamento é sempre 1/1, nunca compra parcial — v2 §6).
+    quantidade_total: { type: DataTypes.INTEGER, allowNull: false },
+    quantidade_restante: { type: DataTypes.INTEGER, allowNull: false },
     preco_unitario: { type: DataTypes.INTEGER, allowNull: false },
     status: {
       type: DataTypes.ENUM("Ativo", "Vendido", "Cancelado"),
@@ -21,6 +25,7 @@ const MarketListing = sequelize.define(
       defaultValue: "Ativo",
     },
     vendido_em: { type: DataTypes.DATE, allowNull: true },
+    cancelado_em: { type: DataTypes.DATE, allowNull: true },
   },
   { tableName: "market_listings" },
 );

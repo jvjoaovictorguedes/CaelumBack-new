@@ -79,6 +79,12 @@ async function previaRefinamento(characterId, { id_instancia, id_item_pergaminho
     CharacterEquipmentInstance.findOne({ where: { id: id_instancia, id_personagem: characterId } }),
   ]);
   if (!instancia) throw Object.assign(new Error("Equipamento não encontrado."), { statusCode: 404 });
+  if (instancia.estado === "Mercado") {
+    throw Object.assign(
+      new Error("Esse equipamento está anunciado no Mercado — cancele o anúncio antes de refinar."),
+      { statusCode: 400 },
+    );
+  }
   if (instancia.refinamento >= NIVEL_MAXIMO) {
     throw Object.assign(new Error("Esse equipamento já está no refinamento máximo."), { statusCode: 400 });
   }
@@ -119,6 +125,17 @@ async function iniciarRefinamento(characterId, { id_instancia, id_item_pergaminh
       lock: transaction.LOCK.UPDATE,
     });
     if (!instancia) throw Object.assign(new Error("Equipamento não encontrado."), { statusCode: 404 });
+    // Instância anunciada no Mercado não pode ser refinada enquanto
+    // estiver à venda — sem essa checagem, o refinamento mudava as
+    // propriedades efetivas de um item que um comprador já estava
+    // vendo listado, e a spec do Mercado v2 exige exatamente o
+    // contrário (equipamento anunciado é imutável até vender/cancelar).
+    if (instancia.estado === "Mercado") {
+      throw Object.assign(
+        new Error("Esse equipamento está anunciado no Mercado — cancele o anúncio antes de refinar."),
+        { statusCode: 400 },
+      );
+    }
     if (instancia.refinamento >= NIVEL_MAXIMO) {
       throw Object.assign(new Error("Esse equipamento já está no refinamento máximo."), { statusCode: 400 });
     }

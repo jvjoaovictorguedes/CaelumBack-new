@@ -19,6 +19,7 @@ const Character = require("./Character");
 const Mission = require("./Mission");
 const CharacterMissionProgress = require("./CharacterMissionProgress");
 const MarketListing = require("./MarketListing");
+const MarketTransaction = require("./MarketTransaction");
 const CraftingRecipe = require("./CraftingRecipe");
 const CraftingRecipeIngredient = require("./CraftingRecipeIngredient");
 const CharacterCraftingQueue = require("./CharacterCraftingQueue");
@@ -81,6 +82,15 @@ MarketListing.belongsTo(Character, { foreignKey: "id_personagem_comprador", as: 
 // Inventário v2 — só preenchido quando o anúncio é de equipamento (ver
 // MarketListing.js), pra mostrar o refinamento de verdade no anúncio.
 MarketListing.belongsTo(CharacterEquipmentInstance, { foreignKey: "id_instancia", as: "instancia" });
+
+// Mercado v2 — cada linha é uma compra de verdade (permite parcial de
+// stack); histórico de preço e receita líquida acumulada de "Meus
+// Anúncios" vêm daqui, nunca recalculados a partir do MarketListing.
+MarketListing.hasMany(MarketTransaction, { foreignKey: "id_listing", as: "transacoes" });
+MarketTransaction.belongsTo(MarketListing, { foreignKey: "id_listing", as: "listing" });
+MarketTransaction.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+MarketTransaction.belongsTo(Character, { foreignKey: "id_personagem_vendedor", as: "vendedor" });
+MarketTransaction.belongsTo(Character, { foreignKey: "id_personagem_comprador", as: "comprador" });
 
 // Forja v2 — receita fixa por item (id_item), com N ingredientes
 // (materiais + quantidade) e no máximo 1 forja em andamento por
