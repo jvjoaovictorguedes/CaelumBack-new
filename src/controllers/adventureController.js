@@ -69,14 +69,9 @@ exports.entrarNaAreaDeCaca = async (req, res) => {
         return res.status(404).json({ message: "Personagem não encontrado." });
       }
 
-      // Mesma exclusão mútua já aplicada entre Aventura e Portal de
-      // Ranque (ver combatController/rankGateController): não dá pra
-      // trocar de zona (perdendo o encontro atual sem resolvê-lo) no
-      // meio de um combate em andamento.
-      if (
-        encontroDoCampoValido(character, "encontro_pve") ||
-        encontroDoCampoValido(character, "encontro_rank_gate")
-      ) {
+      // Não dá pra trocar de zona (perdendo o encontro atual sem
+      // resolvê-lo) no meio de um combate em andamento.
+      if (encontroDoCampoValido(character, "encontro_pve")) {
         return res.status(409).json({
           message: "Termine o combate em andamento antes de entrar em outra Área de Caça.",
         });

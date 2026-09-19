@@ -1,18 +1,22 @@
 // src/services/pveEncounterService.js
 //
 // Fonte única da validade de um encontro de combate salvo num campo
-// JSONB do personagem (character.encontro_pve ou character.encontro_rank_gate)
-// — antes vivia só dentro de combatController.js, e characterInventoryController.js
-// (bloqueio de consumível em combate) checava o campo cru
-// (`if (character.encontro_pve)`) sem passar pela mesma regra de
-// expiração. Resultado: depois que um encontro expirava (30min sem
-// terminar a luta), combatController via ele como "sem combate ativo"
-// mas o bloqueio de poção continuava lendo o campo cru — ainda
-// preenchido, nunca limpo — e travava consumíveis pra sempre até o
-// jogador gerar um inimigo novo. Com todo mundo usando estas mesmas
-// funções (que também LIMPAM o campo expirado), o estado fica
-// consistente nos dois lugares — e no Portal de Ranque também, que usa
-// o mesmo padrão num campo próprio (rankGateController.js).
+// JSONB do personagem (character.encontro_pve) — antes vivia só dentro
+// de combatController.js, e characterInventoryController.js (bloqueio
+// de consumível em combate) checava o campo cru (`if
+// (character.encontro_pve)`) sem passar pela mesma regra de expiração.
+// Resultado: depois que um encontro expirava (30min sem terminar a
+// luta), combatController via ele como "sem combate ativo" mas o
+// bloqueio de poção continuava lendo o campo cru — ainda preenchido,
+// nunca limpo — e travava consumíveis pra sempre até o jogador gerar
+// um inimigo novo. Com todo mundo usando estas mesmas funções (que
+// também LIMPAM o campo expirado), o estado fica consistente.
+//
+// As funções `*DoCampo*` genéricas continuam existindo porque a
+// Aventura já as usa pra checar exclusão mútua entre zonas
+// (adventureController.js) — o Portal de Ranque individual, que usava
+// o mesmo padrão num campo próprio, foi removido (ver migration
+// 20260930780000).
 const VALIDADE_ENCONTRO_MS = 30 * 60 * 1000;
 
 // Devolve uma CÓPIA do encontro válido (ou null) daquele campo, nunca a

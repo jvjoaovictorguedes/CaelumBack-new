@@ -69,37 +69,6 @@ const Character = sequelize.define("Character", {
     type: DataTypes.JSONB,
     allowNull: true,
   },
-  // Cooldown entre tentativas do Portal de Ranque (ver
-  // rankGateController.js) — evita retry imediato após perder.
-  ultima_tentativa_rank_gate: {
-    type: DataTypes.DATE,
-    allowNull: true,
-  },
-  // Cooldown curto separado pra depois de uma VITÓRIA — sem isso, dava
-  // pra encadear vitórias no Portal sem nenhum intervalo (maior fonte
-  // de inflação de ouro do jogo, ver rankGateController.js).
-  ultima_vitoria_rank_gate: {
-    type: DataTypes.DATE,
-    allowNull: true,
-  },
-  // Combate do Portal de Ranque em andamento — mesmo raciocínio de
-  // encontro_pve (persistido, não só em memória), mas separado dele:
-  // um personagem pode ter os dois campos com valores diferentes se
-  // fizer sentido no futuro, e as regras de vitória/derrota do portal
-  // (pontos, dificuldade) são diferentes das da Aventura comum.
-  encontro_rank_gate: {
-    type: DataTypes.JSONB,
-    allowNull: true,
-  },
-  // Progresso acumulado pra vencer o portal do ranque ATUAL — zera
-  // sempre que promove de ranque. Vencer no Fácil dá poucos pontos,
-  // Muito Difícil dá o suficiente pra promover numa luta só (ver
-  // PONTOS_POR_DIFICULDADE em rankGateService.js).
-  pontos_portal_atual: {
-    type: DataTypes.INTEGER,
-    allowNull: false,
-    defaultValue: 0,
-  },
   // Evolução de CLASSE — qual dos caminhos da árvore (ver
   // ClassEvolutionPath/classEvolutionService.js) o personagem escolheu.
   // NULL = ainda não evoluiu. Diferente da Evolution por natureza
@@ -165,6 +134,11 @@ const Character = sequelize.define("Character", {
     ),
     allowNull: false,
   },
+  // Rank do personagem — definido exclusivamente pelas promoções da
+  // Guilda dos Aventureiros (ver adventureGuildProgressionService.js),
+  // espelhando CharacterAdventureGuildProgress.rank a cada Provação
+  // concluída. Não confundir com guild.rank (Portal de Ranque
+  // COLETIVO da guilda de verdade, outro sistema).
   rank: {
     type: DataTypes.STRING(50),
     defaultValue: "F",

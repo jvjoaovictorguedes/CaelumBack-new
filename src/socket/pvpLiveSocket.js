@@ -339,10 +339,9 @@ module.exports = function registerPvpLiveHandlers(io) {
       } else if (tipo === "item") {
         // Consumível como ação de duelo — mesma regra de "gasta o turno
         // inteiro" e o mesmo caminho de validação (inventário + tipo do
-        // item + efeito configurado) já usado no PvE (combatController.js)
-        // e no Portal de Ranque (rankGateController.js). Precisa de
-        // consulta ao banco (await), então trava o duelo pra ninguém
-        // mandar uma segunda ação enquanto essa resolve.
+        // item + efeito configurado) já usado no PvE (combatController.js).
+        // Precisa de consulta ao banco (await), então trava o duelo pra
+        // ninguém mandar uma segunda ação enquanto essa resolve.
         duelo.processandoAcao = true;
         try {
           const inventoryEntry = await CharacterInventory.findOne({

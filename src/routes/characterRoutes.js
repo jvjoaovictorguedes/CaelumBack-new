@@ -1,7 +1,6 @@
 const express = require("express");
 
 const characterController = require("../controllers/characterController");
-const rankGateController = require("../controllers/rankGateController");
 const missionController = require("../controllers/missionController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const adminMiddleware = require("../middlewares/adminMiddleware");
@@ -57,21 +56,6 @@ router
   .route("/:id/class-evolution")
   .get(authMiddleware, exigirDonoOuAdmin("id"), characterController.getEvolucaoDeClasse)
   .post(authMiddleware, exigirDonoDoPersonagem("id"), characterController.evolveClass);
-
-// Portal de Ranque — combate interativo (dificuldade escolhida pelo
-// jogador, turno a turno) contra o chefe do ranque atual; promove só
-// depois de acumular pontos suficientes (ver rankGateService.js).
-router
-  .route("/:id/rank-gate")
-  .get(authMiddleware, exigirDonoOuAdmin("id"), rankGateController.getPortalAtual);
-
-router
-  .route("/:id/rank-gate/start")
-  .post(authMiddleware, exigirDonoDoPersonagem("id"), rankGateController.iniciarPortal);
-
-router
-  .route("/:id/rank-gate/action")
-  .post(authMiddleware, exigirDonoDoPersonagem("id"), rankGateController.atacarPortal);
 
 // Missões diárias/únicas — catálogo fixo (ver seeder), progresso
 // individual por personagem (ver missionService.js).

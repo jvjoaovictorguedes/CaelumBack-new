@@ -32,11 +32,7 @@ const {
   personagemComBonus,
 } = require("../services/equipmentBonusService");
 const { sincronizarRegeneracaoDeVida } = require("../services/regenService");
-const {
-  encontroValido,
-  limparEncontroExpirado,
-  encontroDoCampoValido,
-} = require("../services/pveEncounterService");
+const { encontroValido, limparEncontroExpirado } = require("../services/pveEncounterService");
 const { rolarDropDeVitoria } = require("../services/dropService");
 const { registrarProgresso } = require("../services/missionService");
 const { registrarMorte } = require("../services/monsterKillService");
@@ -202,15 +198,6 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
         return res.status(200).json({
           status: "success",
           data: { enemy: inimigoAtual },
-        });
-      }
-
-      // Não dá pra abrir uma Aventura nova com um Portal de Ranque em
-      // andamento — mesma exclusão mútua que o Portal já aplica no
-      // sentido contrário (ver rankGateController.iniciarPortal).
-      if (encontroDoCampoValido(character, "encontro_rank_gate")) {
-        return res.status(409).json({
-          message: "Termine o combate do Portal de Ranque em andamento antes de partir para a Aventura.",
         });
       }
 

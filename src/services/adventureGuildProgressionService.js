@@ -4,6 +4,7 @@
 // Provação. Chamado a partir de UM lugar só (registrarConclusaoDeContrato),
 // sempre no exato momento em que um contrato passa a Concluido — nunca
 // no resgate da recompensa (§53: resgatar não pode duplicar o contador).
+const Character = require("../models/Character");
 const CharacterAdventureGuildProgress = require("../models/CharacterAdventureGuildProgress");
 const { REQUISITOS_PROMOCAO, proximoRankAventureiro } = require("../config/adventureGuildConfig");
 
@@ -37,6 +38,15 @@ async function registrarConclusaoDeContrato(idPersonagem, contrato, transaction)
       progresso.rank = proximo;
       progresso.missoes_concluidas_no_rank = 0;
       progresso.apto_para_promocao = false;
+
+      // Character.rank agora é definido só pela Guilda dos Aventureiros
+      // (pedido do jogador, removendo o Portal de Ranque individual) —
+      // espelha aqui, no mesmo momento da promoção.
+      const character = await Character.findByPk(idPersonagem, { transaction, lock: transaction.LOCK.UPDATE });
+      if (character) {
+        character.rank = proximo;
+        await character.save({ transaction });
+      }
     }
     await progresso.save({ transaction });
     return;

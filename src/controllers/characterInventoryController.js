@@ -17,10 +17,7 @@ const {
   buscarBonusDeAtributos,
   personagemComBonus,
 } = require("../services/equipmentBonusService");
-const {
-  limparEncontroExpirado,
-  limparEncontroDoCampoExpirado,
-} = require("../services/pveEncounterService");
+const { limparEncontroExpirado } = require("../services/pveEncounterService");
 
 // Sem essas associações, qualquer include: [{model: Character}, {model: Item}]
 // abaixo derruba a chamada com "CharacterInventory is not associated to X!".
@@ -129,14 +126,10 @@ exports.useItem = async (req, res) => {
       // expirar, porque nada além de gerar um inimigo novo limpava esse
       // campo. Já aproveita e persiste a limpeza aqui, já que a
       // transação (com o Character travado) já está aberta.
-      // Mesma regra vale pro combate do Portal de Ranque
-      // (encontro_rank_gate) — também só turno a turno, nunca livre por
-      // este endpoint (ver rankGateController.js).
       const limpouPve = limparEncontroExpirado(character);
-      const limpouPortal = limparEncontroDoCampoExpirado(character, "encontro_rank_gate");
-      if (limpouPve || limpouPortal) {
+      if (limpouPve) {
         await character.save({ transaction });
-      } else if (character.encontro_pve || character.encontro_rank_gate) {
+      } else if (character.encontro_pve) {
         const error = new Error(
           "Durante um combate, consumíveis devem ser utilizados como ação de combate.",
         );
