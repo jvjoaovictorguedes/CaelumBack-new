@@ -82,6 +82,24 @@ const REQUISITOS_PROMOCAO = {
   // S não promove — é o topo (§32).
 };
 
+// Fim do ciclo global ATUAL pra cada categoria de missão livre (§7) —
+// é isso que vira `expira_em` em CharacterMissionProgress. Quando o
+// relógio passa desse valor, missionService.garantirProgresso detecta
+// a expiração (mesma checagem de antes, `expira_em <= now`) e reresta
+// o progresso alinhado ao PRÓXIMO ciclo global — nunca de "agora mais
+// 24h" como a janela móvel antiga.
+function fimDoCicloAtual(categoria, agora = new Date()) {
+  if (categoria === "Semanal") {
+    return new Date(inicioDoCicloSemanal(agora) + 7 * 24 * 60 * 60 * 1000);
+  }
+  if (categoria === "Mensal") {
+    const mesAtual = new Date(inicioDoCicloMensal(agora));
+    return new Date(Date.UTC(mesAtual.getUTCFullYear(), mesAtual.getUTCMonth() + 1, 1));
+  }
+  // Diaria (padrão) — meia-noite UTC seguinte.
+  return new Date(inicioDoCicloDiario(agora) + 24 * 60 * 60 * 1000);
+}
+
 module.exports = {
   RANKS_AVENTUREIRO,
   indiceDoRankAventureiro,
@@ -95,6 +113,7 @@ module.exports = {
   inicioDoCicloDiario,
   inicioDoCicloSemanal,
   inicioDoCicloMensal,
+  fimDoCicloAtual,
   COOLDOWN_PROVACAO_MS,
   REQUISITOS_PROMOCAO,
 };

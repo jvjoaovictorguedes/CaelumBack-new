@@ -1,9 +1,17 @@
 // Progresso de missões — catálogo fixo em Mission (ver seeder), uma
 // linha de progresso por (personagem, missão) em CharacterMissionProgress.
-// Missões "Diaria" resetam IN-PLACE quando expira_em passa (zera
-// progresso/concluida/recompensa_resgatada e marca uma nova janela de
-// 24h) em vez de criar uma linha nova a cada dia — não há histórico de
-// missão diária que valha a pena guardar.
+// Diária/Semanal/Mensal resetam IN-PLACE quando expira_em passa (zera
+// progresso/concluida/recompensa_resgatada e marca o fim do PRÓXIMO
+// ciclo global) em vez de criar uma linha nova a cada ciclo — não há
+// histórico de missão livre que valha a pena guardar.
+//
+// Ciclos GLOBAIS fixos em UTC (§7 da spec da Guilda dos Aventureiros),
+// não mais uma janela móvel individual de 24h a partir de "agora":
+// expira_em passa a ser sempre o fim do ciclo global atual
+// (adventureGuildConfig.fimDoCicloAtual). A transição é absorvida sem
+// migração de dado nenhuma — uma diária em andamento, criada sob a
+// janela móvel antiga, simplesmente expira no seu expira_em antigo (já
+// gravado) e, dali em diante, passa a alinhar com o ciclo global.
 const { Op } = require("sequelize");
 const Mission = require("../models/Mission");
 const CharacterMissionProgress = require("../models/CharacterMissionProgress");
@@ -12,17 +20,19 @@ const Item = require("../models/Item");
 const CharacterInventory = require("../models/CharacterInventory");
 const { adicionarExperiencia } = require("./experienceService");
 const { concederOuro } = require("./goldService");
+const { fimDoCicloAtual } = require("../config/adventureGuildConfig");
 
-const JANELA_DIARIA_MS = 24 * 60 * 60 * 1000;
+const CATEGORIAS_CICLICAS = ["Diaria", "Semanal", "Mensal"];
 
 function estaExpirada(progresso) {
   return Boolean(progresso.expira_em) && progresso.expira_em.getTime() <= Date.now();
 }
 
 // Garante que existe uma linha de progresso (não expirada) pra cada
-// missão ativa e liberada pro nível do personagem, resetando as diárias
-// vencidas. AlcancarNivel é sincronizada aqui mesmo com o nível atual —
-// não incrementa por evento, é um limiar direto contra Character.nivel.
+// missão ativa e liberada pro nível do personagem, resetando as
+// cíclicas vencidas. AlcancarNivel é sincronizada aqui mesmo com o
+// nível atual — não incrementa por evento, é um limiar direto contra
+// Character.nivel.
 async function garantirProgresso(character, transaction) {
   const missoes = await Mission.findAll({
     where: { ativa: true, nivel_minimo: { [Op.lte]: character.nivel } },
@@ -37,23 +47,23 @@ async function garantirProgresso(character, transaction) {
       lock: transaction?.LOCK?.UPDATE,
     });
 
-    const precisaResetarDiaria =
-      mission.categoria === "Diaria" && (!progresso || estaExpirada(progresso));
+    const ehCiclica = CATEGORIAS_CICLICAS.includes(mission.categoria);
+    const precisaResetarCiclica = ehCiclica && (!progresso || estaExpirada(progresso));
 
     if (!progresso) {
       progresso = await CharacterMissionProgress.create(
         {
           id_personagem: character.id,
           id_mission: mission.id,
-          expira_em: mission.categoria === "Diaria" ? new Date(Date.now() + JANELA_DIARIA_MS) : null,
+          expira_em: ehCiclica ? fimDoCicloAtual(mission.categoria) : null,
         },
         { transaction },
       );
-    } else if (precisaResetarDiaria) {
+    } else if (precisaResetarCiclica) {
       progresso.progresso = 0;
       progresso.concluida = false;
       progresso.recompensa_resgatada = false;
-      progresso.expira_em = new Date(Date.now() + JANELA_DIARIA_MS);
+      progresso.expira_em = fimDoCicloAtual(mission.categoria);
       await progresso.save({ transaction });
     }
 
@@ -129,7 +139,7 @@ async function resgatarRecompensa(idPersonagem, idMission, transaction) {
   if (progresso.recompensa_resgatada) {
     throw Object.assign(new Error("Recompensa desta missão já foi resgatada."), { statusCode: 400 });
   }
-  if (mission.categoria === "Diaria" && estaExpirada(progresso)) {
+  if (CATEGORIAS_CICLICAS.includes(mission.categoria) && estaExpirada(progresso)) {
     throw Object.assign(new Error("Esta missão expirou — ela já foi renovada."), { statusCode: 400 });
   }
 
