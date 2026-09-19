@@ -1017,7 +1017,7 @@ exports.comprarEvolucao = async (req, res) => {
 exports.getEvolucaoDeClasse = async (req, res) => {
   try {
     const character = await Character.findByPk(req.params.id, {
-      attributes: ["id", "nivel", "id_classe", "id_evolucao_classe"],
+      attributes: ["id", "nivel", "id_classe", "id_evolucao_classe", "dinheiro"],
     });
     if (!character) {
       return res.status(404).json({ message: "Personagem não encontrado." });
@@ -1051,6 +1051,7 @@ exports.getEvolucaoDeClasse = async (req, res) => {
           ? await contarMortesDoAlvo(character.id, caminho.nome_monstro_alvo)
           : 0;
         const monstroOk = !caminho.nome_monstro_alvo || mortesAtuais >= caminho.quantidade_monstro_necessaria;
+        const ouroOk = character.dinheiro >= caminho.custo_ouro;
 
         return {
           id: caminho.id,
@@ -1064,6 +1065,7 @@ exports.getEvolucaoDeClasse = async (req, res) => {
           nome_monstro_alvo: caminho.nome_monstro_alvo,
           quantidade_monstro_necessaria: caminho.quantidade_monstro_necessaria,
           quantidade_monstro_atual: mortesAtuais,
+          custo_ouro: caminho.custo_ouro,
           bonus_forca: caminho.bonus_forca,
           bonus_vitalidade: caminho.bonus_vitalidade,
           bonus_agilidade: caminho.bonus_agilidade,
@@ -1071,10 +1073,11 @@ exports.getEvolucaoDeClasse = async (req, res) => {
           bonus_velocidade: caminho.bonus_velocidade,
           imagem_url: caminho.imagem_url,
           escolhido: character.id_evolucao_classe === caminho.id,
-          pode_evoluir: !character.id_evolucao_classe && nivelOk && itemOk && monstroOk,
+          pode_evoluir: !character.id_evolucao_classe && nivelOk && itemOk && monstroOk && ouroOk,
           nivel_ok: nivelOk,
           item_ok: itemOk,
           monstro_ok: monstroOk,
+          ouro_ok: ouroOk,
         };
       }),
     );
@@ -1086,6 +1089,7 @@ exports.getEvolucaoDeClasse = async (req, res) => {
         ja_evoluida: Boolean(character.id_evolucao_classe),
         caminho_escolhido: caminhoEscolhido?.nome ?? null,
         nivel_atual: character.nivel,
+        dinheiro_atual: character.dinheiro,
         caminhos: caminhosMontados,
       },
     });
@@ -1146,6 +1150,13 @@ exports.evolveClass = async (req, res) => {
         }
       }
 
+      if (character.dinheiro < caminho.custo_ouro) {
+        throw Object.assign(
+          new Error(`Evoluir pra ${caminho.nome} custa ${caminho.custo_ouro} de ouro.`),
+          { statusCode: 400 },
+        );
+      }
+
       const entradaInventario = await CharacterInventory.findOne({
         where: { id_personagem: character.id, id_item: caminho.id_item_requisito },
         transaction,
@@ -1161,6 +1172,7 @@ exports.evolveClass = async (req, res) => {
         );
       }
 
+      character.dinheiro -= caminho.custo_ouro;
       entradaInventario.quantidade -= caminho.quantidade_item_requisito;
       if (entradaInventario.quantidade > 0) {
         await entradaInventario.save({ transaction });

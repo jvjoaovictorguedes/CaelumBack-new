@@ -75,6 +75,13 @@ const Character = sequelize.define("Character", {
     type: DataTypes.DATE,
     allowNull: true,
   },
+  // Cooldown curto separado pra depois de uma VITÓRIA — sem isso, dava
+  // pra encadear vitórias no Portal sem nenhum intervalo (maior fonte
+  // de inflação de ouro do jogo, ver rankGateController.js).
+  ultima_vitoria_rank_gate: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
   // Combate do Portal de Ranque em andamento — mesmo raciocínio de
   // encontro_pve (persistido, não só em memória), mas separado dele:
   // um personagem pode ter os dois campos com valores diferentes se

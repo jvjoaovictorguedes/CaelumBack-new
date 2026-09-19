@@ -50,9 +50,35 @@ const { NOME_ITEM_FRAGMENTO } = require("../services/abilityLevelService");
 
 const CAMPO_ENCONTRO = "encontro_rank_gate";
 const COOLDOWN_DERROTA_MS = 5 * 60 * 1000;
+// Auditoria de economia (pedido do jogador): vencer o Portal nunca
+// aplicava cooldown nenhum (só perder aplicava, ver COOLDOWN_DERROTA_MS
+// abaixo) — um personagem capaz de vencer o próprio ranque conseguia
+// encadear vitórias sem NENHUM intervalo, e cada vitória em Muito
+// Difícil no ranque S+ paga até 44.000 de ouro (22.000 base x2) de uma
+// vez, de graça, num loop sem fim. Isso sozinho é a maior fonte de
+// inflação do jogo, muito acima de PvE (Aventura paga só dezenas/poucas
+// centenas por luta) ou missões (dezenas por dia). Cooldown curto (bem
+// menor que o de derrota, pra não punir quem só quer jogar) fecha o
+// loop sem tornar o Portal inviável pra quem de fato usa ele pra subir
+// de ranque.
+const COOLDOWN_VITORIA_MS = 60 * 1000;
 
 function limparEncontroRankGate(character) {
   return limparEncontroDoCampoExpirado(character, CAMPO_ENCONTRO);
+}
+
+// Maior das duas janelas de cooldown ainda ativas (derrota OU vitória) —
+// fonte única usada tanto pelo GET de status quanto pelo POST que entra
+// no portal, pra nunca ficarem dessincronizados sobre quando o jogador
+// pode tentar de novo.
+function cooldownRestanteMs(character) {
+  const restanteDerrota = character.ultima_tentativa_rank_gate
+    ? COOLDOWN_DERROTA_MS - (Date.now() - new Date(character.ultima_tentativa_rank_gate).getTime())
+    : 0;
+  const restanteVitoria = character.ultima_vitoria_rank_gate
+    ? COOLDOWN_VITORIA_MS - (Date.now() - new Date(character.ultima_vitoria_rank_gate).getTime())
+    : 0;
+  return Math.max(0, restanteDerrota, restanteVitoria);
 }
 
 function encontroRankGateValido(character) {
@@ -91,12 +117,7 @@ exports.getPortalAtual = async (req, res) => {
 
     const chefeBase = await RankGate.findOne({ where: { rank: character.rank } });
     const proximo = proximoRank(character.rank);
-    const cooldownRestanteMs = character.ultima_tentativa_rank_gate
-      ? Math.max(
-          0,
-          COOLDOWN_DERROTA_MS - (Date.now() - new Date(character.ultima_tentativa_rank_gate).getTime()),
-        )
-      : 0;
+    const cooldownMsRestante = cooldownRestanteMs(character);
 
     const encontroAtivo = encontroRankGateValido(character);
 
@@ -110,8 +131,8 @@ exports.getPortalAtual = async (req, res) => {
         pontos_atual: character.pontos_portal_atual,
         pontos_necessarios: PONTOS_NECESSARIOS,
         pontos_por_dificuldade: PONTOS_POR_DIFICULDADE,
-        pode_tentar: Boolean(chefeBase) && cooldownRestanteMs === 0,
-        cooldown_restante_ms: cooldownRestanteMs,
+        pode_tentar: Boolean(chefeBase) && cooldownMsRestante === 0,
+        cooldown_restante_ms: cooldownMsRestante,
         encontro_ativo: encontroAtivo
           ? { dificuldade: encontroAtivo.dificuldade, enemy: separarChefeDoEncontro(encontroAtivo).chefe }
           : null,
@@ -169,15 +190,12 @@ exports.iniciarPortal = async (req, res) => {
         );
       }
 
-      if (character.ultima_tentativa_rank_gate) {
-        const restanteMs =
-          COOLDOWN_DERROTA_MS - (Date.now() - new Date(character.ultima_tentativa_rank_gate).getTime());
-        if (restanteMs > 0) {
-          throw Object.assign(
-            new Error(`Você foi derrotado recentemente — aguarde ${Math.ceil(restanteMs / 1000)}s antes de tentar de novo.`),
-            { statusCode: 429 },
-          );
-        }
+      const restanteMs = cooldownRestanteMs(character);
+      if (restanteMs > 0) {
+        throw Object.assign(
+          new Error(`Aguarde ${Math.ceil(restanteMs / 1000)}s antes de tentar o portal de novo.`),
+          { statusCode: 429 },
+        );
       }
 
       const chefeBase = await RankGate.findOne({ where: { rank: character.rank }, transaction });
@@ -391,6 +409,9 @@ exports.atacarPortal = async (req, res) => {
         character.ultima_atualizacao_vida = new Date();
         character[CAMPO_ENCONTRO] = null;
         character.pontos_portal_atual += pontosGanhos;
+        // Ver COOLDOWN_VITORIA_MS no topo do arquivo — fecha o loop de
+        // farm infinito que não tinha NENHUM intervalo entre vitórias.
+        character.ultima_vitoria_rank_gate = new Date();
 
         let rankPromovido = null;
         if (character.pontos_portal_atual >= PONTOS_NECESSARIOS) {

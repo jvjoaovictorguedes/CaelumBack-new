@@ -42,6 +42,13 @@ const ClassEvolutionPath = sequelize.define(
       allowNull: false,
       defaultValue: 1,
     },
+    // Sink de ouro (ver migration 20260930580000) — cobrado junto com
+    // o item/nível/caça no momento de evoluir.
+    custo_ouro: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    },
     // Requisito de caça opcional (ver migration 20260930540000) — NULL
     // = caminho não exige matar nenhum monstro específico.
     nome_monstro_alvo: {
