@@ -7,8 +7,9 @@
 // prever/manipular", mesmo raciocínio.
 const crypto = require("crypto");
 const Item = require("../models/Item");
-const CharacterInventory = require("../models/CharacterInventory");
 const { concederOuro } = require("./goldService");
+const { addStack } = require("./inventoryService");
+const { ehEquipavel, create: criarInstancia } = require("./equipmentInstanceService");
 
 const BASE_SORTEIO = 10000;
 const CHANCE_ITEM_BASE10000 = 2000; // 20%
@@ -59,23 +60,20 @@ async function sortearItemDrop() {
   return sortearComPeso(itens, (item) => PESO_POR_RARIDADE[item.raridade] ?? 1);
 }
 
+// Inventário v2 (§4/§11) — equipamento (arma/armadura/escudo/acessório)
+// nunca mais empilha em CharacterInventory: cada unidade dropada vira
+// uma instância própria (com seu refinamento, sempre 0 aqui). Material/
+// Consumível continua empilhado como sempre.
 async function concederItem(idPersonagem, idItem, quantidade, transaction) {
-  let entrada = await CharacterInventory.findOne({
-    where: { id_personagem: idPersonagem, id_item: idItem },
-    transaction,
-    lock: transaction.LOCK.UPDATE,
-  });
-
-  if (entrada) {
-    entrada.quantidade += quantidade;
-    await entrada.save({ transaction });
-  } else {
-    entrada = await CharacterInventory.create(
-      { id_personagem: idPersonagem, id_item: idItem, quantidade },
-      { transaction },
-    );
+  const item = await Item.findByPk(idItem, { transaction });
+  if (item && ehEquipavel(item.tipo_item)) {
+    const instancias = [];
+    for (let i = 0; i < quantidade; i++) {
+      instancias.push(await criarInstancia({ idPersonagem, idItem }, transaction));
+    }
+    return instancias;
   }
-  return entrada;
+  return addStack(idPersonagem, idItem, quantidade, transaction);
 }
 
 // Rola o drop de uma vitória em PvE e, se algo caiu, já credita

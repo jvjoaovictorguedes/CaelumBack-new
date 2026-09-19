@@ -60,6 +60,8 @@ const adventureRoutes = require("./routes/adventureRoutes");
 const bestiaryRoutes = require("./routes/bestiaryRoutes");
 const rankingRoutes = require("./routes/rankingRoutes");
 const adventureGuildRoutes = require("./routes/adventureGuildRoutes");
+const equipmentInstanceRoutes = require("./routes/equipmentInstanceRoutes");
+const inventoryV2Routes = require("./routes/inventoryV2Routes");
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -183,6 +185,8 @@ app.use("/api/combat", combatRoutes);
 app.use("/api/character-items", characterUseItemRoutes);
 app.use("/api/attributes", attributeRoutes);
 app.use("/api/character-equipment", characterEquipmentRoutes);
+app.use("/api/equipment", equipmentInstanceRoutes);
+app.use("/api/inventory", inventoryV2Routes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/pvp", pvpRoutes);
 app.use("/api/guilds", guildRoutes);

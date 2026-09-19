@@ -2,7 +2,8 @@
 const { sequelize } = require("../config/database");
 const Character = require("../models/Character");
 const Item = require("../models/Item");
-const CharacterInventory = require("../models/CharacterInventory");
+const { addStack } = require("../services/inventoryService");
+const { ehEquipavel, create: criarInstancia } = require("../services/equipmentInstanceService");
 
 // POST /api/shop/purchase
 // body: { id_personagem, id_item, quantidade }
@@ -68,22 +69,17 @@ exports.purchaseItem = async (req, res) => {
       character.dinheiro -= precoTotal;
       await character.save({ transaction });
 
-      // Credita o item no inventário (soma se já existir)
-      let inventoryEntry = await CharacterInventory.findOne({
-        where: { id_personagem, id_item },
-        transaction,
-      });
-
-      if (inventoryEntry) {
-        inventoryEntry.quantidade += quantidade;
-        await inventoryEntry.save({ transaction });
-      } else {
-        inventoryEntry = await CharacterInventory.create(
-          { id_personagem, id_item, quantidade },
-          { transaction },
-        );
+      // Inventário v2 (§4/§11) — equipamento vira instância individual
+      // (uma por unidade comprada, refinamento 0), nunca mais um stack.
+      if (ehEquipavel(item.tipo_item)) {
+        const instancias = [];
+        for (let i = 0; i < quantidade; i++) {
+          instancias.push(await criarInstancia({ idPersonagem: id_personagem, idItem: id_item }, transaction));
+        }
+        return { character, instancias, item };
       }
 
+      const inventoryEntry = await addStack(id_personagem, id_item, quantidade, transaction);
       return { character, inventoryEntry, item };
     });
 
@@ -92,7 +88,8 @@ exports.purchaseItem = async (req, res) => {
       message: "Compra realizada com sucesso!",
       data: {
         character: { dinheiro: result.character.dinheiro },
-        inventoryEntry: result.inventoryEntry,
+        inventoryEntry: result.inventoryEntry ?? null,
+        instancias: result.instancias ?? null,
         quantidadeComprada: quantidade,
       },
     });

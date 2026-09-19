@@ -6,6 +6,7 @@
 // risco de contar em dobro com a distribuição de pontos.
 
 const CharacterEquipment = require("../models/CharacterEquipment");
+const CharacterEquipmentInstance = require("../models/CharacterEquipmentInstance");
 const Item = require("../models/Item");
 const WeaponProperties = require("../models/WeaponProperties");
 const ArmorProperties = require("../models/ArmorProperties");
@@ -13,6 +14,7 @@ const CharacterAbilities = require("../models/CharacterAbilities");
 const Power = require("../models/Power");
 const { ATRIBUTO_PARA_CAMPO } = require("./combatFormulas");
 const { multiplicadorEfeito } = require("./abilityLevelService");
+const { propriedadesEfetivasArma, propriedadesEfetivasArmadura } = require("./equipmentRefinementService");
 // Só o require garante que a associação (com alias explícito) já foi
 // declarada — ver models/associations.js pra fonte única.
 require("../models/associations");
@@ -41,6 +43,11 @@ async function buscarBonusDeAtributos(idPersonagem, transaction) {
             { model: ArmorProperties, as: "armorProperties" },
           ],
         },
+        // Inventário v2 (§6/§7) — id_instancia é null pra equipamento
+        // legado (refinamento 0 durante a migração, comportamento
+        // idêntico a antes); quando setado, é dali que vem o
+        // refinamento de verdade que escala as propriedades abaixo.
+        { model: CharacterEquipmentInstance, as: "instancia" },
       ],
       transaction,
     }),
@@ -75,33 +82,42 @@ async function buscarBonusDeAtributos(idPersonagem, transaction) {
     const item = equipamento.item;
     if (!item) continue;
 
-    if (item.armorProperties) {
-      bonus.forca += item.armorProperties.bonus_forca || 0;
-      bonus.vitalidade += item.armorProperties.bonus_vitalidade || 0;
-      bonus.agilidade += item.armorProperties.bonus_agilidade || 0;
-      bonus.inteligencia += item.armorProperties.bonus_inteligencia || 0;
-      bonus.velocidade += item.armorProperties.bonus_velocidade || 0;
+    // Inventário v2 §6/§7 — o bônus percentual de refinamento incide
+    // SÓ nas propriedades do próprio equipamento, nunca nos atributos-
+    // base do personagem. Instância null (equipamento legado, ainda
+    // sem migrar) equivale a refinamento 0 — propriedadesEfetivas*
+    // devolve os valores crus intactos nesse caso.
+    const refinamento = equipamento.instancia?.refinamento ?? 0;
+    const armorEfetivo = propriedadesEfetivasArmadura(item.armorProperties, refinamento);
+    const weaponEfetivo = propriedadesEfetivasArma(item.weaponProperties, refinamento);
+
+    if (armorEfetivo) {
+      bonus.forca += armorEfetivo.bonus_forca || 0;
+      bonus.vitalidade += armorEfetivo.bonus_vitalidade || 0;
+      bonus.agilidade += armorEfetivo.bonus_agilidade || 0;
+      bonus.inteligencia += armorEfetivo.bonus_inteligencia || 0;
+      bonus.velocidade += armorEfetivo.bonus_velocidade || 0;
       // Essa soma existia até aqui e morria: a "defesa" do item nunca saía
       // desse laço nem chegava a personagemComBonus, então equipar
       // armadura não reduzia dano nenhum — ver aplicarMitigacaoDeDefesa em
       // combatFormulas.js pra onde esse valor passa a ser usado de fato.
-      bonus.defesa += item.armorProperties.defesa || 0;
+      bonus.defesa += armorEfetivo.defesa || 0;
     }
 
-    if (item.weaponProperties?.bonus_atributo) {
-      const campo = ATRIBUTO_PARA_CAMPO[item.weaponProperties.bonus_atributo];
+    if (weaponEfetivo?.bonus_atributo) {
+      const campo = ATRIBUTO_PARA_CAMPO[weaponEfetivo.bonus_atributo];
       if (campo) {
-        bonus[campo] += item.weaponProperties.valor_bonus_atributo || 0;
+        bonus[campo] += weaponEfetivo.valor_bonus_atributo || 0;
       }
     }
 
     // A faixa de dano da arma (dano_min/dano_max) só existia no banco —
     // nada usava. Guardamos aqui a da mão principal pra calcularDanoBasico
     // usar no ataque básico, em vez de só olhar a força.
-    if (equipamento.slot === "ArmaPrincipal" && item.weaponProperties) {
+    if (equipamento.slot === "ArmaPrincipal" && weaponEfetivo) {
       arma = {
-        dano_min: item.weaponProperties.dano_min,
-        dano_max: item.weaponProperties.dano_max,
+        dano_min: weaponEfetivo.dano_min,
+        dano_max: weaponEfetivo.dano_max,
       };
     }
   }

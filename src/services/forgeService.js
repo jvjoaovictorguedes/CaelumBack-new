@@ -6,9 +6,8 @@ const { sequelize } = require("../config/database");
 const CharacterForgeProgress = require("../models/CharacterForgeProgress");
 const CharacterForgeQueue = require("../models/CharacterForgeQueue");
 const CharacterEquipmentInstance = require("../models/CharacterEquipmentInstance");
-const CharacterEquipment = require("../models/CharacterEquipment");
 const Item = require("../models/Item");
-const ArmorProperties = require("../models/ArmorProperties");
+const equipmentInstanceService = require("./equipmentInstanceService");
 const { TIPOS_ACAO_FORJA } = require("../config/forgeConfig");
 const { nivelPorXpTotal, xpParaProximoNivel, aplicarGanhoDeXp } = require("./forgeProgressionService");
 const Character = require("../models/Character");
@@ -85,9 +84,9 @@ async function coletar(characterId, slot) {
 
     if (entrada.tipo_acao === TIPOS_ACAO_FORJA.FABRICACAO) {
       const { id_item, qualidade_final } = entrada.payload_resultado;
-      const instancia = await CharacterEquipmentInstance.create(
-        { id_personagem: characterId, id_item, refinamento: 0, equipada: false },
-        { transaction },
+      const instancia = await equipmentInstanceService.create(
+        { idPersonagem: characterId, idItem: id_item },
+        transaction,
       );
       const item = await Item.findByPk(id_item, { transaction });
       resultado = {
@@ -165,66 +164,17 @@ async function listarInstancias(characterId) {
     imagem_url: instancia.item.imagem_url,
     refinamento: instancia.refinamento,
     equipada: instancia.equipada,
+    estado: instancia.estado,
   }));
 }
 
-const SLOT_POR_CATEGORIA_ARMA = "ArmaPrincipal";
-
-// Equipa uma instância forjada no slot certo — resolvido a partir da
-// própria ArmorProperties do item (Cabeca/Torso/Maos/Pes/Acessorio1/2)
-// ou, pra armas, sempre em ArmaPrincipal (sem dual-wield nesta versão).
-// NOTA (gap documentado no relatório final): o bônus percentual do
-// refinamento (spec §24) ainda não é somado por equipmentBonusService.js
-// ao equipar — a instância guarda o refinamento corretamente, mas ele
-// ainda não afeta o combate. Fica como próximo passo natural em cima
-// desta base.
+// Equipar uma instância forjada agora é só uma chamada ao service
+// central (Inventário v2 — spec §12), que resolve o slot certo a
+// partir do item, cuida do refinamento e da concorrência. Mantido aqui
+// só por compatibilidade de import (POST /crafting/instances/:id/equip
+// continua chamando forgeService.equiparInstancia).
 async function equiparInstancia(characterId, idInstancia) {
-  return sequelize.transaction(async (transaction) => {
-    // Sem lock+include combinados (Postgres recusa FOR UPDATE do lado
-    // nullable de um LEFT OUTER JOIN) — mesmo contorno já usado em
-    // craftingController.coletarForja/combatController: trava a
-    // instância "pura" primeiro, busca o Item à parte, sem lock.
-    const instancia = await CharacterEquipmentInstance.findOne({
-      where: { id: idInstancia, id_personagem: characterId },
-      transaction,
-      lock: transaction.LOCK.UPDATE,
-    });
-    if (!instancia) throw Object.assign(new Error("Equipamento não encontrado."), { statusCode: 404 });
-
-    const item = await Item.findByPk(instancia.id_item, { transaction });
-
-    let slot;
-    if (item.tipo_item === "Arma") {
-      slot = SLOT_POR_CATEGORIA_ARMA;
-    } else {
-      const propriedades = await ArmorProperties.findByPk(instancia.id_item, { transaction });
-      if (!propriedades) {
-        throw Object.assign(new Error("Esse item não pode ser equipado."), { statusCode: 400 });
-      }
-      slot = propriedades.slot_equipamento;
-    }
-
-    const instanciaAnteriorNoSlot = await CharacterEquipment.findOne({
-      where: { id_personagem: characterId, slot },
-      transaction,
-      lock: transaction.LOCK.UPDATE,
-    });
-    if (instanciaAnteriorNoSlot?.id_instancia) {
-      await CharacterEquipmentInstance.update(
-        { equipada: false },
-        { where: { id: instanciaAnteriorNoSlot.id_instancia }, transaction },
-      );
-    }
-
-    await CharacterEquipment.upsert(
-      { id_personagem: characterId, slot, id_item: instancia.id_item, id_instancia: instancia.id },
-      { transaction },
-    );
-    instancia.equipada = true;
-    await instancia.save({ transaction });
-
-    return { slot, id_instancia: instancia.id };
-  });
+  return sequelize.transaction((transaction) => equipmentInstanceService.equip(characterId, idInstancia, transaction));
 }
 
 module.exports = {

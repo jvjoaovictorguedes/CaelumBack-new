@@ -18,6 +18,8 @@ const {
   personagemComBonus,
 } = require("../services/equipmentBonusService");
 const { limparEncontroExpirado } = require("../services/pveEncounterService");
+const { addStack } = require("../services/inventoryService");
+const { ehEquipavel, create: criarInstancia } = require("../services/equipmentInstanceService");
 
 // Sem essas associações, qualquer include: [{model: Character}, {model: Item}]
 // abaixo derruba a chamada com "CharacterInventory is not associated to X!".
@@ -207,7 +209,9 @@ exports.useItem = async (req, res) => {
   }
 };
 
-// Criar uma nova entrada no inventário
+// Criar uma nova entrada no inventário (só admin — ver rota) —
+// Inventário v2 (§11): equipamento vira instância individual, nunca um
+// stack, mesmo concedido "na mão" assim.
 exports.createCharacterInventory = async (req, res) => {
   try {
     const { id_personagem, id_item } = req.body;
@@ -220,36 +224,29 @@ exports.createCharacterInventory = async (req, res) => {
       return res.status(400).json({ message: "Quantidade inválida." });
     }
 
-    let existingEntry = await CharacterInventory.findOne({
-      where: { id_personagem, id_item },
-    });
+    const item = await Item.findByPk(id_item);
+    if (!item) {
+      return res.status(404).json({ message: "Item não encontrado." });
+    }
 
-    if (existingEntry) {
-      // Antes: `quantidade || 1` tratava quantidade:0 como "some 1" (bug
-      // silencioso) e um valor não numérico virava NaN persistido na
-      // coluna, corrompendo a linha pra sempre — por isso a validação
-      // acima garante um inteiro positivo antes de chegar aqui.
-      existingEntry.quantidade += quantidade;
-      await existingEntry.save();
-      return res.status(200).json({
+    if (ehEquipavel(item.tipo_item)) {
+      const instancias = [];
+      for (let i = 0; i < quantidade; i++) {
+        instancias.push(await criarInstancia({ idPersonagem: id_personagem, idItem: id_item }));
+      }
+      return res.status(201).json({
         status: "success",
-        message: "Quantidade do item no inventário atualizada!",
-        data: {
-          inventoryEntry: existingEntry,
-        },
+        message: "Instância(s) de equipamento criada(s) com sucesso!",
+        data: { instancias },
       });
     }
 
-    const newInventoryEntry = await CharacterInventory.create({
-      id_personagem,
-      id_item,
-      quantidade,
-    });
+    const inventoryEntry = await addStack(id_personagem, id_item, quantidade);
     res.status(201).json({
       status: "success",
       message: "Item adicionado ao inventário com sucesso!",
       data: {
-        inventoryEntry: newInventoryEntry,
+        inventoryEntry,
       },
     });
   } catch (error) {

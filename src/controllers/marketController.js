@@ -9,6 +9,8 @@ const Character = require("../models/Character");
 const Item = require("../models/Item");
 const CharacterInventory = require("../models/CharacterInventory");
 const MarketListing = require("../models/MarketListing");
+const { addStack } = require("../services/inventoryService");
+const equipmentInstanceService = require("../services/equipmentInstanceService");
 
 // 8% fica pelo caminho a cada venda — dreno de ouro padrão de MMO pra
 // segurar a inflação de uma economia onde jogador também gera ouro
@@ -20,7 +22,7 @@ const PRECO_MAXIMO_UNITARIO = 1_000_000;
 
 exports.criarAnuncio = async (req, res) => {
   const id_personagem = req.personagemAtual.id;
-  const { id_item, quantidade, preco_unitario } = req.body;
+  const { id_item, quantidade, preco_unitario, id_instancia } = req.body;
 
   const qtd = Number(quantidade);
   const preco = Number(preco_unitario);
@@ -42,6 +44,35 @@ exports.criarAnuncio = async (req, res) => {
         throw Object.assign(new Error(`Item do tipo "${item.tipo_item}" não pode ser anunciado.`), {
           statusCode: 400,
         });
+      }
+
+      // Inventário v2 (§4/§11/§12) — equipamento não é mais empilhável:
+      // anuncia UMA instância específica (cada uma pode ter refinamento
+      // diferente), nunca uma "quantidade" solta de id_item.
+      if (equipmentInstanceService.ehEquipavel(item.tipo_item)) {
+        if (qtd !== 1) {
+          throw Object.assign(new Error("Equipamento é anunciado um de cada vez (quantidade deve ser 1)."), {
+            statusCode: 400,
+          });
+        }
+        if (!id_instancia) {
+          throw Object.assign(new Error("id_instancia é obrigatório pra anunciar equipamento."), {
+            statusCode: 400,
+          });
+        }
+        await equipmentInstanceService.reserveForMarket(id_personagem, id_instancia, transaction);
+
+        return MarketListing.create(
+          {
+            id_personagem_vendedor: id_personagem,
+            id_item,
+            id_instancia,
+            quantidade: 1,
+            preco_unitario: preco,
+            status: "Ativo",
+          },
+          { transaction },
+        );
       }
 
       const inventoryEntry = await CharacterInventory.findOne({
@@ -174,19 +205,13 @@ exports.comprarAnuncio = async (req, res) => {
       await comprador.save({ transaction });
       await vendedor.save({ transaction });
 
-      let entrada = await CharacterInventory.findOne({
-        where: { id_personagem: id_personagem_comprador, id_item: listing.id_item },
-        transaction,
-        lock: transaction.LOCK.UPDATE,
-      });
-      if (entrada) {
-        entrada.quantidade += listing.quantidade;
-        await entrada.save({ transaction });
+      // Inventário v2 — anúncio de equipamento transfere a INSTÂNCIA
+      // (mantém o refinamento dela); anúncio de stack credita quantidade
+      // como sempre.
+      if (listing.id_instancia) {
+        await equipmentInstanceService.transfer(listing.id_instancia, id_personagem_comprador, transaction);
       } else {
-        entrada = await CharacterInventory.create(
-          { id_personagem: id_personagem_comprador, id_item: listing.id_item, quantidade: listing.quantidade },
-          { transaction },
-        );
+        await addStack(id_personagem_comprador, listing.id_item, listing.quantidade, transaction);
       }
 
       listing.status = "Vendido";
@@ -224,19 +249,10 @@ exports.cancelarAnuncio = async (req, res) => {
         throw Object.assign(new Error("Este anúncio não é seu."), { statusCode: 403 });
       }
 
-      let entrada = await CharacterInventory.findOne({
-        where: { id_personagem, id_item: listing.id_item },
-        transaction,
-        lock: transaction.LOCK.UPDATE,
-      });
-      if (entrada) {
-        entrada.quantidade += listing.quantidade;
-        await entrada.save({ transaction });
+      if (listing.id_instancia) {
+        await equipmentInstanceService.releaseFromMarket(listing.id_instancia, transaction);
       } else {
-        entrada = await CharacterInventory.create(
-          { id_personagem, id_item: listing.id_item, quantidade: listing.quantidade },
-          { transaction },
-        );
+        await addStack(id_personagem, listing.id_item, listing.quantidade, transaction);
       }
 
       listing.status = "Cancelado";
