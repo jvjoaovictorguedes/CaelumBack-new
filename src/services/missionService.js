@@ -11,6 +11,7 @@ const Character = require("../models/Character");
 const Item = require("../models/Item");
 const CharacterInventory = require("../models/CharacterInventory");
 const { adicionarExperiencia } = require("./experienceService");
+const { concederOuro } = require("./goldService");
 
 const JANELA_DIARIA_MS = 24 * 60 * 60 * 1000;
 
@@ -140,7 +141,7 @@ async function resgatarRecompensa(idPersonagem, idMission, transaction) {
     throw Object.assign(new Error("Personagem não encontrado."), { statusCode: 404 });
   }
 
-  character.dinheiro += mission.recompensa_dinheiro;
+  concederOuro(character, mission.recompensa_dinheiro);
   await character.save({ transaction });
 
   const resultadoXP = mission.recompensa_xp

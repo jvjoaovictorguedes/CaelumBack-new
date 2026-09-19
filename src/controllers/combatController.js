@@ -45,6 +45,7 @@ const AdventureMonster = require("../models/AdventureMonster");
 const { obterSessaoAtiva } = require("../services/adventureService");
 const { sortearMonstroDaZona, sortearNivelMonstro } = require("../services/adventureRollService");
 const { concederRecompensaDeZona } = require("../services/adventureRewardService");
+const { concederOuro } = require("../services/goldService");
 
 const NOMES_INIMIGOS = [
   "Lobo das Sombras",
@@ -669,7 +670,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       // adicionarExperiencia), evitando perder uma recompensa se duas
       // vitórias do mesmo personagem forem processadas ao mesmo tempo
       // (double-click, duas abas).
-      character.dinheiro += dinheiroGanho;
+      concederOuro(character, dinheiroGanho);
       character.vida_atual = personagemAtual.vida_atual;
       character.mana_atual = personagemAtual.mana_atual;
       character.ultima_atualizacao_vida = new Date();

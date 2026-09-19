@@ -47,6 +47,7 @@ const {
 } = require("../services/rankGateService");
 const { concederItem } = require("../services/dropService");
 const { NOME_ITEM_FRAGMENTO } = require("../services/abilityLevelService");
+const { concederOuro } = require("../services/goldService");
 
 const CAMPO_ENCONTRO = "encontro_rank_gate";
 const COOLDOWN_DERROTA_MS = 5 * 60 * 1000;
@@ -403,7 +404,7 @@ exports.atacarPortal = async (req, res) => {
         const recompensa = recompensaComDificuldade(chefeBase, dificuldade);
         const pontosGanhos = PONTOS_POR_DIFICULDADE[dificuldade];
 
-        character.dinheiro += recompensa.dinheiro;
+        concederOuro(character, recompensa.dinheiro);
         character.vida_atual = personagemAtual.vida_atual;
         character.mana_atual = personagemAtual.mana_atual;
         character.ultima_atualizacao_vida = new Date();

@@ -133,6 +133,15 @@ const Character = sequelize.define("Character", {
     defaultValue: 0,
     allowNull: false,
   },
+  // Ranking de Gold (§6 da spec) — ouro TOTAL já ganho de fontes
+  // legítimas (nunca decrementado por gasto, nunca incrementado por
+  // transferência P2P no Mercado). Ver goldService.concederOuro, o
+  // único lugar que deve escrever aqui.
+  dinheiro_total_ganho: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
+    allowNull: false,
+  },
   pontos_distribuir: {
     type: DataTypes.INTEGER,
     defaultValue: 0,

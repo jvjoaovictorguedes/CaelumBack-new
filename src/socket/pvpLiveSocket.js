@@ -549,3 +549,14 @@ async function finalizarDueloPorDesistencia(io, duelId, characterIdQueSaiu) {
   const vencedorChave = duelo.a.id === Number(characterIdQueSaiu) ? "B" : "A";
   await finalizarDuelo(io, duelId, vencedorChave, "desistencia");
 }
+
+// Ranking v2 (§4/§22 da spec) — reaproveita o mesmo mapa `online` que já
+// é a fonte autoritativa de presença (populado/limpo pelos eventos
+// `identificar`/disconnect acima), em vez de inventar um segundo
+// mecanismo ou persistir um boolean no banco sem expiração segura.
+// rankingService só lê isto, nunca escreve.
+function estaOnline(idPersonagem) {
+  return online.has(String(idPersonagem));
+}
+
+module.exports.estaOnline = estaOnline;

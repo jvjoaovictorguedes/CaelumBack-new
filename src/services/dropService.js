@@ -8,6 +8,7 @@
 const crypto = require("crypto");
 const Item = require("../models/Item");
 const CharacterInventory = require("../models/CharacterInventory");
+const { concederOuro } = require("./goldService");
 
 const BASE_SORTEIO = 10000;
 const CHANCE_ITEM_BASE10000 = 2000; // 20%
@@ -94,7 +95,7 @@ async function rolarDropDeVitoria(character, inimigo, transaction) {
 
   if (rolagem < CHANCE_ITEM_BASE10000 + CHANCE_OURO_BONUS_BASE10000) {
     const ouro = 5 + inimigo.nivel * 3 + crypto.randomInt(0, inimigo.nivel * 3 + 1);
-    character.dinheiro += ouro;
+    concederOuro(character, ouro);
     return { tipo: "ouro", dinheiro: ouro };
   }
 

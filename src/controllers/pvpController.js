@@ -16,6 +16,7 @@ const PvpStatus = require("../models/PvpStatus");
 const PvpMatches = require("../models/PvpMatches");
 const { adicionarExperiencia } = require("../services/experienceService");
 const { registrarProgresso } = require("../services/missionService");
+const { concederOuro } = require("../services/goldService");
 const {
   vidaMaximaDe,
   manaMaximaDe,
@@ -214,7 +215,7 @@ async function aplicarResultadoDuelo({ vencedor, perdedor, rodadas }) {
     if (!vencedorTravado) {
       throw new Error("Personagem vencedor não encontrado.");
     }
-    vencedorTravado.dinheiro += recompensa.dinheiro;
+    concederOuro(vencedorTravado, recompensa.dinheiro);
 
     const resultado = await adicionarExperiencia(vencedor.id, recompensa.experiencia, {
       transaction,
