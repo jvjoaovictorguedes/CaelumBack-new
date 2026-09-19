@@ -17,6 +17,7 @@ const PvpMatches = require("../models/PvpMatches");
 const { adicionarExperiencia } = require("../services/experienceService");
 const { registrarProgresso } = require("../services/missionService");
 const { concederOuro } = require("../services/goldService");
+const { registrarProgressoContrato } = require("../services/adventureGuildObjectiveService");
 const {
   vidaMaximaDe,
   manaMaximaDe,
@@ -224,6 +225,13 @@ async function aplicarResultadoDuelo({ vencedor, perdedor, rodadas }) {
 
     await registrarProgresso(vencedorTravado, "VencerDuelos", 1, transaction);
     await registrarProgresso(vencedorTravado, "GanharOuro", recompensa.dinheiro, transaction);
+    // Guilda dos Aventureiros (§44) — só combate PvP oficialmente
+    // concluído chega aqui (aplicarResultadoDuelo é o único lugar que
+    // credita vitória, tanto no duelo assíncrono quanto no ao vivo —
+    // ver comentário no topo deste arquivo), reaproveitando as mesmas
+    // proteções anti-farm de sempre.
+    await registrarProgressoContrato(vencedorTravado, "VencerDuelos", 1, {}, transaction);
+    await registrarProgressoContrato(vencedorTravado, "GanharOuro", recompensa.dinheiro, {}, transaction);
 
     const [statusVencedor, statusPerdedor] = await Promise.all([
       garantirStatus(vencedor.id, transaction),

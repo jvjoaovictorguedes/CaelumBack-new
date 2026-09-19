@@ -6,6 +6,7 @@
 // recusa FOR UPDATE do lado nullable do join) — quem precisa de lock é
 // buscado "puro" primeiro, o include vem numa consulta separada sem lock.
 const { sequelize } = require("../config/database");
+const Character = require("../models/Character");
 const CharacterProfession = require("../models/CharacterProfession");
 const ExpeditionRegion = require("../models/ExpeditionRegion");
 const ExpeditionRegionResource = require("../models/ExpeditionRegionResource");
@@ -16,6 +17,8 @@ const Item = require("../models/Item");
 const { TEMPO_COLETA_MS, CHANCE_POR_NIVEL_PPM, BASE_SORTEIO, NIVEL_MAXIMO } = require("../config/expeditionConfig");
 const { sortearQualidade, sortearRecurso, sortearQuantidade } = require("./expeditionRollService");
 const { nivelPorXpTotal, xpParaProximoNivel, aplicarGanhoDeXp } = require("./expeditionProgressionService");
+const { registrarProgresso } = require("./missionService");
+const { registrarProgressoContrato } = require("./adventureGuildObjectiveService");
 
 const PROFISSOES = ["Mineracao", "Silvicultura", "Exploracao"];
 
@@ -233,6 +236,19 @@ async function coletar(id_personagem, id_regiao) {
     for (const p of profissoesDoPersonagem) {
       p.proxima_coleta_em = proximaColetaEm;
       await p.save({ transaction });
+    }
+
+    // Missões livres da Guilda dos Aventureiros ("Complete N Expedições",
+    // §8) e contratos de Rank do tipo CompletarExpedicoes (§45) — este é
+    // o único ponto onde uma coleta de Expedição é considerada
+    // válida/concluída pelo servidor. missionService.registrarProgresso
+    // precisa do Character de verdade (usa .nivel pra filtrar o
+    // catálogo) — não dá pra passar só o id como faço com
+    // registrarProgressoContrato, que só lê .id.
+    const personagem = await Character.findByPk(id_personagem, { transaction });
+    if (personagem) {
+      await registrarProgresso(personagem, "CompletarExpedicoes", 1, transaction);
+      await registrarProgressoContrato(personagem, "CompletarExpedicoes", 1, {}, transaction);
     }
 
     return {

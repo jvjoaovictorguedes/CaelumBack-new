@@ -11,6 +11,9 @@ const Item = require("../models/Item");
 const ArmorProperties = require("../models/ArmorProperties");
 const { TIPOS_ACAO_FORJA } = require("../config/forgeConfig");
 const { nivelPorXpTotal, xpParaProximoNivel, aplicarGanhoDeXp } = require("./forgeProgressionService");
+const Character = require("../models/Character");
+const { registrarProgresso } = require("./missionService");
+const { registrarProgressoContrato } = require("./adventureGuildObjectiveService");
 
 async function garantirProgresso(characterId, transaction) {
   const [progresso] = await CharacterForgeProgress.findOrCreate({
@@ -120,6 +123,19 @@ async function coletar(characterId, slot) {
       resultado.xp_ganho = resultadoXp.xpGanho;
       resultado.subiu_nivel = resultadoXp.subiuNivel;
       resultado.nivel_forja = resultadoXp.nivelDepois;
+    }
+
+    // Guilda dos Aventureiros (§43/§45) — "fabrique X" (missão livre) e
+    // contratos de Rank Fabricar/Refinar só avançam aqui, no momento
+    // real de COLETA (nunca ao só enfileirar o trabalho, e nunca por
+    // simplesmente possuir um item comprado) — distinguindo Fabricar de
+    // Refinar como a spec pede (§43).
+    const personagem = await Character.findByPk(characterId, { transaction });
+    if (personagem && entrada.tipo_acao === TIPOS_ACAO_FORJA.FABRICACAO) {
+      await registrarProgresso(personagem, "Fabricar", 1, transaction);
+      await registrarProgressoContrato(personagem, "Fabricar", 1, {}, transaction);
+    } else if (personagem && entrada.tipo_acao === TIPOS_ACAO_FORJA.REFINAMENTO && resultado.sucesso) {
+      await registrarProgressoContrato(personagem, "Refinar", 1, {}, transaction);
     }
 
     await entrada.destroy({ transaction });

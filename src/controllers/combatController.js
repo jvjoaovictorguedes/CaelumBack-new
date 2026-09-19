@@ -46,6 +46,7 @@ const { obterSessaoAtiva } = require("../services/adventureService");
 const { sortearMonstroDaZona, sortearNivelMonstro } = require("../services/adventureRollService");
 const { concederRecompensaDeZona } = require("../services/adventureRewardService");
 const { concederOuro } = require("../services/goldService");
+const { registrarProgressoContrato } = require("../services/adventureGuildObjectiveService");
 
 const NOMES_INIMIGOS = [
   "Lobo das Sombras",
@@ -725,6 +726,22 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       await registrarProgresso(character, "MatarInimigos", 1, transaction);
       await registrarProgresso(character, "GanharOuro", dinheiroGanhoTotal, transaction);
       await registrarMorte(character.id, inimigoAtual.nome, transaction);
+
+      // Guilda dos Aventureiros (§23/§45) — mesmo evento real, agora
+      // também alimentando contratos de Rank ativos. id_monstro/id_area
+      // só existem em encontro de zona (ehEncontroDeZona) — contratos
+      // de "matar monstro específico"/"matar na região" simplesmente
+      // não avançam com um encontro legado, o que é o comportamento
+      // certo (não tem como validar região/monstro sem esses IDs).
+      await registrarProgressoContrato(
+        character,
+        "MatarInimigos",
+        1,
+        { id_monstro: inimigoAtual.id_monstro, id_area: inimigoAtual.id_area },
+        transaction,
+      );
+      await registrarProgressoContrato(character, "GanharOuro", dinheiroGanhoTotal, {}, transaction);
+
       await character.save({ transaction });
 
       return res.status(200).json({
