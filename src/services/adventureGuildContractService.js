@@ -79,15 +79,21 @@ async function aceitarOferta(idPersonagem, idOferta, transaction) {
 // §21/§22 — Entregar é atômico: só conclui quando o servidor confirma
 // posse E já debitou o inventário, nunca por "possuir" contado à toa.
 async function entregarItens(idPersonagem, idContrato, transaction) {
+  // Nunca combina `lock` com `include` que gere LEFT OUTER JOIN
+  // (Postgres recusa FOR UPDATE do lado nullable do join, mesmo
+  // cuidado documentado em forgeCraftingService.js/combatController.js)
+  // — busca o contrato "puro" primeiro, a missão vem numa consulta
+  // separada sem lock.
   const contrato = await CharacterAdventureGuildContract.findOne({
     where: { id: idContrato, id_personagem: idPersonagem },
-    include: [{ model: AdventureGuildMission, as: "missao" }],
     transaction,
     lock: transaction.LOCK.UPDATE,
   });
   if (!contrato) throw erroGuilda(404, "Contrato não encontrado.");
   if (contrato.status !== "Ativo") throw erroGuilda(400, "Este contrato não está ativo.");
-  if (contrato.missao.tipo_objetivo !== "Entregar") {
+
+  const missao = await AdventureGuildMission.findByPk(contrato.id_mission, { transaction });
+  if (missao.tipo_objetivo !== "Entregar") {
     throw erroGuilda(400, "Este contrato não é de entrega de itens.");
   }
   if (contrato.expira_em && contrato.expira_em.getTime() <= Date.now()) {
@@ -96,9 +102,9 @@ async function entregarItens(idPersonagem, idContrato, transaction) {
     throw erroGuilda(409, "Este contrato expirou.");
   }
 
-  const quantidadeNecessaria = contrato.missao.quantidade_objetivo;
+  const quantidadeNecessaria = missao.quantidade_objetivo;
   const entrada = await CharacterInventory.findOne({
-    where: { id_personagem: idPersonagem, id_item: contrato.missao.id_item_alvo },
+    where: { id_personagem: idPersonagem, id_item: missao.id_item_alvo },
     transaction,
     lock: transaction.LOCK.UPDATE,
   });
@@ -123,20 +129,20 @@ async function entregarItens(idPersonagem, idContrato, transaction) {
 // §33/§53 — resgate concede as recompensas (N linhas, não 1 item só) e
 // nunca duplica o contador de promoção (isso já aconteceu na conclusão).
 async function resgatarRecompensaContrato(idPersonagem, idContrato, transaction) {
+  // Mesmo cuidado de entregarItens: contrato "puro" primeiro, missão +
+  // recompensas numa consulta separada sem lock.
   const contrato = await CharacterAdventureGuildContract.findOne({
     where: { id: idContrato, id_personagem: idPersonagem },
-    include: [
-      {
-        model: AdventureGuildMission,
-        as: "missao",
-        include: [{ model: AdventureGuildMissionReward, as: "recompensas" }],
-      },
-    ],
     transaction,
     lock: transaction.LOCK.UPDATE,
   });
   if (!contrato) throw erroGuilda(404, "Contrato não encontrado.");
   if (contrato.status !== "Concluido") throw erroGuilda(400, "Este contrato ainda não foi concluído.");
+
+  const missao = await AdventureGuildMission.findByPk(contrato.id_mission, {
+    include: [{ model: AdventureGuildMissionReward, as: "recompensas" }],
+    transaction,
+  });
 
   const character = await Character.findByPk(idPersonagem, { transaction, lock: transaction.LOCK.UPDATE });
   if (!character) throw erroGuilda(404, "Personagem não encontrado.");
@@ -145,7 +151,7 @@ async function resgatarRecompensaContrato(idPersonagem, idContrato, transaction)
   let xp = 0;
   const itensConcedidos = [];
 
-  for (const recompensa of contrato.missao.recompensas) {
+  for (const recompensa of missao.recompensas) {
     if (recompensa.tipo === "Ouro") {
       concederOuro(character, recompensa.quantidade);
       dinheiro += recompensa.quantidade;

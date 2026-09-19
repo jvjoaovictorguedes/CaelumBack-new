@@ -23,16 +23,26 @@ function coincideObjetivo(missao, tipo, contexto) {
 }
 
 async function registrarProgressoContrato(character, tipo, quantidade, contexto = {}, transaction) {
+  // Nunca combina `lock` com `include` que gere LEFT OUTER JOIN
+  // (Postgres recusa FOR UPDATE do lado nullable do join) — trava só os
+  // contratos, busca as missões correspondentes numa consulta separada
+  // sem lock.
   const contratosAtivos = await CharacterAdventureGuildContract.findAll({
     where: { id_personagem: character.id, status: "Ativo" },
-    include: [{ model: AdventureGuildMission, as: "missao" }],
     transaction,
     lock: transaction.LOCK.UPDATE,
   });
+  if (contratosAtivos.length === 0) return;
+
+  const missoes = await AdventureGuildMission.findAll({
+    where: { id: contratosAtivos.map((c) => c.id_mission) },
+    transaction,
+  });
+  const missaoPorId = new Map(missoes.map((m) => [m.id, m]));
 
   for (const contrato of contratosAtivos) {
-    const missao = contrato.missao;
-    if (!coincideObjetivo(missao, tipo, contexto)) continue;
+    const missao = missaoPorId.get(contrato.id_mission);
+    if (!missao || !coincideObjetivo(missao, tipo, contexto)) continue;
 
     // §18 — contrato expirado nunca conta progresso, mesmo que ainda
     // não tenha sido varrido/marcado Expirado por uma leitura anterior.
