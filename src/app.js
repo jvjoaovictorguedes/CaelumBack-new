@@ -59,6 +59,7 @@ const marketRoutes = require("./routes/marketRoutes");
 const adventureRoutes = require("./routes/adventureRoutes");
 const bestiaryRoutes = require("./routes/bestiaryRoutes");
 const rankingRoutes = require("./routes/rankingRoutes");
+const adventureGuildRoutes = require("./routes/adventureGuildRoutes");
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -190,6 +191,7 @@ app.use("/api/market", marketRoutes);
 app.use("/api/adventure", adventureRoutes);
 app.use("/api/bestiary", bestiaryRoutes);
 app.use("/api/ranking", rankingRoutes);
+app.use("/api/adventure-guild", adventureGuildRoutes);
 
 // PVP ao vivo (Socket.io) precisa do servidor HTTP cru pra fazer o
 // upgrade da conexão — por isso o app não usa mais app.listen direto.
