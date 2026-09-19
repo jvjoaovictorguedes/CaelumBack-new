@@ -32,10 +32,11 @@ async function listarZonas(nivelPersonagem) {
 // montar o seletor de "caçar um alvo específico" sem precisar inventar
 // a própria lista (era hardcoded igual dos dois lados antes da zona
 // existir, ver HuntTargetSelector.tsx).
-async function monstrosDaZona(idArea) {
+async function monstrosDaZona(idArea, transaction) {
   const vinculos = await AdventureZoneMonster.findAll({
     where: { id_area: idArea, ativo: true },
     include: [{ model: AdventureMonster, as: "monstro" }],
+    transaction,
   });
   return vinculos.map((v) => ({ nome: v.monstro.nome, tipo_aparicao: v.tipo_aparicao }));
 }

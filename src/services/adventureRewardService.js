@@ -16,6 +16,7 @@ const {
   xpBaseDoNivel,
   ouroBaseDoNivel,
 } = require("../config/adventureConfig");
+const { aplicarBonusDeMaestria } = require("./masteryBonusService");
 
 // Mesmo truque de escala inteira do dropService.sortearComPeso.
 const ESCALA = 1000;
@@ -64,14 +65,26 @@ async function concederRecompensaDeZona(character, inimigoAtual, transaction) {
 
   // Reaproveita a MESMA fórmula base que a Aventura já usava (§8/§11),
   // só multiplicada quando o encontro era o Raro da zona.
-  const xpGanho = Math.round(
+  const xpBase = Math.round(
     xpBaseDoNivel(inimigoAtual.nivel) * (ehRaro ? MULTIPLICADOR_RARO_XP : 1),
   );
-  const dinheiroGanho = Math.round(
+  const dinheiroBase = Math.round(
     ouroBaseDoNivel(inimigoAtual.nivel) * (ehRaro ? MULTIPLICADOR_RARO_OURO : 1),
   );
 
-  const espolio = await sortearEspolioDaZona(inimigoAtual.id_area, ehRaro, transaction);
+  const espolioBase = await sortearEspolioDaZona(inimigoAtual.id_area, ehRaro, transaction);
+
+  // Bônus de Maestria Regional (Bestiário — §14/§16) — usa os abates
+  // JÁ existentes antes desta vitória (registrarMorte só roda depois,
+  // em combatController.js), então nunca conta o kill atual duas vezes
+  // na hora de decidir se o bônus está ativo.
+  const { xpGanho, dinheiroGanho, espolio } = await aplicarBonusDeMaestria(
+    character.id,
+    inimigoAtual.id_area,
+    { xpGanho: xpBase, dinheiroGanho: dinheiroBase, espolio: espolioBase },
+    transaction,
+  );
+
   if (espolio) {
     await concederItem(character.id, espolio.id_item, espolio.quantidade, transaction);
   }

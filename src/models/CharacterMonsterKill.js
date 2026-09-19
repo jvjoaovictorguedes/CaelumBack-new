@@ -25,6 +25,13 @@ const CharacterMonsterKill = sequelize.define(
       allowNull: false,
       defaultValue: 0,
     },
+    // Bestiário (§7 da spec) — quando a ficha completa do monstro passa
+    // a ficar visível. Nulo enquanto o personagem nunca venceu esse
+    // monstro (ver monsterKillService.registrarMorte).
+    primeira_derrota_em: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
   },
   {
     tableName: "character_monster_kills",
