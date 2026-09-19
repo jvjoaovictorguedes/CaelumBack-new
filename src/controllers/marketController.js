@@ -8,6 +8,7 @@ const { sequelize } = require("../config/database");
 const Character = require("../models/Character");
 const Item = require("../models/Item");
 const CharacterInventory = require("../models/CharacterInventory");
+const CharacterEquipmentInstance = require("../models/CharacterEquipmentInstance");
 const MarketListing = require("../models/MarketListing");
 const { addStack } = require("../services/inventoryService");
 const equipmentInstanceService = require("../services/equipmentInstanceService");
@@ -130,6 +131,9 @@ exports.listarAnuncios = async (req, res) => {
       include: [
         { model: Item, as: "item", where: Object.keys(whereItem).length ? whereItem : undefined },
         { model: Character, as: "vendedor", attributes: ["id", "nome"] },
+        // Inventário v2 — só existe quando o anúncio é de equipamento;
+        // é dali que vem o refinamento de verdade daquela cópia.
+        { model: CharacterEquipmentInstance, as: "instancia", attributes: ["id", "refinamento"] },
       ],
       order: [["preco_unitario", "ASC"]],
       limit: 100,
@@ -147,7 +151,10 @@ exports.meusAnuncios = async (req, res) => {
   try {
     const listings = await MarketListing.findAll({
       where: { id_personagem_vendedor: req.personagemAtual.id },
-      include: [{ model: Item, as: "item" }],
+      include: [
+        { model: Item, as: "item" },
+        { model: CharacterEquipmentInstance, as: "instancia", attributes: ["id", "refinamento"] },
+      ],
       order: [["createdAt", "DESC"]],
       limit: 100,
     });

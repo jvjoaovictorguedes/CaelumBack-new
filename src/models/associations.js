@@ -78,6 +78,9 @@ Mission.belongsTo(Item, { foreignKey: "recompensa_item_id", as: "itemRecompensa"
 MarketListing.belongsTo(Item, { foreignKey: "id_item", as: "item" });
 MarketListing.belongsTo(Character, { foreignKey: "id_personagem_vendedor", as: "vendedor" });
 MarketListing.belongsTo(Character, { foreignKey: "id_personagem_comprador", as: "comprador" });
+// Inventário v2 — só preenchido quando o anúncio é de equipamento (ver
+// MarketListing.js), pra mostrar o refinamento de verdade no anúncio.
+MarketListing.belongsTo(CharacterEquipmentInstance, { foreignKey: "id_instancia", as: "instancia" });
 
 // Forja v2 — receita fixa por item (id_item), com N ingredientes
 // (materiais + quantidade) e no máximo 1 forja em andamento por
