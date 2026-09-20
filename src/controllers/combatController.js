@@ -86,6 +86,24 @@ function sortear(lista) {
 const RODADAS_PARA_MATAR_INIMIGO = 4;
 const RODADAS_PARA_INIMIGO_MATAR_JOGADOR = 4.2;
 
+// Quanto vida_maxima/dano_base do inimigo escalam pra CIMA por nível
+// sorteado acima do nível ATUAL do jogador (§5 — zonas nunca bloqueiam
+// entrada, mas precisam ser de verdade mais perigosas). Sem isso, um
+// personagem nível 12 caçando no Covil do Minotauro (30-50) podia
+// sortear um Minotauro "nível 50" que, na prática, tinha vida_maxima/
+// dano_base calibrados pros PRÓPRIOS atributos daquele personagem
+// nível 12 (ver gerarInimigo) — o "nível 50" ficava só no nome, o
+// rótulo de perigo (calcularPerigo, ver adventureConfig.js) prometia
+// "EXTREMO" e a luta não entregava nada disso. Só escala pra cima
+// (nunca pra baixo): um personagem ACIMA do nível do monstro já fica
+// mais fácil de forma orgânica, porque a calibração usa os atributos
+// REAIS dele (que crescem com o nível) — não precisa de mais um fator
+// pra essa direção.
+const FATOR_ESCALA_POR_NIVEL_ACIMA_DO_JOGADOR = 0.07;
+// Teto pra essa escala não sair de controle numa zona futura com uma
+// faixa de nível muito mais larga que as atuais.
+const ESCALA_MAXIMA_POR_DIFERENCA_DE_NIVEL = 6;
+
 // Gera um inimigo calibrado a partir dos ATRIBUTOS DE VERDADE do
 // personagem (já com bônus de equipamento somado) — não mais só o nível.
 // Antes o inimigo era pensado pra um "personagem médio" daquele nível
@@ -123,13 +141,21 @@ function gerarInimigo(jogador, nomeAlvo, opcoes = {}) {
   const vidaJogador = vidaMaximaDe(jogador);
   const ataqueJogador = Math.max(1, danoBasicoEsperado(jogador));
 
+  const diferencaDeNivel = Math.max(0, nivel - (jogador.nivel ?? 1));
+  const escalaPorNivel = Math.min(
+    ESCALA_MAXIMA_POR_DIFERENCA_DE_NIVEL,
+    1 + diferencaDeNivel * FATOR_ESCALA_POR_NIVEL_ACIMA_DO_JOGADOR,
+  );
+
   const vidaMaxima = Math.max(
     20,
-    Math.round(ataqueJogador * RODADAS_PARA_MATAR_INIMIGO * variacao() * mult.vida),
+    Math.round(ataqueJogador * RODADAS_PARA_MATAR_INIMIGO * variacao() * mult.vida * escalaPorNivel),
   );
   const danoBase = Math.max(
     1,
-    Math.round((vidaJogador / RODADAS_PARA_INIMIGO_MATAR_JOGADOR) * variacao() * mult.dano),
+    Math.round(
+      (vidaJogador / RODADAS_PARA_INIMIGO_MATAR_JOGADOR) * variacao() * mult.dano * escalaPorNivel,
+    ),
   );
 
   // Agilidade/velocidade espelham as do próprio jogador (com variação),
