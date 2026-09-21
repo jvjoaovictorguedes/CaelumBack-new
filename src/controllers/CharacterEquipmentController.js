@@ -20,7 +20,6 @@ const {
 const VALID_SLOTS = [
   "Cabeca",
   "Torso",
-  "Maos",
   "Pes",
   "ArmaPrincipal",
   "ArmaSecundaria",
@@ -28,10 +27,12 @@ const VALID_SLOTS = [
   "Acessorio2",
 ];
 
-// "Maos" NÃO aceita mais Escudo (ver abaixo) — sobra só pra uma futura
-// peça de armadura tipo luva, se um dia existir. Shields vivem
-// inteiramente em ArmaSecundaria agora.
-const ARMOR_SLOTS = ["Cabeca", "Torso", "Maos", "Pes"];
+// "Maos" removido de propósito (pedido do jogador) — uma mão já
+// segura a arma, a outra o escudo, não sobra mão livre pra uma peça de
+// armadura separada. Os itens de Manopla/Luva que existiam foram
+// descontinuados (ver migration 20261019010000-remove-manoplas-luvas).
+// Escudo continua vivendo inteiramente em ArmaSecundaria, nunca aqui.
+const ARMOR_SLOTS = ["Cabeca", "Torso", "Pes"];
 
 // Equipamento que aumenta vitalidade/inteligência também aumenta vida/
 // mana MÁXIMA — sem reclampar depois de trocar, vida_atual podia ficar
@@ -87,10 +88,9 @@ async function validarCompatibilidade(slot, item) {
     // A "mão secundária" aceita uma segunda arma (dual-wield) OU um
     // escudo — nunca os dois ao mesmo tempo, e isso já sai de graça por
     // ser o MESMO slot do banco (upsert por id_personagem+slot: só cabe
-    // um item aqui). De propósito, Escudo não passa mais pelo
-    // ARMOR_SLOTS/slot "Maos" acima — se passasse, alguém equiparia uma
-    // segunda arma em ArmaSecundaria E um escudo em Maos ao mesmo tempo,
-    // ou seja, três itens de mão pra duas mãos.
+    // um item aqui). Escudo nunca passa pelo ARMOR_SLOTS acima — só as
+    // duas mãos existem (arma + arma/escudo), não sobra uma terceira
+    // pra uma peça de armadura separada.
     if (item.tipo_item !== "Arma" && item.tipo_item !== "Escudo") {
       return `O item "${item.nome}" não é uma arma nem um escudo.`;
     }

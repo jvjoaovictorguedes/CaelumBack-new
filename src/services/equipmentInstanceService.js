@@ -45,7 +45,8 @@ async function resolverSlot(item, transaction) {
   }
 
   // Capacete / Armadura — slot vem da própria ArmorProperties
-  // (Cabeca/Torso/Maos/Pes).
+  // (Cabeca/Torso/Pes — "Maos" descontinuado, ver
+  // 20261019010000-remove-manoplas-luvas.js).
   const propriedades = await ArmorProperties.findByPk(item.id, { transaction });
   if (!propriedades) throw erro(`O item "${item.nome}" não possui propriedades de armadura configuradas.`);
   return propriedades.slot_equipamento;

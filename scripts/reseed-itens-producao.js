@@ -382,40 +382,37 @@ const ESCUDOS = [
 ];
 
 // ---------------------------------------------------------------------
-// Armaduras — 3 sets completos (Cabeça/Torso/Mãos/Pés), cada um com uma
+// Armaduras — 3 sets completos (Cabeça/Torso/Pés), cada um com uma
 // identidade diferente: Couro é leve (bônus de agilidade/velocidade),
 // Ferro é equilibrado/tanque, Élfico favorece magos (inteligência) sem
-// abrir mão de agilidade.
-// ---------------------------------------------------------------------
+// abrir mão de agilidade. Peça de Mãos descontinuada (pedido do
+// jogador — uma mão segura a arma, a outra o escudo, ver migration
+// 20261019010000-remove-manoplas-luvas.js); nunca adicionar
+// slot_equipamento "Maos" de volta aqui.
 const ARMADURAS = [
   // --- Set Couro (Comum) ---
   { nome: "Elmo de Couro", descricao: "Protege sem pesar — parte do conjunto de couro.", raridade: "Comum", valor_compra: 18, valor_venda: 6, peso: 1, disponivel_loja: true, tipo_item: "Capacete", propriedades: { slot_equipamento: "Cabeca", defesa: 2, bonus_agilidade: 1 } },
   { nome: "Peitoral de Couro", descricao: "Flexível o bastante pra não atrapalhar um golpe rápido.", raridade: "Comum", valor_compra: 30, valor_venda: 10, peso: 3, disponivel_loja: true, tipo_item: "Armadura", propriedades: { slot_equipamento: "Torso", defesa: 4, bonus_agilidade: 2 } },
-  { nome: "Luvas de Couro", descricao: "Mantêm os dedos livres pra qualquer coisa que a batalha exigir.", raridade: "Comum", valor_compra: 14, valor_venda: 5, peso: 0.5, disponivel_loja: true, tipo_item: "Armadura", propriedades: { slot_equipamento: "Maos", defesa: 1, bonus_agilidade: 1 } },
   { nome: "Botas de Couro", descricao: "Leves o bastante pra correr, resistentes o bastante pra durar.", raridade: "Comum", valor_compra: 16, valor_venda: 5, peso: 1, disponivel_loja: true, tipo_item: "Armadura", propriedades: { slot_equipamento: "Pes", defesa: 1, bonus_velocidade: 2 } },
 
   // --- Set Ferro (Incomum) ---
   { nome: "Elmo de Ferro", descricao: "Um elmo simples, mas resistente.", raridade: "Incomum", valor_compra: 45, valor_venda: 15, peso: 2, disponivel_loja: true, tipo_item: "Capacete", propriedades: { slot_equipamento: "Cabeca", defesa: 5, bonus_vitalidade: 2 } },
   { nome: "Peitoral de Ferro", descricao: "Pesado, mas quase nada atravessa.", raridade: "Incomum", valor_compra: 80, valor_venda: 27, peso: 6, disponivel_loja: true, tipo_item: "Armadura", propriedades: { slot_equipamento: "Torso", defesa: 10, bonus_vitalidade: 4 } },
-  { nome: "Manoplas de Ferro", descricao: "Cada soco pesa um pouco mais com elas.", raridade: "Incomum", valor_compra: 35, valor_venda: 12, peso: 2, disponivel_loja: true, tipo_item: "Armadura", propriedades: { slot_equipamento: "Maos", defesa: 3, bonus_forca: 2 } },
   { nome: "Botas de Ferro", descricao: "Firmes no chão, difíceis de derrubar.", raridade: "Incomum", valor_compra: 40, valor_venda: 13, peso: 3, disponivel_loja: true, tipo_item: "Armadura", propriedades: { slot_equipamento: "Pes", defesa: 3, bonus_vitalidade: 1 } },
 
   // --- Set Élfico (Raro) ---
   { nome: "Diadema Élfico", descricao: "Canaliza energia arcana só de estar na cabeça de quem sabe usá-la.", raridade: "Raro", valor_compra: 180, valor_venda: 60, peso: 0.5, disponivel_loja: true, tipo_item: "Capacete", propriedades: { slot_equipamento: "Cabeca", defesa: 6, bonus_inteligencia: 5 } },
   { nome: "Manto Élfico", descricao: "Tecido que parece se mover sozinho, sempre um passo à frente do vento.", raridade: "Raro", valor_compra: 260, valor_venda: 88, peso: 1.5, disponivel_loja: true, tipo_item: "Armadura", propriedades: { slot_equipamento: "Torso", defesa: 11, bonus_inteligencia: 6, bonus_agilidade: 2 } },
-  { nome: "Luvas Élficas", descricao: "Precisas o bastante pra não perder um único fio de mana.", raridade: "Raro", valor_compra: 120, valor_venda: 40, peso: 0.3, disponivel_loja: true, tipo_item: "Armadura", propriedades: { slot_equipamento: "Maos", defesa: 4, bonus_inteligencia: 3 } },
   { nome: "Botas Élficas", descricao: "Quase não tocam o chão — feitas pra quem nunca devia ser alcançado.", raridade: "Raro", valor_compra: 140, valor_venda: 47, peso: 0.4, disponivel_loja: true, tipo_item: "Armadura", propriedades: { slot_equipamento: "Pes", defesa: 4, bonus_velocidade: 4, bonus_agilidade: 2 } },
 
   // --- Set Sombrio (Épico) — fora da loja, só via drop/mercado/forja ---
   { nome: "Elmo Sombrio", descricao: "Some na escuridão até o momento em que já é tarde demais.", raridade: "Epico", valor_compra: 300, valor_venda: 100, peso: 1.5, disponivel_loja: false, tipo_item: "Capacete", propriedades: { slot_equipamento: "Cabeca", defesa: 10, bonus_agilidade: 3, bonus_inteligencia: 2 } },
   { nome: "Peitoral Sombrio", descricao: "Tecido entre as sombras — pesa menos do que parece, corta mais do que aparenta proteger.", raridade: "Epico", valor_compra: 480, valor_venda: 160, peso: 4, disponivel_loja: false, tipo_item: "Armadura", propriedades: { slot_equipamento: "Torso", defesa: 17, bonus_agilidade: 4, bonus_forca: 3 } },
-  { nome: "Manoplas Sombrias", descricao: "Cada golpe some antes do inimigo perceber de onde veio.", raridade: "Epico", valor_compra: 260, valor_venda: 88, peso: 1, disponivel_loja: false, tipo_item: "Armadura", propriedades: { slot_equipamento: "Maos", defesa: 8, bonus_agilidade: 4 } },
   { nome: "Botas Sombrias", descricao: "Não deixam rastro, nem som, nem chance de fuga pra quem é caçado por elas.", raridade: "Epico", valor_compra: 280, valor_venda: 95, peso: 1, disponivel_loja: false, tipo_item: "Armadura", propriedades: { slot_equipamento: "Pes", defesa: 8, bonus_velocidade: 5, bonus_agilidade: 3 } },
 
   // --- Set Dracônico (Lendário) — fora da loja, só via drop/mercado ---
   { nome: "Elmo Dracônico", descricao: "Moldado a partir da escama da fronte de um dragão — quase impossível de rachar.", raridade: "Lendario", valor_compra: 380, valor_venda: 130, peso: 3, disponivel_loja: false, tipo_item: "Capacete", propriedades: { slot_equipamento: "Cabeca", defesa: 14, bonus_forca: 4, bonus_vitalidade: 4 } },
   { nome: "Peitoral Dracônico", descricao: "Escamas sobrepostas que já resistiram a fogo de verdade.", raridade: "Lendario", valor_compra: 620, valor_venda: 210, peso: 8, disponivel_loja: false, tipo_item: "Armadura", propriedades: { slot_equipamento: "Torso", defesa: 24, bonus_forca: 6, bonus_vitalidade: 8 } },
-  { nome: "Manoplas Dracônicas", descricao: "Garras adaptadas em luvas — o golpe vem com peso de verdade.", raridade: "Lendario", valor_compra: 340, valor_venda: 115, peso: 4, disponivel_loja: false, tipo_item: "Armadura", propriedades: { slot_equipamento: "Maos", defesa: 12, bonus_forca: 7 } },
   { nome: "Botas Dracônicas", descricao: "Cada passo pesa como o de algo muito maior do que um humano.", raridade: "Lendario", valor_compra: 360, valor_venda: 120, peso: 5, disponivel_loja: false, tipo_item: "Armadura", propriedades: { slot_equipamento: "Pes", defesa: 12, bonus_vitalidade: 6 } },
 ];
 
