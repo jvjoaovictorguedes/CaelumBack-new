@@ -15,10 +15,22 @@ function fatorRefinamento(refinamento) {
 // Só escala valores POSITIVOS (spec: "bônus positivos de atributos") —
 // zero continua zero, e nunca inventamos um bônus negativo virando
 // "mais negativo ainda" por um efeito colateral de arredondamento.
+//
+// Garante pelo menos +1 assim que refinamento > 0 — sem isso, um
+// atributo baixo (ex.: dano 5-8 de uma arma Comum, ou um bônus de +1
+// de atributo) ficava com Math.round(valor * pct) travado em 0 por
+// VÁRIOS refinamentos seguidos (ex.: +1 a +3 não mudavam nada, e um
+// bônus de atributo de valor 1 nunca subia nem no +10 — 32% de 1 ainda
+// arredonda pra 0). Jogador refinando e "não acontecendo nada" era
+// literalmente esse bug: o % configurado é real, só não aparecia em
+// valores pequenos até o arredondamento normal ultrapassar 1 sozinho.
 function escalar(valor, fator) {
   const numero = Number(valor) || 0;
   if (numero <= 0) return numero;
-  return Math.round(numero * fator);
+  const percentual = fator - 1;
+  if (percentual <= 0) return numero;
+  const bonusCalculado = Math.round(numero * percentual);
+  return numero + Math.max(1, bonusCalculado);
 }
 
 // `arma`/`armadura` aceitam tanto a instância Sequelize quanto um
