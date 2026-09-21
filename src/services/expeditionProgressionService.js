@@ -4,7 +4,12 @@
 // especificação: "Preferencialmente armazenar XP acumulado total da
 // profissão e calcular nível através de tabela/configuração, em vez
 // de ficar zerando XP").
-const { NIVEL_MAXIMO, XP_TOTAL_PARA_NIVEL, XP_POR_RESULTADO } = require("../config/expeditionConfig");
+const {
+  NIVEL_MAXIMO,
+  XP_TOTAL_PARA_NIVEL,
+  XP_POR_RESULTADO,
+  MULTIPLICADOR_XP_POR_NIVEL,
+} = require("../config/expeditionConfig");
 
 function nivelPorXpTotal(xpTotal) {
   let nivel = 1;
@@ -27,7 +32,9 @@ function xpParaProximoNivel(nivelAtual) {
 // o XP total já acumulado e retorna o novo estado + se houve level up.
 function aplicarGanhoDeXp(xpTotalAtual, resultado) {
   const nivelAntes = nivelPorXpTotal(xpTotalAtual);
-  const ganho = XP_POR_RESULTADO[resultado] ?? 0;
+  const base = XP_POR_RESULTADO[resultado] ?? 0;
+  const multiplicador = MULTIPLICADOR_XP_POR_NIVEL[nivelAntes] ?? 1;
+  const ganho = base > 0 ? Math.max(1, Math.round(base * multiplicador)) : 0;
   const xpTotalNovo = xpTotalAtual + ganho;
   const nivelDepois = nivelPorXpTotal(xpTotalNovo);
 

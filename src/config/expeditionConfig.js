@@ -27,8 +27,9 @@ for (let nivel = 2; nivel <= NIVEL_MAXIMO; nivel += 1) {
   XP_TOTAL_PARA_NIVEL[nivel] = XP_TOTAL_PARA_NIVEL[nivel - 1] + XP_NECESSARIO_POR_ETAPA[nivel - 1];
 }
 
-// XP ganho por tentativa, mesmo sem coleta — evita que azar puro
-// impeça progressão (seção 4).
+// XP BASE ganho por tentativa (nível 1), mesmo sem coleta — evita que
+// azar puro impeça progressão (seção 4). Escalado por
+// MULTIPLICADOR_XP_POR_NIVEL abaixo pros níveis seguintes.
 const XP_POR_RESULTADO = {
   Nada: 1,
   Comum: 2,
@@ -38,6 +39,29 @@ const XP_POR_RESULTADO = {
   Lendario: 6,
   Mitico: 10,
 };
+
+// Sem isso, o custo pra subir de nível cresce ~2x a cada nível (ver
+// XP_NECESSARIO_POR_ETAPA acima) mas o XP ganho por coleta ficava
+// sempre igual a XP_POR_RESULTADO — cada nível passava a exigir muito
+// mais cliques que o anterior, sem nenhum motivo pro jogador continuar
+// clicando. Escala o XP ganho pela RAIZ QUADRADA da proporção entre o
+// custo do nível atual e o custo do nível 1 (não a proporção cheia,
+// que zeraria de vez a dificuldade extra dos níveis altos) — o grind
+// continua ficando mais longo a cada nível, só que numa curva bem mais
+// suave: ex. o último nível (que hoje pede ~180x mais tentativas que o
+// primeiro) passa a pedir só ~13x mais, não ~180x. Ainda é grind de
+// verdade nos níveis altos, só não uma parede. MULTIPLICADOR_XP_POR_NIVEL[n]
+// se aplica ao XP ganho enquanto a profissão está NO nível n (antes do
+// ganho).
+const MULTIPLICADOR_XP_POR_NIVEL = { 1: 1 };
+for (let nivel = 2; nivel < NIVEL_MAXIMO; nivel += 1) {
+  MULTIPLICADOR_XP_POR_NIVEL[nivel] = Math.sqrt(XP_NECESSARIO_POR_ETAPA[nivel] / XP_NECESSARIO_POR_ETAPA[1]);
+}
+// Nível máximo não tem etapa própria (XP_NECESSARIO_POR_ETAPA não tem
+// entrada NIVEL_MAXIMO) — mantém o mesmo multiplicador do penúltimo
+// nível, só por continuidade (XP acumulado além do nível máximo não
+// tem mais efeito nenhum).
+MULTIPLICADOR_XP_POR_NIVEL[NIVEL_MAXIMO] = MULTIPLICADOR_XP_POR_NIVEL[NIVEL_MAXIMO - 1];
 
 // Chance por tentativa, em partes por milhão (BASE = 1_000_000) pra
 // evitar imprecisão de float — ver seção 8. O que sobra depois de
@@ -105,6 +129,7 @@ module.exports = {
   XP_NECESSARIO_POR_ETAPA,
   XP_TOTAL_PARA_NIVEL,
   XP_POR_RESULTADO,
+  MULTIPLICADOR_XP_POR_NIVEL,
   BASE_SORTEIO,
   CHANCE_POR_NIVEL_PPM,
   QUANTIDADE_POR_NIVEL,

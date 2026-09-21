@@ -13,8 +13,10 @@ const ForgeBlueprintIngredient = require("../models/ForgeBlueprintIngredient");
 const ForgeBlueprintResult = require("../models/ForgeBlueprintResult");
 const Item = require("../models/Item");
 const WeaponProperties = require("../models/WeaponProperties");
-// Só o require garante que a associação Item<->WeaponProperties (alias
-// "weaponProperties") já foi declarada — ver models/associations.js.
+const ArmorProperties = require("../models/ArmorProperties");
+// Só o require garante que a associação Item<->WeaponProperties/
+// ArmorProperties (aliases "weaponProperties"/"armorProperties") já
+// foi declarada — ver models/associations.js.
 require("../models/associations");
 const {
   ORDEM_QUALIDADE,
@@ -57,6 +59,38 @@ async function resolverIngredientesResolvidos(blueprint, qualidade, transaction)
   return resolvidos;
 }
 
+// Atributos do item resultante daquela qualidade, pro tooltip da tela
+// de Fabricação (pedido do jogador: "colocar os atributos dos itens
+// que estão na forja pro player entender qual fazer") — nunca usado
+// pra decidir nada no servidor, só exibição.
+function propriedadesDoResultado(item) {
+  if (!item) return null;
+  if (item.weaponProperties) {
+    const p = item.weaponProperties;
+    return {
+      tipo: "Arma",
+      dano_min: p.dano_min,
+      dano_max: p.dano_max,
+      tipo_dano: p.tipo_dano,
+      bonus_atributo: p.bonus_atributo,
+      valor_bonus_atributo: p.valor_bonus_atributo,
+    };
+  }
+  if (item.armorProperties) {
+    const p = item.armorProperties;
+    return {
+      tipo: "Armadura",
+      defesa: p.defesa,
+      bonus_forca: p.bonus_forca,
+      bonus_vitalidade: p.bonus_vitalidade,
+      bonus_inteligencia: p.bonus_inteligencia,
+      bonus_agilidade: p.bonus_agilidade,
+      bonus_velocidade: p.bonus_velocidade,
+    };
+  }
+  return null;
+}
+
 // Lista todos os blueprints ativos com, pra cada qualidade possível de
 // material, os ingredientes resolvidos + quanto o personagem tem +
 // prévia das chances de qualidade superior (spec §59: "mostrar as
@@ -71,7 +105,16 @@ async function listarBlueprints(characterId) {
         {
           model: ForgeBlueprintResult,
           as: "resultados",
-          include: [{ model: Item, as: "item", include: [{ model: WeaponProperties, as: "weaponProperties" }] }],
+          include: [
+            {
+              model: Item,
+              as: "item",
+              include: [
+                { model: WeaponProperties, as: "weaponProperties" },
+                { model: ArmorProperties, as: "armorProperties" },
+              ],
+            },
+          ],
         },
       ],
     }),
@@ -115,6 +158,9 @@ async function listarBlueprints(characterId) {
         ingredientes: ingredientesComEstoque,
         pode_fabricar: temMateriais && nivelForja >= blueprint.nivel_forja_minimo,
         chances_percentual: chancesExibicao,
+        // Atributos do item nesta qualidade (resultado garantido se não
+        // rolar degrau de qualidade superior) — pro tooltip do frontend.
+        propriedades: propriedadesDoResultado(resultadoPorQualidade.get(qualidade)),
         tempo_segundos: Math.round(
           (TEMPO_BASE_FABRICACAO_MS_POR_QUALIDADE[qualidade] *
             blueprint.multiplicador_tempo *
