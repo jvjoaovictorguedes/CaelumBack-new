@@ -61,6 +61,14 @@ const Character = sequelize.define("Character", {
     allowNull: false,
     defaultValue: DataTypes.NOW,
   },
+  // Mesma ideia, pra mana_atual — regenService trata os dois em
+  // paralelo, cada um com seu próprio relógio (dano/cura mexe só na
+  // vida, gasto/cura de mana mexe só na mana).
+  ultima_atualizacao_mana: {
+    type: DataTypes.DATE,
+    allowNull: false,
+    defaultValue: DataTypes.NOW,
+  },
   // Combate PvE em andamento (inimigo + timestamp), se houver — ver
   // combatController.js. Persistido no banco (não só em memória do
   // processo) pra sobreviver a um restart/redeploy do servidor sem

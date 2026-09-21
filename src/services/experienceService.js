@@ -65,6 +65,7 @@ if (novoNivel > nivelInicial) {
   character.vida_atual = vidaMaximaDe(personagemEfetivo);
   character.mana_atual = manaMaximaDe(personagemEfetivo);
   character.ultima_atualizacao_vida = new Date();
+  character.ultima_atualizacao_mana = new Date();
 }
 
 await character.save({ transaction });

@@ -165,6 +165,7 @@ exports.useItem = async (req, res) => {
       if (efeito.efeito_mana) {
         const cura = Math.round(manaMaxima * (efeito.efeito_mana / 100) * quantidade);
         character.mana_atual = Math.min(manaMaxima, character.mana_atual + cura);
+        character.ultima_atualizacao_mana = new Date();
       }
 
       await character.save({ transaction });

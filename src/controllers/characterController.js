@@ -40,7 +40,11 @@ const {
   buscarItemRequisito,
   contarMortesDoAlvo,
 } = require("../services/classEvolutionService");
-const { sincronizarRegeneracaoDeVida, msAteRegenCompleta } = require("../services/regenService");
+const {
+  sincronizarRegeneracaoDeVidaEMana,
+  msAteVidaRegenCompleta,
+  msAteManaRegenCompleta,
+} = require("../services/regenService");
 const {
   PROPOSITO_RACA,
   PROPOSITO_CLASSE,
@@ -348,9 +352,10 @@ async function carregarRespostaDoPersonagem(character) {
   );
 
   // Regeneração passiva: calcula sob demanda quanto tempo real
-  // passou desde a última mudança de vida e aplica o que já
-  // regenerou. Só grava no banco quando há progresso de verdade.
-  if (sincronizarRegeneracaoDeVida(character, personagemEfetivo)) {
+  // passou desde a última mudança de vida/mana e aplica o que já
+  // regenerou (cada uma com seu próprio relógio). Só grava no banco
+  // quando há progresso de verdade.
+  if (sincronizarRegeneracaoDeVidaEMana(character, personagemEfetivo)) {
     await character.save();
   }
 
@@ -365,10 +370,12 @@ async function carregarRespostaDoPersonagem(character) {
   return {
     ...character.toJSON(),
     vida_atual: personagemEfetivo.vida_atual,
+    mana_atual: personagemEfetivo.mana_atual,
     bonus_atributos,
     vida_maxima: vidaMaximaDe(personagemEfetivo),
     mana_maxima: manaMaximaDe(personagemEfetivo),
-    regen_vida_restante_ms: msAteRegenCompleta(personagemEfetivo),
+    regen_vida_restante_ms: msAteVidaRegenCompleta(personagemEfetivo),
+    regen_mana_restante_ms: msAteManaRegenCompleta(personagemEfetivo),
     guilda: membroGuild?.Guild
       ? { id: membroGuild.Guild.id, nome: membroGuild.Guild.nome, sigla: membroGuild.Guild.sigla }
       : null,

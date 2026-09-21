@@ -31,7 +31,7 @@ const {
   buscarBonusDeAtributos,
   personagemComBonus,
 } = require("../services/equipmentBonusService");
-const { sincronizarRegeneracaoDeVida } = require("../services/regenService");
+const { sincronizarRegeneracaoDeVidaEMana } = require("../services/regenService");
 const { encontroValido, limparEncontroExpirado } = require("../services/pveEncounterService");
 const { rolarDropDeVitoria } = require("../services/dropService");
 const { registrarProgresso } = require("../services/missionService");
@@ -260,11 +260,11 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
 
       // Aplica a regeneração passiva acumulada antes de calibrar/entrar
       // em combate — sem isso, um jogador que ficou horas offline entrava
-      // na luta com a vida velha (baixa), mesmo já tendo regenerado.
+      // na luta com a vida/mana velha (baixa), mesmo já tendo regenerado.
       // Muta `character`/`jogadorEfetivo` em memória; persistido junto
       // com encontro_pve no save abaixo, que já é obrigatório de
       // qualquer jeito.
-      sincronizarRegeneracaoDeVida(character, jogadorEfetivo);
+      sincronizarRegeneracaoDeVidaEMana(character, jogadorEfetivo);
 
       // Escolha de alvo removida (pedido do jogador) — sempre sorteio
       // ponderado normal da zona (§6/§7), nunca mais "caçar" um monstro
@@ -424,7 +424,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
     // "derrotado" quem já regenerou o suficiente enquanto estava longe.
     // Só ajusta o objeto em memória aqui; a persistência acontece no(s)
     // save() mais abaixo, já dentro da mesma transação/lock.
-    sincronizarRegeneracaoDeVida(character, personagemAtual);
+    sincronizarRegeneracaoDeVidaEMana(character, personagemAtual);
 
     if (personagemAtual.vida_atual <= 0) {
       return res.status(400).json({
@@ -692,6 +692,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       character.vida_atual = personagemAtual.vida_atual;
       character.mana_atual = personagemAtual.mana_atual;
       character.ultima_atualizacao_vida = new Date();
+      character.ultima_atualizacao_mana = new Date();
       character.encontro_pve = null;
       const resultadoXP = await adicionarExperiencia(characterId, xpGanho, {
         transaction,
@@ -857,6 +858,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
     character.vida_atual = derrotado ? 0 : personagemAtual.vida_atual;
     character.mana_atual = personagemAtual.mana_atual;
     character.ultima_atualizacao_vida = new Date();
+    character.ultima_atualizacao_mana = new Date();
     // Combate derrotado encerra o encontro (precisa buscar um novo
     // inimigo pra tentar de novo); senão, persiste o estado atualizado
     // do inimigo (vida restante) pro próximo turno.
