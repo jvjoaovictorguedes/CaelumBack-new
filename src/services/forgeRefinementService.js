@@ -11,11 +11,9 @@ const CharacterForgeProgress = require("../models/CharacterForgeProgress");
 const CharacterForgeQueue = require("../models/CharacterForgeQueue");
 const CharacterEquipmentInstance = require("../models/CharacterEquipmentInstance");
 const CharacterInventory = require("../models/CharacterInventory");
-const ForgeBlueprintResult = require("../models/ForgeBlueprintResult");
-const ForgeBlueprint = require("../models/ForgeBlueprint");
-const ForgeBlueprintIngredient = require("../models/ForgeBlueprintIngredient");
 const ForgeScroll = require("../models/ForgeScroll");
 const Item = require("../models/Item");
+const ExpeditionResource = require("../models/ExpeditionResource");
 const {
   NIVEL_MAXIMO,
   UNIDADES_MATERIAL_REFINAMENTO_POR_ALVO,
@@ -30,45 +28,62 @@ const { resolverIdItemDoInsumo } = require("./forgeMaterialsService");
 const { chanceFinalRefinamentoPpm, rolarSucessoRefinamento } = require("./forgeRollService");
 const { nivelPorXpTotal } = require("./forgeProgressionService");
 
-async function localizarBlueprintDoItem(idItem, transaction) {
-  const resultado = await ForgeBlueprintResult.findOne({ where: { id_item: idItem }, transaction });
-  if (!resultado) return null;
-  return ForgeBlueprint.findByPk(resultado.id_blueprint, {
-    include: [{ model: ForgeBlueprintIngredient, as: "ingredientes" }],
-    transaction,
-  });
+// Recurso genérico usado como "barra"/"tronco" de refinamento pra
+// QUALQUER equipamento — nunca amarrado a uma receita de Fabricação
+// existir pro item (bug real: só os ~190 itens forjados por minério
+// tinham receita; TODO o resto do jogo — Loja, drop de monstro, itens
+// nomeados/temáticos — não tinha NENHUMA, e o refinamento simplesmente
+// não funcionava pra eles: a prévia estourava erro 500 e a tela ficava
+// muda, sem nenhuma mensagem). O custo de refinar já depende só de
+// CATEGORIA (MATERIAIS_BASE_REFINAMENTO_POR_CATEGORIA) e RARIDADE do
+// item (OURO_BASE_REFINAMENTO_POR_QUALIDADE) — os dois já eram
+// genéricos, só a resolução do ITEM CONCRETO de barra/tronco é que
+// dependia indevidamente do blueprint. Ferro/Carvalho têm cobertura
+// completa nas 6 qualidades (ForgeBarItem/ExpeditionResourceItem),
+// então servem de material universal de refino.
+let recursoBarraCache = null;
+let recursoTroncoCache = null;
+
+async function recursoBarraRefinamento(transaction) {
+  if (!recursoBarraCache) {
+    recursoBarraCache = await ExpeditionResource.findOne({ where: { nome: "Ferro", profissao: "Mineracao" }, transaction });
+  }
+  return recursoBarraCache;
+}
+
+async function recursoTroncoRefinamento(transaction) {
+  if (!recursoTroncoCache) {
+    recursoTroncoCache = await ExpeditionResource.findOne({ where: { nome: "Carvalho", profissao: "Silvicultura" }, transaction });
+  }
+  return recursoTroncoCache;
 }
 
 async function calcularMateriaisNecessarios(instancia, transaction) {
   const item = await Item.findByPk(instancia.id_item, { transaction });
-  const blueprint = await localizarBlueprintDoItem(instancia.id_item, transaction);
-  if (!item || !blueprint) return null;
+  if (!item) return null;
 
   const alvo = instancia.refinamento + 1;
   const unidades = UNIDADES_MATERIAL_REFINAMENTO_POR_ALVO[alvo] ?? 1;
-  const base = MATERIAIS_BASE_REFINAMENTO_POR_CATEGORIA[blueprint.categoria_equipamento] ?? { barras: 1, troncos: 0 };
-
-  const ingredienteBarra = blueprint.ingredientes.find((i) => i.tipo_insumo === "Barra");
-  const ingredienteTronco = blueprint.ingredientes.find((i) => i.tipo_insumo === "RecursoExpedicao");
+  const base = MATERIAIS_BASE_REFINAMENTO_POR_CATEGORIA[item.tipo_item] ?? { barras: 1, troncos: 0 };
 
   const materiais = [];
-  if (base.barras > 0 && ingredienteBarra) {
-    const idItemBarra = await resolverIdItemDoInsumo(
-      { tipo_insumo: "Barra", id_recurso: ingredienteBarra.id_recurso, qualidade: item.raridade },
-      transaction,
-    );
+  if (base.barras > 0) {
+    const recursoBarra = await recursoBarraRefinamento(transaction);
+    const idItemBarra = recursoBarra
+      ? await resolverIdItemDoInsumo({ tipo_insumo: "Barra", id_recurso: recursoBarra.id, qualidade: item.raridade }, transaction)
+      : null;
     if (idItemBarra) materiais.push({ id_item: idItemBarra, quantidade: base.barras * unidades, papel: "barras" });
   }
-  if (base.troncos > 0 && ingredienteTronco) {
-    const idItemTronco = await resolverIdItemDoInsumo(
-      { tipo_insumo: "RecursoExpedicao", id_recurso: ingredienteTronco.id_recurso, qualidade: item.raridade },
-      transaction,
-    );
+  if (base.troncos > 0) {
+    const recursoTronco = await recursoTroncoRefinamento(transaction);
+    const idItemTronco = recursoTronco
+      ? await resolverIdItemDoInsumo({ tipo_insumo: "RecursoExpedicao", id_recurso: recursoTronco.id, qualidade: item.raridade }, transaction)
+      : null;
     if (idItemTronco) materiais.push({ id_item: idItemTronco, quantidade: base.troncos * unidades, papel: "troncos" });
   }
 
   const ouro = (OURO_BASE_REFINAMENTO_POR_QUALIDADE[item.raridade] ?? 0) * unidades;
-  return { alvo, unidades, materiais, ouro, item, blueprint };
+  return { alvo, unidades, materiais, ouro, item };
 }
 
 // Prévia pra tela de Refinamento (spec §60) — nunca decide nada, só
