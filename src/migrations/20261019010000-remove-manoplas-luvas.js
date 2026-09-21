@@ -10,6 +10,14 @@
 // esse campo pra Escudo (equipmentInstanceService.resolverSlot manda
 // Escudo sempre pra ArmaSecundaria, fixo). Só os 5 itens de
 // Armadura/Manopla/Luva abaixo saem do jogo.
+//
+// Limpa TUDO relacionado a esses itens sozinha — nunca aborta pedindo
+// intervenção manual: desequipa quem estiver com um equipado, cancela
+// qualquer anúncio ativo no Mercado devolvendo o slot pra null, e só
+// depois apaga instância/estoque/receita/propriedades/item. Rodar de
+// novo depois de já ter rodado é sempre seguro (idempotente): se os 5
+// itens já não existirem mais em "Items", não há mais nada pra
+// desequipar/cancelar/apagar.
 const NOMES_REMOVIDOS = [
   "Luvas de Couro",
   "Manoplas de Ferro",
@@ -31,34 +39,44 @@ module.exports = {
     const ids = itens.map((i) => i.id);
     console.log(`[migration] Removendo ${itens.length} itens de Mãos:`, itens.map((i) => i.nome).join(", "));
 
-    // Auditoria antes de apagar — aborta se achar algo que exigiria
-    // tratamento manual (nada disso era esperado, ver investigação
-    // prévia: nenhum jogador tinha equipado, anunciado ou uma receita
-    // de Forja usando esses itens).
-    const [equipado] = await queryInterface.sequelize.query(
-      `SELECT ce.id_personagem, ce.slot FROM character_equipment ce
-       JOIN character_equipment_instances cei ON cei.id = ce.id_instancia
-       WHERE cei.id_item IN (:ids);`,
+    // Desequipa automaticamente quem estiver com um desses itens
+    // equipado agora — o slot "Maos" está sendo descontinuado de
+    // qualquer jeito, então o personagem simplesmente fica sem nada
+    // nesse slot (igual desequipar manualmente antes de vender/
+    // descartar o item).
+    const [desequipados] = await queryInterface.sequelize.query(
+      `DELETE FROM character_equipment ce
+       USING character_equipment_instances cei
+       WHERE cei.id = ce.id_instancia AND cei.id_item IN (:ids)
+       RETURNING ce.id_personagem;`,
       { replacements: { ids } },
     );
-    if (equipado.length > 0) {
-      throw new Error(
-        `Existem ${equipado.length} personagem(ns) com item de Mãos EQUIPADO agora — aborta pra não remover algo em uso: ${JSON.stringify(equipado)}`,
-      );
-    }
-    const [anunciado] = await queryInterface.sequelize.query(
-      `SELECT ml.id FROM market_listings ml
-       JOIN character_equipment_instances cei ON cei.id = ml.id_instancia
-       WHERE cei.id_item IN (:ids) AND ml.status = 'Ativo';`,
-      { replacements: { ids } },
-    );
-    if (anunciado.length > 0) {
-      throw new Error(`Existem ${anunciado.length} anúncio(s) ATIVO(s) no Mercado com item de Mãos — aborta.`);
+    if (desequipados.length > 0) {
+      console.log(`[migration] Desequipado automaticamente de ${desequipados.length} personagem(ns):`, desequipados.map((d) => d.id_personagem).join(", "));
     }
 
-    // Instâncias existentes (todas no inventário de algum jogador, sem
-    // estar equipadas/anunciadas — já confirmado acima) somem junto com
-    // o item, igual descontinuar qualquer outro item do catálogo.
+    // Cancela qualquer anúncio ativo no Mercado envolvendo esses itens
+    // — a instância vai deixar de existir, então o anúncio não pode
+    // continuar de pé. Ninguém perde ouro (a compra não aconteceu).
+    const [cancelados] = await queryInterface.sequelize.query(
+      `UPDATE market_listings SET status = 'Cancelado'
+       WHERE id_instancia IN (SELECT id FROM character_equipment_instances WHERE id_item IN (:ids))
+         AND status = 'Ativo'
+       RETURNING id;`,
+      { replacements: { ids } },
+    );
+    if (cancelados.length > 0) {
+      console.log(`[migration] ${cancelados.length} anúncio(s) ativo(s) no Mercado cancelado(s).`);
+    }
+    await queryInterface.sequelize.query(
+      `UPDATE market_listings SET id_instancia = NULL
+       WHERE id_instancia IN (SELECT id FROM character_equipment_instances WHERE id_item IN (:ids));`,
+      { replacements: { ids } },
+    );
+
+    // Instâncias existentes (agora garantidamente sem estar equipadas
+    // nem anunciadas) somem junto com o item, igual descontinuar
+    // qualquer outro item do catálogo.
     await queryInterface.sequelize.query(`DELETE FROM character_equipment_instances WHERE id_item IN (:ids);`, {
       replacements: { ids },
     });
