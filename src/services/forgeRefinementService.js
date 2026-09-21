@@ -66,20 +66,41 @@ async function calcularMateriaisNecessarios(instancia, transaction) {
   const unidades = UNIDADES_MATERIAL_REFINAMENTO_POR_ALVO[alvo] ?? 1;
   const base = MATERIAIS_BASE_REFINAMENTO_POR_CATEGORIA[item.tipo_item] ?? { barras: 1, troncos: 0 };
 
+  // nome/imagem do material — sem isso a prévia só tinha o id_item cru,
+  // e o frontend nunca conseguia mostrar PRA QUEM refina o que
+  // efetivamente precisa ter em mãos (só o custo em ouro aparecia).
   const materiais = [];
   if (base.barras > 0) {
     const recursoBarra = await recursoBarraRefinamento(transaction);
     const idItemBarra = recursoBarra
       ? await resolverIdItemDoInsumo({ tipo_insumo: "Barra", id_recurso: recursoBarra.id, qualidade: item.raridade }, transaction)
       : null;
-    if (idItemBarra) materiais.push({ id_item: idItemBarra, quantidade: base.barras * unidades, papel: "barras" });
+    if (idItemBarra) {
+      const itemBarra = await Item.findByPk(idItemBarra, { attributes: ["nome", "imagem_url"], transaction });
+      materiais.push({
+        id_item: idItemBarra,
+        quantidade: base.barras * unidades,
+        papel: "barras",
+        nome: itemBarra?.nome ?? "Barra",
+        imagem_url: itemBarra?.imagem_url ?? null,
+      });
+    }
   }
   if (base.troncos > 0) {
     const recursoTronco = await recursoTroncoRefinamento(transaction);
     const idItemTronco = recursoTronco
       ? await resolverIdItemDoInsumo({ tipo_insumo: "RecursoExpedicao", id_recurso: recursoTronco.id, qualidade: item.raridade }, transaction)
       : null;
-    if (idItemTronco) materiais.push({ id_item: idItemTronco, quantidade: base.troncos * unidades, papel: "troncos" });
+    if (idItemTronco) {
+      const itemTronco = await Item.findByPk(idItemTronco, { attributes: ["nome", "imagem_url"], transaction });
+      materiais.push({
+        id_item: idItemTronco,
+        quantidade: base.troncos * unidades,
+        papel: "troncos",
+        nome: itemTronco?.nome ?? "Tronco",
+        imagem_url: itemTronco?.imagem_url ?? null,
+      });
+    }
   }
 
   const ouro = (OURO_BASE_REFINAMENTO_POR_QUALIDADE[item.raridade] ?? 0) * unidades;
@@ -120,11 +141,22 @@ async function previaRefinamento(characterId, { id_instancia, id_item_pergaminho
 
   const chancePpm = chanceFinalRefinamentoPpm(info.alvo, nivelForja, bonusPergaminho);
 
+  // Quanto o jogador já tem de cada material — pro frontend mostrar
+  // "2/3" (igual já faz na tela de Fabricação) em vez de só o nome.
+  const materiaisComEstoque = await Promise.all(
+    info.materiais.map(async (material) => {
+      const entrada = await CharacterInventory.findOne({
+        where: { id_personagem: characterId, id_item: material.id_item },
+      });
+      return { ...material, quantidade_disponivel: entrada?.quantidade ?? 0 };
+    }),
+  );
+
   return {
     alvo: info.alvo,
     chance_percentual: chancePpm / 10_000,
     ouro_custo: info.ouro,
-    materiais: info.materiais,
+    materiais: materiaisComEstoque,
     pergaminho_aplicado: pergaminhoNome,
   };
 }
