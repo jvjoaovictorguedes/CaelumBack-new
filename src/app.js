@@ -65,6 +65,7 @@ const rankingRoutes = require("./routes/rankingRoutes");
 const adventureGuildRoutes = require("./routes/adventureGuildRoutes");
 const equipmentInstanceRoutes = require("./routes/equipmentInstanceRoutes");
 const inventoryV2Routes = require("./routes/inventoryV2Routes");
+const battleRoutes = require("./routes/battleRoutes");
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -83,7 +84,10 @@ app.disable("x-powered-by");
 // rejeitada sem handler derruba o processo inteiro (comportamento padrão
 // do Node desde a v15) mesmo depois do servidor já estar no ar.
 connectDB().catch((error) => {
-  console.error("Erro fatal e inesperado ao conectar ao banco de dados:", error);
+  console.error(
+    "Erro fatal e inesperado ao conectar ao banco de dados:",
+    error,
+  );
 });
 
 // CORS_ORIGIN é opcional fora de produção (comportamento de antes:
@@ -100,7 +104,7 @@ const origensPermitidas = (process.env.CORS_ORIGIN || "")
 
 if (emProducao && origensPermitidas.length === 0) {
   throw new Error(
-    "CORS_ORIGIN é obrigatório em produção (NODE_ENV=production) e não pode cair em \"*\". " +
+    'CORS_ORIGIN é obrigatório em produção (NODE_ENV=production) e não pode cair em "*". ' +
       'Defina CORS_ORIGIN="https://seusite.com" (separado por vírgula se houver mais de um) antes de subir o servidor.',
   );
 }
@@ -128,7 +132,7 @@ const corsOptions =
 // (quando enviado) leva um link quebrado.
 if (emProducao && !(process.env.RESEND_API_KEY && process.env.RESEND_FROM)) {
   throw new Error(
-    "RESEND_API_KEY e RESEND_FROM são obrigatórios em produção (NODE_ENV=production) — sem eles, \"esqueci minha senha\" nunca entrega e-mail nenhum. " +
+    'RESEND_API_KEY e RESEND_FROM são obrigatórios em produção (NODE_ENV=production) — sem eles, "esqueci minha senha" nunca entrega e-mail nenhum. ' +
       "Configure RESEND_API_KEY e RESEND_FROM antes de subir o servidor.",
   );
 }
@@ -207,7 +211,8 @@ app.use("/api/onboarding", onboardingRoutes);
 // jogador. Sempre depois de TODAS as rotas, senão intercepta tudo.
 app.use((req, res) => {
   res.status(404).json({
-    message: "Essa página ou recurso não existe. Verifique o link e tente de novo.",
+    message:
+      "Essa página ou recurso não existe. Verifique o link e tente de novo.",
   });
 });
 
@@ -234,10 +239,12 @@ const io = new SocketIOServer(server, {
       ? { origin: origensPermitidas, credentials: true }
       : { origin: "*" },
 });
+const registerBattleHandlers = require("./socket/battleSocket");
 registerPvpLiveHandlers(io);
 registerRankedLiveHandlers(io);
 registerGuildHandlers(io);
 registerMessagesHandlers(io);
+registerBattleHandlers(io);
 // rankedController usa isso pra emitir ranked:queue:update fora do
 // ciclo de socket (join/leave da fila são rotas REST, não eventos), e
 // messageController faz o mesmo pra message:new/inbox:update quando a
