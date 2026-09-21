@@ -196,8 +196,9 @@ GuildBossAttempt.belongsTo(Guild, { foreignKey: "id_guild" });
 GuildBossContribution.belongsTo(GuildBossAttempt, { foreignKey: "id_guild_boss_attempt" });
 GuildBossContribution.belongsTo(Character, { foreignKey: "id_personagem" });
 
-// Arena Ranqueada (PvP Competitivo v1) — separado do Duelo
-// casual/PvpStatus/Ranking PvP v2, ver rankedConfig.js.
+// Arena Ranqueada (PvP Competitivo v1) — também é a fonte da aba PvP do
+// Ranking geral (rankingService.js); o Duelo casual (PvpStatus) fica de
+// fora de qualquer ranking, ver rankedConfig.js.
 PvPSeason.hasMany(CharacterPvpSeason, { foreignKey: "season_id", as: "participacoes" });
 CharacterPvpSeason.belongsTo(PvPSeason, { foreignKey: "season_id", as: "temporada" });
 CharacterPvpSeason.belongsTo(Character, { foreignKey: "character_id", as: "personagem" });

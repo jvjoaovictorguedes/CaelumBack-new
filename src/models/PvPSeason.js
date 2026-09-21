@@ -1,9 +1,10 @@
 const { DataTypes } = require("sequelize");
 const { sequelize } = require("../config/database");
 
-// Temporada da Arena Ranqueada (PvP Competitivo v1, §7). Não confundir
-// com o Ranking PvP v2 (rankingService.js) — aquele usa PvpStatus e
-// continua existindo à parte, sem relação com rating/temporada.
+// Temporada da Arena Ranqueada (PvP Competitivo v1, §7). O Ranking PvP
+// v2 (rankingService.js) usa esta mesma temporada/rating — o Duelo
+// casual (PvpStatus) não entra em nenhum ranking, só estatística própria
+// da aba Casual.
 const PvPSeason = sequelize.define(
   "PvPSeason",
   {

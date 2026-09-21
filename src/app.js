@@ -65,7 +65,6 @@ const rankingRoutes = require("./routes/rankingRoutes");
 const adventureGuildRoutes = require("./routes/adventureGuildRoutes");
 const equipmentInstanceRoutes = require("./routes/equipmentInstanceRoutes");
 const inventoryV2Routes = require("./routes/inventoryV2Routes");
-const battleRoutes = require("./routes/battleRoutes");
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -239,12 +238,10 @@ const io = new SocketIOServer(server, {
       ? { origin: origensPermitidas, credentials: true }
       : { origin: "*" },
 });
-const registerBattleHandlers = require("./socket/battleSocket");
 registerPvpLiveHandlers(io);
 registerRankedLiveHandlers(io);
 registerGuildHandlers(io);
 registerMessagesHandlers(io);
-registerBattleHandlers(io);
 // rankedController usa isso pra emitir ranked:queue:update fora do
 // ciclo de socket (join/leave da fila são rotas REST, não eventos), e
 // messageController faz o mesmo pra message:new/inbox:update quando a

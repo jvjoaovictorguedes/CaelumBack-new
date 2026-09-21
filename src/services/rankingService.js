@@ -2,19 +2,16 @@
 // isto e monta a resposta; toda ordenação/filtro/paginação é
 // server-authoritative (§25). "Sua posição" é sempre uma query
 // separada (§19) — nunca exige carregar o ranking inteiro.
+const { Op } = require("sequelize");
 const { sequelize } = require("../config/database");
 const Character = require("../models/Character");
 const Guild = require("../models/Guild");
-const PvpStatus = require("../models/PvpStatus");
+const CharacterPvpSeason = require("../models/CharacterPvpSeason");
 const CharacterForgeProgress = require("../models/CharacterForgeProgress");
 const { estaOnline } = require("../socket/pvpLiveSocket");
-const {
-  TAMANHO_PAGINA_PADRAO,
-  PVP_MINIMO_COMBATES,
-  PVP_BONUS_ATIVIDADE_MAXIMO,
-  PVP_DIVISOR_BONUS_ATIVIDADE,
-  PVP_PESO_SALDO,
-} = require("../config/rankingConfig");
+const { obterOuIniciarTemporadaAtiva } = require("./rankedSeasonService");
+const { LEADERBOARD_MINIMO_PARTIDAS } = require("../config/rankedConfig");
+const { TAMANHO_PAGINA_PADRAO } = require("../config/rankingConfig");
 
 function paginar(page) {
   const pagina = Math.max(1, Number.parseInt(page, 10) || 1);
@@ -24,16 +21,6 @@ function paginar(page) {
 
 function paginaDeResposta(pagina, limite, totalItens, itens) {
   return { itens, pagina, totalPaginas: Math.max(1, Math.ceil(totalItens / limite)), totalItens };
-}
-
-function pontuacaoPvp(vitorias, derrotas) {
-  const saldo = vitorias - derrotas;
-  const combates = vitorias + derrotas;
-  const atividade = Math.min(
-    PVP_BONUS_ATIVIDADE_MAXIMO,
-    Math.floor(combates / PVP_DIVISOR_BONUS_ATIVIDADE),
-  );
-  return saldo * PVP_PESO_SALDO + atividade;
 }
 
 // ---------------------------------------------------------------
@@ -262,110 +249,82 @@ async function posicaoForja(idPersonagem) {
 }
 
 // ---------------------------------------------------------------
-// PvP (§8-§13) — Pontuação PvP = (saldo × 10) + bônus de atividade
-// (floor(combates/5), máx. 30). Só entra no Top quem tem >= 10 combates
-// E saldo >= 0 (§9). Desempate na ordem exata do §13.
+// PvP — o Ranking geral (aba "PvP") reflete exclusivamente a Arena
+// Ranqueada (rating Elo da temporada ativa), nunca o Duelo casual: o
+// casual é só pra jogar sem compromisso, não conta pra troféu/posição
+// nenhuma. Pontuação exibida = rating da temporada. Mesmo mínimo de
+// partidas do leaderboard ranqueado (rankedConfig.LEADERBOARD_MINIMO_
+// PARTIDAS) pra entrar no Top, pra não expor rating de placement cedo
+// demais. Desempate: rating > vitórias > menos jogos.
 // ---------------------------------------------------------------
 async function rankingPvp(page) {
   const { pagina, offset, limite } = paginar(page);
+  const temporada = await obterOuIniciarTemporadaAtiva();
 
-  const [linhasContagem] = await sequelize.query(
-    `SELECT COUNT(*)::int AS count FROM "PvpStatuses"
-     WHERE total_batalhas >= :minimo AND (vitorias - derrotas) >= 0;`,
-    { replacements: { minimo: PVP_MINIMO_COMBATES } },
-  );
-  const totalItens = linhasContagem[0].count;
+  const { count, rows } = await CharacterPvpSeason.findAndCountAll({
+    where: { season_id: temporada.id, jogos: { [Op.gte]: LEADERBOARD_MINIMO_PARTIDAS } },
+    include: [{ model: Character, as: "personagem", attributes: ["id", "nome"] }],
+    order: [
+      ["rating", "DESC"],
+      ["vitorias", "DESC"],
+      ["jogos", "ASC"],
+    ],
+    limit: limite,
+    offset,
+  });
 
-  const [linhas] = await sequelize.query(
-    `SELECT
-       ps.id_personagem AS id,
-       c.nome AS nome,
-       ps.vitorias, ps.derrotas, ps.total_batalhas AS combates,
-       (ps.vitorias - ps.derrotas) AS saldo,
-       ((ps.vitorias - ps.derrotas) * :peso
-         + LEAST(:bonusMax, FLOOR((ps.vitorias + ps.derrotas) / :divisor))) AS pontuacao
-     FROM "PvpStatuses" ps
-     JOIN "Characters" c ON c.id = ps.id_personagem
-     WHERE ps.total_batalhas >= :minimo AND (ps.vitorias - ps.derrotas) >= 0
-     ORDER BY pontuacao DESC, saldo DESC, ps.vitorias DESC, ps.total_batalhas DESC, ps.derrotas ASC, ps.id_personagem ASC
-     LIMIT :limite OFFSET :offset;`,
-    {
-      replacements: {
-        minimo: PVP_MINIMO_COMBATES,
-        peso: PVP_PESO_SALDO,
-        bonusMax: PVP_BONUS_ATIVIDADE_MAXIMO,
-        divisor: PVP_DIVISOR_BONUS_ATIVIDADE,
-        limite,
-        offset,
-      },
-    },
-  );
-
-  const itens = linhas.map((linha, indice) => ({
+  const itens = rows.map((linha, indice) => ({
     posicao: offset + indice + 1,
-    id: linha.id,
-    nome: linha.nome,
-    pontuacao: Number(linha.pontuacao),
+    id: linha.character_id,
+    nome: linha.personagem?.nome ?? "???",
+    pontuacao: linha.rating,
     vitorias: linha.vitorias,
     derrotas: linha.derrotas,
-    saldo: Number(linha.saldo),
-    combates: linha.combates,
-    online: estaOnline(linha.id),
+    saldo: linha.vitorias - linha.derrotas,
+    combates: linha.jogos,
+    online: estaOnline(linha.character_id),
   }));
 
-  return paginaDeResposta(pagina, limite, totalItens, itens);
+  return paginaDeResposta(pagina, limite, count, itens);
 }
 
 async function posicaoPvp(idPersonagem) {
-  const status = await PvpStatus.findByPk(idPersonagem);
-  if (!status) {
-    return {
-      elegivel: false,
-      motivo: "Ainda não classificado. Complete pelo menos 10 combates PvP e mantenha saldo não negativo.",
-    };
+  const temporada = await obterOuIniciarTemporadaAtiva();
+  const participacao = await CharacterPvpSeason.findOne({
+    where: { character_id: idPersonagem, season_id: temporada.id },
+  });
+
+  const naoClassificado = {
+    elegivel: false,
+    motivo: `Ainda não classificado. Jogue pelo menos ${LEADERBOARD_MINIMO_PARTIDAS} partidas na Arena Ranqueada nesta temporada (o Duelo casual não conta pro ranking).`,
+    vitorias: participacao?.vitorias ?? 0,
+    derrotas: participacao?.derrotas ?? 0,
+    saldo: (participacao?.vitorias ?? 0) - (participacao?.derrotas ?? 0),
+    combates: participacao?.jogos ?? 0,
+  };
+
+  if (!participacao || participacao.jogos < LEADERBOARD_MINIMO_PARTIDAS) {
+    return naoClassificado;
   }
 
-  const saldo = status.vitorias - status.derrotas;
-  const elegivel = status.total_batalhas >= PVP_MINIMO_COMBATES && saldo >= 0;
-  if (!elegivel) {
-    return {
-      elegivel: false,
-      motivo: "Ainda não classificado. Complete pelo menos 10 combates PvP e mantenha saldo não negativo.",
-      vitorias: status.vitorias,
-      derrotas: status.derrotas,
-      saldo,
-      combates: status.total_batalhas,
-    };
-  }
-
-  const pontuacao = pontuacaoPvp(status.vitorias, status.derrotas);
-
-  // Mesma comparação de tupla usada no ORDER BY do ranking (§13), só
-  // que aqui conta quantos ficariam ANTES de mim — evita carregar o
-  // ranking inteiro só pra achar minha posição (§19).
+  // Mesma comparação de tupla usada no ORDER BY do ranking, só que aqui
+  // conta quantos ficariam ANTES de mim — evita carregar o ranking
+  // inteiro só pra achar minha posição (§19).
   const [linhas] = await sequelize.query(
-    `SELECT COUNT(*)::int AS count FROM "PvpStatuses" ps
-     WHERE ps.total_batalhas >= :minimo AND (ps.vitorias - ps.derrotas) >= 0
+    `SELECT COUNT(*)::int AS count FROM character_pvp_seasons cps
+     WHERE cps.season_id = :seasonId AND cps.jogos >= :minimo
        AND (
-         ((ps.vitorias - ps.derrotas) * :peso + LEAST(:bonusMax, FLOOR((ps.vitorias + ps.derrotas) / :divisor))),
-         (ps.vitorias - ps.derrotas),
-         ps.vitorias,
-         ps.total_batalhas,
-         -ps.derrotas,
-         -ps.id_personagem
-       ) > (:pontuacao, :saldo, :vitorias, :combates, :derrotasNeg, :idNeg);`,
+         cps.rating > :rating
+         OR (cps.rating = :rating AND cps.vitorias > :vitorias)
+         OR (cps.rating = :rating AND cps.vitorias = :vitorias AND cps.jogos < :jogos)
+       );`,
     {
       replacements: {
-        minimo: PVP_MINIMO_COMBATES,
-        peso: PVP_PESO_SALDO,
-        bonusMax: PVP_BONUS_ATIVIDADE_MAXIMO,
-        divisor: PVP_DIVISOR_BONUS_ATIVIDADE,
-        pontuacao,
-        saldo,
-        vitorias: status.vitorias,
-        combates: status.total_batalhas,
-        derrotasNeg: -status.derrotas,
-        idNeg: -idPersonagem,
+        seasonId: temporada.id,
+        minimo: LEADERBOARD_MINIMO_PARTIDAS,
+        rating: participacao.rating,
+        vitorias: participacao.vitorias,
+        jogos: participacao.jogos,
       },
     },
   );
@@ -373,11 +332,11 @@ async function posicaoPvp(idPersonagem) {
   return {
     elegivel: true,
     posicao: linhas[0].count + 1,
-    pontuacao,
-    vitorias: status.vitorias,
-    derrotas: status.derrotas,
-    saldo,
-    combates: status.total_batalhas,
+    pontuacao: participacao.rating,
+    vitorias: participacao.vitorias,
+    derrotas: participacao.derrotas,
+    saldo: participacao.vitorias - participacao.derrotas,
+    combates: participacao.jogos,
   };
 }
 
@@ -392,7 +351,6 @@ module.exports = {
   posicaoForja,
   rankingPvp,
   posicaoPvp,
-  pontuacaoPvp,
   rankingBoss,
   posicaoBoss,
 };
