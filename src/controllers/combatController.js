@@ -183,6 +183,68 @@ function gerarInimigo(jogador, nomeAlvo, opcoes = {}) {
   };
 }
 
+// Mesma calibração de gerarInimigo acima, só que pro modo em grupo
+// (Aventura em party — ver src/socket/partySocket.js): em vez da vida/
+// ataque de UM jogador, usa a SOMA de vida_maxima e de dano esperado do
+// grupo inteiro pra vida do monstro (N aliados batem nele por rodada,
+// então precisa aguentar os N golpes, não só o de um), mas o dano do
+// monstro continua calibrado pela vida MÉDIA de um único aliado (o
+// monstro só ataca UM aliado por vez, então escalar pela vida somada do
+// grupo inteiro deixaria esse golpe absurdamente forte contra quem for
+// atingido). Nível/agilidade/velocidade usam a média do grupo.
+function gerarInimigoDeGrupo(
+  { vidaTotalGrupo, ataqueTotalGrupo, vidaMediaAliado, nivelMedio, agilidadeMedia, velocidadeMedia },
+  nomeAlvo,
+  opcoes = {},
+) {
+  const { nivelForcado, multiplicadores } = opcoes;
+  const mult = {
+    vida: multiplicadores?.vida ?? 1,
+    dano: multiplicadores?.dano ?? 1,
+    agilidade: multiplicadores?.agilidade ?? 1,
+    velocidade: multiplicadores?.velocidade ?? 1,
+  };
+  const nivel = Math.max(1, nivelForcado ?? nivelMedio ?? 1);
+  const variacao = () => 0.9 + Math.random() * 0.2;
+
+  const diferencaDeNivel = Math.max(0, nivel - (nivelMedio ?? 1));
+  const escalaPorNivel = Math.min(
+    ESCALA_MAXIMA_POR_DIFERENCA_DE_NIVEL,
+    1 + diferencaDeNivel * FATOR_ESCALA_POR_NIVEL_ACIMA_DO_JOGADOR,
+  );
+
+  const vidaMaxima = Math.max(
+    20,
+    Math.round(ataqueTotalGrupo * RODADAS_PARA_MATAR_INIMIGO * variacao() * mult.vida * escalaPorNivel),
+  );
+  const danoBase = Math.max(
+    1,
+    Math.round(
+      (vidaMediaAliado / RODADAS_PARA_INIMIGO_MATAR_JOGADOR) * variacao() * mult.dano * escalaPorNivel,
+    ),
+  );
+
+  const agilidade = Math.max(1, Math.round((agilidadeMedia || 1) * variacao() * mult.agilidade));
+  const velocidade = Math.max(1, Math.round((velocidadeMedia || 1) * variacao() * mult.velocidade));
+  const forca = Math.max(1, Math.round((danoBase - 3) / 0.7));
+  const vitalidade = Math.max(1, Math.round((vidaMaxima - 20) / 5));
+
+  return {
+    nome: nomeAlvo ?? sortear(NOMES_INIMIGOS),
+    nivel,
+    forca,
+    vitalidade,
+    agilidade,
+    velocidade,
+    vida_maxima: vidaMaxima,
+    vida_atual: vidaMaxima,
+    dano_base: danoBase,
+  };
+}
+
+exports.gerarInimigo = gerarInimigo;
+exports.gerarInimigoDeGrupo = gerarInimigoDeGrupo;
+
 // GET /api/combat/enemy/:characterId
 // Gera um inimigo compatível com o nível do personagem.
 //

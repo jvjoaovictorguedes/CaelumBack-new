@@ -9,6 +9,7 @@ const registerPvpLiveHandlers = require("./socket/pvpLiveSocket");
 const registerRankedLiveHandlers = require("./socket/rankedLiveSocket");
 const registerGuildHandlers = require("./socket/guildSocket");
 const registerMessagesHandlers = require("./socket/messagesSocket");
+const registerPartyHandlers = require("./socket/partySocket");
 
 // Importa TODOS os modelos primeiro.
 // A ordem de importação dos modelos aqui geralmente não importa,
@@ -242,6 +243,7 @@ registerPvpLiveHandlers(io);
 registerRankedLiveHandlers(io);
 registerGuildHandlers(io);
 registerMessagesHandlers(io);
+registerPartyHandlers(io);
 // rankedController usa isso pra emitir ranked:queue:update fora do
 // ciclo de socket (join/leave da fila são rotas REST, não eventos), e
 // messageController faz o mesmo pra message:new/inbox:update quando a
