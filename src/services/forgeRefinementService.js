@@ -124,7 +124,7 @@ async function previaRefinamento(characterId, { id_instancia, id_item_pergaminho
   if (!instancia) throw Object.assign(new Error("Equipamento não encontrado."), { statusCode: 404 });
   if (instancia.estado === "Mercado") {
     throw Object.assign(
-      new Error("Esse equipamento está anunciado no Mercado — cancele o anúncio antes de refinar."),
+      new Error("Esse equipamento está anunciado no Mercado Negro — cancele o anúncio antes de refinar."),
       { statusCode: 400 },
     );
   }
@@ -186,7 +186,7 @@ async function iniciarRefinamento(characterId, { id_instancia, id_item_pergaminh
     // contrário (equipamento anunciado é imutável até vender/cancelar).
     if (instancia.estado === "Mercado") {
       throw Object.assign(
-        new Error("Esse equipamento está anunciado no Mercado — cancele o anúncio antes de refinar."),
+        new Error("Esse equipamento está anunciado no Mercado Negro — cancele o anúncio antes de refinar."),
         { statusCode: 400 },
       );
     }

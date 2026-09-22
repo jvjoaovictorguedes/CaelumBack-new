@@ -73,7 +73,7 @@ exports.obterProgresso = async (req, res) => {
       },
       {
         chave: "mercado",
-        titulo: "Negocie no Mercado",
+        titulo: "Negocie no Mercado Negro",
         descricao: "Compre algo de outro jogador ou anuncie um item seu pra vender.",
         rota: "/dashboard/market",
         concluido: anuncios > 0 || transacoes > 0,

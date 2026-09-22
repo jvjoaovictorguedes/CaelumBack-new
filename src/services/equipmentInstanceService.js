@@ -79,7 +79,7 @@ async function equip(idPersonagem, idInstancia, transaction) {
     throw erro("Este equipamento não pertence a você.", 403);
   }
   if (instancia.estado === ESTADOS.MERCADO) {
-    throw erro("Este equipamento está anunciado no Mercado — cancele o anúncio antes de equipar.", 400);
+    throw erro("Este equipamento está anunciado no Mercado Negro — cancele o anúncio antes de equipar.", 400);
   }
 
   const item = await Item.findByPk(instancia.id_item, { transaction });
@@ -143,7 +143,7 @@ async function reserveForMarket(idPersonagem, idInstancia, transaction) {
     throw erro("Este equipamento não pertence a você.", 403);
   }
   if (instancia.estado !== ESTADOS.INVENTARIO) {
-    throw erro("Esse equipamento precisa estar no inventário (não equipado, não já anunciado) pra anunciar no Mercado.", 400);
+    throw erro("Esse equipamento precisa estar no inventário (não equipado, não já anunciado) pra anunciar no Mercado Negro.", 400);
   }
   instancia.estado = ESTADOS.MERCADO;
   await instancia.save({ transaction });
