@@ -38,6 +38,7 @@ const {
 } = require("./pvpLiveSocket");
 
 const TAMANHO_MAXIMO_GRUPO = 4;
+const TAMANHO_MINIMO_GRUPO = 2;
 const PRAZO_CONVITE_MS = 20000;
 const PRAZO_TURNO_MS = 20000;
 const MAX_RODADAS = 40;
@@ -150,6 +151,10 @@ module.exports = function registerPartyHandlers(io) {
         grupos.set(grupo.id, grupo);
       } else if (grupo.hostId !== idConvidante) {
         return socket.emit("party:erro", { mensagem: "Só o anfitrião do grupo pode chamar mais gente." });
+      }
+
+      if (grupo.emBatalha) {
+        return socket.emit("party:erro", { mensagem: "Não dá pra chamar mais gente com o grupo em batalha." });
       }
 
       if (grupo.membros.size >= TAMANHO_MAXIMO_GRUPO) {
@@ -265,6 +270,9 @@ module.exports = function registerPartyHandlers(io) {
       if (grupo.hostId !== characterId) {
         return socket.emit("party:erro", { mensagem: "Só o anfitrião pode remover alguém do grupo." });
       }
+      if (grupo.emBatalha) {
+        return socket.emit("party:erro", { mensagem: "Não dá pra remover alguém com o grupo em batalha." });
+      }
       const chaveAlvo = chaveOnline(idAlvo);
       if (chaveAlvo === characterId) {
         return socket.emit("party:erro", { mensagem: 'Use "Sair do grupo" pra sair você mesmo.' });
@@ -295,8 +303,11 @@ module.exports = function registerPartyHandlers(io) {
       if (grupo.hostId !== characterId) {
         return socket.emit("party:erro", { mensagem: "Só o anfitrião pode iniciar a aventura." });
       }
-      if (grupo.membros.size < 2) {
-        return socket.emit("party:erro", { mensagem: "Precisa de pelo menos 2 aventureiros pra formar um grupo." });
+      if (grupo.emBatalha) {
+        return socket.emit("party:erro", { mensagem: "O grupo já está em batalha." });
+      }
+      if (grupo.membros.size < TAMANHO_MINIMO_GRUPO) {
+        return socket.emit("party:erro", { mensagem: `Precisa de pelo menos ${TAMANHO_MINIMO_GRUPO} aventureiros pra formar um grupo.` });
       }
       const naoProntos = grupo.ordem.filter((id) => !grupo.membros.get(id)?.pronto);
       if (naoProntos.length > 0) {
@@ -333,9 +344,23 @@ module.exports = function registerPartyHandlers(io) {
 
         const escolhido = sortearMonstroDaZona(monstrosDaZona);
         const nivelSorteado = sortearNivelMonstro(escolhido, zona);
+
+        // A soma de atributos do grupo (vidaTotalGrupo/ataqueTotalGrupo)
+        // já deixa o monstro mais "gordo" com mais gente, mas o monstro
+        // só ataca UM aliado por rodada — então, sem mais nada, quanto
+        // maior o grupo, mais diluído (mais fácil por pessoa) fica o
+        // risco. Esse bônus extra, por cabeça além do mínimo de
+        // TAMANHO_MINIMO_GRUPO, compensa isso com um pouco mais de vida e
+        // dano do inimigo (moderado — o resto do design já favorece ir
+        // em grupo: XP/ouro cheios pra todo mundo, não divididos).
+        const aventureirosExtras = Math.max(0, grupo.ordem.length - TAMANHO_MINIMO_GRUPO);
+        const fatorDificuldadeGrupo = {
+          vida: 1 + aventureirosExtras * 0.12,
+          dano: 1 + aventureirosExtras * 0.08,
+        };
         const multiplicadores = {
-          vida: escolhido.monstro.multiplicador_vida,
-          dano: escolhido.monstro.multiplicador_dano,
+          vida: escolhido.monstro.multiplicador_vida * fatorDificuldadeGrupo.vida,
+          dano: escolhido.monstro.multiplicador_dano * fatorDificuldadeGrupo.dano,
           agilidade: escolhido.monstro.multiplicador_agilidade,
           velocidade: escolhido.monstro.multiplicador_velocidade,
         };
@@ -351,6 +376,7 @@ module.exports = function registerPartyHandlers(io) {
         const batalha = {
           id: battleId,
           sala,
+          partyId,
           zona: { id: zona.id, nome: zona.nome },
           ordem: grupo.ordem.slice(),
           membros: new Map(membros.map((m) => [chaveOnline(m.id), m])),
@@ -371,10 +397,13 @@ module.exports = function registerPartyHandlers(io) {
           io.sockets.sockets.get(socketId)?.join(sala);
         }
 
-        grupos.delete(partyId);
-        for (const id of grupo.ordem) {
-          grupoPorPersonagem.delete(id);
-        }
+        // O grupo continua existindo durante a batalha (só trava convite/
+        // expulsão/novo início enquanto emBatalha) — antes ele era
+        // apagado aqui, e como nada o recriava depois, terminar uma
+        // aventura em grupo desfazia o grupo inteiro mesmo sem o
+        // anfitrião ter saído (bug reportado). Ele volta pro lobby (ver
+        // finalizarBatalha) quando a batalha termina.
+        grupo.emBatalha = true;
 
         io.to(sala).emit("party:batalha-iniciada", {
           battleId,
@@ -705,5 +734,20 @@ async function finalizarBatalha(io, battleId, vitoria, motivo = vitoria ? "comba
 
   for (const socketId of io.sockets.adapter.rooms.get(batalha.sala) || []) {
     io.sockets.sockets.get(socketId)?.leave(batalha.sala);
+  }
+
+  // O grupo sobrevive à aventura — só o anfitrião desfazendo (saindo,
+  // ver removerDoGrupo) encerra o grupo de verdade. Terminar uma run
+  // (vitória, derrota ou abandono por desconexão) só devolve todo mundo
+  // pro lobby, prontos pra encarar outra sem precisar se convidar de
+  // novo. Se o próprio anfitrião já tiver saído/desfeito o grupo durante
+  // a batalha, `grupo` não existe mais aqui — nada a restaurar.
+  const grupo = grupos.get(batalha.partyId);
+  if (grupo) {
+    grupo.emBatalha = false;
+    for (const membro of grupo.membros.values()) {
+      membro.pronto = false;
+    }
+    emitirGrupoAtualizado(io, grupo);
   }
 }
