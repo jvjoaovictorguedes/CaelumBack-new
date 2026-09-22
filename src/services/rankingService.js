@@ -298,7 +298,11 @@ async function posicaoPvp(idPersonagem) {
 
   const naoClassificado = {
     elegivel: false,
-    motivo: `Ainda não classificado. Jogue pelo menos ${LEADERBOARD_MINIMO_PARTIDAS} partidas na Arena Ranqueada nesta temporada (o Duelo casual não conta pro ranking).`,
+    // §14 — entra desde a 1ª partida válida; só 0 partidas fica de fora.
+    motivo:
+      LEADERBOARD_MINIMO_PARTIDAS === 1
+        ? "Ainda não classificado. Dispute pelo menos uma partida na Arena Ranqueada nesta temporada (o Duelo casual não conta pro ranking ranqueado)."
+        : `Ainda não classificado. Jogue pelo menos ${LEADERBOARD_MINIMO_PARTIDAS} partidas na Arena Ranqueada nesta temporada (o Duelo casual não conta pro ranking ranqueado).`,
     vitorias: participacao?.vitorias ?? 0,
     derrotas: participacao?.derrotas ?? 0,
     saldo: (participacao?.vitorias ?? 0) - (participacao?.derrotas ?? 0),
