@@ -6,7 +6,8 @@ const { sequelize } = require("../config/database");
 const PvPSeason = require("../models/PvPSeason");
 const CharacterPvpSeason = require("../models/CharacterPvpSeason");
 const { softReset } = require("./rankedRatingService");
-const { DURACAO_TEMPORADA_DIAS } = require("../config/rankedConfig");
+const { DURACAO_TEMPORADA_DIAS, LEADERBOARD_MINIMO_PARTIDAS } = require("../config/rankedConfig");
+const { Op } = require("sequelize");
 
 const MS_POR_DIA = 24 * 60 * 60 * 1000;
 // §13 — janelas FIXAS de 14 dias corridos contadas a partir do
@@ -127,10 +128,52 @@ function diasRestantes(temporada) {
   return Math.max(0, Math.ceil(restanteMs / MS_POR_DIA));
 }
 
+// Medalhas do perfil — pedido explícito: passam a ser do RANQUEADO, não
+// mais de pódio de Torneio (Torneio agora só concede Troféu, ver
+// tournamentStatsService.podioDoPersonagem). Ouro/Prata/Bronze = quantas
+// vezes o personagem terminou em 1º/2º/3º no leaderboard de uma
+// temporada já ENCERRADA — mesma ordenação e mesmo mínimo de partidas
+// do leaderboard público (rankedController.leaderboard), pra o pódio
+// nunca divergir de quem realmente apareceu em 1º/2º/3º na temporada.
+// Tudo derivado por agregação, sem contador manual: a temporada ativa
+// nunca entra na contagem (ainda não terminou).
+async function medalhasDoPersonagem(characterId) {
+  const temporadasEncerradas = await PvPSeason.findAll({
+    where: { status: "Encerrada" },
+    attributes: ["id"],
+  });
+
+  let ouro = 0;
+  let prata = 0;
+  let bronze = 0;
+
+  for (const temporada of temporadasEncerradas) {
+    // eslint-disable-next-line no-await-in-loop -- poucas temporadas (uma a cada 14 dias), clareza > uma query com window function aqui.
+    const top3 = await CharacterPvpSeason.findAll({
+      where: { season_id: temporada.id, jogos: { [Op.gte]: LEADERBOARD_MINIMO_PARTIDAS } },
+      order: [
+        ["rating", "DESC"],
+        ["vitorias", "DESC"],
+        ["jogos", "ASC"],
+      ],
+      limit: 3,
+      attributes: ["character_id"],
+    });
+
+    const posicao = top3.findIndex((linha) => linha.character_id === characterId);
+    if (posicao === 0) ouro += 1;
+    else if (posicao === 1) prata += 1;
+    else if (posicao === 2) bronze += 1;
+  }
+
+  return { ouro, prata, bronze };
+}
+
 module.exports = {
   diasRestantes,
   criarProximaTemporada,
   obterTemporadaAtiva,
   obterOuIniciarTemporadaAtiva,
   encerrarTemporadaEIniciarProxima,
+  medalhasDoPersonagem,
 };

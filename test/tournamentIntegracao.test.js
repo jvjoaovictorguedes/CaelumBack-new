@@ -296,10 +296,12 @@ testeComBanco("MD3 precisa de 2 vitórias; MD5 (final) precisa de 3", async () =
   assert.equal(campeao.final_placement, 1);
   assert.equal(vice.final_placement, 2);
 
-  // Pódio derivado (troféus === 1os lugares).
+  // Troféu vem do torneio (campeonato); medalha NÃO — medalha agora é
+  // só de temporada ranqueada encerrada (ver teste dedicado abaixo).
+  // Ganhar um torneio não gera Ouro nenhum por si só.
   const podio = await tournamentStatsService.podioDoPersonagem(campeao.character_id);
-  assert.equal(podio.ouro, 1);
-  assert.equal(podio.trofeus, podio.ouro);
+  assert.equal(podio.trofeus, 1);
+  assert.equal(podio.ouro, 0);
   assert.equal(podio.prata, 0);
 });
 
@@ -498,6 +500,82 @@ testeComBanco("cancelamento fecha o torneio e bloqueia novo cancelamento após f
     /finalizado/,
   );
 });
+
+// -------------------- Desconexão no meio de um jogo --------------------
+//
+// Regressão: um jogador caindo no MEIO de um jogo de torneio (não no
+// ready check) tinha que passar pelo mesmo finalize que o fim por
+// combate já usa (duelo.finalizar), senão a série nunca recebia o
+// resultado e a chave travava — foi exatamente o bug relatado (W.O. sem
+// avançar pra próxima fase). Simula o disconnect direto pelo módulo do
+// duelo ao vivo, sem precisar de um socket.io real.
+testeComBanco(
+  "desconexão no meio de um jogo de torneio avança a série (não só o fim por combate)",
+  async () => {
+    const pvpLiveSocket = require("../src/socket/pvpLiveSocket");
+    const tournamentSocket = require("../src/socket/tournamentSocket");
+
+    const admin = await adminDeTeste();
+    const { torneio } = await torneioComInscritos(4, { adminUserId: admin.id });
+    await tournamentService.iniciar({ torneioId: torneio.id });
+    const semi = await TournamentSeries.findOne({
+      where: { tournament_id: torneio.id, round: "Semifinal", posicao: 0 },
+    });
+    const participanteA = await TournamentParticipant.findByPk(semi.participant_a_id);
+    const participanteB = await TournamentParticipant.findByPk(semi.participant_b_id);
+
+    // Jogo 1 da série termina por combate normal (não é o que estamos
+    // testando) — deixa a série em 1-0 pra A.
+    await vencerSerieUmJogo(semi, semi.participant_a_id);
+
+    // Jogo 2 (decisivo, MD3 = 2 vitórias): B desconecta no meio da
+    // partida. Registra um duelo "de verdade" nos mapas do módulo,
+    // exatamente como tournamentSocket.iniciarJogoDaSerie faria, e
+    // simula o evento de disconnect.
+    const duelId = pvpLiveSocket.alocarDuelId();
+    const ioFalso = {
+      to: () => ({ emit: () => {} }),
+      sockets: { adapter: { rooms: new Map() }, sockets: new Map() },
+    };
+    pvpLiveSocket.duelos.set(duelId, {
+      id: duelId,
+      sala: `torneio:${duelId}`,
+      a: { id: participanteA.character_id, nome: "A" },
+      b: { id: participanteB.character_id, nome: "B" },
+      torneio: true,
+      serieId: semi.id,
+      participantAId: semi.participant_a_id,
+      participantBId: semi.participant_b_id,
+      finalizar: tournamentSocket.finalizarJogoDeTorneio,
+      timer: null,
+    });
+
+    await pvpLiveSocket.finalizarDueloPorDesistencia(
+      ioFalso,
+      duelId,
+      participanteB.character_id,
+    );
+
+    const semiAtualizada = await TournamentSeries.findByPk(semi.id);
+    assert.equal(semiAtualizada.status, "Finalizada", "a série precisa ter recebido o resultado");
+    assert.equal(semiAtualizada.winner_participant_id, semi.participant_a_id);
+    assert.equal(semiAtualizada.score_a, 2);
+
+    // E o vencedor avançou de verdade pra Final — não só a série local
+    // ficou marcada como finalizada.
+    const final = await TournamentSeries.findOne({
+      where: { tournament_id: torneio.id, round: "Final" },
+    });
+    assert.equal(final.participant_a_id ?? final.participant_b_id, semi.participant_a_id);
+  },
+);
+
+async function vencerSerieUmJogo(serie, vencedorParticipantId) {
+  await tournamentMatchService.registrarResultadoDeJogo({
+    serieId: serie.id,
+    vencedorParticipantId,
+  });
+}
 
 test.after(async () => {
   if (temBanco) await sequelize.close();

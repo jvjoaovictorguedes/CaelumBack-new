@@ -603,7 +603,15 @@ async function finalizarDueloPorDesistencia(io, duelId, characterIdQueSaiu) {
   const duelo = duelos.get(duelId);
   if (!duelo) return;
   const vencedorChave = duelo.a.id === Number(characterIdQueSaiu) ? "B" : "A";
-  await finalizarDuelo(io, duelId, vencedorChave, "desistencia");
+  // Mesmo cuidado do fim por combate (linha ~542): duelo de torneio seta
+  // `duelo.finalizar` (finalizarJogoDeTorneio), que já sabe tratar
+  // motivo "desistencia" e avançar a série/chave. Sem isto, uma
+  // desconexão no meio de um jogo de torneio caía direto no finalize
+  // casual — nunca chamava tournamentMatchService.registrarResultadoDeJogo,
+  // a série nunca avançava, e ainda creditava recompensa casual (ouro/XP)
+  // por engano numa partida de torneio.
+  const finalizar = duelo.finalizar || finalizarDuelo;
+  await finalizar(io, duelId, vencedorChave, "desistencia");
 }
 
 // Ranking v2 (§4/§22 da spec) — reaproveita o mesmo mapa `online` que já
@@ -631,5 +639,6 @@ module.exports.chaveOnline = chaveOnline;
 module.exports.alocarDuelId = alocarDuelId;
 module.exports.executarTurno = executarTurno;
 module.exports.finalizarDuelo = finalizarDuelo;
+module.exports.finalizarDueloPorDesistencia = finalizarDueloPorDesistencia;
 module.exports.PRAZO_TURNO_MS = PRAZO_TURNO_MS;
 module.exports.MAX_ACOES = MAX_ACOES;

@@ -505,6 +505,84 @@ testeComBanco("alvo enviado pelo cliente é ignorado: o servidor escolhe", async
   }
 });
 
+// -------------------- Medalhas de temporada (pódio do perfil) --------------------
+//
+// Ajuste pós-lançamento: medalha deixou de ser de pódio de Torneio e
+// passou a ser de 1º/2º/3º lugar no leaderboard de uma temporada
+// RANQUEADA já encerrada (tournamentStatsService.podioDoPersonagem
+// delega pra rankedSeasonService.medalhasDoPersonagem — ver teste
+// espelho em tournamentIntegracao.test.js confirmando que ganhar
+// torneio não gera medalha nenhuma, só Troféu).
+testeComBanco("medalha vem do 1º/2º/3º lugar da temporada ranqueada ENCERRADA", async () => {
+  const temporada = await temporadaDeTeste();
+  await temporada.update({ status: "Encerrada" });
+
+  const ouro = await participante(2000, { seasonId: temporada.id });
+  const prata = await participante(1900, { seasonId: temporada.id });
+  const bronze = await participante(1800, { seasonId: temporada.id });
+  const quarto = await participante(1700, { seasonId: temporada.id });
+  // Precisa ter jogado pelo menos 1 partida pra contar (mesmo mínimo do
+  // leaderboard público) — sem isso um personagem parado em 1000 (nunca
+  // jogou) não pode "ganhar" medalha por default.
+  await Promise.all(
+    [ouro, prata, bronze, quarto].map(({ participacao }) => participacao.update({ jogos: 5 })),
+  );
+
+  const medalhasOuro = await rankedSeasonService.medalhasDoPersonagem(ouro.personagem.id);
+  assert.deepEqual(medalhasOuro, { ouro: 1, prata: 0, bronze: 0 });
+
+  const medalhasPrata = await rankedSeasonService.medalhasDoPersonagem(prata.personagem.id);
+  assert.deepEqual(medalhasPrata, { ouro: 0, prata: 1, bronze: 0 });
+
+  const medalhasBronze = await rankedSeasonService.medalhasDoPersonagem(bronze.personagem.id);
+  assert.deepEqual(medalhasBronze, { ouro: 0, prata: 0, bronze: 1 });
+
+  const medalhasQuarto = await rankedSeasonService.medalhasDoPersonagem(quarto.personagem.id);
+  assert.deepEqual(medalhasQuarto, { ouro: 0, prata: 0, bronze: 0 }, "4º lugar não pontua");
+});
+
+testeComBanco("temporada ATIVA nunca concede medalha (ainda não terminou)", async () => {
+  const temporada = await temporadaDeTeste();
+  await temporada.update({ status: "Ativa" });
+
+  const lider = await participante(3000, { seasonId: temporada.id });
+  await lider.participacao.update({ jogos: 10 });
+
+  const medalhas = await rankedSeasonService.medalhasDoPersonagem(lider.personagem.id);
+  assert.deepEqual(medalhas, { ouro: 0, prata: 0, bronze: 0 });
+});
+
+testeComBanco("medalhas acumulam por temporada — duas temporadas de ouro = 2 medalhas", async () => {
+  const { personagem } = await criarPersonagem();
+
+  const temporada1 = await temporadaDeTeste();
+  await temporada1.update({ status: "Encerrada" });
+  await CharacterPvpSeason.create({
+    character_id: personagem.id,
+    season_id: temporada1.id,
+    rating: 2500,
+    jogos: 5,
+    vitorias: 5,
+    derrotas: 0,
+    peak_rating: 2500,
+  });
+
+  const temporada2 = await temporadaDeTeste();
+  await temporada2.update({ status: "Encerrada" });
+  await CharacterPvpSeason.create({
+    character_id: personagem.id,
+    season_id: temporada2.id,
+    rating: 2600,
+    jogos: 5,
+    vitorias: 5,
+    derrotas: 0,
+    peak_rating: 2600,
+  });
+
+  const medalhas = await rankedSeasonService.medalhasDoPersonagem(personagem.id);
+  assert.deepEqual(medalhas, { ouro: 2, prata: 0, bronze: 0 });
+});
+
 test.after(async () => {
   if (temBanco) await sequelize.close();
 });
