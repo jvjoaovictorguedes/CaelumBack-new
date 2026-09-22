@@ -24,6 +24,11 @@ const PvPSeason = require("./PvPSeason");
 const CharacterPvpSeason = require("./CharacterPvpSeason");
 const RankedMatch = require("./RankedMatch");
 const CharacterRankedDailyUsage = require("./CharacterRankedDailyUsage");
+const Tournament = require("./Tournament");
+const TournamentParticipant = require("./TournamentParticipant");
+const TournamentSeries = require("./TournamentSeries");
+const TournamentMatch = require("./TournamentMatch");
+const User = require("./User");
 const CraftingRecipe = require("./CraftingRecipe");
 const CraftingRecipeIngredient = require("./CraftingRecipeIngredient");
 const CharacterCraftingQueue = require("./CharacterCraftingQueue");
@@ -214,5 +219,24 @@ RankedMatch.belongsTo(Character, { foreignKey: "id_vencedor", as: "vencedor" });
 // PvP v2 §11 — limite diário de partidas ranqueadas.
 CharacterRankedDailyUsage.belongsTo(Character, { foreignKey: "character_id" });
 Character.hasMany(CharacterRankedDailyUsage, { foreignKey: "character_id", as: "usoDiarioRanked" });
+
+// Torneios (PvP v2 §16) — isolados de rating ranqueado e de PvpStatus
+// casual; só se relacionam com Character (participante) e User (admin
+// que criou).
+Tournament.hasMany(TournamentParticipant, { foreignKey: "tournament_id", as: "participantes" });
+TournamentParticipant.belongsTo(Tournament, { foreignKey: "tournament_id", as: "torneio" });
+TournamentParticipant.belongsTo(Character, { foreignKey: "character_id", as: "personagem" });
+Character.hasMany(TournamentParticipant, { foreignKey: "character_id", as: "torneios" });
+Tournament.belongsTo(User, { foreignKey: "created_by", as: "criadoPor" });
+
+Tournament.hasMany(TournamentSeries, { foreignKey: "tournament_id", as: "series" });
+TournamentSeries.belongsTo(Tournament, { foreignKey: "tournament_id", as: "torneio" });
+TournamentSeries.belongsTo(TournamentParticipant, { foreignKey: "participant_a_id", as: "participanteA" });
+TournamentSeries.belongsTo(TournamentParticipant, { foreignKey: "participant_b_id", as: "participanteB" });
+TournamentSeries.belongsTo(TournamentParticipant, { foreignKey: "winner_participant_id", as: "vencedor" });
+
+TournamentSeries.hasMany(TournamentMatch, { foreignKey: "series_id", as: "jogos" });
+TournamentMatch.belongsTo(TournamentSeries, { foreignKey: "series_id", as: "serie" });
+TournamentMatch.belongsTo(TournamentParticipant, { foreignKey: "winner_participant_id", as: "vencedor" });
 
 module.exports = {};

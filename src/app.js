@@ -7,6 +7,7 @@ const { Server: SocketIOServer } = require("socket.io");
 const { connectDB, isDatabaseReady } = require("./config/database");
 const registerPvpLiveHandlers = require("./socket/pvpLiveSocket");
 const registerRankedLiveHandlers = require("./socket/rankedLiveSocket");
+const registerTournamentHandlers = require("./socket/tournamentSocket");
 const registerGuildHandlers = require("./socket/guildSocket");
 const registerMessagesHandlers = require("./socket/messagesSocket");
 const registerPartyHandlers = require("./socket/partySocket");
@@ -66,6 +67,7 @@ const rankingRoutes = require("./routes/rankingRoutes");
 const adventureGuildRoutes = require("./routes/adventureGuildRoutes");
 const equipmentInstanceRoutes = require("./routes/equipmentInstanceRoutes");
 const inventoryV2Routes = require("./routes/inventoryV2Routes");
+const adminTournamentRoutes = require("./routes/adminTournamentRoutes");
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -204,6 +206,9 @@ app.use("/api/bestiary", bestiaryRoutes);
 app.use("/api/ranking", rankingRoutes);
 app.use("/api/adventure-guild", adventureGuildRoutes);
 app.use("/api/onboarding", onboardingRoutes);
+// Torneios — administração (criar/iniciar/cancelar/prêmio). Toda rota
+// aqui exige authMiddleware + adminMiddleware (ver o arquivo).
+app.use("/api/admin/pvp/tournaments", adminTournamentRoutes);
 
 // Nenhuma rota acima bateu — sem isso, o Express respondia com a página
 // de erro padrão dele (texto puro tipo "Cannot GET /api/xyz"), que o
@@ -247,6 +252,7 @@ registerRankedLiveHandlers(io);
 require("./socket/rankedLiveSocket")
   .encerrarPartidasOrfas()
   .catch((error) => console.error("Falha ao encerrar partidas ranqueadas órfãs:", error));
+registerTournamentHandlers(io);
 registerGuildHandlers(io);
 registerMessagesHandlers(io);
 registerPartyHandlers(io);

@@ -26,6 +26,7 @@ const rankedSeasonService = require("../services/rankedSeasonService");
 const rankedOpponentSelectionService = require("../services/rankedOpponentSelectionService");
 const rankedDailyLimitService = require("../services/rankedDailyLimitService");
 const rankedAiService = require("../services/rankedAiService");
+const tournamentService = require("../services/tournamentService");
 const pvpLiveSocket = require("./pvpLiveSocket");
 const { JANELA_RECONEXAO_SEGUNDOS, IA_DELAY_TURNO_MS } = require("../config/rankedConfig");
 
@@ -302,6 +303,16 @@ async function iniciarPartidaAssincrona(io, { idDesafiante }) {
   }
   if (pvpLiveSocket.duelPorPersonagem.has(chaveDesafiante)) {
     throw new RankedMatchError("ja-em-duelo", "Você já está em um duelo.", 409);
+  }
+  // §16 — exclusão mútua entre as três experiências: quem tem série de
+  // torneio em ready check ou em andamento não inicia ranqueada. O
+  // estado de torneio é persistido, então vale mesmo depois de restart.
+  if (await tournamentService.emSerieAtiva(idDesafiante)) {
+    throw new RankedMatchError(
+      "em-torneio",
+      "Você tem uma série de torneio em andamento. Termine-a antes de jogar ranqueada.",
+      409,
+    );
   }
 
   const temporada = await rankedSeasonService.obterOuIniciarTemporadaAtiva();

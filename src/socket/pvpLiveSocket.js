@@ -204,6 +204,19 @@ module.exports = function registerPvpLiveHandlers(io) {
         return socket.emit("pvp:erro", { mensagem: erroAntifarmPar });
       }
 
+      // PvP v2 §16 — exclusão mútua: personagem com série de torneio
+      // ativa (ready check ou em andamento) não entra em duelo casual.
+      // require() tardio pelo mesmo motivo do `estaOnline` acima: o
+      // service de torneio carrega models que, no topo, criariam ciclo.
+      const { emSerieAtiva } = require("../services/tournamentService");
+      for (const id of [idDesafiante, idDesafiado]) {
+        if (await emSerieAtiva(id)) {
+          return socket.emit("pvp:erro", {
+            mensagem: "Um dos dois está em uma série de torneio agora.",
+          });
+        }
+      }
+
       const desafiante = await Character.findByPk(idDesafiante);
       if (!desafiante) {
         return socket.emit("pvp:erro", { mensagem: "Personagem desafiante não encontrado." });

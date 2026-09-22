@@ -1,6 +1,7 @@
 const express = require("express");
 const pvpController = require("../controllers/pvpController");
 const rankedController = require("../controllers/rankedController");
+const tournamentRoutes = require("./tournamentRoutes");
 const authMiddleware = require("../middlewares/authMiddleware");
 const { carregarPersonagemAtual } = require("../middlewares/currentCharacterMiddleware");
 
@@ -31,5 +32,9 @@ router.post(
 router.get("/ranked/status", authMiddleware, carregarPersonagemAtual, rankedController.status);
 router.get("/ranked/season", authMiddleware, rankedController.season);
 router.get("/ranked/leaderboard", authMiddleware, rankedController.leaderboard);
+
+// Torneios (PvP v2 §16) — rotas de jogador. As administrativas ficam
+// em /api/admin/pvp/tournaments (adminTournamentRoutes.js).
+router.use("/tournaments", tournamentRoutes);
 
 module.exports = router;
