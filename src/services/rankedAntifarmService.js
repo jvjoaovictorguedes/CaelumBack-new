@@ -1,56 +1,77 @@
-// Anti-farm específico da Arena Ranqueada (§10). Como o oponente é
-// escolhido pelo SERVIDOR (nunca por escolha direta do jogador), a
-// maior parte do exploit que o pvpAntifarmService.js cobre pro duelo
-// casual (par combinado se desafiando direto) já não se aplica aqui —
-// o que sobra é: rematch consecutivo do mesmo par quando havia
-// alternativa na fila. Mantido em memória (histórico recente por
-// jogador) pra o predicado de pareamento continuar síncrono — nunca
-// bate no banco dentro do tick do matchmaking.
-const { RANKED_MAX_REMATCHES_CONSECUTIVOS } = require("../config/rankedConfig");
+// Anti-rematch da Arena Ranqueada v2 (§7).
+//
+// A v1 guardava histórico em memória porque o pareamento acontecia
+// dentro do tick da fila e precisava ser síncrono. A v2 não tem fila: a
+// seleção de oponente é assíncrona, roda uma vez por partida e já está
+// dentro de uma requisição HTTP — então a validação passa a ser feita
+// contra o histórico PERSISTIDO (ranked_matches), que é o único que
+// sobrevive a restart e não pode ser zerado por quem quer farmar.
+//
+// Regra: no máximo RANKED_MAX_PARTIDAS_MESMO_OPONENTE_DIA partidas
+// contra o MESMO oponente, por desafiante, por dia contábil. O bloqueio
+// só vale enquanto existir alternativa — se o oponente bloqueado for o
+// único candidato elegível, a seleção devolve "sem oponente" (§6) em
+// vez de repetir o rematch.
+const { Op, fn, col } = require("sequelize");
+const RankedMatch = require("../models/RankedMatch");
+const { RANKED_MAX_PARTIDAS_MESMO_OPONENTE_DIA } = require("../config/rankedConfig");
+const { chaveDoDia } = require("./rankedDailyLimitService");
 
-// characterId -> array dos últimos oponentes, mais recente primeiro,
-// limitado a RANKED_MAX_REMATCHES_CONSECUTIVOS entradas.
-const historicoRecente = new Map();
+// Quantas partidas o desafiante já fez hoje contra cada oponente.
+// Retorna Map<idOponente(Number), quantidade>.
+async function partidasPorOponenteHoje(idDesafiante, { dateKey } = {}) {
+  const chave = dateKey ?? chaveDoDia();
 
-function registrarResultado(idA, idB) {
-  for (const [id, oponente] of [
-    [idA, idB],
-    [idB, idA],
-  ]) {
-    const historico = historicoRecente.get(id) ?? [];
-    historico.unshift(oponente);
-    historicoRecente.set(id, historico.slice(0, RANKED_MAX_REMATCHES_CONSECUTIVOS));
+  const linhas = await RankedMatch.findAll({
+    where: { id_jogador1: idDesafiante, date_key: chave },
+    attributes: ["id_jogador2", [fn("COUNT", col("id")), "total"]],
+    group: ["id_jogador2"],
+    raw: true,
+  });
+
+  const mapa = new Map();
+  for (const linha of linhas) {
+    mapa.set(Number(linha.id_jogador2), Number(linha.total));
   }
+  return mapa;
 }
 
-function rematchesConsecutivos(idJogador, idOponente) {
-  const historico = historicoRecente.get(idJogador) ?? [];
-  if (historico.length < RANKED_MAX_REMATCHES_CONSECUTIVOS) return false;
-  return historico.every((oponente) => oponente === idOponente);
-}
-
-// Predicado usado pelo rankedMatchmakingService._tick (assinatura
-// síncrona: idA, idB, tamanhoFilaNoMomento). Só bloqueia o rematch
-// consecutivo quando existem outros candidatos na fila além desse par
-// (§10 — "quando houver alternativas"); se só sobrou esse par, deixa
-// parear em vez de travar a fila indefinidamente.
-function podeParear(idA, idB, tamanhoFilaNoMomento) {
-  const haAlternativas = tamanhoFilaNoMomento > 2;
-  if (!haAlternativas) return true;
-
-  if (rematchesConsecutivos(idA, idB) || rematchesConsecutivos(idB, idA)) {
-    return false;
+// Ids que NÃO podem ser sorteados hoje pra esse desafiante.
+async function oponentesBloqueadosHoje(idDesafiante, { dateKey } = {}) {
+  const mapa = await partidasPorOponenteHoje(idDesafiante, { dateKey });
+  const bloqueados = [];
+  for (const [idOponente, total] of mapa.entries()) {
+    if (total >= RANKED_MAX_PARTIDAS_MESMO_OPONENTE_DIA) bloqueados.push(idOponente);
   }
-  return true;
+  return bloqueados;
 }
 
-function limparHistorico(characterId) {
-  historicoRecente.delete(characterId);
+async function podeEnfrentar(idDesafiante, idOponente, { dateKey } = {}) {
+  const chave = dateKey ?? chaveDoDia();
+  const total = await RankedMatch.count({
+    where: { id_jogador1: idDesafiante, id_jogador2: idOponente, date_key: chave },
+  });
+  return total < RANKED_MAX_PARTIDAS_MESMO_OPONENTE_DIA;
+}
+
+// Compat com chamadas antigas que passavam um par qualquer — mantida
+// porque o duelo casual e testes legados podiam depender do nome.
+async function rematchesConsecutivos(idDesafiante, idOponente) {
+  return !(await podeEnfrentar(idDesafiante, idOponente));
+}
+
+// Partidas ranqueadas do desafiante no dia, independente de oponente
+// (usado só em log/observabilidade §18).
+async function partidasHoje(idDesafiante, { dateKey } = {}) {
+  return RankedMatch.count({
+    where: { id_jogador1: idDesafiante, date_key: dateKey ?? chaveDoDia(), id: { [Op.gt]: 0 } },
+  });
 }
 
 module.exports = {
-  registrarResultado,
+  partidasPorOponenteHoje,
+  oponentesBloqueadosHoje,
+  podeEnfrentar,
   rematchesConsecutivos,
-  podeParear,
-  limparHistorico,
+  partidasHoje,
 };

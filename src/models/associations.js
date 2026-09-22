@@ -23,6 +23,7 @@ const MarketTransaction = require("./MarketTransaction");
 const PvPSeason = require("./PvPSeason");
 const CharacterPvpSeason = require("./CharacterPvpSeason");
 const RankedMatch = require("./RankedMatch");
+const CharacterRankedDailyUsage = require("./CharacterRankedDailyUsage");
 const CraftingRecipe = require("./CraftingRecipe");
 const CraftingRecipeIngredient = require("./CraftingRecipeIngredient");
 const CharacterCraftingQueue = require("./CharacterCraftingQueue");
@@ -209,5 +210,9 @@ RankedMatch.belongsTo(PvPSeason, { foreignKey: "season_id", as: "temporada" });
 RankedMatch.belongsTo(Character, { foreignKey: "id_jogador1", as: "jogador1" });
 RankedMatch.belongsTo(Character, { foreignKey: "id_jogador2", as: "jogador2" });
 RankedMatch.belongsTo(Character, { foreignKey: "id_vencedor", as: "vencedor" });
+
+// PvP v2 §11 — limite diário de partidas ranqueadas.
+CharacterRankedDailyUsage.belongsTo(Character, { foreignKey: "character_id" });
+Character.hasMany(CharacterRankedDailyUsage, { foreignKey: "character_id", as: "usoDiarioRanked" });
 
 module.exports = {};

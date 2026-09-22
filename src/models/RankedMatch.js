@@ -23,6 +23,22 @@ const RankedMatch = sequelize.define(
       type: DataTypes.ENUM("Vitoria", "Abandono", "FalhaServidor"),
       allowNull: true,
     },
+    // PvP v2 §6/§8 — partida assíncrona: id_jogador2 é um SNAPSHOT do
+    // defensor, que joga controlado por IA e nunca tem rating/V-D
+    // alterados. rating_jogador2_antes fica como auditoria, e
+    // rating_jogador2_depois permanece NULL nessas partidas.
+    defensor_controlado_por_ia: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    // Dia contábil (fuso de rankedConfig) da tentativa diária gasta —
+    // usado pelo estorno (§11) e pelo anti-rematch por dia (§7).
+    date_key: { type: DataTypes.STRING(10), allowNull: true },
+    // §12 — guarda de idempotência: finalizar uma partida já Finalizada
+    // é no-op.
+    status: {
+      type: DataTypes.ENUM("EmAndamento", "Finalizada"),
+      allowNull: false,
+      defaultValue: "EmAndamento",
+    },
+    delta_desafiante: { type: DataTypes.INTEGER, allowNull: true },
     iniciada_em: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     encerrada_em: { type: DataTypes.DATE, allowNull: true },
   },
