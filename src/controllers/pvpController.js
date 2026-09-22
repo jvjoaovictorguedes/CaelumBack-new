@@ -344,22 +344,6 @@ function statusVirtual(idPersonagem) {
   };
 }
 
-// Patente de Arena — só rótulo de exibição a partir de vitórias
-// acumuladas em PvpStatus, não é uma coluna própria nem afeta nenhuma
-// regra de duelo (matchmaking, recompensa, etc. continuam iguais).
-const FAIXAS_PATENTE_ARENA = [
-  { min: 100, nome: "Grão-Mestre" },
-  { min: 50, nome: "Mestre" },
-  { min: 25, nome: "Campeão" },
-  { min: 10, nome: "Veterano" },
-  { min: 3, nome: "Aprendiz" },
-  { min: 0, nome: "Recruta" },
-];
-
-function patenteDeArena(vitorias) {
-  return FAIXAS_PATENTE_ARENA.find((faixa) => vitorias >= faixa.min).nome;
-}
-
 exports.getStatus = async (req, res) => {
   try {
     // GET não deve ter efeito colateral de escrita — findOrCreate
@@ -371,11 +355,13 @@ exports.getStatus = async (req, res) => {
     const statusFinal = status ?? statusVirtual(req.params.characterId);
     return res.status(200).json({
       status: "success",
+      // PvP v2 (§2): "Patente de Arena" foi REMOVIDA. Era só um rótulo
+      // derivado de vitórias casuais, nunca persistido e nunca usado por
+      // nenhuma regra. Quem mostra progressão competitiva agora é o
+      // Tier/Divisão da Arena Ranqueada (GET /api/pvp/ranked/status) —
+      // o status casual devolve só estatística casual.
       data: {
-        pvpStatus: {
-          ...(status ? status.toJSON() : statusFinal),
-          patenteArena: patenteDeArena(statusFinal.vitorias),
-        },
+        pvpStatus: status ? status.toJSON() : statusFinal,
       },
     });
   } catch (error) {

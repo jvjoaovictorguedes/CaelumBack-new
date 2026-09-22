@@ -1,38 +1,27 @@
-// Rating Elo da Arena Ranqueada (PvP Competitivo v1, §5). Cálculo
-// sempre no servidor, após resultado oficial — nenhum client nunca
-// envia vencedor ou delta de rating (§10).
+// Rating da Arena Ranqueada v2 (§5/§8/§12/§13).
+//
+// O cálculo Elo por valor esperado da v1 FOI REMOVIDO: agora o delta é
+// fixo por diferença de Tier (rankedTierService.deltaRating) e só o
+// DESAFIANTE humano tem rating alterado — o defensor assíncrono é um
+// snapshot controlado por IA e nunca perde/ganha nada (§8).
+//
+// Nenhum client envia vencedor ou delta: tudo é calculado aqui, no
+// servidor, a partir do resultado oficial do duelo.
 const CharacterPvpSeason = require("../models/CharacterPvpSeason");
+const rankedTierService = require("./rankedTierService");
 const {
   RATING_INICIAL,
   RATING_MINIMO,
-  ELO_K_PLACEMENT,
-  ELO_K_NORMAL,
-  PARTIDAS_PLACEMENT,
-  LIGAS,
-  FATOR_SOFT_RESET,
+  SOFT_RESET_FATOR_BASE,
+  SOFT_RESET_AJUSTE_MAXIMO,
+  SOFT_RESET_ESCALA_WINRATE,
+  SOFT_RESET_JOGOS_AMOSTRA_CHEIA,
 } = require("../config/rankedConfig");
 
-function calcularExpected(ratingJogador, ratingOponente) {
-  return 1 / (1 + 10 ** ((ratingOponente - ratingJogador) / 400));
-}
-
-// K maior nas primeiras PARTIDAS_PLACEMENT partidas RANQUEADAS da
-// temporada do jogador (§5/§8) — placement não é secreto, só usa K
-// maior; `jogosJaJogados` é a contagem ANTES da partida atual.
-function kParaJogos(jogosJaJogados) {
-  return jogosJaJogados < PARTIDAS_PLACEMENT ? ELO_K_PLACEMENT : ELO_K_NORMAL;
-}
-
-// Arredondamento determinístico (§5): sempre Math.round, nunca floor/
-// ceil variando por sinal — e nunca abaixo do piso de rating.
-function calcularNovoRating(rating, expected, resultado, k) {
-  const bruto = rating + k * (resultado - expected);
-  return Math.max(RATING_MINIMO, Math.round(bruto));
-}
-
+// Compat: vários pontos antigos pediam só o nome da "liga". Agora é o
+// rótulo completo de Tier+Divisão (ex.: "Bronze IV").
 function ligaParaRating(rating) {
-  const liga = LIGAS.find((l) => rating >= l.min && rating <= l.max);
-  return liga ? liga.nome : LIGAS[0].nome;
+  return rankedTierService.tierDivisaoParaRating(rating).label;
 }
 
 async function obterOuCriarParticipacao(characterId, seasonId, transaction) {
@@ -52,66 +41,77 @@ async function obterOuCriarParticipacao(characterId, seasonId, transaction) {
   return participacao;
 }
 
-// Aplica o resultado oficial de uma partida ranqueada: carrega (ou cria)
-// a participação sazonal dos dois jogadores, calcula o novo rating de
-// cada um via Elo e persiste. Retorna rating antes/depois dos dois —
-// usado tanto pra persistir em RankedMatch (§16) quanto pro evento
-// ranked:rating:update.
-async function aplicarResultadoRanked({ idVencedor, idPerdedor, seasonId, transaction }) {
-  const participacaoVencedor = await obterOuCriarParticipacao(idVencedor, seasonId, transaction);
-  const participacaoPerdedor = await obterOuCriarParticipacao(idPerdedor, seasonId, transaction);
+// §5/§8 — aplica o resultado de uma partida ranqueada ASSÍNCRONA.
+// Só o desafiante é tocado; `ratingOponente` entra apenas no cálculo da
+// diferença de Tier e é persistido em RankedMatch como snapshot de
+// auditoria (§11), nunca escrito de volta no CharacterPvpSeason dele.
+//
+// Precisa rodar DENTRO da transação de finalização (§12).
+async function aplicarResultadoDesafiante({
+  idDesafiante,
+  seasonId,
+  ratingOponente,
+  venceu,
+  transaction,
+}) {
+  const participacao = await obterOuCriarParticipacao(idDesafiante, seasonId, transaction);
 
-  const ratingVencedorAntes = participacaoVencedor.rating;
-  const ratingPerdedorAntes = participacaoPerdedor.rating;
+  const ratingAntes = participacao.rating;
+  const delta = rankedTierService.deltaRating({
+    ratingJogador: ratingAntes,
+    ratingOponente,
+    venceu,
+  });
+  const ratingDepois = rankedTierService.aplicarDelta(ratingAntes, delta);
 
-  const expectedVencedor = calcularExpected(ratingVencedorAntes, ratingPerdedorAntes);
-  const expectedPerdedor = calcularExpected(ratingPerdedorAntes, ratingVencedorAntes);
-
-  const kVencedor = kParaJogos(participacaoVencedor.jogos);
-  const kPerdedor = kParaJogos(participacaoPerdedor.jogos);
-
-  const ratingVencedorDepois = calcularNovoRating(ratingVencedorAntes, expectedVencedor, 1, kVencedor);
-  const ratingPerdedorDepois = calcularNovoRating(ratingPerdedorAntes, expectedPerdedor, 0, kPerdedor);
-
-  await participacaoVencedor.update(
+  await participacao.update(
     {
-      rating: ratingVencedorDepois,
-      jogos: participacaoVencedor.jogos + 1,
-      vitorias: participacaoVencedor.vitorias + 1,
-      peak_rating: Math.max(participacaoVencedor.peak_rating, ratingVencedorDepois),
-    },
-    { transaction },
-  );
-
-  await participacaoPerdedor.update(
-    {
-      rating: ratingPerdedorDepois,
-      jogos: participacaoPerdedor.jogos + 1,
-      derrotas: participacaoPerdedor.derrotas + 1,
-      peak_rating: Math.max(participacaoPerdedor.peak_rating, ratingPerdedorDepois),
+      rating: ratingDepois,
+      jogos: participacao.jogos + 1,
+      vitorias: participacao.vitorias + (venceu ? 1 : 0),
+      derrotas: participacao.derrotas + (venceu ? 0 : 1),
+      peak_rating: Math.max(participacao.peak_rating, ratingDepois),
     },
     { transaction },
   );
 
   return {
-    ratingVencedorAntes,
-    ratingVencedorDepois,
-    ratingPerdedorAntes,
-    ratingPerdedorDepois,
+    ratingAntes,
+    ratingDepois,
+    // O delta EFETIVO pode ser menor que o teórico quando o piso de
+    // rating (0) corta a perda — é esse que vai pro log/API.
+    delta: ratingDepois - ratingAntes,
+    deltaTeorico: delta,
+    tierAntes: rankedTierService.tierDivisaoParaRating(ratingAntes),
+    tierDepois: rankedTierService.tierDivisaoParaRating(ratingDepois),
   };
 }
 
-// §12 — soft reset no início da temporada seguinte, em direção a 1000.
-function softReset(ratingFinal) {
-  return Math.round(RATING_INICIAL + (ratingFinal - RATING_INICIAL) * FATOR_SOFT_RESET);
+// §13 — soft reset no início da próxima temporada.
+//
+//   Base        = 1000 + (RatingFinal - 1000) × 0,80
+//   WinRate     = Vitórias / Jogos (0 quando Jogos = 0)
+//   AjusteBruto = clamp((WinRate - 0,50) × 300, -60, +60)
+//   FatorAmostra= min(1, Jogos / 10)
+//   AjusteFinal = round(AjusteBruto × FatorAmostra)
+//   NovoRating  = max(0, round(Base + AjusteFinal))
+//
+// Exemplo da spec: 1800 / 60% / 20 jogos → 1670.
+function softReset(ratingFinal, { jogos = 0, vitorias = 0 } = {}) {
+  const base = RATING_INICIAL + (ratingFinal - RATING_INICIAL) * SOFT_RESET_FATOR_BASE;
+  const winRate = jogos > 0 ? vitorias / jogos : 0;
+  const ajusteBruto = Math.min(
+    SOFT_RESET_AJUSTE_MAXIMO,
+    Math.max(-SOFT_RESET_AJUSTE_MAXIMO, (winRate - 0.5) * SOFT_RESET_ESCALA_WINRATE),
+  );
+  const fatorAmostra = Math.min(1, jogos / SOFT_RESET_JOGOS_AMOSTRA_CHEIA);
+  const ajusteFinal = Math.round(ajusteBruto * fatorAmostra);
+  return Math.max(RATING_MINIMO, Math.round(base + ajusteFinal));
 }
 
 module.exports = {
-  calcularExpected,
-  calcularNovoRating,
-  kParaJogos,
   ligaParaRating,
   obterOuCriarParticipacao,
-  aplicarResultadoRanked,
+  aplicarResultadoDesafiante,
   softReset,
 };
