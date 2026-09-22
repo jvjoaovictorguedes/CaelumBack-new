@@ -474,9 +474,21 @@ exports.getMeuPersonagem = async (req, res) => {
       return res.status(404).json({ message: "Você ainda não tem um personagem." });
     }
 
+    // isAdmin só aqui (leitura do PRÓPRIO personagem), nunca em
+    // CHARACTER_INCLUDES — esse include é reaproveitado por leituras de
+    // personagens de OUTRAS contas (ex.: alvo de PvP), e vazar se o dono
+    // de outro personagem é admin não é o objetivo aqui. Usado hoje só
+    // pra decidir se o frontend mostra o link de administração de
+    // Torneios (a checagem de verdade continua sendo o adminMiddleware
+    // em cada rota administrativa).
+    const usuario = await User.findByPk(req.user.id, { attributes: ["isAdmin"] });
+
     res.status(200).json({
       status: "success",
-      data: { character: await carregarRespostaDoPersonagem(character) },
+      data: {
+        character: await carregarRespostaDoPersonagem(character),
+        isAdmin: Boolean(usuario?.isAdmin),
+      },
     });
   } catch (error) {
     console.error("Erro ao buscar personagem atual:", error);
