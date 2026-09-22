@@ -24,6 +24,7 @@ const {
   SLOTS_FORJA,
   TIPOS_ACAO_FORJA,
 } = require("../config/forgeConfig");
+const { REFINEMENT_COST_TIER_MULTIPLIER } = require("../config/equipmentTierConfig");
 const { resolverIdItemDoInsumo } = require("./forgeMaterialsService");
 const { chanceFinalRefinamentoPpm, rolarSucessoRefinamento } = require("./forgeRollService");
 const { nivelPorXpTotal } = require("./forgeProgressionService");
@@ -103,7 +104,13 @@ async function calcularMateriaisNecessarios(instancia, transaction) {
     }
   }
 
-  const ouro = (OURO_BASE_REFINAMENTO_POR_QUALIDADE[item.raridade] ?? 0) * unidades;
+  // Tier mais alto custa mais Ouro pra manter refinado (spec de Tier
+  // §34) — não altera a chance-base de sucesso nem as quantidades de
+  // material, só o custo em Ouro. item.tier_equipamento é null pra
+  // itens sem Tier (não deveria acontecer com equipável, mas cai em 1x
+  // por segurança em vez de quebrar a prévia).
+  const multiplicadorTier = REFINEMENT_COST_TIER_MULTIPLIER[item.tier_equipamento] ?? 1;
+  const ouro = Math.round((OURO_BASE_REFINAMENTO_POR_QUALIDADE[item.raridade] ?? 0) * unidades * multiplicadorTier);
   return { alvo, unidades, materiais, ouro, item };
 }
 

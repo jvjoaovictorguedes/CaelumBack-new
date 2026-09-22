@@ -77,6 +77,17 @@ const Item = sequelize.define("Item", {
     allowNull: false,
     defaultValue: false,
   },
+  // Faixa de poder REAL da receita/modelo (1 = mais forte, 5 = mais
+  // básico — spec de Tier §17). Null pra tipos não equipáveis
+  // (Material/Consumivel/QuestItem/Currencia/Espolio); obrigatório pra
+  // Arma/Armadura/Capacete/Escudo/Acessorio1/Acessorio2 daqui pra
+  // frente. Nunca muda por Fabricação/Refinamento — é fixo pelo
+  // catálogo (ver equipmentTierConfig.js/equipmentTierService.js).
+  tier_equipamento: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    validate: { min: 1, max: 5 },
+  },
 });
 
 module.exports = Item;

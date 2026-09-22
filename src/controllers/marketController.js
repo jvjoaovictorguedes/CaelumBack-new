@@ -160,18 +160,33 @@ const ORDENACOES = {
   // elementos (associação, coluna, direção) no lugar de 2.
   refinement_desc: [[{ model: CharacterEquipmentInstance, as: "instancia" }, "refinamento", "DESC"]],
   refinement_asc: [[{ model: CharacterEquipmentInstance, as: "instancia" }, "refinamento", "ASC"]],
+  // Tier I é numericamente 1 (mais forte) — "tier_asc" começa por ele
+  // de propósito (spec de Tier §41/§47: "ordenação por Tier respeita I
+  // como mais forte").
+  tier_asc: [[{ model: Item, as: "item" }, "tier_equipamento", "ASC"]],
+  tier_desc: [[{ model: Item, as: "item" }, "tier_equipamento", "DESC"]],
 };
 
 // GET /api/market/listings?tipo_item=&raridade=&nome=&preco_min=&preco_max=
-//   &refinamento_min=&refinamento_exato=&sort=price_asc&page=1&limit=30
+//   &refinamento_min=&refinamento_exato=&tier=&tier_min=&tier_max=&sort=price_asc&page=1&limit=30
 exports.listarAnuncios = async (req, res) => {
   try {
-    const { tipo_item, raridade, nome, preco_min, preco_max, refinamento_min, refinamento_exato, sort } = req.query;
+    const { tipo_item, raridade, nome, preco_min, preco_max, refinamento_min, refinamento_exato, tier, tier_min, tier_max, sort } = req.query;
 
     const whereItem = {};
     if (tipo_item) whereItem.tipo_item = tipo_item;
     if (raridade) whereItem.raridade = raridade;
     if (nome) whereItem.nome = { [Op.iLike]: `%${nome}%` };
+    // Tier I é numericamente 1 (mais forte) e V é 5 (spec de Tier §41) —
+    // tier_min/tier_max filtram pelo NÚMERO, não pela força; o cliente
+    // decide a direção.
+    if (tier !== undefined) {
+      whereItem.tier_equipamento = Number(tier);
+    } else if (tier_min !== undefined || tier_max !== undefined) {
+      whereItem.tier_equipamento = {};
+      if (tier_min !== undefined) whereItem.tier_equipamento[Op.gte] = Number(tier_min);
+      if (tier_max !== undefined) whereItem.tier_equipamento[Op.lte] = Number(tier_max);
+    }
 
     const whereListing = { status: "Ativo" };
     if (preco_min !== undefined || preco_max !== undefined) {

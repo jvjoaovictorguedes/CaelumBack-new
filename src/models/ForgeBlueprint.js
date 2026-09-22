@@ -13,6 +13,12 @@ const ForgeBlueprint = sequelize.define(
     multiplicador_tempo: { type: DataTypes.FLOAT, allowNull: false, defaultValue: 1 },
     nivel_forja_minimo: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
     ativo: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+    // Tier fixo da receita (1 = mais forte, 5 = mais básico) — todos os
+    // ForgeBlueprintResult deste blueprint (uma por Raridade) apontam
+    // pra Items com o MESMO tier_equipamento (spec de Tier §18).
+    // Nullable só até a migration de backfill rodar; daqui pra frente
+    // todo blueprint novo precisa vir com Tier.
+    tier_equipamento: { type: DataTypes.INTEGER, allowNull: true, validate: { min: 1, max: 5 } },
   },
   { tableName: "forge_blueprints" },
 );

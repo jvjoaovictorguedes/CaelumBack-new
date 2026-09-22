@@ -28,6 +28,7 @@ const {
   SLOTS_FORJA,
   TIPOS_ACAO_FORJA,
 } = require("../config/forgeConfig");
+const { FORGE_XP_TIER_MULTIPLIER } = require("../config/equipmentTierConfig");
 const { resolverIdItemDoInsumo } = require("./forgeMaterialsService");
 const { rolarDegrausQualidadeSuperior, qualidadeComDegraus } = require("./forgeRollService");
 const { bonusesAtivosPara } = require("./guildBuffService");
@@ -174,6 +175,10 @@ async function listarBlueprints(characterId) {
     dados.push({
       id: blueprint.id,
       nome: blueprint.nome,
+      // Tier fixo da receita (spec de Tier §30: "o jogador deve saber
+      // que está fabricando uma receita Tier II, independentemente da
+      // Raridade final") — mostrado antes mesmo de escolher qualidade.
+      tier_equipamento: blueprint.tier_equipamento,
       categoria_equipamento: blueprint.categoria_equipamento,
       // Só existe pra categoria "Arma" — usado pra montar a subseção por
       // tipo de arma (Espada/Cajado/etc.) na tela de Fabricação, já que
@@ -281,8 +286,15 @@ async function iniciarFabricacao(characterId, { id_blueprint, qualidade }) {
       });
     }
 
+    // Multiplicador moderado por Tier (spec de Tier §32) — receitas mais
+    // avançadas recompensam mais XP de Fabricação. Mantém o anti-farm
+    // existente (multiplicadorAntiFarmXp) intacto, só multiplicando por
+    // cima.
+    const multiplicadorTier = FORGE_XP_TIER_MULTIPLIER[blueprint.tier_equipamento] ?? 1;
     const xpGanho = Math.round(
-      XP_FABRICACAO_POR_QUALIDADE_EQUIPAMENTO[qualidadeFinal] * multiplicadorAntiFarmXp(nivelForja, qualidade),
+      XP_FABRICACAO_POR_QUALIDADE_EQUIPAMENTO[qualidadeFinal] *
+        multiplicadorAntiFarmXp(nivelForja, qualidade) *
+        multiplicadorTier,
     );
     const tempoMs = Math.round(
       TEMPO_BASE_FABRICACAO_MS_POR_QUALIDADE[qualidade] *
