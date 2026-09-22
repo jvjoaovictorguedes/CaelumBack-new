@@ -35,7 +35,7 @@ module.exports = {
         created_by: {
           type: Sequelize.INTEGER,
           allowNull: false,
-          references: { model: "Users", key: "id" },
+          references: { model: "users", key: "id" },
         },
         // Chaveamento sorteado uma única vez, persistido pra sobreviver a
         // restart e nunca ser regerado.
