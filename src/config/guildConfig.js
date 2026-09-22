@@ -144,8 +144,9 @@ const BOSS_AO_VIVO_TAMANHO_MINIMO = 1;
 const BOSS_AO_VIVO_PRAZO_TURNO_MS = 20 * 1000;
 // Dano do boss começa em dano_base_ataque (rodada 1) e cresce por
 // rodada — "ataques fracos que vão aumentando com o passar dos turnos",
-// pedido do jogador.
-const BOSS_AO_VIVO_FATOR_ESCALADA_DANO = 0.15;
+// pedido do jogador. Buff leve (0.15 -> 0.20): rodada 5 já bate ~1.8x
+// mais forte que a 1ª em vez de ~1.6x, sem virar parede logo de cara.
+const BOSS_AO_VIVO_FATOR_ESCALADA_DANO = 0.2;
 const BOSS_AO_VIVO_MAX_RODADAS = 60;
 
 // §31 — 1 boss por semana, ciclo global semanal (mesma semana UTC usada

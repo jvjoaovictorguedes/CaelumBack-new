@@ -23,6 +23,11 @@
 //     informação persistida em GuildBossContribution — dá pra ver
 //     tanto durante a luta (broadcast a cada golpe) quanto depois via
 //     GET /guilds/:id/boss (guildBossService.obterStatus).
+//   - Cooldown de 20min por membro (guildBossService.COOLDOWN_ATAQUE_MS)
+//     checado na ENTRADA da sala, não por golpe — dentro de uma luta já
+//     em andamento os turnos seguem livres, só reentrar numa luta nova
+//     é que espera o cooldown (o clique assíncrono de "atacar" antigo
+//     saiu da UI: a luta ao vivo agora é o único jeito de atacar).
 //
 // De propósito SEM "identificar" próprio: reaproveita socket.characterId
 // já setado pelo "identificar" do pvpLiveSocket, mesmo raciocínio já
@@ -38,7 +43,7 @@ const GuildBossConfig = require("../models/GuildBossConfig");
 const GuildLog = require("../models/GuildLog");
 const { aplicarAcao } = require("../services/duelEngine");
 const { custoManaEfetivo } = require("../services/combatFormulas");
-const { atacarBossAoVivo, expirarSeNecessario } = require("../services/guildBossService");
+const { atacarBossAoVivo, expirarSeNecessario, tempoRestanteCooldown } = require("../services/guildBossService");
 const {
   BOSS_AO_VIVO_TAMANHO_MAXIMO,
   BOSS_AO_VIVO_TAMANHO_MINIMO,
@@ -138,6 +143,13 @@ module.exports = function registerGuildBossHandlers(io) {
         const tentativa = await tentativaAtivaDaGuild(membro.id_guild);
         if (!tentativa) {
           return socket.emit("guildboss:erro", { mensagem: "Não há Boss liberado (ou o tempo dele já esgotou)." });
+        }
+
+        const restanteMs = await tempoRestanteCooldown(membro.id_guild, characterId);
+        if (restanteMs > 0) {
+          return socket.emit("guildboss:erro", {
+            mensagem: `Aguarde ${Math.ceil(restanteMs / 60000)}min antes de atacar o Boss de novo.`,
+          });
         }
 
         let lobby = lobbies.get(membro.id_guild);

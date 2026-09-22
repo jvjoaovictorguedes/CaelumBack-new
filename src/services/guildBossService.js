@@ -29,8 +29,12 @@ const {
 } = require("../config/guildConfig");
 
 // Cooldown por membro entre ataques ao MESMO boss — sem isso, uma
-// pessoa sozinha conseguiria zerar o chefe batendo em loop.
-const COOLDOWN_ATAQUE_MS = 4 * 60 * 60 * 1000;
+// pessoa sozinha conseguiria zerar o chefe batendo em loop. V2.0:
+// atacar virou só a batalha ao vivo (o clique assíncrono antigo saiu
+// da UI), e o cooldown de 20min é checado na entrada da sala
+// (guildbossSocket.js), não mais por golpe individual — um pedido de
+// jogador pra não ficar preso horas fora da luta em grupo.
+const COOLDOWN_ATAQUE_MS = 20 * 60 * 1000;
 
 function erroGuilda(mensagem, statusCode = 400) {
   return Object.assign(new Error(mensagem), { statusCode });
@@ -48,6 +52,23 @@ async function expirarSeNecessario(tentativa, transaction, registrarLog) {
     }
   }
   return tentativa;
+}
+
+// Quanto falta (em ms) pro membro poder entrar na sala ao vivo de novo
+// — 0 se pode atacar agora. Só olha a tentativa ATIVA da guilda; sem
+// tentativa em andamento não há cooldown pra checar (a entrada na sala
+// já falha por outro motivo nesse caso).
+async function tempoRestanteCooldown(idGuild, idPersonagem) {
+  const tentativa = await GuildBossAttempt.findOne({ where: { id_guild: idGuild, status: "Ativo" } });
+  if (!tentativa) return 0;
+
+  const contribuicao = await GuildBossContribution.findOne({
+    where: { id_guild_boss_attempt: tentativa.id, id_personagem: idPersonagem },
+  });
+  if (!contribuicao?.ultimo_ataque) return 0;
+
+  const restante = COOLDOWN_ATAQUE_MS - (Date.now() - new Date(contribuicao.ultimo_ataque).getTime());
+  return Math.max(0, restante);
 }
 
 async function obterStatus(idGuild) {
@@ -346,4 +367,11 @@ async function distribuirRecompensa(tentativa, chefe, transaction, { registrarLo
   };
 }
 
-module.exports = { obterStatus, liberarBoss, atacarBoss, atacarBossAoVivo, expirarSeNecessario };
+module.exports = {
+  obterStatus,
+  liberarBoss,
+  atacarBoss,
+  atacarBossAoVivo,
+  expirarSeNecessario,
+  tempoRestanteCooldown,
+};
