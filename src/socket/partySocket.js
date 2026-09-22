@@ -538,8 +538,17 @@ module.exports = function registerPartyHandlers(io) {
       if (!characterId) return;
       // Só trata como saída real se este ainda é o socket "dono" do
       // personagem (mesma cautela do pvpLiveSocket: um socket novo pro
-      // mesmo characterId já assumiu `online` antes desse handler rodar).
-      if (online.get(characterId) === socket.id) return;
+      // mesmo characterId já assumiu `online` antes desse handler rodar,
+      // de forma síncrona, antes do disconnect do socket antigo disparar
+      // — de forma assíncrona). Condição estava invertida (bug reportado:
+      // aceitar convite de grupo e cair sozinho da party) — comparava
+      // igual quando devia comparar diferente, então QUALQUER reconexão
+      // (ex.: o próprio socket.io reconectando durante a navegação pra
+      // "/dashboard/adventure" logo após aceitar o convite) fazia o
+      // socket antigo, já substituído, expulsar o personagem de um grupo
+      // que ele nunca chegou a sair de verdade.
+      const eraSocketAtivo = online.get(characterId) === socket.id;
+      if (!eraSocketAtivo) return;
       removerDoGrupo(io, characterId);
       sairDaBatalhaPorDesconexao(io, characterId);
     });
