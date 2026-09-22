@@ -252,6 +252,39 @@ module.exports = function registerPartyHandlers(io) {
       removerDoGrupo(io, characterId);
     });
 
+    // Remover alguém do grupo (só o anfitrião) — igual convidar mais
+    // gente, funciona a qualquer momento antes da batalha começar, não
+    // só na tela de montar o grupo.
+    socket.on("party:expulsar", ({ idAlvo } = {}) => {
+      const characterId = socket.characterId;
+      if (!characterId) return;
+      const partyId = grupoPorPersonagem.get(characterId);
+      if (!partyId) return socket.emit("party:erro", { mensagem: "Você não está em nenhum grupo." });
+      const grupo = grupos.get(partyId);
+      if (!grupo) return;
+      if (grupo.hostId !== characterId) {
+        return socket.emit("party:erro", { mensagem: "Só o anfitrião pode remover alguém do grupo." });
+      }
+      const chaveAlvo = chaveOnline(idAlvo);
+      if (chaveAlvo === characterId) {
+        return socket.emit("party:erro", { mensagem: 'Use "Sair do grupo" pra sair você mesmo.' });
+      }
+      if (!grupo.membros.has(chaveAlvo)) {
+        return socket.emit("party:erro", { mensagem: "Esse jogador não está mais no grupo." });
+      }
+
+      grupo.membros.delete(chaveAlvo);
+      grupo.ordem = grupo.ordem.filter((id) => id !== chaveAlvo);
+      grupoPorPersonagem.delete(chaveAlvo);
+
+      const socketIdAlvo = online.get(chaveAlvo);
+      const socketDoAlvo = socketIdAlvo ? io.sockets.sockets.get(socketIdAlvo) : null;
+      socketDoAlvo?.leave(`party:${partyId}`);
+      socketDoAlvo?.emit("party:expulso", { partyId });
+
+      emitirGrupoAtualizado(io, grupo);
+    });
+
     socket.on("party:iniciar", async ({ idZona } = {}) => {
       const characterId = socket.characterId;
       if (!characterId) return;
