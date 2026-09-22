@@ -118,6 +118,56 @@ function removerDoGrupo(io, characterId) {
 
 module.exports = function registerPartyHandlers(io) {
   io.on("connection", (socket) => {
+    // Nomes dos jogadores online pra convidar — a UI só tinha o id (via
+    // `online`, que só guarda characterId -> socketId) e mostrava
+    // "Jogador #123" na lista de convite (bug reportado). Callback igual
+    // "pvp:listar-online" (pvpLiveSocket.js), só que também resolve nome.
+    socket.on("party:listar-online", async (_payload, callback) => {
+      if (typeof callback !== "function") return;
+      const characterId = socket.characterId;
+      const ids = Array.from(online.keys()).filter((id) => id !== characterId);
+      if (ids.length === 0) return callback({ jogadores: [] });
+      const personagens = await Character.findAll({
+        where: { id: ids },
+        attributes: ["id", "nome"],
+      });
+      callback({ jogadores: personagens.map((p) => ({ id: p.id, nome: p.nome })) });
+    });
+
+    // Criar o grupo antes de chamar qualquer um (pedido dos jogadores) —
+    // antes, o grupo só nascia "de lado" na primeira chamada de convite
+    // (party:convidar), e o anfitrião só via o lobby depois que ALGUÉM
+    // aceitasse. Agora dá pra formar o grupo (só você) e já ver o lobby
+    // pra ir chamando gente com calma, um de cada vez.
+    socket.on("party:criar", async () => {
+      const characterId = socket.characterId;
+      if (!characterId) {
+        return socket.emit("party:erro", { mensagem: "Identifique seu personagem antes de criar um grupo." });
+      }
+      if (grupoPorPersonagem.has(characterId) || batalhaPorPersonagem.has(characterId)) {
+        return socket.emit("party:erro", { mensagem: "Você já está em outro grupo ou em batalha." });
+      }
+
+      const anfitriao = await Character.findByPk(characterId, { attributes: ["id", "nome"] });
+      if (!anfitriao) {
+        return socket.emit("party:erro", { mensagem: "Personagem não encontrado." });
+      }
+
+      const grupo = {
+        id: proximoGrupoId++,
+        hostId: characterId,
+        membros: new Map(),
+        ordem: [],
+      };
+      grupo.membros.set(characterId, { id: anfitriao.id, nome: anfitriao.nome, classe: null, pronto: false });
+      grupo.ordem.push(characterId);
+      grupos.set(grupo.id, grupo);
+      grupoPorPersonagem.set(characterId, grupo.id);
+      socket.join(`party:${grupo.id}`);
+
+      emitirGrupoAtualizado(io, grupo);
+    });
+
     socket.on("party:convidar", async ({ idConvidado } = {}) => {
       const idConvidante = socket.characterId;
       if (!idConvidante) {
