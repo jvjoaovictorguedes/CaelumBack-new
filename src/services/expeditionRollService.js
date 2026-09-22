@@ -8,6 +8,7 @@ const {
   CHANCE_POR_NIVEL_PPM,
   QUANTIDADE_POR_NIVEL,
   aplicarTetoDeQualidade,
+  CHANCE_MONSTRO_PPM,
 } = require("../config/expeditionConfig");
 
 // Ordem da mais rara pra mais comum — soma cumulativa checando a mais
@@ -53,4 +54,12 @@ function sortearQuantidade(nivel, qualidade) {
   return aplicarTetoDeQualidade(base, qualidade);
 }
 
-module.exports = { sortearQualidade, sortearRecurso, sortearQuantidade };
+// Rola se ESTA coleta vira uma interrupção de monstro em vez do sorteio
+// normal de qualidade/recurso (ver expeditionService.coletar) — sempre
+// checado ANTES de sortearQualidade, nunca em conjunto (uma coleta ou
+// gera recurso ou vira combate, nunca os dois).
+function sortearInterrupcaoDeMonstro() {
+  return crypto.randomInt(0, BASE_SORTEIO) < CHANCE_MONSTRO_PPM;
+}
+
+module.exports = { sortearQualidade, sortearRecurso, sortearQuantidade, sortearInterrupcaoDeMonstro };

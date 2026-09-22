@@ -7,6 +7,7 @@
 // buscado "puro" primeiro, o include vem numa consulta separada sem lock.
 const { sequelize } = require("../config/database");
 const Character = require("../models/Character");
+const Class = require("../models/Class");
 const CharacterProfession = require("../models/CharacterProfession");
 const ExpeditionRegion = require("../models/ExpeditionRegion");
 const ExpeditionRegionResource = require("../models/ExpeditionRegionResource");
@@ -14,13 +15,24 @@ const ExpeditionResource = require("../models/ExpeditionResource");
 const ExpeditionResourceItem = require("../models/ExpeditionResourceItem");
 const CharacterInventory = require("../models/CharacterInventory");
 const Item = require("../models/Item");
-const { TEMPO_COLETA_MS, CHANCE_POR_NIVEL_PPM, BASE_SORTEIO, NIVEL_MAXIMO } = require("../config/expeditionConfig");
-const { sortearQualidade, sortearRecurso, sortearQuantidade } = require("./expeditionRollService");
+const {
+  TEMPO_COLETA_MS,
+  CHANCE_POR_NIVEL_PPM,
+  BASE_SORTEIO,
+  NIVEL_MAXIMO,
+  deslocamentoDeNivelPorRegiao,
+} = require("../config/expeditionConfig");
+const { sortearQualidade, sortearRecurso, sortearQuantidade, sortearInterrupcaoDeMonstro } = require("./expeditionRollService");
 const { nivelPorXpTotal, xpParaProximoNivel, aplicarGanhoDeXp } = require("./expeditionProgressionService");
 const { registrarProgresso } = require("./missionService");
 const { addStack } = require("./inventoryService");
 const { registrarProgressoContrato } = require("./adventureGuildObjectiveService");
 const { registrarProgressoMissaoGuilda } = require("./guildMissionService");
+const { buscarBonusDeAtributos, personagemComBonus } = require("./equipmentBonusService");
+const { comMultiplicadoresDeClasse } = require("./combatFormulas");
+const { sincronizarRegeneracaoDeVidaEMana } = require("./regenService");
+const { encontroValido } = require("./pveEncounterService");
+const { gerarInimigo } = require("../controllers/combatController");
 
 const PROFISSOES = ["Mineracao", "Silvicultura", "Exploracao"];
 
@@ -134,6 +146,18 @@ async function coletar(id_personagem, id_regiao) {
       throw Object.assign(new Error("Região de expedição não encontrada."), { statusCode: 404 });
     }
 
+    // Travado aqui (antes das linhas de profissão, mesma ordem sempre:
+    // Character -> CharacterProfession) só por causa da possível
+    // interrupção de monstro abaixo — o resto da função nem toca em
+    // character até o final (progresso de missão/contrato).
+    const character = await Character.findByPk(id_personagem, {
+      transaction,
+      lock: { level: transaction.LOCK.UPDATE, of: Character },
+    });
+    if (!character) {
+      throw Object.assign(new Error("Personagem não encontrado."), { statusCode: 404 });
+    }
+
     // Cooldown é GLOBAL entre as 3 profissões (pedido do jogador: coletar
     // em Mineração também deve travar Silvicultura/Exploração por 3s,
     // não só a própria Mineração) — trava as 3 linhas de profissão do
@@ -166,6 +190,79 @@ async function coletar(id_personagem, id_regiao) {
         statusCode: 429,
         disponivelEmMs: disponivelEm - agora,
       });
+    }
+
+    // Pequena chance de a coleta virar uma interrupção de monstro em
+    // vez do sorteio normal de recurso — qualquer local (Mineração,
+    // Silvicultura ou Exploração) e qualquer região podem interromper,
+    // com o nível do monstro deslocado a partir do nível de combate
+    // REAL do personagem pela dificuldade da região (ver
+    // deslocamentoDeNivelPorRegiao). Só rola se o personagem não
+    // estiver com um combate ativo (encontro_pve compartilhado com a
+    // Aventura solo) — nesse caso raríssimo, segue pro sorteio normal.
+    if (!encontroValido(character) && sortearInterrupcaoDeMonstro()) {
+      const classe = await Class.findByPk(character.id_classe, { transaction });
+      const bonusEquipamento = await buscarBonusDeAtributos(character.id, transaction);
+      const jogadorEfetivo = comMultiplicadoresDeClasse(
+        personagemComBonus(character.toJSON(), bonusEquipamento),
+        classe,
+      );
+      sincronizarRegeneracaoDeVidaEMana(character, jogadorEfetivo);
+
+      const nivelForcado = Math.max(
+        1,
+        (character.nivel ?? 1) + deslocamentoDeNivelPorRegiao(regiao.nivel_minimo),
+      );
+      const inimigo = gerarInimigo(jogadorEfetivo, undefined, { nivelForcado });
+
+      const statsPersonagem = {
+        nivel: character.nivel,
+        forca: jogadorEfetivo.forca,
+        vitalidade: jogadorEfetivo.vitalidade,
+        agilidade: jogadorEfetivo.agilidade,
+        inteligencia: jogadorEfetivo.inteligencia,
+        velocidade: jogadorEfetivo.velocidade,
+        defesa: jogadorEfetivo.defesa,
+        arma_equipada: jogadorEfetivo.arma_equipada,
+        multiplicador_vida_por_nivel: jogadorEfetivo.multiplicador_vida_por_nivel,
+        multiplicador_mana_por_nivel: jogadorEfetivo.multiplicador_mana_por_nivel,
+        multiplicador_dano_fisico: jogadorEfetivo.multiplicador_dano_fisico,
+        multiplicador_dano_magico: jogadorEfetivo.multiplicador_dano_magico,
+      };
+
+      // Sem id_area/id_monstro de propósito — /combat/action já trata
+      // um encontro sem esses campos como "não é de zona" e concede a
+      // recompensa genérica (nunca a de zona), exatamente o que faz
+      // sentido aqui: essa luta não pertence a nenhuma Área de Caça.
+      character.encontro_pve = {
+        ...inimigo,
+        criadoEm: Date.now(),
+        statsPersonagem,
+      };
+
+      // O cooldown de coleta é consumido igual (o clique já foi gasto),
+      // mesmo sem gerar recurso — evita um segundo caminho de cooldown
+      // só pra esse caso.
+      const proximaColetaEmInterrupcao = new Date(agora + TEMPO_COLETA_MS);
+      for (const p of profissoesDoPersonagem) {
+        p.proxima_coleta_em = proximaColetaEmInterrupcao;
+        await p.save({ transaction });
+      }
+      await character.save({ transaction });
+
+      return {
+        interrompida: true,
+        enemy: inimigo,
+        resultado: null,
+        item_ganho: null,
+        quantidade: 0,
+        xp_ganho: 0,
+        subiu_nivel: false,
+        nivel: nivelAtual,
+        experiencia: profissao.experiencia,
+        xp_proximo_nivel: xpParaProximoNivel(nivelAtual),
+        proxima_coleta_em: proximaColetaEmInterrupcao,
+      };
     }
 
     // Recursos possíveis da região (sem lock — pesos são estáticos,
@@ -237,18 +334,15 @@ async function coletar(id_personagem, id_regiao) {
     // Missões livres da Guilda dos Aventureiros ("Complete N Expedições",
     // §8) e contratos de Rank do tipo CompletarExpedicoes (§45) — este é
     // o único ponto onde uma coleta de Expedição é considerada
-    // válida/concluída pelo servidor. missionService.registrarProgresso
-    // precisa do Character de verdade (usa .nivel pra filtrar o
-    // catálogo) — não dá pra passar só o id como faço com
-    // registrarProgressoContrato, que só lê .id.
-    const personagem = await Character.findByPk(id_personagem, { transaction });
-    if (personagem) {
-      await registrarProgresso(personagem, "CompletarExpedicoes", 1, transaction);
-      await registrarProgressoContrato(personagem, "CompletarExpedicoes", 1, {}, transaction);
-      await registrarProgressoMissaoGuilda(personagem, "CompletarExpedicoes", 1, transaction);
-    }
+    // válida/concluída pelo servidor. `character` já foi carregado no
+    // início da função (travado, pra checagem de interrupção acima) —
+    // reaproveita em vez de buscar de novo.
+    await registrarProgresso(character, "CompletarExpedicoes", 1, transaction);
+    await registrarProgressoContrato(character, "CompletarExpedicoes", 1, {}, transaction);
+    await registrarProgressoMissaoGuilda(character, "CompletarExpedicoes", 1, transaction);
 
     return {
+      interrompida: false,
       resultado,
       item_ganho: itemGanho,
       quantidade: quantidadeGanha,

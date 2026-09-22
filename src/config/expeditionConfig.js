@@ -124,6 +124,28 @@ function aplicarTetoDeQualidade(quantidadeBase, qualidade) {
 // reverter pra um valor de produção antes do lançamento de verdade.
 const TEMPO_COLETA_MS = 3000;
 
+// Chance (em PPM, mesma escala de BASE_SORTEIO acima) de uma coleta ser
+// interrompida por um monstro em vez de gerar o recurso normal —
+// independe de profissão/local (Mineração, Silvicultura ou Exploração)
+// e da região específica, só do azar do sorteio. Moderada de propósito:
+// é uma variação de sabor pro modo AFK-ish de Expedição, não pode
+// dominar o ritmo normal de coleta.
+const CHANCE_MONSTRO_PPM = 60_000; // 6%
+
+// Quantos NÍVEIS DE COMBATE acima/abaixo do próprio personagem o
+// monstro da interrupção fica, por região — a região só tem
+// nivel_minimo (1-10, escala de profissão, NÃO a mesma escala do
+// nível de combate do personagem), então em vez de usar esse número
+// direto como nível do monstro (o que geraria um inimigo trivial pra
+// qualquer personagem capaz de chegar numa região de nível alto), ele
+// só desloca o nível do monstro pra cima/baixo do nível de combate
+// REAL do personagem — igual gerarInimigo já faz pro resto da
+// Aventura. Região nível 1 = monstro no seu próprio nível; região
+// nível 10 (a mais dura) = +3 níveis de combate acima do seu.
+function deslocamentoDeNivelPorRegiao(nivelMinimoRegiao) {
+  return Math.round((Math.max(1, nivelMinimoRegiao) - 1) / 3);
+}
+
 module.exports = {
   NIVEL_MAXIMO,
   XP_NECESSARIO_POR_ETAPA,
@@ -135,4 +157,6 @@ module.exports = {
   QUANTIDADE_POR_NIVEL,
   aplicarTetoDeQualidade,
   TEMPO_COLETA_MS,
+  CHANCE_MONSTRO_PPM,
+  deslocamentoDeNivelPorRegiao,
 };
