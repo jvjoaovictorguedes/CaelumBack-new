@@ -1,44 +1,62 @@
 // src/socket/rankedLiveSocket.js
 //
-// Arena Ranqueada (PvP Competitivo v1) — camada de integração com o
-// duelo ao vivo (§3/§18.4 da spec). NÃO duplica motor de turno,
-// carregamento de lutador nem presença: tudo isso vem de
-// pvpLiveSocket.js (exports adicionados especificamente pra isso). O
-// que este módulo adiciona é específico do ranqueado: pareamento via
-// fila (nunca escolha direta de oponente), rating Elo no fim da
-// partida, e janela de reconexão de 30s (§9) — o duelo casual continua
-// desistindo na hora.
+// Arena Ranqueada v2 — partida ASSÍNCRONA (PvP v2 §6/§8/§9/§10/§12).
 //
-// Ações de turno usam o MESMO evento "pvp:acao" já registrado por
-// pvpLiveSocket.js — aquele handler resolve o duelo genericamente via
-// duelPorPersonagem/duelos, então um duelo ranked (criado aqui, mas
-// inserido nos mesmos Maps) já funciona com ele sem nenhuma mudança.
+// O que mudou em relação à v1: a fila em tempo real foi removida. O
+// jogador chama POST /api/pvp/ranked/match/start, o servidor escolhe o
+// oponente (rankedOpponentSelectionService), carrega um SNAPSHOT
+// completo do personagem dele e a partida começa na hora — o oponente
+// não precisa estar online nem aceitar nada, e quem joga por ele é a
+// IA (rankedAiService).
+//
+// O que NÃO mudou: o motor de combate. Este módulo continua sem
+// duplicar turno, dano, carregamento de lutador ou presença — tudo vem
+// de pvpLiveSocket.js. Um duelo ranqueado é um duelo normal inserido
+// nos MESMOS mapas (`duelos`/`duelPorPersonagem`), então o handler
+// "pvp:acao" já existente resolve as ações do humano turno a turno,
+// exatamente como no duelo ao vivo. A única diferença é que o lado B
+// não tem socket: ele age pelo gancho `aoTrocarTurno`.
+const { Op } = require("sequelize");
+const { sequelize } = require("../config/database");
 const RankedMatch = require("../models/RankedMatch");
-const rankedMatchmakingService = require("../services/rankedMatchmakingService");
+const Character = require("../models/Character");
 const rankedRatingService = require("../services/rankedRatingService");
-const rankedAntifarmService = require("../services/rankedAntifarmService");
+const rankedTierService = require("../services/rankedTierService");
 const rankedSeasonService = require("../services/rankedSeasonService");
-const { JANELA_RECONEXAO_SEGUNDOS } = require("../config/rankedConfig");
+const rankedOpponentSelectionService = require("../services/rankedOpponentSelectionService");
+const rankedDailyLimitService = require("../services/rankedDailyLimitService");
+const rankedAiService = require("../services/rankedAiService");
 const pvpLiveSocket = require("./pvpLiveSocket");
+const { JANELA_RECONEXAO_SEGUNDOS, IA_DELAY_TURNO_MS } = require("../config/rankedConfig");
 
 const NOME_ARENA_RANKED = "Arena Ranqueada de Caelum";
 
-// Predicado de anti-farm (§10) injetado no matchmaking — mantém o
-// service de fila 100% desacoplado de regra de negócio ranked.
-rankedMatchmakingService.podeParear = rankedAntifarmService.podeParear;
+// §18 — observabilidade: um prefixo só, fácil de grepar no log.
+function log(evento, dados) {
+  console.log(`[ranked] ${evento}`, JSON.stringify(dados));
+}
 
 function montarPayloadInicio(duelo, ehResync = false) {
   return {
     duelId: duelo.id,
     arena: NOME_ARENA_RANKED,
     ranked: true,
+    assincrono: true,
+    rankedMatchId: duelo.rankedMatchId,
     temporada: { id: duelo.seasonId },
     a: { id: duelo.a.id, nome: duelo.a.nome, genero: duelo.a.genero, classe: duelo.a.classe, chave: "A" },
-    b: { id: duelo.b.id, nome: duelo.b.nome, genero: duelo.b.genero, classe: duelo.b.classe, chave: "B" },
+    b: {
+      id: duelo.b.id,
+      nome: duelo.b.nome,
+      genero: duelo.b.genero,
+      classe: duelo.b.classe,
+      chave: "B",
+      controladoPorIA: true,
+    },
     ratingA: duelo.ratingAntes.A,
     ratingB: duelo.ratingAntes.B,
-    ligaA: rankedRatingService.ligaParaRating(duelo.ratingAntes.A),
-    ligaB: rankedRatingService.ligaParaRating(duelo.ratingAntes.B),
+    tierA: rankedTierService.resumoTier(duelo.ratingAntes.A),
+    tierB: rankedTierService.resumoTier(duelo.ratingAntes.B),
     vidaMaxA: duelo.a.vidaMax,
     vidaMaxB: duelo.b.vidaMax,
     manaMaxA: duelo.a.manaMax,
@@ -49,8 +67,12 @@ function montarPayloadInicio(duelo, ehResync = false) {
     manaB: duelo.b.estado.mana_atual,
     poderesA: pvpLiveSocket.poderesPublicos(duelo.a.poderes),
     poderesB: pvpLiveSocket.poderesPublicos(duelo.b.poderes),
-    consumiveisA: duelo.a.consumiveis,
-    consumiveisB: duelo.b.consumiveis,
+    // §10 — consumíveis desabilitados no ranqueado: a lista vai vazia
+    // pro cliente nem oferecer o botão, e o servidor rejeita de novo
+    // caso alguém mande mesmo assim (pvpLiveSocket.js).
+    consumiveisA: [],
+    consumiveisB: [],
+    consumiveisHabilitados: false,
     turnoDe: duelo.turnoDe,
     prazoSegundos: pvpLiveSocket.PRAZO_TURNO_MS / 1000,
     resync: ehResync,
@@ -63,16 +85,17 @@ function limparGraceTimers(duelo) {
   duelo.desconexoes = {};
 }
 
-// §9 — desconexão em partida ranqueada não pode anular o resultado
-// indefinidamente: concede 30s pra reconectar, e se não voltar conta
-// derrota por abandono (não uma anulação sem vencedor).
+// §9/§11 — desconexão do jogador humano: janela de reconexão e, se não
+// voltar, derrota por abandono. Abandono NÃO devolve tentativa diária.
 function aoDesconectarRanked(io, duelId, characterId) {
   const duelo = pvpLiveSocket.duelos.get(duelId);
   if (!duelo) return;
 
   const chave = duelo.a.id === Number(characterId) ? "A" : "B";
+  if (chave === duelo.ia) return; // o lado da IA não tem socket pra cair
+
   duelo.desconexoes = duelo.desconexoes || {};
-  if (duelo.desconexoes[chave]) return; // já tem grace period rodando pra esse lado
+  if (duelo.desconexoes[chave]) return;
 
   io.to(duelo.sala).emit("ranked:oponente-desconectado", {
     characterId: Number(characterId),
@@ -101,102 +124,149 @@ function aoReconectarRanked(io, socket, duelId) {
   socket.emit("ranked:match:start", montarPayloadInicio(duelo, true));
 }
 
-// Resultado oficial de uma partida ranqueada (§16 — observabilidade
-// completa: rating antes/depois dos dois, motivo, timestamps).
+// §6/§9 — quando o turno passa pro lado da IA, ela decide e age depois
+// de um pequeno atraso (pro cliente conseguir animar o turno anterior).
+// Reaproveita executarTurno do motor casual: a IA não tem caminho de
+// resolução próprio.
+function agendarTurnoIA(io, duelId, turnoDe) {
+  const duelo = pvpLiveSocket.duelos.get(duelId);
+  if (!duelo || duelo.ia !== turnoDe) return;
+
+  clearTimeout(duelo.timerIA);
+  duelo.timerIA = setTimeout(() => {
+    const atual = pvpLiveSocket.duelos.get(duelId);
+    if (!atual || atual.turnoDe !== turnoDe) return;
+
+    const lutadorIA = turnoDe === "A" ? atual.a : atual.b;
+    const { acao, resumo } = rankedAiService.escolherAcaoIA(lutadorIA);
+    log("ia:decisao", { duelId, rankedMatchId: atual.rankedMatchId, ...resumo });
+    pvpLiveSocket.executarTurno(io, duelId, turnoDe, acao);
+  }, IA_DELAY_TURNO_MS);
+}
+
+// §12 — finalização ATÔMICA e IDEMPOTENTE.
+//
+// Tudo numa transação só: rating do desafiante, V/D sazonal, linha de
+// RankedMatch. A guarda de idempotência é o próprio status da partida,
+// lido com SELECT ... FOR UPDATE: se já está "Finalizada", a chamada
+// vira no-op (o mesmo duelo podia ser finalizado por combate e por
+// timer de abandono quase ao mesmo tempo).
+//
 // `motivo`: "combate" | "abandono" | "falha-servidor". Falha comprovada
-// do servidor NUNCA altera rating (§9) — nem quando passada
-// explicitamente, nem quando o próprio cálculo de rating lança uma
-// exceção (nesse caso vira falha-servidor automaticamente em vez de
-// deixar a partida travada sem resultado nenhum).
+// do servidor não altera rating E devolve a tentativa diária (§11).
 async function finalizarDueloRanked(io, duelId, vencedorChave, motivo = "combate") {
   const duelo = pvpLiveSocket.duelos.get(duelId);
   if (!duelo) return;
 
   clearTimeout(duelo.timer);
+  clearTimeout(duelo.timerIA);
   limparGraceTimers(duelo);
   pvpLiveSocket.duelos.delete(duelId);
   pvpLiveSocket.duelPorPersonagem.delete(String(duelo.a.id));
-  pvpLiveSocket.duelPorPersonagem.delete(String(duelo.b.id));
+  // O defensor assíncrono nunca entra em duelPorPersonagem (ele não está
+  // "ocupado" — pode estar jogando outra coisa), então não há o que
+  // limpar do lado dele.
 
-  const vencedorInfo = vencedorChave === "A" ? duelo.a : duelo.b;
-  const perdedorInfo = vencedorChave === "A" ? duelo.b : duelo.a;
+  const chaveHumano = duelo.ia === "B" ? "A" : "B";
+  const humanoVenceu = vencedorChave === chaveHumano;
+  const idDesafiante = duelo.desafianteId;
 
   let resultado = null;
   let motivoFinal = motivo === "abandono" ? "Abandono" : "Vitoria";
-
-  if (motivo === "falha-servidor") {
-    motivoFinal = "FalhaServidor";
-  } else {
-    try {
-      resultado = await rankedRatingService.aplicarResultadoRanked({
-        idVencedor: vencedorInfo.id,
-        idPerdedor: perdedorInfo.id,
-        seasonId: duelo.seasonId,
-      });
-      rankedAntifarmService.registrarResultado(vencedorInfo.id, perdedorInfo.id);
-    } catch (error) {
-      console.error("Falha ao aplicar resultado ranked — encerrando sem alterar rating:", error);
-      motivoFinal = "FalhaServidor";
-      resultado = null;
-    }
-  }
+  if (motivo === "falha-servidor") motivoFinal = "FalhaServidor";
 
   try {
-    await RankedMatch.update(
-      {
-        id_vencedor: resultado ? vencedorInfo.id : null,
-        rating_jogador1_depois: resultado
-          ? duelo.a.id === vencedorInfo.id
-            ? resultado.ratingVencedorDepois
-            : resultado.ratingPerdedorDepois
-          : null,
-        rating_jogador2_depois: resultado
-          ? duelo.b.id === vencedorInfo.id
-            ? resultado.ratingVencedorDepois
-            : resultado.ratingPerdedorDepois
-          : null,
-        motivo_encerramento: motivoFinal,
-        encerrada_em: new Date(),
-      },
-      { where: { id: duelo.rankedMatchId } },
-    );
+    await sequelize.transaction(async (transaction) => {
+      const [linhas] = await sequelize.query(
+        `SELECT id, status FROM ranked_matches WHERE id = :id FOR UPDATE;`,
+        { replacements: { id: duelo.rankedMatchId }, transaction },
+      );
+      const partida = linhas[0];
+      if (!partida) throw new Error(`RankedMatch ${duelo.rankedMatchId} não encontrada.`);
+      if (partida.status === "Finalizada") {
+        log("finalizacao:ignorada-idempotente", { duelId, rankedMatchId: duelo.rankedMatchId });
+        return;
+      }
+
+      if (motivoFinal !== "FalhaServidor") {
+        resultado = await rankedRatingService.aplicarResultadoDesafiante({
+          idDesafiante,
+          seasonId: duelo.seasonId,
+          ratingOponente: duelo.ratingAntes[duelo.ia],
+          venceu: humanoVenceu,
+          transaction,
+        });
+      } else {
+        // §11 — falha comprovada do servidor devolve a tentativa. Dentro
+        // da MESMA transação, pra nunca estornar sem registrar o motivo.
+        await rankedDailyLimitService.devolverTentativa(idDesafiante, {
+          transaction,
+          dateKey: duelo.dateKey,
+        });
+      }
+
+      await RankedMatch.update(
+        {
+          id_vencedor: resultado ? (humanoVenceu ? idDesafiante : duelo.defensorId) : null,
+          rating_jogador1_depois: resultado ? resultado.ratingDepois : null,
+          // §8 — o defensor controlado por IA NUNCA tem rating alterado:
+          // a coluna "depois" dele fica NULL de propósito.
+          rating_jogador2_depois: null,
+          delta_desafiante: resultado ? resultado.delta : null,
+          motivo_encerramento: motivoFinal,
+          status: "Finalizada",
+          encerrada_em: new Date(),
+        },
+        { where: { id: duelo.rankedMatchId }, transaction },
+      );
+    });
   } catch (error) {
-    console.error("Falha ao persistir encerramento de RankedMatch:", error);
+    console.error("[ranked] Falha ao finalizar partida ranqueada:", error);
+    io.to(duelo.sala).emit("pvp:erro", { mensagem: "Erro ao finalizar a partida ranqueada." });
+    return;
   }
 
-  // "pvp:duelo-fim" reaproveita a MESMA UI de fim de duelo do casual no
-  // frontend (LiveDuelArena) — sem recompensa/nível (ranked não mexe em
-  // Gold/XP na v1, só rating), e "ranked:rating:update" complementa com
-  // o delta de Elo (§13 — nenhum client calcula ou envia esse valor).
+  log("partida:fim", {
+    duelId,
+    rankedMatchId: duelo.rankedMatchId,
+    desafiante: idDesafiante,
+    defensor: duelo.defensorId,
+    motivo: motivoFinal,
+    humanoVenceu,
+    ratingAntes: resultado?.ratingAntes ?? null,
+    ratingDepois: resultado?.ratingDepois ?? null,
+    delta: resultado?.delta ?? 0,
+    acoes: duelo.acoes,
+  });
+
   io.to(duelo.sala).emit("pvp:duelo-fim", {
     duelId,
     vencedorChave: resultado ? vencedorChave : null,
-    vencedor: resultado ? { id: vencedorInfo.id, nome: vencedorInfo.nome } : null,
-    perdedor: resultado ? { id: perdedorInfo.id, nome: perdedorInfo.nome } : null,
+    vencedor: resultado
+      ? humanoVenceu
+        ? { id: duelo.a.id, nome: duelo.a.nome }
+        : { id: duelo.b.id, nome: duelo.b.nome }
+      : null,
+    perdedor: resultado
+      ? humanoVenceu
+        ? { id: duelo.b.id, nome: duelo.b.nome }
+        : { id: duelo.a.id, nome: duelo.a.nome }
+      : null,
     motivo: motivoFinal,
     ranked: true,
   });
 
   if (resultado) {
-    const ratingADepois =
-      duelo.a.id === vencedorInfo.id ? resultado.ratingVencedorDepois : resultado.ratingPerdedorDepois;
-    const ratingBDepois =
-      duelo.b.id === vencedorInfo.id ? resultado.ratingVencedorDepois : resultado.ratingPerdedorDepois;
-
     io.to(duelo.sala).emit("ranked:rating:update", {
       duelId,
-      jogadorA: {
-        id: duelo.a.id,
-        ratingAntes: duelo.ratingAntes.A,
-        ratingDepois: ratingADepois,
-        liga: rankedRatingService.ligaParaRating(ratingADepois),
-      },
-      jogadorB: {
-        id: duelo.b.id,
-        ratingAntes: duelo.ratingAntes.B,
-        ratingDepois: ratingBDepois,
-        liga: rankedRatingService.ligaParaRating(ratingBDepois),
-      },
+      ratingAntes: resultado.ratingAntes,
+      ratingDepois: resultado.ratingDepois,
+      delta: resultado.delta,
+      tierAntes: rankedTierService.resumoTier(resultado.ratingAntes),
+      tierDepois: rankedTierService.resumoTier(resultado.ratingDepois),
+      // §8 — explicitado no payload pra não restar dúvida no cliente.
+      defensorControladoPorIA: true,
+      ratingDefensorInalterado: duelo.ratingAntes[duelo.ia],
     });
   }
 
@@ -205,60 +275,100 @@ async function finalizarDueloRanked(io, duelId, vencedorChave, motivo = "combate
   }
 }
 
-// Chamado pelo rankedMatchmakingService quando encontra um par
-// compatível. idJogador1/idJogador2 já foram removidos da fila pelo
-// service nesse momento.
-async function criarPartidaRanked(io, idJogador1, idJogador2) {
-  const chave1 = pvpLiveSocket.chaveOnline(idJogador1);
-  const chave2 = pvpLiveSocket.chaveOnline(idJogador2);
+// Erros de negócio da criação de partida: o controller traduz em HTTP.
+class RankedMatchError extends Error {
+  constructor(codigo, mensagem, status = 400) {
+    super(mensagem);
+    this.codigo = codigo;
+    this.status = status;
+  }
+}
 
-  // Revalida presença e "não pareado ainda" no exato instante do match —
-  // a fila só sabe de rating/tempo, não de desconexões/duelos que
-  // começaram depois de entrar nela.
-  const aindaValido =
-    pvpLiveSocket.online.has(chave1) &&
-    pvpLiveSocket.online.has(chave2) &&
-    !pvpLiveSocket.duelPorPersonagem.has(chave1) &&
-    !pvpLiveSocket.duelPorPersonagem.has(chave2);
+// §6 — cria e inicia a partida assíncrona. Chamado pelo controller
+// (POST /api/pvp/ranked/match/start), NUNCA por evento de socket vindo
+// do cliente: assim o id do desafiante vem sempre da sessão autenticada.
+//
+// Ordem importa (§6/§11): seleciona o oponente ANTES de consumir a
+// tentativa diária — sem candidato elegível, nada é gasto.
+async function iniciarPartidaAssincrona(io, { idDesafiante }) {
+  const chaveDesafiante = pvpLiveSocket.chaveOnline(idDesafiante);
 
-  if (!aindaValido) {
-    // Devolve pra fila só quem ainda está online e livre — o outro
-    // simplesmente não é readicionado (ele já saiu/está ocupado, então
-    // "entrar de novo" seria voltar a um estado inconsistente).
-    for (const [id, chave] of [
-      [idJogador1, chave1],
-      [idJogador2, chave2],
-    ]) {
-      if (pvpLiveSocket.online.has(chave) && !pvpLiveSocket.duelPorPersonagem.has(chave)) {
-        const participacao = await rankedRatingService.obterOuCriarParticipacao(
-          id,
-          (await rankedSeasonService.obterOuIniciarTemporadaAtiva()).id,
-        );
-        rankedMatchmakingService.entrar(id, participacao.rating);
-      }
-    }
-    return;
+  if (!pvpLiveSocket.online.has(chaveDesafiante)) {
+    throw new RankedMatchError(
+      "socket-offline",
+      "Conecte-se à Arena antes de iniciar uma partida ranqueada.",
+      400,
+    );
+  }
+  if (pvpLiveSocket.duelPorPersonagem.has(chaveDesafiante)) {
+    throw new RankedMatchError("ja-em-duelo", "Você já está em um duelo.", 409);
   }
 
-  try {
-    const temporada = await rankedSeasonService.obterOuIniciarTemporadaAtiva();
-    const [participacao1, participacao2] = await Promise.all([
-      rankedRatingService.obterOuCriarParticipacao(idJogador1, temporada.id),
-      rankedRatingService.obterOuCriarParticipacao(idJogador2, temporada.id),
-    ]);
+  const temporada = await rankedSeasonService.obterOuIniciarTemporadaAtiva();
+  const participacao = await rankedRatingService.obterOuCriarParticipacao(idDesafiante, temporada.id);
+  const personagem = await Character.findByPk(idDesafiante, { attributes: ["id", "nivel"] });
+  const dateKey = rankedDailyLimitService.chaveDoDia();
 
+  const oponente = await rankedOpponentSelectionService.selecionarOponente({
+    idDesafiante,
+    ratingDesafiante: participacao.rating,
+    nivelDesafiante: personagem?.nivel ?? 1,
+    seasonId: temporada.id,
+    dateKey,
+  });
+
+  if (!oponente) {
+    // §6 — sem oponente elegível NÃO consome tentativa diária.
+    throw new RankedMatchError(
+      "sem-oponente",
+      "Nenhum oponente elegível no seu Tier agora. Tente novamente mais tarde.",
+      409,
+    );
+  }
+
+  log("oponente:selecionado", {
+    desafiante: idDesafiante,
+    ratingDesafiante: participacao.rating,
+    tierDesafiante: rankedTierService.tierDivisaoParaRating(participacao.rating).label,
+    defensor: oponente.characterId,
+    ratingDefensor: oponente.rating,
+    tierDefensor: oponente.tierLabel,
+    ...oponente.motivo,
+  });
+
+  // §11 — a tentativa só é gasta agora, com oponente em mãos e logo
+  // antes de criar a partida de verdade.
+  const uso = await rankedDailyLimitService.consumirTentativa(idDesafiante, { data: new Date() });
+  if (!uso.consumiu) {
+    throw new RankedMatchError(
+      "limite-diario",
+      `Você já usou suas ${uso.limite} partidas ranqueadas de hoje. Volte amanhã.`,
+      429,
+    );
+  }
+  log("limite-diario:consumido", { desafiante: idDesafiante, ...uso });
+
+  let partida = null;
+  try {
     const [lutadorA, lutadorB] = await Promise.all([
-      pvpLiveSocket.carregarLutador(idJogador1),
-      pvpLiveSocket.carregarLutador(idJogador2),
+      pvpLiveSocket.carregarLutador(idDesafiante),
+      // §6 — snapshot COMPLETO do defensor no estado atual dele
+      // (atributos, equipamento/refinamento, habilidades, passivas):
+      // carregarLutador é exatamente o mesmo carregamento do duelo ao
+      // vivo, então o build dele é representado do mesmo jeito.
+      pvpLiveSocket.carregarLutador(oponente.characterId),
     ]);
     if (!lutadorA || !lutadorB) throw new Error("Personagem não encontrado ao montar partida ranqueada.");
 
-    const partida = await RankedMatch.create({
+    partida = await RankedMatch.create({
       season_id: temporada.id,
-      id_jogador1: idJogador1,
-      id_jogador2: idJogador2,
-      rating_jogador1_antes: participacao1.rating,
-      rating_jogador2_antes: participacao2.rating,
+      id_jogador1: idDesafiante,
+      id_jogador2: oponente.characterId,
+      rating_jogador1_antes: participacao.rating,
+      rating_jogador2_antes: oponente.rating,
+      defensor_controlado_por_ia: true,
+      date_key: uso.dateKey,
+      status: "EmAndamento",
       iniciada_em: new Date(),
     });
 
@@ -274,63 +384,148 @@ async function criarPartidaRanked(io, idJogador1, idJogador2) {
       turnoDe: primeiro,
       acoes: 0,
       timer: null,
+      timerIA: null,
       ranked: true,
+      assincrono: true,
+      ia: "B", // o defensor é SEMPRE o lado B numa partida assíncrona
+      desafianteId: idDesafiante,
+      defensorId: oponente.characterId,
       seasonId: temporada.id,
       rankedMatchId: partida.id,
-      ratingAntes: { A: participacao1.rating, B: participacao2.rating },
+      dateKey: uso.dateKey,
+      ratingAntes: { A: participacao.rating, B: oponente.rating },
       finalizar: finalizarDueloRanked,
       aoDesconectar: aoDesconectarRanked,
       aoReconectar: aoReconectarRanked,
+      aoTrocarTurno: agendarTurnoIA,
     };
 
     pvpLiveSocket.duelos.set(duelId, duelo);
-    pvpLiveSocket.duelPorPersonagem.set(chave1, duelId);
-    pvpLiveSocket.duelPorPersonagem.set(chave2, duelId);
+    // Só o humano fica marcado como "em duelo": o defensor está offline
+    // (ou jogando outra coisa) e não pode ser travado por uma partida
+    // que não é dele (§8/§16 — exclusividade vale por quem está de fato
+    // em combate).
+    pvpLiveSocket.duelPorPersonagem.set(chaveDesafiante, duelId);
 
-    const socketA = io.sockets.sockets.get(pvpLiveSocket.online.get(chave1));
-    const socketB = io.sockets.sockets.get(pvpLiveSocket.online.get(chave2));
+    const socketA = io.sockets.sockets.get(pvpLiveSocket.online.get(chaveDesafiante));
     socketA?.join(sala);
-    socketB?.join(sala);
 
     io.to(sala).emit("ranked:match:found", {
       duelId,
-      a: { id: lutadorA.id, nome: lutadorA.nome, rating: participacao1.rating },
-      b: { id: lutadorB.id, nome: lutadorB.nome, rating: participacao2.rating },
+      desafiante: { id: lutadorA.id, nome: lutadorA.nome, rating: participacao.rating },
+      defensor: {
+        id: lutadorB.id,
+        nome: lutadorB.nome,
+        rating: oponente.rating,
+        controladoPorIA: true,
+      },
     });
     io.to(sala).emit("ranked:match:start", montarPayloadInicio(duelo));
 
+    log("partida:inicio", {
+      duelId,
+      rankedMatchId: partida.id,
+      desafiante: idDesafiante,
+      ratingDesafiante: participacao.rating,
+      defensor: oponente.characterId,
+      ratingDefensor: oponente.rating,
+      primeiro,
+    });
+
     pvpLiveSocket.iniciarTimerDeTurno(io, duelId);
+    // Se a IA começa jogando, o gancho de troca de turno ainda não
+    // rodou (nenhum turno foi executado) — agenda explicitamente.
+    agendarTurnoIA(io, duelId, primeiro);
+
+    return {
+      duelId,
+      rankedMatchId: partida.id,
+      temporada,
+      uso,
+      desafiante: {
+        id: idDesafiante,
+        rating: participacao.rating,
+        ...rankedTierService.resumoTier(participacao.rating),
+      },
+      defensor: {
+        id: oponente.characterId,
+        nome: oponente.nome,
+        nivel: oponente.nivel,
+        controladoPorIA: true,
+        ...rankedTierService.resumoTier(oponente.rating),
+      },
+    };
   } catch (error) {
-    console.error("Erro ao criar partida ranqueada:", error);
-    io.to(pvpLiveSocket.online.get(chave1)).emit("pvp:erro", {
-      mensagem: "Não foi possível iniciar a partida ranqueada.",
-    });
-    io.to(pvpLiveSocket.online.get(chave2)).emit("pvp:erro", {
-      mensagem: "Não foi possível iniciar a partida ranqueada.",
-    });
+    // §11 — falha comprovada do servidor ANTES de um resultado válido
+    // devolve a tentativa.
+    console.error("[ranked] Erro ao criar partida assíncrona — estornando tentativa:", error);
+    await rankedDailyLimitService
+      .devolverTentativa(idDesafiante, { dateKey: uso.dateKey })
+      .catch((erroEstorno) => console.error("[ranked] Falha ao estornar tentativa:", erroEstorno));
+    log("limite-diario:estornado", { desafiante: idDesafiante, motivo: "falha-ao-criar-partida" });
+
+    if (partida) {
+      await RankedMatch.update(
+        { status: "Finalizada", motivo_encerramento: "FalhaServidor", encerrada_em: new Date() },
+        { where: { id: partida.id, status: "EmAndamento" } },
+      ).catch(() => {});
+    }
+    throw new RankedMatchError(
+      "falha-servidor",
+      "Não foi possível iniciar a partida ranqueada. Sua tentativa foi devolvida.",
+      500,
+    );
   }
 }
 
-module.exports = function registerRankedLiveHandlers(io) {
-  rankedMatchmakingService.on("match", ({ jogador1, jogador2 }) => {
-    criarPartidaRanked(io, jogador1, jogador2).catch((error) => {
-      console.error("Erro não tratado ao processar match ranked:", error);
-    });
+// Partidas que ficaram "EmAndamento" após um restart do servidor: o
+// estado do duelo vive em memória, então elas nunca terminariam
+// sozinhas. Marca como falha de servidor e devolve a tentativa (§11).
+async function encerrarPartidasOrfas() {
+  const orfas = await RankedMatch.findAll({
+    where: { status: "EmAndamento", defensor_controlado_por_ia: true, id: { [Op.gt]: 0 } },
   });
+  for (const partida of orfas) {
+    await sequelize
+      .transaction(async (transaction) => {
+        await rankedDailyLimitService.devolverTentativa(partida.id_jogador1, {
+          transaction,
+          dateKey: partida.date_key,
+        });
+        await partida.update(
+          { status: "Finalizada", motivo_encerramento: "FalhaServidor", encerrada_em: new Date() },
+          { transaction },
+        );
+      })
+      .catch((error) => console.error("[ranked] Falha ao encerrar partida órfã:", error));
+  }
+  if (orfas.length > 0) log("partidas-orfas:encerradas", { total: orfas.length });
+  return orfas.length;
+}
 
+module.exports = function registerRankedLiveHandlers(io) {
   io.on("connection", (socket) => {
-    // Sem "identificar" próprio aqui de propósito — reaproveita
-    // socket.characterId já setado pelo "identificar" de
-    // pvpLiveSocket.js na MESMA conexão (a Arena Ranqueada vive na
-    // mesma página/socket do Duelo, diferente do chat de guilda, que
-    // usa uma conexão separada e por isso precisou de evento próprio).
-    socket.on("disconnect", () => {
-      if (socket.characterId && rankedMatchmakingService.estaNaFila(socket.characterId)) {
-        rankedMatchmakingService.sair(socket.characterId);
-      }
-    });
+    // Sem "identificar" próprio: reaproveita socket.characterId setado
+    // pelo "identificar" de pvpLiveSocket.js na MESMA conexão.
+    //
+    // DEPRECATED (PvP v2 §19): os eventos de fila ranqueada
+    // ("ranked:queue:join"/"ranked:queue:leave") não existem mais — o
+    // matchmaking por fila foi substituído por POST
+    // /api/pvp/ranked/match/start. Respondidos explicitamente pra um
+    // cliente antigo receber um erro claro em vez de silêncio.
+    for (const eventoAntigo of ["ranked:queue:join", "ranked:queue:leave"]) {
+      socket.on(eventoAntigo, () => {
+        socket.emit("pvp:erro", {
+          mensagem:
+            "A fila ranqueada foi removida. Use POST /api/pvp/ranked/match/start para iniciar uma partida.",
+        });
+      });
+    }
   });
 };
 
 module.exports.finalizarDueloRanked = finalizarDueloRanked;
-module.exports.criarPartidaRanked = criarPartidaRanked;
+module.exports.iniciarPartidaAssincrona = iniciarPartidaAssincrona;
+module.exports.encerrarPartidasOrfas = encerrarPartidasOrfas;
+module.exports.RankedMatchError = RankedMatchError;
+module.exports.montarPayloadInicio = montarPayloadInicio;

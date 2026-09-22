@@ -355,6 +355,15 @@ module.exports = function registerPvpLiveHandlers(io) {
         }
         acao = { tipo: "power", power };
       } else if (tipo === "item") {
+        // PvP v2 §10 — consumíveis são DESABILITADOS na Arena
+        // Ranqueada (e só nela: casual e torneio continuam liberados).
+        // Barrado aqui, no único ponto por onde uma ação de item entra,
+        // em vez de espalhar a checagem por quem monta o duelo.
+        if (duelo.ranked) {
+          return socket.emit("pvp:erro", {
+            mensagem: "Consumíveis não podem ser usados na Arena Ranqueada.",
+          });
+        }
         // Consumível como ação de duelo — mesma regra de "gasta o turno
         // inteiro" e o mesmo caminho de validação (inventário + tipo do
         // item + efeito configurado) já usado no PvE (combatController.js).
@@ -528,6 +537,11 @@ function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
   io.to(duelo.sala).emit("pvp:turno-resultado", payloadTurno);
 
   iniciarTimerDeTurno(io, duelId);
+
+  // PvP v2 §6 — gancho pro lado controlado por IA agir quando o turno
+  // vira pra ele (partida ranqueada assíncrona). Duelo casual e torneio
+  // nunca setam `aoTrocarTurno`, então isto é no-op pra eles.
+  duelo.aoTrocarTurno?.(io, duelId, duelo.turnoDe);
 }
 
 async function finalizarDuelo(io, duelId, vencedorChave, motivo = "combate") {
@@ -602,4 +616,7 @@ module.exports.poderesPublicos = poderesPublicos;
 module.exports.iniciarTimerDeTurno = iniciarTimerDeTurno;
 module.exports.chaveOnline = chaveOnline;
 module.exports.alocarDuelId = alocarDuelId;
+module.exports.executarTurno = executarTurno;
+module.exports.finalizarDuelo = finalizarDuelo;
 module.exports.PRAZO_TURNO_MS = PRAZO_TURNO_MS;
+module.exports.MAX_ACOES = MAX_ACOES;

@@ -241,13 +241,19 @@ const io = new SocketIOServer(server, {
 });
 registerPvpLiveHandlers(io);
 registerRankedLiveHandlers(io);
+// PvP v2 §11/§12 — partidas ranqueadas assíncronas vivem em memória:
+// um restart deixaria linhas "EmAndamento" órfãs (e a tentativa diária
+// gasta). Encerra como falha de servidor e estorna a tentativa no boot.
+require("./socket/rankedLiveSocket")
+  .encerrarPartidasOrfas()
+  .catch((error) => console.error("Falha ao encerrar partidas ranqueadas órfãs:", error));
 registerGuildHandlers(io);
 registerMessagesHandlers(io);
 registerPartyHandlers(io);
-// rankedController usa isso pra emitir ranked:queue:update fora do
-// ciclo de socket (join/leave da fila são rotas REST, não eventos), e
-// messageController faz o mesmo pra message:new/inbox:update quando a
-// mensagem é enviada por REST em vez de socket.
+// rankedController usa isso pra criar a partida ranqueada assíncrona a
+// partir de uma rota REST (POST /ranked/match/start) e emitir os
+// eventos do duelo pro socket do jogador; messageController faz o mesmo
+// pra message:new/inbox:update quando a mensagem é enviada por REST.
 app.set("io", io);
 
 server.listen(port, () => {

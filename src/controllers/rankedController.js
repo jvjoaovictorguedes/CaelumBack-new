@@ -1,20 +1,23 @@
-// Arena Ranqueada (PvP Competitivo v1) — REST §13. Fila/pareamento/
-// resultado de partida em si vivem em rankedMatchmakingService e
-// rankedLiveSocket.js; este controller só expõe entrada/saída da fila e
-// consultas de status/temporada/leaderboard.
+// Arena Ranqueada v2 — REST (PvP v2 §15/§17/§19).
+//
+// O personagem que age é SEMPRE req.personagemAtual (sessão
+// autenticada), nunca um id vindo do cliente. O cliente também nunca
+// escolhe oponente, nunca envia vencedor/delta/tier e nunca toca o
+// contador diário — tudo isso é resolvido no servidor.
 const { Op } = require("sequelize");
 const Character = require("../models/Character");
 const CharacterPvpSeason = require("../models/CharacterPvpSeason");
-const rankedMatchmakingService = require("../services/rankedMatchmakingService");
 const rankedRatingService = require("../services/rankedRatingService");
+const rankedTierService = require("../services/rankedTierService");
 const rankedSeasonService = require("../services/rankedSeasonService");
+const rankedDailyLimitService = require("../services/rankedDailyLimitService");
 const pvpLiveSocket = require("../socket/pvpLiveSocket");
+const rankedLiveSocket = require("../socket/rankedLiveSocket");
 const { LEADERBOARD_MINIMO_PARTIDAS, LEADERBOARD_TAMANHO_PAGINA } = require("../config/rankedConfig");
 
 function participacaoPublica(participacao) {
   return {
-    rating: participacao.rating,
-    liga: rankedRatingService.ligaParaRating(participacao.rating),
+    ...rankedTierService.resumoTier(participacao.rating),
     jogos: participacao.jogos,
     vitorias: participacao.vitorias,
     derrotas: participacao.derrotas,
@@ -29,68 +32,13 @@ function temporadaPublica(temporada) {
     starts_at: temporada.starts_at,
     ends_at: temporada.ends_at,
     status: temporada.status,
+    diasRestantes: rankedSeasonService.diasRestantes(temporada),
   };
 }
 
-async function entrarFila(req, res) {
-  try {
-    const personagem = req.personagemAtual;
-    const chave = pvpLiveSocket.chaveOnline(personagem.id);
-
-    if (!pvpLiveSocket.estaOnline(personagem.id)) {
-      return res.status(400).json({
-        erro: "Conecte-se ao Duelo ao vivo antes de entrar na fila ranqueada.",
-      });
-    }
-    if (pvpLiveSocket.duelPorPersonagem.has(chave)) {
-      return res.status(409).json({ message: "Você já está em um duelo." });
-    }
-    if (rankedMatchmakingService.estaNaFila(chave)) {
-      return res.status(409).json({ message: "Você já está na fila ranqueada." });
-    }
-
-    const temporada = await rankedSeasonService.obterOuIniciarTemporadaAtiva();
-    const participacao = await rankedRatingService.obterOuCriarParticipacao(personagem.id, temporada.id);
-
-    rankedMatchmakingService.entrar(chave, participacao.rating);
-
-    const socketId = pvpLiveSocket.online.get(chave);
-    if (socketId) {
-      req.app.get("io")?.to(socketId).emit("ranked:queue:update", {
-        emFila: true,
-        tempoNaFilaMs: 0,
-      });
-    }
-
-    return res.json({
-      emFila: true,
-      temporada: temporadaPublica(temporada),
-      participacao: participacaoPublica(participacao),
-    });
-  } catch (error) {
-    console.error("Erro ao entrar na fila ranqueada:", error);
-    return res.status(500).json({ message: "Erro ao entrar na fila ranqueada." });
-  }
-}
-
-async function sairFila(req, res) {
-  try {
-    const personagem = req.personagemAtual;
-    const chave = pvpLiveSocket.chaveOnline(personagem.id);
-    const saiu = rankedMatchmakingService.sair(chave);
-
-    const socketId = pvpLiveSocket.online.get(chave);
-    if (socketId) {
-      req.app.get("io")?.to(socketId).emit("ranked:queue:update", { emFila: false });
-    }
-
-    return res.json({ emFila: false, saiu });
-  } catch (error) {
-    console.error("Erro ao sair da fila ranqueada:", error);
-    return res.status(500).json({ message: "Erro ao sair da fila ranqueada." });
-  }
-}
-
+// GET /api/pvp/ranked/status — §15.
+// Só dados da TEMPORADA ATUAL e só ranqueado: vitórias/derrotas casuais
+// (PvpStatus) nunca entram aqui.
 async function status(req, res) {
   try {
     const personagem = req.personagemAtual;
@@ -98,9 +46,7 @@ async function status(req, res) {
 
     const temporada = await rankedSeasonService.obterOuIniciarTemporadaAtiva();
     const participacao = await rankedRatingService.obterOuCriarParticipacao(personagem.id, temporada.id);
-
-    const emFila = rankedMatchmakingService.estaNaFila(chave);
-    const tempoNaFilaMs = emFila ? rankedMatchmakingService.tempoNaFilaMs(chave) : null;
+    const uso = await rankedDailyLimitService.consultarUso(personagem.id);
 
     const duelId = pvpLiveSocket.duelPorPersonagem.get(chave);
     const duelo = duelId ? pvpLiveSocket.duelos.get(duelId) : null;
@@ -109,8 +55,12 @@ async function status(req, res) {
     return res.json({
       temporada: temporadaPublica(temporada),
       participacao: participacaoPublica(participacao),
-      emFila,
-      tempoNaFilaMs,
+      limiteDiario: {
+        usadas: uso.usadas,
+        limite: uso.limite,
+        restantes: uso.restantes,
+        rotulo: `${uso.usadas}/${uso.limite}`,
+      },
       emPartidaRanked,
       duelId: emPartidaRanked ? duelId : null,
     });
@@ -118,6 +68,58 @@ async function status(req, res) {
     console.error("Erro ao consultar status ranqueado:", error);
     return res.status(500).json({ message: "Erro ao consultar status ranqueado." });
   }
+}
+
+// POST /api/pvp/ranked/match/start — §6/§17.
+// Substitui a antiga entrada na fila. Qualquer alvo enviado no corpo é
+// IGNORADO de propósito: a escolha do oponente é exclusivamente do
+// servidor.
+async function iniciarPartida(req, res) {
+  try {
+    const personagem = req.personagemAtual;
+
+    if (req.body && (req.body.id_oponente || req.body.idOponente || req.body.opponentId)) {
+      console.warn(
+        `[ranked] Tentativa de escolher oponente ignorada (personagem ${personagem.id}) — o servidor sempre seleciona.`,
+      );
+    }
+
+    const resultado = await rankedLiveSocket.iniciarPartidaAssincrona(req.app.get("io"), {
+      idDesafiante: personagem.id,
+    });
+
+    return res.status(201).json({
+      duelId: resultado.duelId,
+      rankedMatchId: resultado.rankedMatchId,
+      temporada: temporadaPublica(resultado.temporada),
+      desafiante: resultado.desafiante,
+      defensor: resultado.defensor,
+      limiteDiario: {
+        usadas: resultado.uso.usadas,
+        limite: resultado.uso.limite,
+        restantes: Math.max(0, resultado.uso.limite - resultado.uso.usadas),
+        rotulo: `${resultado.uso.usadas}/${resultado.uso.limite}`,
+      },
+      consumiveisHabilitados: false,
+    });
+  } catch (error) {
+    if (error instanceof rankedLiveSocket.RankedMatchError) {
+      return res.status(error.status).json({ codigo: error.codigo, message: error.message });
+    }
+    console.error("Erro ao iniciar partida ranqueada:", error);
+    return res.status(500).json({ message: "Erro ao iniciar partida ranqueada." });
+  }
+}
+
+// DEPRECATED (PvP v2 §19): matchmaking por fila foi removido. Mantido
+// respondendo 410 Gone com instrução explícita, pra um cliente antigo
+// falhar de forma clara em vez de ficar esperando um match que nunca vem.
+function filaRemovida(req, res) {
+  return res.status(410).json({
+    codigo: "fila-removida",
+    message:
+      "A fila ranqueada foi removida no PvP v2. Use POST /api/pvp/ranked/match/start para iniciar uma partida.",
+  });
 }
 
 async function season(req, res) {
@@ -130,8 +132,8 @@ async function season(req, res) {
   }
 }
 
-// §15 — só entram no leaderboard público quem tem o mínimo configurável
-// de partidas; isso nunca afeta o rating interno, só a visibilidade.
+// GET /api/pvp/ranked/leaderboard — §14: aparece desde a 1ª partida
+// válida da temporada; 0 partidas não é listado.
 async function leaderboard(req, res) {
   try {
     const temporada = await rankedSeasonService.obterOuIniciarTemporadaAtiva();
@@ -155,8 +157,7 @@ async function leaderboard(req, res) {
       posicao: offset + indice + 1,
       id: linha.character_id,
       nome: linha.personagem?.nome ?? "???",
-      rating: linha.rating,
-      liga: rankedRatingService.ligaParaRating(linha.rating),
+      ...rankedTierService.resumoTier(linha.rating),
       jogos: linha.jogos,
       vitorias: linha.vitorias,
       derrotas: linha.derrotas,
@@ -177,4 +178,4 @@ async function leaderboard(req, res) {
   }
 }
 
-module.exports = { entrarFila, sairFila, status, season, leaderboard };
+module.exports = { status, iniciarPartida, filaRemovida, season, leaderboard };
