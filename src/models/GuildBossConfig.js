@@ -28,6 +28,13 @@ const GuildBossConfig = sequelize.define(
     // sink econômico líquido.
     pool_dinheiro_total: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
     pool_xp_total: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    // V2.0 (batalha ao vivo) — dano que o boss causa por acerto na
+    // primeira rodada; escala pra cima a cada rodada seguinte (ver
+    // FATOR_ESCALADA_DANO_BOSS_AO_VIVO em guildConfig.js).
+    dano_base_ataque: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    // V2.0 — bônus de ouro só pra quem causou mais dano na tentativa
+    // vencida, além da recompensa proporcional que todo mundo já recebe.
+    premio_maior_dano: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
     imagem_url: { type: DataTypes.STRING(255), allowNull: true },
   },
   {

@@ -132,6 +132,22 @@ function xpGuildaMissaoRank(rank) {
 const BOSS_FRACAO_IGUALITARIA = 0.25;
 const BOSS_FRACAO_PROPORCIONAL = 0.75;
 
+// Boss da Guilda V2.0 — batalha em tempo real (guildBossSocket.js),
+// mesmo modelo de turnos da Aventura em grupo (partySocket.js): grupo
+// pequeno, cada um ataca na sua vez, o boss revida 1 alvo aleatório por
+// rodada. A vida do boss em si continua sendo a MESMA vida_restante
+// persistida da tentativa da semana — várias salas ao vivo diferentes
+// (grupos distintos de membros) podem golpear o mesmo boss em paralelo,
+// cada golpe é salvo na hora.
+const BOSS_AO_VIVO_TAMANHO_MAXIMO = 8;
+const BOSS_AO_VIVO_TAMANHO_MINIMO = 1;
+const BOSS_AO_VIVO_PRAZO_TURNO_MS = 20 * 1000;
+// Dano do boss começa em dano_base_ataque (rodada 1) e cresce por
+// rodada — "ataques fracos que vão aumentando com o passar dos turnos",
+// pedido do jogador.
+const BOSS_AO_VIVO_FATOR_ESCALADA_DANO = 0.15;
+const BOSS_AO_VIVO_MAX_RODADAS = 60;
+
 // §31 — 1 boss por semana, ciclo global semanal (mesma semana UTC usada
 // pelas missões Semanais de personagem/guilda).
 const {
@@ -157,6 +173,11 @@ module.exports = {
   xpGuildaMissaoRank,
   BOSS_FRACAO_IGUALITARIA,
   BOSS_FRACAO_PROPORCIONAL,
+  BOSS_AO_VIVO_TAMANHO_MAXIMO,
+  BOSS_AO_VIVO_TAMANHO_MINIMO,
+  BOSS_AO_VIVO_PRAZO_TURNO_MS,
+  BOSS_AO_VIVO_FATOR_ESCALADA_DANO,
+  BOSS_AO_VIVO_MAX_RODADAS,
   // Reexportados por conveniência — mesma fonte de verdade de ciclos
   // globais já usada pela Guilda dos Aventureiros/Missões livres (§9 do
   // documento novo pede exatamente os mesmos resets globais).

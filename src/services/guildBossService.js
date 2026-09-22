@@ -76,6 +76,7 @@ async function obterStatus(idGuild) {
     contribuidores: contribuicoes.map((c) => ({
       personagem: c.Character ? { id: c.Character.id, nome: c.Character.nome } : null,
       dano_total: c.dano_total,
+      numero_ataques: c.numero_ataques,
     })),
   };
 }
@@ -147,10 +148,11 @@ async function liberarBoss(idGuild, idPersonagem, transaction, { registrarLog, e
   return tentativa;
 }
 
-// §33/§34/§35/§36/§37/§38/§39 — dano coletivo; ao zerar a vida,
-// distribui recompensa (só se derrotado dentro da janela) e nunca
-// promove Rank.
-async function atacarBoss(idGuild, idPersonagem, transaction, { registrarLog, emitirEvento } = {}) {
+// Carrega e valida a tentativa (Ativo, não expirada) + a contribuição do
+// personagem — compartilhado entre o ataque assíncrono (clique com
+// cooldown) e o ataque ao vivo (guildBossSocket.js, sem cooldown, uma
+// batida por turno já é o rate-limit natural).
+async function carregarTentativaEContribuicao(idGuild, idPersonagem, transaction, { registrarLog } = {}) {
   const membro = await GuildMember.findOne({ where: { id_guild: idGuild, id_personagem: idPersonagem }, transaction });
   if (!membro) throw erroGuilda("Você não pertence a essa guilda.", 403);
 
@@ -173,30 +175,25 @@ async function atacarBoss(idGuild, idPersonagem, transaction, { registrarLog, em
     throw erroGuilda("O tempo deste Boss se esgotou.", 410);
   }
 
+  const chefe = await GuildBossConfig.findByPk(tentativa.id_guild_boss_config, { transaction });
   const [contribuicao] = await GuildBossContribution.findOrCreate({
     where: { id_guild_boss_attempt: tentativa.id, id_personagem: idPersonagem },
-    defaults: { dano_total: 0 },
+    defaults: { dano_total: 0, numero_ataques: 0 },
     transaction,
   });
 
-  if (contribuicao.ultimo_ataque) {
-    const restanteMs = COOLDOWN_ATAQUE_MS - (Date.now() - new Date(contribuicao.ultimo_ataque).getTime());
-    if (restanteMs > 0) {
-      throw erroGuilda(`Aguarde ${Math.ceil(restanteMs / 60000)}min antes de atacar de novo.`, 429);
-    }
-  }
+  return { tentativa, chefe, contribuicao };
+}
 
-  const character = await Character.findByPk(idPersonagem, { include: [{ model: Class }], transaction });
-  const chefe = await GuildBossConfig.findByPk(tentativa.id_guild_boss_config, { transaction });
-
-  const bonusEquipamento = await buscarBonusDeAtributos(character.id, transaction);
-  const jogadorEfetivo = comMultiplicadoresDeClasse(
-    personagemComBonus(character.toJSON(), bonusEquipamento),
-    character.Class,
-  );
-  const dano = aplicarMitigacaoDeDefesa(calcularDanoBasico(jogadorEfetivo), chefe);
-
+// Aplica um golpe já calculado (dano >= 0) na tentativa + contribuição,
+// persiste, distribui recompensa se zerou a vida, e emite o evento de
+// atualização pra sala da guilda. Único ponto que escreve dano no boss —
+// tanto atacarBoss (assíncrono) quanto guildBossSocket (ao vivo) passam
+// por aqui, então as duas contagens de numero_ataques/dano_total nunca
+// divergem.
+async function aplicarGolpeNoBoss(idGuild, tentativa, chefe, contribuicao, dano, transaction, { registrarLog, emitirEvento } = {}) {
   contribuicao.dano_total = Number(contribuicao.dano_total) + dano;
+  contribuicao.numero_ataques = Number(contribuicao.numero_ataques) + 1;
   contribuicao.ultimo_ataque = new Date();
   await contribuicao.save({ transaction });
 
@@ -220,6 +217,43 @@ async function atacarBoss(idGuild, idPersonagem, transaction, { registrarLog, em
   }
 
   return { dano, tentativa, derrotado, recompensas };
+}
+
+// §33/§34/§35/§36/§37/§38/§39 — dano coletivo (modo assíncrono, clique
+// com cooldown por membro); ao zerar a vida, distribui recompensa (só
+// se derrotado dentro da janela) e nunca promove Rank.
+async function atacarBoss(idGuild, idPersonagem, transaction, { registrarLog, emitirEvento } = {}) {
+  const { tentativa, chefe, contribuicao } = await carregarTentativaEContribuicao(idGuild, idPersonagem, transaction, {
+    registrarLog,
+  });
+
+  if (contribuicao.ultimo_ataque) {
+    const restanteMs = COOLDOWN_ATAQUE_MS - (Date.now() - new Date(contribuicao.ultimo_ataque).getTime());
+    if (restanteMs > 0) {
+      throw erroGuilda(`Aguarde ${Math.ceil(restanteMs / 60000)}min antes de atacar de novo.`, 429);
+    }
+  }
+
+  const character = await Character.findByPk(idPersonagem, { include: [{ model: Class }], transaction });
+  const bonusEquipamento = await buscarBonusDeAtributos(character.id, transaction);
+  const jogadorEfetivo = comMultiplicadoresDeClasse(
+    personagemComBonus(character.toJSON(), bonusEquipamento),
+    character.Class,
+  );
+  const dano = aplicarMitigacaoDeDefesa(calcularDanoBasico(jogadorEfetivo), chefe);
+
+  return aplicarGolpeNoBoss(idGuild, tentativa, chefe, contribuicao, dano, transaction, { registrarLog, emitirEvento });
+}
+
+// V2.0 — golpe da batalha ao vivo (guildBossSocket.js): o dano já vem
+// calculado de lá (mesmo motor de combate da Aventura em grupo,
+// duelEngine.aplicarAcao, suporta ataque básico e poder) — aqui só
+// persiste. Sem checagem de cooldown: um turno por vez já limita.
+async function atacarBossAoVivo(idGuild, idPersonagem, dano, transaction, { registrarLog, emitirEvento } = {}) {
+  const { tentativa, chefe, contribuicao } = await carregarTentativaEContribuicao(idGuild, idPersonagem, transaction, {
+    registrarLog,
+  });
+  return aplicarGolpeNoBoss(idGuild, tentativa, chefe, contribuicao, dano, transaction, { registrarLog, emitirEvento });
 }
 
 // Nunca chamado fora de atacarBoss (vida_restante <= 0), e
@@ -278,16 +312,38 @@ async function distribuirRecompensa(tentativa, chefe, transaction, { registrarLo
     }
   }
 
-  tentativa.recompensa_distribuida = true;
-
-  if (registrarLog) {
-    await registrarLog(tentativa.id_guild, "boss_derrotado", {
-      detalhes: `Boss Rank ${tentativa.rank} derrotado — ${chefe.xp_guilda_concedido} XP de Guilda${subiuNivel ? ` (+${niveisGanhos} nível(is))` : ""}, ${elegiveis.length} participante(s) recompensado(s).`,
+  // V2.0 — prêmio extra em ouro só pra quem causou mais dano na
+  // tentativa, além da parte proporcional que já recebeu acima. Em
+  // caso de empate no dano, fica com quem bateu primeiro (Array.reduce
+  // só troca em ">" estrito) — resultado determinístico, sem sorteio.
+  let maiorDano = null;
+  if (elegiveis.length > 0 && chefe.premio_maior_dano > 0) {
+    maiorDano = elegiveis.reduce((atual, c) => (Number(c.dano_total) > Number(atual.dano_total) ? c : atual));
+    await Character.increment("dinheiro", {
+      by: chefe.premio_maior_dano,
+      where: { id: maiorDano.id_personagem },
       transaction,
     });
   }
 
-  return { xpGuilda: chefe.xp_guilda_concedido, subiuNivel, niveisGanhos, participantes: recompensasPorPersonagem };
+  tentativa.recompensa_distribuida = true;
+
+  if (registrarLog) {
+    await registrarLog(tentativa.id_guild, "boss_derrotado", {
+      detalhes: `Boss Rank ${tentativa.rank} derrotado — ${chefe.xp_guilda_concedido} XP de Guilda${subiuNivel ? ` (+${niveisGanhos} nível(is))` : ""}, ${elegiveis.length} participante(s) recompensado(s)${maiorDano ? `, prêmio de ${chefe.premio_maior_dano} ouro pro maior dano (personagem ${maiorDano.id_personagem})` : ""}.`,
+      transaction,
+    });
+  }
+
+  return {
+    xpGuilda: chefe.xp_guilda_concedido,
+    subiuNivel,
+    niveisGanhos,
+    participantes: recompensasPorPersonagem,
+    premioMaiorDano: maiorDano
+      ? { idPersonagem: maiorDano.id_personagem, ouro: chefe.premio_maior_dano }
+      : null,
+  };
 }
 
-module.exports = { obterStatus, liberarBoss, atacarBoss, expirarSeNecessario };
+module.exports = { obterStatus, liberarBoss, atacarBoss, atacarBossAoVivo, expirarSeNecessario };

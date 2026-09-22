@@ -11,6 +11,7 @@ const registerTournamentHandlers = require("./socket/tournamentSocket");
 const registerGuildHandlers = require("./socket/guildSocket");
 const registerMessagesHandlers = require("./socket/messagesSocket");
 const registerPartyHandlers = require("./socket/partySocket");
+const registerGuildBossHandlers = require("./socket/guildBossSocket");
 
 // Importa TODOS os modelos primeiro.
 // A ordem de importação dos modelos aqui geralmente não importa,
@@ -258,6 +259,7 @@ registerTournamentHandlers(io);
 registerGuildHandlers(io);
 registerMessagesHandlers(io);
 registerPartyHandlers(io);
+registerGuildBossHandlers(io);
 // rankedController usa isso pra criar a partida ranqueada assíncrona a
 // partir de uma rota REST (POST /ranked/match/start) e emitir os
 // eventos do duelo pro socket do jogador; messageController faz o mesmo

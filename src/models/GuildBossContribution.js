@@ -12,6 +12,10 @@ const GuildBossContribution = sequelize.define(
     id_guild_boss_attempt: { type: DataTypes.INTEGER, allowNull: false },
     id_personagem: { type: DataTypes.INTEGER, allowNull: false },
     dano_total: { type: DataTypes.BIGINT, allowNull: false, defaultValue: 0 },
+    // V2.0 — quantos golpes (ataque básico ou poder) aquele membro
+    // desferiu no boss, contado tanto no modo assíncrono (clique com
+    // cooldown) quanto na batalha ao vivo — usado no ranking novo.
+    numero_ataques: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
     ultimo_ataque: { type: DataTypes.DATE, allowNull: true },
   },
   {
