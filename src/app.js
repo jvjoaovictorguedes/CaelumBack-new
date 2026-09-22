@@ -64,6 +64,7 @@ const marketRoutes = require("./routes/marketRoutes");
 const adventureRoutes = require("./routes/adventureRoutes");
 const bestiaryRoutes = require("./routes/bestiaryRoutes");
 const rankingRoutes = require("./routes/rankingRoutes");
+const worldRoutes = require("./routes/worldRoutes");
 const adventureGuildRoutes = require("./routes/adventureGuildRoutes");
 const equipmentInstanceRoutes = require("./routes/equipmentInstanceRoutes");
 const inventoryV2Routes = require("./routes/inventoryV2Routes");
@@ -204,6 +205,7 @@ app.use("/api/market", marketRoutes);
 app.use("/api/adventure", adventureRoutes);
 app.use("/api/bestiary", bestiaryRoutes);
 app.use("/api/ranking", rankingRoutes);
+app.use("/api/world", worldRoutes);
 app.use("/api/adventure-guild", adventureGuildRoutes);
 app.use("/api/onboarding", onboardingRoutes);
 // Torneios — administração (criar/iniciar/cancelar/prêmio). Toda rota

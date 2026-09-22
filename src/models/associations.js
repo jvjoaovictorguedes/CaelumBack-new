@@ -29,6 +29,9 @@ const TournamentParticipant = require("./TournamentParticipant");
 const TournamentSeries = require("./TournamentSeries");
 const TournamentMatch = require("./TournamentMatch");
 const User = require("./User");
+const WorldTerritory = require("./WorldTerritory");
+const WorldMapNode = require("./WorldMapNode");
+const WorldMapConnection = require("./WorldMapConnection");
 const CraftingRecipe = require("./CraftingRecipe");
 const CraftingRecipeIngredient = require("./CraftingRecipeIngredient");
 const CharacterCraftingQueue = require("./CharacterCraftingQueue");
@@ -238,5 +241,14 @@ TournamentSeries.belongsTo(TournamentParticipant, { foreignKey: "winner_particip
 TournamentSeries.hasMany(TournamentMatch, { foreignKey: "series_id", as: "jogos" });
 TournamentMatch.belongsTo(TournamentSeries, { foreignKey: "series_id", as: "serie" });
 TournamentMatch.belongsTo(TournamentParticipant, { foreignKey: "winner_participant_id", as: "vencedor" });
+
+// Mapa Mundial (spec de Mapa v1 §12/§13/§17/§22) — WorldTerritory
+// contém vários WorldMapNode (id_territorio null = zona neutra, nunca
+// obrigatório); WorldMapConnection só referencia dois Nodes, sem
+// bloquear nada (puramente visual nesta versão).
+WorldTerritory.hasMany(WorldMapNode, { foreignKey: "id_territorio", as: "nodes" });
+WorldMapNode.belongsTo(WorldTerritory, { foreignKey: "id_territorio", as: "territorio" });
+WorldMapConnection.belongsTo(WorldMapNode, { foreignKey: "id_origem", as: "origem" });
+WorldMapConnection.belongsTo(WorldMapNode, { foreignKey: "id_destino", as: "destino" });
 
 module.exports = {};
