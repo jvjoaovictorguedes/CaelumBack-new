@@ -8,6 +8,7 @@ const Character = require("../models/Character");
 const Guild = require("../models/Guild");
 const CharacterPvpSeason = require("../models/CharacterPvpSeason");
 const CharacterForgeProgress = require("../models/CharacterForgeProgress");
+const PvpStatus = require("../models/PvpStatus");
 const { estaOnline } = require("../socket/pvpLiveSocket");
 const { obterOuIniciarTemporadaAtiva } = require("./rankedSeasonService");
 const { LEADERBOARD_MINIMO_PARTIDAS } = require("../config/rankedConfig");
@@ -254,8 +255,9 @@ async function posicaoForja(idPersonagem) {
 // casual é só pra jogar sem compromisso, não conta pra troféu/posição
 // nenhuma. Pontuação exibida = rating da temporada. Mesmo mínimo de
 // partidas do leaderboard ranqueado (rankedConfig.LEADERBOARD_MINIMO_
-// PARTIDAS) pra entrar no Top, pra não expor rating de placement cedo
-// demais. Desempate: rating > vitórias > menos jogos.
+// PARTIDAS = 1 na v2) pra entrar no Top: §14 manda listar desde a
+// primeira partida válida — só quem tem 0 partidas fica de fora.
+// Desempate: rating > vitórias > menos jogos.
 // ---------------------------------------------------------------
 async function rankingPvp(page) {
   const { pagina, offset, limite } = paginar(page);
@@ -340,7 +342,114 @@ async function posicaoPvp(idPersonagem) {
   };
 }
 
+// ---------------------------------------------------------------
+// PvP Casual (PvP v2 §3) — categoria SEPARADA da Arena Ranqueada.
+// Nunca lê rating/temporada: pontua só o que o Duelo casual produz
+// (PvpStatus). Fórmula da spec:
+//
+//   Saldo          = Vitórias - Derrotas
+//   Combates       = Vitórias + Derrotas
+//   BônusAtividade = min(30, floor(Combates / 5))
+//   Pontuação      = (Saldo × 10) + BônusAtividade
+//
+// Elegibilidade mantida igual à do ranking casual anterior: entra quem
+// já tem linha em PvpStatus com pelo menos 1 combate (0 combate não
+// aparece). Desempate: pontuação > saldo > menos combates > id.
+const SQL_PONTUACAO_CASUAL = `(("PvpStatus".vitorias - "PvpStatus".derrotas) * 10
+  + LEAST(30, FLOOR((("PvpStatus".vitorias + "PvpStatus".derrotas)) / 5)))`;
+
+function pontuacaoCasual({ vitorias, derrotas }) {
+  const saldo = vitorias - derrotas;
+  const combates = vitorias + derrotas;
+  const bonusAtividade = Math.min(30, Math.floor(combates / 5));
+  return saldo * 10 + bonusAtividade;
+}
+
+async function rankingPvpCasual(page) {
+  const { pagina, offset, limite } = paginar(page);
+
+  const { count, rows } = await PvpStatus.findAndCountAll({
+    where: sequelize.literal('("PvpStatus".vitorias + "PvpStatus".derrotas) > 0'),
+    include: [{ model: Character, attributes: ["id", "nome"] }],
+    order: [
+      [sequelize.literal(SQL_PONTUACAO_CASUAL), "DESC"],
+      [sequelize.literal('("PvpStatus".vitorias - "PvpStatus".derrotas)'), "DESC"],
+      [sequelize.literal('("PvpStatus".vitorias + "PvpStatus".derrotas)'), "ASC"],
+      ["id_personagem", "ASC"],
+    ],
+    limit: limite,
+    offset,
+  });
+
+  const itens = rows.map((linha, indice) => ({
+    posicao: offset + indice + 1,
+    id: linha.id_personagem,
+    nome: linha.Character?.nome ?? "???",
+    pontuacao: pontuacaoCasual(linha),
+    vitorias: linha.vitorias,
+    derrotas: linha.derrotas,
+    saldo: linha.vitorias - linha.derrotas,
+    combates: linha.vitorias + linha.derrotas,
+    online: estaOnline(linha.id_personagem),
+  }));
+
+  return paginaDeResposta(pagina, limite, count, itens);
+}
+
+async function posicaoPvpCasual(idPersonagem) {
+  const status = await PvpStatus.findOne({ where: { id_personagem: idPersonagem } });
+  const combates = (status?.vitorias ?? 0) + (status?.derrotas ?? 0);
+
+  if (!status || combates === 0) {
+    return {
+      elegivel: false,
+      motivo: "Ainda não classificado. Dispute pelo menos um Duelo casual para entrar no ranking.",
+      pontuacao: 0,
+      vitorias: status?.vitorias ?? 0,
+      derrotas: status?.derrotas ?? 0,
+      saldo: (status?.vitorias ?? 0) - (status?.derrotas ?? 0),
+      combates,
+    };
+  }
+
+  const pontuacao = pontuacaoCasual(status);
+
+  // Mesma comparação de tupla do ORDER BY acima — conta quantos ficam
+  // ANTES, sem carregar o ranking inteiro (§19 do Ranking v2).
+  const [linhas] = await sequelize.query(
+    `SELECT COUNT(*)::int AS count FROM "PvpStatuses" ps
+     WHERE (ps.vitorias + ps.derrotas) > 0 AND (
+       ((ps.vitorias - ps.derrotas) * 10 + LEAST(30, FLOOR((ps.vitorias + ps.derrotas) / 5))) > :pontuacao
+       OR (((ps.vitorias - ps.derrotas) * 10 + LEAST(30, FLOOR((ps.vitorias + ps.derrotas) / 5))) = :pontuacao
+           AND (ps.vitorias - ps.derrotas) > :saldo)
+       OR (((ps.vitorias - ps.derrotas) * 10 + LEAST(30, FLOOR((ps.vitorias + ps.derrotas) / 5))) = :pontuacao
+           AND (ps.vitorias - ps.derrotas) = :saldo
+           AND (ps.vitorias + ps.derrotas) < :combates)
+     );`,
+    {
+      replacements: {
+        pontuacao,
+        saldo: status.vitorias - status.derrotas,
+        combates,
+      },
+    },
+  );
+
+  return {
+    elegivel: true,
+    posicao: linhas[0].count + 1,
+    pontuacao,
+    vitorias: status.vitorias,
+    derrotas: status.derrotas,
+    saldo: status.vitorias - status.derrotas,
+    combates,
+  };
+}
+
 module.exports = {
+  pontuacaoCasual,
+  rankingPvpCasual,
+  posicaoPvpCasual,
   rankingNivel,
   posicaoNivel,
   rankingGold,
