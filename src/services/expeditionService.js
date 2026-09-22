@@ -18,6 +18,7 @@ const { TEMPO_COLETA_MS, CHANCE_POR_NIVEL_PPM, BASE_SORTEIO, NIVEL_MAXIMO } = re
 const { sortearQualidade, sortearRecurso, sortearQuantidade } = require("./expeditionRollService");
 const { nivelPorXpTotal, xpParaProximoNivel, aplicarGanhoDeXp } = require("./expeditionProgressionService");
 const { registrarProgresso } = require("./missionService");
+const { addStack } = require("./inventoryService");
 const { registrarProgressoContrato } = require("./adventureGuildObjectiveService");
 const { registrarProgressoMissaoGuilda } = require("./guildMissionService");
 
@@ -202,20 +203,14 @@ async function coletar(id_personagem, id_regiao) {
         );
       }
 
-      const entradaInventario = await CharacterInventory.findOne({
-        where: { id_personagem, id_item: vinculo.id_item },
-        transaction,
-        lock: transaction.LOCK.UPDATE,
-      });
-      if (entradaInventario) {
-        entradaInventario.quantidade += quantidade;
-        await entradaInventario.save({ transaction });
-      } else {
-        await CharacterInventory.create(
-          { id_personagem, id_item: vinculo.id_item, quantidade },
-          { transaction },
-        );
-      }
+      // addStack (upsert atômico) em vez do findOne-then-create/update
+      // manual de antes — esse padrão não tranca nada quando a linha
+      // ainda não existe (lock de linha só protege linha existente), e
+      // duas coletas de Expedição terminando quase juntas conseguiam
+      // criar duas linhas pro mesmo item em vez de somar numa só (bug
+      // real: fragmentos "sumindo" da Fundição por estarem espalhados
+      // em duas linhas, a Forja só enxergando uma delas).
+      await addStack(id_personagem, vinculo.id_item, quantidade, transaction);
 
       resultado = qualidadeSorteada;
       quantidadeGanha = quantidade;

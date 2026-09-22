@@ -8,6 +8,7 @@ const CraftingRecipe = require("../models/CraftingRecipe");
 const CraftingRecipeIngredient = require("../models/CraftingRecipeIngredient");
 const CharacterCraftingQueue = require("../models/CharacterCraftingQueue");
 const { listarReceitasComItens } = require("../services/craftingService");
+const { addStack } = require("../services/inventoryService");
 
 function formatarReceita(receita, quantidadesPorItem) {
   return {
@@ -236,17 +237,7 @@ exports.coletarForja = async (req, res) => {
       });
 
       const idItem = receita.item.id;
-      const entrada = await CharacterInventory.findOne({
-        where: { id_personagem, id_item: idItem },
-        transaction,
-        lock: transaction.LOCK.UPDATE,
-      });
-      if (entrada) {
-        entrada.quantidade += 1;
-        await entrada.save({ transaction });
-      } else {
-        await CharacterInventory.create({ id_personagem, id_item: idItem, quantidade: 1 }, { transaction });
-      }
+      await addStack(id_personagem, idItem, 1, transaction);
 
       const item = receita.item;
       await fila.destroy({ transaction });

@@ -11,6 +11,7 @@ const CharacterInventory = require("../models/CharacterInventory");
 const Item = require("../models/Item");
 const AdventureMonster = require("../models/AdventureMonster");
 const AdventureZone = require("../models/AdventureZone");
+const { addStack } = require("./inventoryService");
 const { adicionarExperiencia } = require("./experienceService");
 const { concederOuro } = require("./goldService");
 const { registrarProgresso } = require("./missionService");
@@ -160,20 +161,7 @@ async function resgatarRecompensaContrato(idPersonagem, idContrato, transaction)
     } else if (recompensa.tipo === "XP") {
       xp += recompensa.quantidade;
     } else if (recompensa.tipo === "Item") {
-      let entrada = await CharacterInventory.findOne({
-        where: { id_personagem: idPersonagem, id_item: recompensa.id_item },
-        transaction,
-        lock: transaction.LOCK.UPDATE,
-      });
-      if (entrada) {
-        entrada.quantidade += recompensa.quantidade;
-        await entrada.save({ transaction });
-      } else {
-        entrada = await CharacterInventory.create(
-          { id_personagem: idPersonagem, id_item: recompensa.id_item, quantidade: recompensa.quantidade },
-          { transaction },
-        );
-      }
+      await addStack(idPersonagem, recompensa.id_item, recompensa.quantidade, transaction);
       const item = await Item.findByPk(recompensa.id_item, { transaction });
       itensConcedidos.push({ id: recompensa.id_item, nome: item?.nome ?? "?", quantidade: recompensa.quantidade });
     }

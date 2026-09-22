@@ -20,6 +20,7 @@ const Item = require("../models/Item");
 const CharacterInventory = require("../models/CharacterInventory");
 const { adicionarExperiencia } = require("./experienceService");
 const { concederOuro } = require("./goldService");
+const { addStack } = require("./inventoryService");
 const { fimDoCicloAtual } = require("../config/adventureGuildConfig");
 
 const CATEGORIAS_CICLICAS = ["Diaria", "Semanal", "Mensal"];
@@ -162,20 +163,7 @@ async function resgatarRecompensa(idPersonagem, idMission, transaction) {
   if (mission.recompensa_item_id) {
     const item = await Item.findByPk(mission.recompensa_item_id, { transaction });
     if (item) {
-      let entrada = await CharacterInventory.findOne({
-        where: { id_personagem: idPersonagem, id_item: item.id },
-        transaction,
-        lock: transaction.LOCK.UPDATE,
-      });
-      if (entrada) {
-        entrada.quantidade += mission.recompensa_item_quantidade;
-        await entrada.save({ transaction });
-      } else {
-        entrada = await CharacterInventory.create(
-          { id_personagem: idPersonagem, id_item: item.id, quantidade: mission.recompensa_item_quantidade },
-          { transaction },
-        );
-      }
+      await addStack(idPersonagem, item.id, mission.recompensa_item_quantidade, transaction);
       itemConcedido = { id: item.id, nome: item.nome, quantidade: mission.recompensa_item_quantidade };
     }
   }

@@ -26,6 +26,7 @@ const {
 } = require("../config/forgeConfig");
 const { rolarBarraBonus } = require("./forgeRollService");
 const { aplicarGanhoDeXp, nivelPorXpTotal } = require("./forgeProgressionService");
+const { addStack } = require("./inventoryService");
 
 function indiceQualidadeMaxima(nivelForja) {
   const qualidadeMaxima = QUALIDADE_MAXIMA_FUNDICAO_POR_NIVEL[nivelForja] ?? "Comum";
@@ -173,20 +174,7 @@ async function fundir(characterId, { id_recurso, qualidade, quantidadeBarras }) 
       await entradaFragmento.save({ transaction });
     }
 
-    const entradaBarra = await CharacterInventory.findOne({
-      where: { id_personagem: characterId, id_item: barra.id_item },
-      transaction,
-      lock: transaction.LOCK.UPDATE,
-    });
-    if (entradaBarra) {
-      entradaBarra.quantidade += totalBarras;
-      await entradaBarra.save({ transaction });
-    } else {
-      await CharacterInventory.create(
-        { id_personagem: characterId, id_item: barra.id_item, quantidade: totalBarras },
-        { transaction },
-      );
-    }
+    await addStack(characterId, barra.id_item, totalBarras, transaction);
 
     // XP contado só pelas barras-BASE pedidas, não pelas de bônus — senão
     // o próprio bônus de sorte vira uma segunda fonte de XP em cima da
