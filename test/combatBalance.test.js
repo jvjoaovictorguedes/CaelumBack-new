@@ -105,12 +105,20 @@ async function criarPoderComStatus({ statusKey, cooldown, chancePpm = 1_000_000 
 
 testeComBanco("ataque básico continua funcionando sem nenhum status/cooldown envolvido (regressão)", async () => {
   const { personagem } = await criarPersonagem({ nivel: 5 });
-  await encontroDeTreino(personagem);
 
-  const r = await chamarExecutarTurno(personagem.id, { type: "attack" });
+  // Mesma ressalva do teste de poder abaixo: 5% de chance base de
+  // esquiva mesmo em vantagem total de Agilidade.
+  let r = null;
+  for (let tentativa = 0; tentativa < 10; tentativa += 1) {
+    await encontroDeTreino(personagem);
+    // eslint-disable-next-line no-await-in-loop
+    r = await chamarExecutarTurno(personagem.id, { type: "attack" });
+    if (r.corpo.data.log.some((l) => l.includes("Você atacou"))) break;
+  }
+
   assert.equal(r.statusCode, 200);
   assert.equal(r.corpo.data.done, false);
-  assert.ok(r.corpo.data.log.some((l) => l.includes("Você atacou")));
+  assert.ok(r.corpo.data.log.some((l) => l.includes("Você atacou")), "ataque não acertou em 10 tentativas — investigar");
   assert.deepEqual(r.corpo.data.statusEffects, { player: [], enemy: [] });
 });
 
@@ -118,11 +126,24 @@ testeComBanco("usar um poder com efeito de status aplica o status no inimigo e i
   const { personagem } = await criarPersonagem({ nivel: 5 });
   const power = await criarPoderComStatus({ statusKey: "BURN", cooldown: 2 });
   await CharacterAbilities.create({ id_personagem: personagem.id, id_power: power.id, is_active: true, nivel_habilidade: 1 });
-  await encontroDeTreino(personagem);
 
-  const r = await chamarExecutarTurno(personagem.id, { type: "power", powerId: power.id });
+  // chanceDeEsquiva tem uma chance BASE mínima de 5% mesmo com o
+  // atacante em vantagem total de Agilidade (ver combatFormulas.js) —
+  // então "o golpe acerta" não é 100% garantido nem com chance_ppm do
+  // status em 1_000_000 (essa chance só vale DEPOIS de acertar). Tenta
+  // de novo em uma encontro NOVO (reseta cooldown) até um golpe
+  // acertar; ~(0.05)^10 de chance de esgotar as tentativas por puro
+  // azar, não vale a pena travar o teste nisso.
+  let r = null;
+  for (let tentativa = 0; tentativa < 10; tentativa += 1) {
+    await encontroDeTreino(personagem);
+    // eslint-disable-next-line no-await-in-loop
+    r = await chamarExecutarTurno(personagem.id, { type: "power", powerId: power.id });
+    if (r.corpo.data.log.some((l) => l.includes("Queimadura"))) break;
+  }
+
   assert.equal(r.statusCode, 200);
-  assert.ok(r.corpo.data.log.some((l) => l.includes("Queimadura")));
+  assert.ok(r.corpo.data.log.some((l) => l.includes("Queimadura")), "golpe não acertou em 10 tentativas — investigar");
   assert.ok(r.corpo.data.statusEffects.enemy.some((s) => s.key === "BURN"));
 
   const bloqueada = await chamarExecutarTurno(personagem.id, { type: "power", powerId: power.id });
@@ -188,28 +209,40 @@ testeComBanco("DoT pode terminar o combate em vitória antes do contra-ataque do
 
 testeComBanco("Enfraquecimento reduz o dano de saída de quem está afetado", async () => {
   const { personagem } = await criarPersonagem({ nivel: 5, forca: 50 });
-  await encontroDeTreino(personagem, {
-    vida_maxima: 100_000,
-    vida_atual: 100_000,
-  });
 
-  // Ataque básico sem enfraquecimento, pra ter uma referência.
-  const semWeaken = await chamarExecutarTurno(personagem.id, { type: "attack" });
-  const vidaApos1 = semWeaken.corpo.data.enemy.vida_atual;
-  const danoSemWeaken = 100_000 - vidaApos1;
+  // Ataque básico sem enfraquecimento, pra ter uma referência — repete
+  // em caso de esquiva (5% de chance base, ver testes acima) até um
+  // golpe acertar de verdade (dano > 0).
+  let danoSemWeaken = 0;
+  for (let tentativa = 0; tentativa < 10 && danoSemWeaken === 0; tentativa += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await encontroDeTreino(personagem, { vida_maxima: 100_000, vida_atual: 100_000 });
+    // eslint-disable-next-line no-await-in-loop
+    const semWeaken = await chamarExecutarTurno(personagem.id, { type: "attack" });
+    danoSemWeaken = 100_000 - semWeaken.corpo.data.enemy.vida_atual;
+  }
+  assert.ok(danoSemWeaken > 0, "ataque de referência não acertou em 10 tentativas — investigar");
 
-  await encontroDeTreino(personagem, {
-    vida_maxima: 100_000,
-    vida_atual: 100_000,
-    statusEffects: {
-      player: [
-        { key: "WEAKEN", sourceActorId: "enemy", sourcePowerId: null, sourceItemId: null, remainingTurns: 2, stacks: 1, potency: 50, appliedAtTurn: 1 },
-      ],
-      enemy: [],
-    },
-  });
-  const comWeaken = await chamarExecutarTurno(personagem.id, { type: "attack" });
-  const danoComWeaken = 100_000 - comWeaken.corpo.data.enemy.vida_atual;
+  let danoComWeaken = null;
+  for (let tentativa = 0; tentativa < 10 && danoComWeaken === null; tentativa += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    await encontroDeTreino(personagem, {
+      vida_maxima: 100_000,
+      vida_atual: 100_000,
+      statusEffects: {
+        player: [
+          { key: "WEAKEN", sourceActorId: "enemy", sourcePowerId: null, sourceItemId: null, remainingTurns: 2, stacks: 1, potency: 50, appliedAtTurn: 1 },
+        ],
+        enemy: [],
+      },
+    });
+    // eslint-disable-next-line no-await-in-loop
+    const comWeaken = await chamarExecutarTurno(personagem.id, { type: "attack" });
+    if (!comWeaken.corpo.data.log.some((l) => l.includes("esquivou"))) {
+      danoComWeaken = 100_000 - comWeaken.corpo.data.enemy.vida_atual;
+    }
+  }
+  assert.ok(danoComWeaken !== null, "ataque enfraquecido não acertou em 10 tentativas — investigar");
 
   assert.ok(danoComWeaken < danoSemWeaken, "50% de Enfraquecimento precisa reduzir o dano causado");
 });
