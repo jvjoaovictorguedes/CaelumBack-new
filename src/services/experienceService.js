@@ -8,7 +8,7 @@ const {
 const { buscarBonusDeAtributos, personagemComBonus } = require("./equipmentBonusService");
 
 const XP_POR_NIVEL = 100;
-const PONTOS_POR_NIVEL = 1;
+const PONTOS_POR_NIVEL = 4;
 
 // `transaction` + `personagem` (instância já travada com LOCK.UPDATE)
 // existem pra permitir que o chamador junte XP, dinheiro e outros campos
@@ -79,4 +79,6 @@ return {
 }
 module.exports = {
   adicionarExperiencia,
+  PONTOS_POR_NIVEL,
+  XP_POR_NIVEL,
 };
