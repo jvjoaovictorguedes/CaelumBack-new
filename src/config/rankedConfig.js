@@ -85,8 +85,16 @@ const TIERS = [
     nome: "Mestre",
     asset: "mestre",
     ordem: 6,
-    // Sem divisão: uma única faixa aberta.
-    divisoes: [{ divisao: null, min: 3000, max: Infinity }],
+    // Sem divisão. Deixou de ser o topo aberto quando Grão-Mestre
+    // entrou acima — agora é uma faixa fechada como as demais.
+    divisoes: [{ divisao: null, min: 3000, max: 3499 }],
+  },
+  {
+    nome: "Grão-Mestre",
+    asset: "grao-mestre",
+    ordem: 7,
+    // Sem divisão: uma única faixa aberta, agora o topo de verdade.
+    divisoes: [{ divisao: null, min: 3500, max: Infinity }],
   },
 ];
 

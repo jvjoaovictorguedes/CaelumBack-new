@@ -66,7 +66,9 @@ const FRONTEIRAS = [
   [2900, "Diamante I"],
   [2999, "Diamante I"],
   [3000, "Mestre"],
-  [99999, "Mestre"],
+  [3499, "Mestre"],
+  [3500, "Grão-Mestre"],
+  [99999, "Grão-Mestre"],
 ];
 
 test("Tier/Divisão correto em todas as fronteiras da spec", () => {
@@ -79,13 +81,15 @@ test("Tier/Divisão correto em todas as fronteiras da spec", () => {
   }
 });
 
-test("Mestre não tem divisão", () => {
-  assert.equal(rankedTierService.tierDivisaoParaRating(3500).divisao, null);
+test("Mestre e Grão-Mestre não têm divisão", () => {
+  assert.equal(rankedTierService.tierDivisaoParaRating(3200).divisao, null);
+  assert.equal(rankedTierService.tierDivisaoParaRating(3600).divisao, null);
 });
 
 test("chave de asset é estável e derivada do Tier", () => {
   assert.equal(rankedTierService.tierParaAsset("Ferro"), "ferro");
   assert.equal(rankedTierService.tierParaAsset("Mestre"), "mestre");
+  assert.equal(rankedTierService.tierParaAsset("Grão-Mestre"), "grao-mestre");
   assert.equal(rankedTierService.tierDivisaoParaRating(2650).asset, "diamante");
   // Nome desconhecido nunca vira caminho arbitrário: cai no tier base.
   assert.equal(rankedTierService.tierParaAsset("../../hack.png"), "ferro");
@@ -94,7 +98,8 @@ test("chave de asset é estável e derivada do Tier", () => {
 test("adjacência de pareamento é ±1 tier e nunca expande", () => {
   assert.deepEqual(rankedTierService.tiersAdjacentes("Ferro"), ["Ferro", "Bronze"]);
   assert.deepEqual(rankedTierService.tiersAdjacentes("Bronze"), ["Ferro", "Bronze", "Prata"]);
-  assert.deepEqual(rankedTierService.tiersAdjacentes("Mestre"), ["Diamante", "Mestre"]);
+  assert.deepEqual(rankedTierService.tiersAdjacentes("Mestre"), ["Diamante", "Mestre", "Grão-Mestre"]);
+  assert.deepEqual(rankedTierService.tiersAdjacentes("Grão-Mestre"), ["Mestre", "Grão-Mestre"]);
 
   // Ferro nunca encara Prata.
   assert.equal(rankedTierService.saoTiersAdjacentes("Ferro", "Prata"), false);
@@ -103,9 +108,12 @@ test("adjacência de pareamento é ±1 tier e nunca expande", () => {
     assert.equal(rankedTierService.saoTiersAdjacentes("Bronze", alvo), true);
   }
   assert.equal(rankedTierService.saoTiersAdjacentes("Bronze", "Ouro"), false);
-  // Mestre só encara Diamante/Mestre.
+  // Mestre encara Diamante/Mestre/Grão-Mestre, mas não Platina.
   assert.equal(rankedTierService.saoTiersAdjacentes("Mestre", "Platina"), false);
   assert.equal(rankedTierService.saoTiersAdjacentes("Mestre", "Diamante"), true);
+  assert.equal(rankedTierService.saoTiersAdjacentes("Mestre", "Grão-Mestre"), true);
+  // Grão-Mestre só encara Mestre/Grão-Mestre.
+  assert.equal(rankedTierService.saoTiersAdjacentes("Grão-Mestre", "Diamante"), false);
 });
 
 test("deltas de rating seguem a tabela por diferença de tier", () => {
