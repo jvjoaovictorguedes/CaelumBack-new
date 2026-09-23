@@ -19,6 +19,7 @@ const PADRAO = {
     autorizar_gastos: true,
     liberar_boss: true,
     comprar_beneficios: true,
+    gerenciar_mural: true,
   },
   Oficial: {
     convidar: true,
@@ -30,6 +31,10 @@ const PADRAO = {
     autorizar_gastos: false,
     liberar_boss: false,
     comprar_beneficios: false,
+    // Mural (item da fila: "líder e o cargo imediatamente abaixo dele
+    // podem postar/remover") — Oficial é o cargo logo abaixo de
+    // Fundador em HIERARQUIA, então só esses dois entram true aqui.
+    gerenciar_mural: true,
   },
   Veterano: {
     convidar: true,
@@ -41,6 +46,7 @@ const PADRAO = {
     autorizar_gastos: false,
     liberar_boss: false,
     comprar_beneficios: false,
+    gerenciar_mural: false,
   },
   Membro: {
     convidar: false,
@@ -52,6 +58,7 @@ const PADRAO = {
     autorizar_gastos: false,
     liberar_boss: false,
     comprar_beneficios: false,
+    gerenciar_mural: false,
   },
   Recruta: {
     convidar: false,
@@ -63,6 +70,7 @@ const PADRAO = {
     autorizar_gastos: false,
     liberar_boss: false,
     comprar_beneficios: false,
+    gerenciar_mural: false,
   },
 };
 

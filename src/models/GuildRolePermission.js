@@ -47,6 +47,7 @@ const GuildRolePermission = sequelize.define(
         "autorizar_gastos",
         "liberar_boss",
         "comprar_beneficios",
+        "gerenciar_mural",
       ),
       allowNull: false,
     },

@@ -3,6 +3,7 @@ const guildController = require("../controllers/guildController");
 const guildBossController = require("../controllers/guildBossController");
 const guildMissionController = require("../controllers/guildMissionController");
 const guildBenefitController = require("../controllers/guildBenefitController");
+const guildMuralController = require("../controllers/guildMuralController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const { carregarPersonagemAtual } = require("../middlewares/currentCharacterMiddleware");
 const { exigirMembroDaGuild } = require("../middlewares/guildMembershipMiddleware");
@@ -169,6 +170,20 @@ router.get(
   carregarPersonagemAtual,
   exigirMembroDaGuild("id"),
   guildController.listarLogs,
+);
+
+// Mural (guildMuralController.js) — todo membro lê; postar/remover exige
+// a permissão "gerenciar_mural" (checada dentro do controller, mesmo
+// padrão de exigirPermissao usado no resto da guilda).
+router
+  .route("/:id/mural")
+  .get(authMiddleware, carregarPersonagemAtual, exigirMembroDaGuild("id"), guildMuralController.listar)
+  .post(authMiddleware, carregarPersonagemAtual, guildMuralController.criar);
+router.delete(
+  "/:id/mural/:messageId",
+  authMiddleware,
+  carregarPersonagemAtual,
+  guildMuralController.deletar,
 );
 
 module.exports = router;

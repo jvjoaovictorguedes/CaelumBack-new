@@ -102,6 +102,12 @@ async function registrarLog(idGuild, tipo, { responsavel, alvo, detalhes, transa
   );
 }
 
+// Reexportados pra guildMuralController.js poder reusar a mesma checagem
+// de permissão/log em vez de duplicar (Mural usa exatamente o mesmo
+// padrão cargo+permissão de todo o resto da guilda).
+exports.exigirPermissao = exigirPermissao;
+exports.registrarLog = registrarLog;
+
 // ---------------------------------------------------------------------
 // Identidade e ciclo de vida da guilda
 // ---------------------------------------------------------------------
