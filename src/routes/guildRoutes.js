@@ -1,14 +1,43 @@
 const express = require("express");
+const multer = require("multer");
 const guildController = require("../controllers/guildController");
 const guildBossController = require("../controllers/guildBossController");
 const guildMissionController = require("../controllers/guildMissionController");
 const guildBenefitController = require("../controllers/guildBenefitController");
 const guildMuralController = require("../controllers/guildMuralController");
+const guildEmblemController = require("../controllers/guildEmblemController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const { carregarPersonagemAtual } = require("../middlewares/currentCharacterMiddleware");
 const { exigirMembroDaGuild } = require("../middlewares/guildMembershipMiddleware");
+const { TAMANHO_MAXIMO_BYTES } = require("../config/guildEmblemConfig");
 
 const router = express.Router();
+
+// memoryStorage: o buffer inteiro precisa estar disponível de uma vez
+// pro sharp validar/processar (ver guildEmblemService.js) — sem disco
+// intermediário, e o limite de tamanho aqui é a primeira linha de
+// defesa (multer recusa durante o próprio parse do multipart, antes
+// mesmo do handler rodar).
+const uploadEmblema = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: TAMANHO_MAXIMO_BYTES },
+});
+
+// multer.MulterError (ex.: LIMIT_FILE_SIZE) cai fora do try/catch do
+// controller — sem isso, um upload grande demais batia no error
+// handler genérico do app.js e virava um 500 "algo deu errado",
+// escondendo o motivo real do jogador.
+function tratarErroDeUpload(req, res, next) {
+  uploadEmblema.single("imagem")(req, res, (erro) => {
+    if (!erro) return next();
+    if (erro instanceof multer.MulterError && erro.code === "LIMIT_FILE_SIZE") {
+      return res.status(400).json({
+        message: `A imagem pode ter no máximo ${Math.round(TAMANHO_MAXIMO_BYTES / 1024 / 1024)}MB.`,
+      });
+    }
+    return res.status(400).json({ message: "Não foi possível processar o arquivo enviado." });
+  });
+}
 
 // authMiddleware + carregarPersonagemAtual em toda rota que age em nome
 // de "meu personagem" — o controller usa req.personagemAtual.id em vez
@@ -185,5 +214,19 @@ router.delete(
   carregarPersonagemAtual,
   guildMuralController.deletar,
 );
+
+// Emblema de guilda (guildEmblemController.js) — mesma permissão
+// "editar_identidade" já usada pra descrição/recrutamento (checada
+// dentro do controller). GET é público de propósito: o emblema é
+// identidade visual da guilda, igual nome/sigla (guildPublica já expõe
+// isso pra qualquer um, sem exigir ser membro).
+router.post(
+  "/:id/emblem",
+  authMiddleware,
+  carregarPersonagemAtual,
+  tratarErroDeUpload,
+  guildEmblemController.enviarEmblema,
+);
+router.get("/:id/emblem", guildEmblemController.obterEmblema);
 
 module.exports = router;

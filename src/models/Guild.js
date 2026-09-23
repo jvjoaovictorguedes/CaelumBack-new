@@ -24,8 +24,26 @@ const Guild = sequelize.define(
       type: DataTypes.STRING(500),
       allowNull: true,
     },
+    // Aponta pro endpoint próprio (GET /guilds/:id/emblem) depois de um
+    // upload — nunca uma URL arbitrária vinda do cliente (ver
+    // guildEmblemController.js). ?v=<timestamp> no fim pra cache-busting.
     emblema_url: {
       type: DataTypes.STRING(255),
+      allowNull: true,
+    },
+    // Bytes da imagem já validada/normalizada (ver guildEmblemService.js)
+    // — guardada no próprio banco, não em disco local (o host não
+    // garante disco persistente entre deploys).
+    emblema_imagem: {
+      type: DataTypes.BLOB,
+      allowNull: true,
+    },
+    emblema_mime: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+    },
+    emblema_atualizado_em: {
+      type: DataTypes.DATE,
       allowNull: true,
     },
     id_fundador: {
@@ -117,6 +135,18 @@ const Guild = sequelize.define(
   },
   {
     tableName: "Guilds",
+    // emblema_imagem pode ter até algumas centenas de KB — excluída do
+    // SELECT por padrão pra não pesar TODA query de Guild que não
+    // precisa dela (listagem, ranking, qualquer lookup interno já
+    // existente antes desse campo existir). Só guildEmblemController
+    // (servir o próprio emblema) usa Guild.scope("comImagem") pra
+    // pedir esse campo de volta explicitamente.
+    defaultScope: {
+      attributes: { exclude: ["emblema_imagem"] },
+    },
+    scopes: {
+      comImagem: {},
+    },
   },
 );
 
