@@ -858,6 +858,18 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
     cooldowns.player = cooldownService.decrementarCooldowns(cooldowns.player, cooldownsPlayerAplicadosNesteTurno);
     statusEffects.player = statusEffectService.decrementarDuracoes(statusEffects.player);
 
+    // Snapshot de vida/mana logo após a AÇÃO do jogador (poder/item/
+    // ataque), antes do contra-ataque do inimigo mais abaixo — sem
+    // isso, o cliente só via o resultado LÍQUIDO do turno inteiro
+    // (cura menos o dano que o inimigo causa em seguida), e uma cura
+    // real podia ficar "invisível" na tela sempre que o contra-ataque
+    // fosse maior que ela, mesmo com o log dizendo corretamente que a
+    // poção funcionou. Devolvido em character.vida_apos_sua_acao pro
+    // front mostrar a cura de verdade antes de aplicar o golpe do
+    // inimigo por cima.
+    const vidaAposAcaoJogador = personagemAtual.vida_atual;
+    const manaAposAcaoJogador = personagemAtual.mana_atual;
+
     // ==========================================================
     // CHECA VITÓRIA
     // ==========================================================
@@ -1132,6 +1144,12 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
 
           mana_atual:
             personagemAtual.mana_atual,
+
+          // Só faz sentido como um passo intermediário quando o
+          // combate CONTINUA — numa derrota o valor final já é 0 e o
+          // inimigo não chega a contra-atacar de novo.
+          vida_apos_sua_acao: derrotado ? 0 : vidaAposAcaoJogador,
+          mana_apos_sua_acao: manaAposAcaoJogador,
 
           nivel: character.nivel,
           experiencia: character.experiencia,
