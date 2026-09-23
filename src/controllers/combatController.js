@@ -45,6 +45,7 @@ const { concederOuro } = require("../services/goldService");
 const { registrarProgressoContrato } = require("../services/adventureGuildObjectiveService");
 const { registrarProgressoMissaoGuilda } = require("../services/guildMissionService");
 const { bonusesAtivosPara } = require("../services/guildBuffService");
+const achievementService = require("../services/achievementService");
 const statusEffectService = require("../services/statusEffectService");
 const cooldownService = require("../services/cooldownService");
 const { resolverEfeitosDoUso } = require("../services/combatEffectResolver");
@@ -922,6 +923,11 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       await registrarProgresso(character, "MatarInimigos", 1, transaction);
       await registrarProgresso(character, "GanharOuro", dinheiroGanhoTotal, transaction);
       await registrarMorte(character.id, inimigoAtual.nome, transaction);
+      // Perfil de Jogador (§23) — mesmo evento de abate alimenta
+      // conquistas de caça e de Bestiário (descoberta/maestria mudam
+      // junto com o abate).
+      await achievementService.checkMonsterKillAchievements(character.id, transaction);
+      await achievementService.checkBestiaryAchievements(character.id, transaction);
 
       // Guilda dos Aventureiros (§23/§45) — mesmo evento real, agora
       // também alimentando contratos de Rank ativos. id_monstro/id_area

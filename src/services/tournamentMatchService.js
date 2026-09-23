@@ -20,6 +20,7 @@ const { VITORIAS_NECESSARIAS, READY_CHECK_SEGUNDOS, JOGO_TRAVADO_SEGUNDOS } = re
 // ciclo de dependência: pvpLiveSocket.js nunca exige nenhum service de
 // torneio.
 const pvpLiveSocket = require("../socket/pvpLiveSocket");
+const achievementService = require("./achievementService");
 
 function log(evento, dados) {
   console.log(`[torneio] ${evento}`, JSON.stringify(dados));
@@ -301,6 +302,12 @@ async function aplicarFimDeSerie({ serie, vencedorParticipantId, porWO, transact
         { final_placement: 2, eliminated: true },
         { where: { id: perdedorId }, transaction },
       );
+    }
+
+    // Perfil de Jogador (§23) — "Campeão" (venceu um torneio).
+    const campeao = await TournamentParticipant.findByPk(vencedorParticipantId, { transaction });
+    if (campeao) {
+      await achievementService.checkPvpAchievements(campeao.character_id, transaction);
     }
   }
   if (serie.round === "TerceiroLugar") {

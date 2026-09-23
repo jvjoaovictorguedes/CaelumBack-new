@@ -259,4 +259,38 @@ const PowerStatusEffect = require("./PowerStatusEffect");
 Power.hasMany(PowerStatusEffect, { foreignKey: "id_power", as: "efeitosDeStatus" });
 PowerStatusEffect.belongsTo(Power, { foreignKey: "id_power", as: "power" });
 
+// Perfil de Jogador (Especificação Perfil de Jogador Caelum) — conquistas
+// e títulos são catálogos globais; CharacterAchievement/CharacterTitle
+// são o que cada personagem desbloqueou; CharacterProfile é a
+// personalização (frase/título selecionado); os *Highlight são os
+// destaques (até 3 cada) escolhidos pelo jogador.
+const Achievement = require("./Achievement");
+const Title = require("./Title");
+const CharacterProfile = require("./CharacterProfile");
+const CharacterAchievement = require("./CharacterAchievement");
+const CharacterTitle = require("./CharacterTitle");
+const CharacterProfileAchievementHighlight = require("./CharacterProfileAchievementHighlight");
+const CharacterProfileMonsterHighlight = require("./CharacterProfileMonsterHighlight");
+
+Title.belongsTo(Achievement, { foreignKey: "id_achievement_desbloqueia", as: "conquistaQueDesbloqueia" });
+
+CharacterProfile.belongsTo(Character, { foreignKey: "id_personagem" });
+CharacterProfile.belongsTo(Title, { foreignKey: "id_titulo_selecionado", as: "tituloSelecionado" });
+
+CharacterAchievement.belongsTo(Character, { foreignKey: "id_personagem" });
+CharacterAchievement.belongsTo(Achievement, { foreignKey: "id_achievement", as: "achievement" });
+Character.hasMany(CharacterAchievement, { foreignKey: "id_personagem", as: "conquistas" });
+
+CharacterTitle.belongsTo(Character, { foreignKey: "id_personagem" });
+CharacterTitle.belongsTo(Title, { foreignKey: "id_title", as: "title" });
+Character.hasMany(CharacterTitle, { foreignKey: "id_personagem", as: "titulos" });
+
+CharacterProfileAchievementHighlight.belongsTo(Character, { foreignKey: "id_personagem" });
+CharacterProfileAchievementHighlight.belongsTo(Achievement, { foreignKey: "id_achievement", as: "achievement" });
+Character.hasMany(CharacterProfileAchievementHighlight, { foreignKey: "id_personagem", as: "destaquesDeConquista" });
+
+CharacterProfileMonsterHighlight.belongsTo(Character, { foreignKey: "id_personagem" });
+CharacterProfileMonsterHighlight.belongsTo(AdventureMonster, { foreignKey: "id_monstro", as: "monstro" });
+Character.hasMany(CharacterProfileMonsterHighlight, { foreignKey: "id_personagem", as: "destaquesDeMonstro" });
+
 module.exports = {};

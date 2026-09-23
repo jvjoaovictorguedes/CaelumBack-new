@@ -1,6 +1,7 @@
 const express = require("express");
 
 const characterController = require("../controllers/characterController");
+const characterProfileController = require("../controllers/characterProfileController");
 const missionController = require("../controllers/missionController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const adminMiddleware = require("../middlewares/adminMiddleware");
@@ -24,6 +25,17 @@ router
 // Precisa vir antes de "/:id" — senão o Express casa "me" com o
 // parâmetro :id e tenta buscar um personagem literalmente chamado "me".
 router.route("/me").get(authMiddleware, carregarPersonagemAtual, characterController.getMeuPersonagem);
+
+// Perfil de Jogador (Especificação Perfil de Jogador §37/§40) — "/me/profile"
+// também precisa vir antes de "/:id/profile" pelo mesmo motivo do "/me"
+// acima. GET não exige carregarPersonagemAtual (visitante sem
+// personagem ainda pode ver o perfil de outro); PATCH exige, porque só
+// o próprio personagem pode editar o próprio perfil.
+router
+  .route("/me/profile")
+  .patch(authMiddleware, carregarPersonagemAtual, characterProfileController.atualizarPerfilProprio);
+
+router.route("/:id/profile").get(authMiddleware, characterProfileController.getPerfil);
 
 // Precisa vir antes de "/:id" pelo mesmo motivo — senão "/:id/public"
 // nunca seria alcançado, "/:id" já teria casado primeiro.

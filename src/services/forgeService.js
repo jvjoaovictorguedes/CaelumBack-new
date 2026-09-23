@@ -14,6 +14,7 @@ const Character = require("../models/Character");
 const { registrarProgresso } = require("./missionService");
 const { registrarProgressoContrato } = require("./adventureGuildObjectiveService");
 const { registrarProgressoMissaoGuilda } = require("./guildMissionService");
+const achievementService = require("./achievementService");
 
 async function garantirProgresso(characterId, transaction) {
   const [progresso] = await CharacterForgeProgress.findOrCreate({
@@ -123,6 +124,12 @@ async function coletar(characterId, slot) {
       resultado.xp_ganho = resultadoXp.xpGanho;
       resultado.subiu_nivel = resultadoXp.subiuNivel;
       resultado.nivel_forja = resultadoXp.nivelDepois;
+
+      // Perfil de Jogador (§23) — só checa em level up de verdade, não
+      // em todo ganho de XP.
+      if (resultadoXp.subiuNivel) {
+        await achievementService.checkForgeAchievements(characterId, transaction);
+      }
     }
 
     // Guilda dos Aventureiros (§43/§45) — "fabrique X" (missão livre) e

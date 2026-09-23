@@ -12,6 +12,7 @@ const Character = require("../models/Character");
 const { temPermissao, podeGerenciarCargo, PADRAO, HIERARQUIA } = require("../services/guildPermissionService");
 const { pontuarContribuicao, pontosPorDoacao } = require("../services/guildContributionService");
 const { emitParaGuild, removerDaSalaDeGuild } = require("../socket/guildSocket");
+const achievementService = require("../services/achievementService");
 
 const CUSTO_CRIACAO = 500;
 const NIVEL_MINIMO_CRIACAO = 5;
@@ -165,6 +166,7 @@ exports.criarGuild = async (req, res) => {
         { id_personagem, id_guild: novaGuild.id, cargo: "Fundador" },
         { transaction },
       );
+      await achievementService.grantByKey(id_personagem, "companheiro_de_armas", transaction);
 
       await registrarLog(novaGuild.id, "criacao", {
         responsavel: id_personagem,
@@ -470,6 +472,7 @@ exports.responderConvite = async (req, res) => {
         { id_personagem: idPersonagem, id_guild: guild.id, cargo: "Recruta" },
         { transaction },
       );
+      await achievementService.grantByKey(idPersonagem, "companheiro_de_armas", transaction);
       convite.status = "Aceito";
       await convite.save({ transaction });
 
@@ -510,6 +513,7 @@ exports.entrarDireto = async (req, res) => {
         { id_personagem: idPersonagem, id_guild: guild.id, cargo: "Recruta" },
         { transaction },
       );
+      await achievementService.grantByKey(idPersonagem, "companheiro_de_armas", transaction);
       await registrarLog(guild.id, "entrada", { responsavel: idPersonagem, transaction });
       return { guild: guildDetalhada(guild) };
     });
@@ -599,6 +603,7 @@ exports.responderCandidatura = async (req, res) => {
         { id_personagem: candidatura.id_personagem, id_guild: guild.id, cargo: "Recruta" },
         { transaction },
       );
+      await achievementService.grantByKey(candidatura.id_personagem, "companheiro_de_armas", transaction);
       candidatura.status = "Aceita";
       candidatura.data_resposta = new Date();
       await candidatura.save({ transaction });
