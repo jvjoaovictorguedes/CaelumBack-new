@@ -99,13 +99,26 @@ module.exports = function registerGuildHandlers(io) {
     // DESCONECTAVA à força o socket antigo (o de verdade, o do PvP ao
     // vivo) por achar que era uma reconexão. Resultado: só abrir o chat
     // da guilda já derrubava a conexão de PvP ao vivo do jogador.
-    socket.on("guild:identificar", async ({ ticket } = {}) => {
+    socket.on("guild:identificar", async ({ ticket } = {}, callback) => {
       // characterId só vem do ticket verificado, nunca do que o cliente
       // mandar direto (senão qualquer socket conseguia falar/ouvir o
       // chat de guilda de outro personagem).
       const characterId = await personagemViaTicket(ticket);
-      if (!characterId) return;
+      if (!characterId) {
+        return typeof callback === "function" && callback({ erro: "Ticket inválido ou expirado." });
+      }
       socket.characterId = characterId;
+      // personagemViaTicket consulta o banco (await) — sem um ack aqui,
+      // o cliente que dispara "guild:join-room" logo em seguida (sem
+      // esperar nada) corria contra essa consulta e quase sempre
+      // GANHAVA a corrida: o handler de join-room roda seu primeiro
+      // `if (!characterId)` de forma síncrona, antes do await acima
+      // terminar, então socket.characterId ainda estava undefined.
+      // Resultado batido com um script de reprodução real: join-room
+      // respondia "Identifique seu personagem antes." e guild:message,
+      // mandado logo depois, era descartado em silêncio — a causa raiz
+      // do "chat da guilda não envia mensagem".
+      if (typeof callback === "function") callback({ ok: true });
     });
 
     socket.on("guild:join-room", async (_payload, callback) => {
@@ -132,7 +145,15 @@ module.exports = function registerGuildHandlers(io) {
 
     socket.on("guild:message", async ({ texto } = {}) => {
       const characterId = socket.characterId;
-      if (!characterId || !socket.guildRoom) return;
+      if (!characterId || !socket.guildRoom) {
+        // Antes retornava em silêncio — se algum cliente (ou uma versão
+        // desatualizada do frontend em cache) ainda mandar guild:message
+        // cedo demais, ao menos agora ele recebe um erro visível em vez
+        // da mensagem simplesmente sumir sem explicação nenhuma.
+        return socket.emit("guild:erro", {
+          mensagem: "Conexão do chat ainda não está pronta. Aguarde um instante e tente de novo.",
+        });
+      }
 
       if (excedeuRateLimit(characterId)) {
         return socket.emit("guild:erro", {
