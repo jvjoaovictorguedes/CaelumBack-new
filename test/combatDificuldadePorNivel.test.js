@@ -3,10 +3,17 @@
 // Selvagem (Nv. 1)" em poucos hits mas ainda levava dano relevante de
 // volta, porque gerarInimigo calibrava 100% em cima dos atributos REAIS
 // do jogador e só escalava pra CIMA quando o monstro tinha nível MAIOR
-// que o do jogador (nunca pra baixo) — algo que não existe passado o
-// nível 50 (teto de zona atual). calcularEscalaPorNivel agora também
-// encolhe pra BAIXO quanto mais o monstro fica pra trás do nível real
-// do jogador. Não precisa de banco — é função pura.
+// que o do jogador (nunca pra baixo).
+//
+// Primeira correção usava DIFERENÇA ABSOLUTA de nível — e reintroduziu
+// o MESMO bug numa forma mais grave: um personagem nível 14 relatou
+// estar morrendo pra um monstro nível 4 (gap de 10 níveis só derrubava
+// a escala pra ~85%, forte o bastante pra ainda matar). Diferença
+// absoluta não captura que "10 níveis" é desprezível pra um nível 107
+// mas ESMAGADOR pra um nível 14. calcularEscalaPorNivel agora usa a
+// RAZÃO entre os níveis (elevada ao quadrado) pra decair pra BAIXO —
+// funciona em qualquer faixa de nível do jogo, não só em números altos.
+// Não precisa de banco — é função pura.
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
@@ -24,7 +31,22 @@ test("monstro no mesmo nível do jogador (ou acima) mantém a escala cheia/cresc
 test("monstro BEM abaixo do nível do jogador agora fica perto do piso (antes ficava sempre em 1x)", () => {
   const escalaJavali = calcularEscalaPorNivel(1, 107);
   assert.ok(escalaJavali < 0.15, `esperava escala perto do piso, veio ${escalaJavali}`);
-  assert.ok(escalaJavali >= 0.08, "nunca deveria cair abaixo do piso configurado");
+  assert.ok(escalaJavali >= 0.05, "nunca deveria cair abaixo do piso configurado");
+});
+
+test("bug relatado: monstro nível 4 vs jogador nível 14 agora fica bem enfraquecido (antes só caía pra ~85%)", () => {
+  const escala = calcularEscalaPorNivel(4, 14);
+  assert.ok(escala < 0.15, `esperava um monstro claramente incapaz de ameaçar o jogador, veio ${escala}`);
+});
+
+test("gap pequeno em nível BAIXO também pesa — nível 1 vs nível 3 (exemplo literal do pedido) fica fraco", () => {
+  // "um lvl 1 não pode matar um lvl 3, só se ele não tiver item e não
+  // upar as habilidades" — a calibração de base (gerarInimigo) ainda
+  // depende dos atributos reais do jogador; o que a escala por nível
+  // garante é que o monstro nível 1 não comece numa força comparável à
+  // de um combate "normal" só porque a diferença absoluta é pequena.
+  const escala = calcularEscalaPorNivel(1, 3);
+  assert.ok(escala < 0.2, `esperava escala baixa mesmo com gap absoluto pequeno, veio ${escala}`);
 });
 
 test("monstro perto do nível do jogador (mesmo os dois altos) continua dando trabalho de verdade", () => {
@@ -46,6 +68,23 @@ test("a escala cai de forma monotônica quanto mais o monstro fica pra trás do 
       `escala deveria só diminuir (ou empatar no piso) conforme o monstro fica mais fraco: ${JSON.stringify(escalas)}`,
     );
   }
+});
+
+test("gerarInimigo: bug relatado — jogador nível 14 com build mediano não pode morrer pra um monstro nível 4", () => {
+  // Build "mediano", não otimizado (o próprio pedido do jogador admite
+  // que só um personagem SEM itens e SEM habilidades upadas deveria
+  // perder aqui) — nem exagerado pra cima, só razoável pro nível.
+  const jogadorNivel14 = { nivel: 14, forca: 22, vitalidade: 22, agilidade: 14, velocidade: 14, inteligencia: 10 };
+  const monstroFraco = gerarInimigo(jogadorNivel14, "Algo fraco", { nivelForcado: 4 });
+
+  const vidaDoJogador = 30 + jogadorNivel14.vitalidade * 6; // mesma fórmula de vidaMaximaDe (combatFormulas.js)
+  // RODADAS_PARA_INIMIGO_MATAR_JOGADOR é ~4.2 num combate "normal" (escala
+  // 1x) — um monstro genuinamente fraco precisa estar bem longe disso:
+  // exige mais de 15 acertos pra matar o jogador, não ~4.
+  assert.ok(
+    monstroFraco.dano_base * 15 < vidaDoJogador,
+    `monstro nível 4 (dano ${monstroFraco.dano_base}) ainda mataria um jogador nível 14 (vida ~${vidaDoJogador}) rápido demais`,
+  );
 });
 
 test("gerarInimigo: um Javali nível 1 pra um jogador nível 107 sai drasticamente mais fraco que um encontro no mesmo nível", () => {

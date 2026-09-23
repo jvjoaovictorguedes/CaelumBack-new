@@ -123,41 +123,38 @@ const ESCALA_MAXIMA_POR_DIFERENCA_DE_NIVEL = 6;
 // próprio jogador (ver gerarInimigo), então esse Javali sobrevivia a um
 // hit e ainda batia de volta por dano relevante, exatamente como
 // qualquer outro monstro "nível 1" contra qualquer outro nível de
-// jogador — o número do nível virava só rótulo. Faltava a mesma ideia
-// do fator ACIMA, só que na direção contrária: quanto mais o nível do
-// monstro fica pra TRÁS do nível real do jogador, mais essa calibração
-// relativa encolhe — um monstro bem abaixo vira picada mesmo, mas um
-// monstro pertinho do nível do jogador (mesmo os dois sendo altos,
-// tipo 100 vs 107) continua entregando quase a luta cheia de ~4
-// rodadas, porque a diferença é pequena.
+// jogador — o número do nível virava só rótulo.
 //
-// Fator pequeno de propósito: com 0.07 (o de cima) a fórmula bateria no
-// piso já uns 13 níveis abaixo, e "um pouco mais fraco" viraria
-// "praticamente nada" cedo demais — a faixa de decaimento perto do
-// jogador precisa ficar suave, só a distância grande é que precisa
-// esmagar de verdade.
-const FATOR_ENFRAQUECIMENTO_POR_NIVEL_ABAIXO_DO_JOGADOR = 0.015;
-// Piso — nunca vira 100% inofensivo (ainda é uma luta de verdade, só
-// que trivial), mas fica perto disso pra diferenças de dezenas de
-// níveis.
-const PISO_ESCALA_POR_NIVEL_ABAIXO_DO_JOGADOR = 0.08;
+// Primeira tentativa de correção usava DIFERENÇA ABSOLUTA de nível
+// (como o fator ACIMA usa) — e não funcionava: um gap de "10 níveis" é
+// desprezível pra um jogador nível 107 (quase no mesmo patamar), mas
+// ESMAGADOR pra um nível 14 (o monstro tem menos de 1/3 do nível dele).
+// Bug real reportado por causa disso: nível 4 vs nível 14 só caía pra
+// ~85% de força (diferença absoluta pequena), continuando forte o
+// bastante pra matar o jogador. Diferença absoluta não captura "quão
+// pra trás, proporcionalmente" — RAZÃO entre os níveis captura.
+//
+// razão² (não razão linear): precisa cair rápido o bastante pra um gap
+// de metade do nível (razão 0.5) já ficar claramente fraco (~25%), sem
+// zerar de propósito uma diferença pequena (razão 0.9+ fica perto de
+// 0.8+, ainda dá luta).
+const PISO_ESCALA_POR_NIVEL_ABAIXO_DO_JOGADOR = 0.05;
 
 // Fator de escala assinado (positivo = monstro no nível do jogador ou
 // acima, negativo = abaixo) — mesma curva usada tanto no solo
 // (gerarInimigo) quanto no grupo (gerarInimigoDeGrupo), pra nunca
 // divergir entre os dois modos.
 function calcularEscalaPorNivel(nivelMonstro, nivelReferencia) {
-  const diferenca = nivelMonstro - (nivelReferencia ?? 1);
+  const nivelRef = Math.max(1, nivelReferencia ?? 1);
+  const diferenca = nivelMonstro - nivelRef;
   if (diferenca >= 0) {
     return Math.min(
       ESCALA_MAXIMA_POR_DIFERENCA_DE_NIVEL,
       1 + diferenca * FATOR_ESCALA_POR_NIVEL_ACIMA_DO_JOGADOR,
     );
   }
-  return Math.max(
-    PISO_ESCALA_POR_NIVEL_ABAIXO_DO_JOGADOR,
-    1 + diferenca * FATOR_ENFRAQUECIMENTO_POR_NIVEL_ABAIXO_DO_JOGADOR,
-  );
+  const razao = nivelMonstro / nivelRef;
+  return Math.max(PISO_ESCALA_POR_NIVEL_ABAIXO_DO_JOGADOR, razao * razao);
 }
 
 // Gera um inimigo calibrado a partir dos ATRIBUTOS DE VERDADE do
