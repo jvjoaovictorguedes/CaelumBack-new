@@ -13,6 +13,17 @@
 // divergir da lógica de produção.
 module.exports = {
   async up(queryInterface) {
+    // masteryService->adventureService.monstrosDaZona faz um include de
+    // AdventureMonster em cima de AdventureZoneMonster — essa associação
+    // só é registrada por src/models/associations.js, que o app/testes
+    // sempre carregam antes de qualquer serviço rodar, mas sequelize-cli
+    // NÃO carrega sozinho ao rodar uma migration isolada. Sem este
+    // require aqui, a migration quebra com "AdventureMonster is not
+    // associated to AdventureZoneMonster!" assim que tenta calcular a
+    // Maestria de alguém (erro real batido em produção — derrubava o
+    // deploy inteiro, já que `npm start` roda `migrate && node app.js`
+    // em sequência).
+    require("../models/associations");
     const CharacterZoneMasteryFloor = require("../models/CharacterZoneMasteryFloor");
     const CharacterMonsterKill = require("../models/CharacterMonsterKill");
     const { calcularMaestriaDaRegiao } = require("../services/masteryService");
