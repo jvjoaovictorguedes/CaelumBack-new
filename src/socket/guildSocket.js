@@ -1,14 +1,15 @@
 // src/socket/guildSocket.js
 //
-// Chat de guilda em tempo real (só tempo real no MVP — sem persistir
-// histórico, ver decisão registrada na seção 15 do documento de design).
-// A sala Socket.IO só existe pra quem realmente pertence à guilda: o
-// servidor confirma o vínculo (GuildMember) antes de deixar entrar,
-// nunca confia em guildId enviado solto pelo cliente (seção 13).
+// Chat de guilda em tempo real, com histórico persistido (apagado todo
+// mês — ver guildChatService.js). A sala Socket.IO só existe pra quem
+// realmente pertence à guilda: o servidor confirma o vínculo
+// (GuildMember) antes de deixar entrar, nunca confia em guildId enviado
+// solto pelo cliente (seção 13).
 
 const GuildMember = require("../models/GuildMember");
 const Character = require("../models/Character");
 const { personagemViaTicket } = require("./socketAuth");
+const guildChatService = require("../services/guildChatService");
 
 function salaDaGuild(idGuild) {
   return `guild:${idGuild}`;
@@ -121,7 +122,8 @@ module.exports = function registerGuildHandlers(io) {
         socket.guildRoom = salaDaGuild(membro.id_guild);
         socket.join(socket.guildRoom);
         registrarSocketDoPersonagem(characterId, socket);
-        if (typeof callback === "function") callback({ idGuild: membro.id_guild });
+        const historico = await guildChatService.buscarHistorico(membro.id_guild);
+        if (typeof callback === "function") callback({ idGuild: membro.id_guild, historico });
       } catch (error) {
         console.error("Erro ao entrar na sala da guilda:", error);
         if (typeof callback === "function") callback({ erro: "Erro ao entrar na sala da guilda." });
@@ -155,6 +157,12 @@ module.exports = function registerGuildHandlers(io) {
 
         const personagem = await Character.findByPk(characterId, { attributes: ["id", "nome"] });
         if (!personagem) return;
+        await guildChatService.persistirMensagem({
+          idGuild: membro.id_guild,
+          idPersonagem: personagem.id,
+          nomePersonagem: personagem.nome,
+          texto: mensagem,
+        });
         io.to(socket.guildRoom).emit("guild:message:new", {
           idPersonagem: personagem.id,
           nome: personagem.nome,
