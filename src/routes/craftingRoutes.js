@@ -24,6 +24,7 @@ router.get("/blueprints", authMiddleware, carregarPersonagemAtual, forgeControll
 router.post("/craft", authMiddleware, carregarPersonagemAtual, forgeController.postCraft);
 router.get("/instances", authMiddleware, carregarPersonagemAtual, forgeController.getInstances);
 router.post("/instances/:id/equip", authMiddleware, carregarPersonagemAtual, forgeController.postEquipInstance);
+router.get("/scrolls", authMiddleware, carregarPersonagemAtual, forgeController.getScrolls);
 router.get("/refine/preview", authMiddleware, carregarPersonagemAtual, forgeController.getRefinePreview);
 router.post("/refine", authMiddleware, carregarPersonagemAtual, forgeController.postRefine);
 router.get("/forge-queue", authMiddleware, carregarPersonagemAtual, forgeController.getForgeQueue);

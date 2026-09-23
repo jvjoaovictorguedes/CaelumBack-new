@@ -95,6 +95,18 @@ exports.postEquipInstance = async (req, res) => {
   }
 };
 
+// GET /api/crafting/scrolls — catálogo de Pergaminhos de Melhoria (spec
+// §7: quantidade e bônus visíveis, motivo quando o nível de Forja não
+// alcança) já cruzado com o inventário/nível do personagem autenticado.
+exports.getScrolls = async (req, res) => {
+  try {
+    const pergaminhos = await forgeRefinementService.listarPergaminhosDisponiveis(req.personagemAtual.id);
+    res.status(200).json({ status: "success", data: { pergaminhos } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao buscar pergaminhos.");
+  }
+};
+
 // GET /api/crafting/refine/preview?id_instancia=&id_item_pergaminho=
 exports.getRefinePreview = async (req, res) => {
   try {

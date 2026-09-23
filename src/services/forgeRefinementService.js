@@ -114,6 +114,59 @@ async function calcularMateriaisNecessarios(instancia, transaction) {
   return { alvo, unidades, materiais, ouro, item };
 }
 
+// Confere um id_item_pergaminho contra ForgeScroll + inventário + nível
+// de Forja — usado tanto na prévia (onde uma indisponibilidade só
+// "desliga" o bônus, sem travar a prévia inteira) quanto reaproveitado
+// como referência de validação em iniciarRefinamento (que aí sim
+// BLOQUEIA a tentativa inteira se o pergaminho pedido não for válido —
+// nunca inicia um refinamento fingindo que o bônus não foi pedido).
+// Retorna { scroll, erro } — erro é a mensagem pronta pra mostrar ao
+// jogador quando o pergaminho não pode ser aplicado.
+async function validarPergaminho(characterId, idItemPergaminho, nivelForja, { transaction, lock } = {}) {
+  const scroll = await ForgeScroll.findByPk(idItemPergaminho, {
+    include: [{ model: Item, as: "item" }],
+    transaction,
+  });
+  if (!scroll) return { scroll: null, erro: "Esse pergaminho não existe." };
+  if (nivelForja < scroll.nivel_forja_minimo) {
+    return { scroll, erro: `Exige nível ${scroll.nivel_forja_minimo} de Forja.` };
+  }
+  const entrada = await CharacterInventory.findOne({
+    where: { id_personagem: characterId, id_item: idItemPergaminho },
+    transaction,
+    lock,
+  });
+  if (!entrada || entrada.quantidade < 1) {
+    return { scroll, erro: "Você não possui esse pergaminho." };
+  }
+  return { scroll, erro: null, entrada };
+}
+
+// Catálogo dos pergaminhos (spec §7: "com quantidade e bônus visíveis",
+// e desabilitar opção que não atende ao nível mínimo "mostrando o
+// motivo") — pouquíssimas linhas (hoje só 3), então um findAll sem
+// paginação é suficiente.
+async function listarPergaminhosDisponiveis(characterId) {
+  const progresso = await CharacterForgeProgress.findOne({ where: { id_personagem: characterId } });
+  const nivelForja = nivelPorXpTotal(progresso?.experiencia ?? 0);
+
+  const scrolls = await ForgeScroll.findAll({ include: [{ model: Item, as: "item" }] });
+  const idsItens = scrolls.map((s) => s.id_item);
+  const inventario = idsItens.length
+    ? await CharacterInventory.findAll({ where: { id_personagem: characterId, id_item: idsItens } })
+    : [];
+  const quantidadePorItem = new Map(inventario.map((e) => [e.id_item, e.quantidade]));
+
+  return scrolls.map((scroll) => ({
+    id_item: scroll.id_item,
+    nome: scroll.item.nome,
+    bonus_percentual: scroll.bonus_percentual,
+    nivel_forja_minimo: scroll.nivel_forja_minimo,
+    quantidade_disponivel: quantidadePorItem.get(scroll.id_item) ?? 0,
+    nivel_forja_suficiente: nivelForja >= scroll.nivel_forja_minimo,
+  }));
+}
+
 // Prévia pra tela de Refinamento (spec §60) — nunca decide nada, só
 // mostra o que a tentativa vai custar/valer.
 async function previaRefinamento(characterId, { id_instancia, id_item_pergaminho }) {
@@ -136,16 +189,25 @@ async function previaRefinamento(characterId, { id_instancia, id_item_pergaminho
   const info = await calcularMateriaisNecessarios(instancia, null);
   if (!info) throw Object.assign(new Error("Não foi possível calcular os materiais desse equipamento."), { statusCode: 500 });
 
+  // Pergaminho pedido pra essa prévia — indisponibilidade (nível
+  // insuficiente, sem estoque, item inválido) só DESLIGA o bônus e
+  // avisa por que (pergaminho_erro); nunca derruba a prévia inteira —
+  // é só uma simulação, o jogador ainda pode ver a chance sem
+  // pergaminho e trocar a seleção.
   let bonusPergaminho = 0;
-  let pergaminhoNome = null;
+  let pergaminhoAplicado = null;
+  let pergaminhoErro = null;
   if (id_item_pergaminho) {
-    const scroll = await ForgeScroll.findByPk(id_item_pergaminho, { include: [{ model: Item, as: "item" }] });
-    if (scroll) {
+    const { scroll, erro } = await validarPergaminho(characterId, id_item_pergaminho, nivelForja);
+    if (erro) {
+      pergaminhoErro = erro;
+    } else {
       bonusPergaminho = scroll.bonus_percentual;
-      pergaminhoNome = scroll.item.nome;
+      pergaminhoAplicado = { id_item: scroll.id_item, nome: scroll.item.nome, bonus_percentual: scroll.bonus_percentual };
     }
   }
 
+  const chancePpmSemPergaminho = chanceFinalRefinamentoPpm(info.alvo, nivelForja, 0);
   const chancePpm = chanceFinalRefinamentoPpm(info.alvo, nivelForja, bonusPergaminho);
 
   // Quanto o jogador já tem de cada material — pro frontend mostrar
@@ -161,10 +223,17 @@ async function previaRefinamento(characterId, { id_instancia, id_item_pergaminho
 
   return {
     alvo: info.alvo,
+    // "+10%" é ponto percentual, não multiplicativo — chance_percentual
+    // já sai com o bônus somado direto (ver chanceFinalRefinamentoPpm),
+    // e chance_percentual_sem_pergaminho dá o "antes" pro frontend
+    // mostrar "45,0% → 55,0%" (spec §5.1) sem precisar de uma segunda
+    // chamada.
     chance_percentual: chancePpm / 10_000,
+    chance_percentual_sem_pergaminho: chancePpmSemPergaminho / 10_000,
     ouro_custo: info.ouro,
     materiais: materiaisComEstoque,
-    pergaminho_aplicado: pergaminhoNome,
+    pergaminho_aplicado: pergaminhoAplicado,
+    pergaminho_erro: pergaminhoErro,
   };
 }
 
@@ -235,23 +304,25 @@ async function iniciarRefinamento(characterId, { id_instancia, id_item_pergaminh
       entradasMateriais.push({ entrada, quantidade: material.quantidade });
     }
 
+    // Iniciar é quem MANDA de verdade — diferente da prévia (que só
+    // desliga o bônus quando o pergaminho não é válido), aqui qualquer
+    // problema (item errado, nível insuficiente, sem estoque) BLOQUEIA
+    // a tentativa inteira. Nunca inicia um refinamento silenciosamente
+    // ignorando um pergaminho pedido — se o jogador pediu, ou aplica ou
+    // recusa a tentativa toda (spec §6.3: "não aceitar bônus arbitrário",
+    // "garantir idempotência/concorrência").
     let entradaPergaminho = null;
     let bonusPergaminho = 0;
+    let nomePergaminho = null;
     if (id_item_pergaminho) {
-      const scroll = await ForgeScroll.findByPk(id_item_pergaminho, { transaction });
-      if (!scroll) throw Object.assign(new Error("Pergaminho inválido."), { statusCode: 400 });
-      if (nivelForja < scroll.nivel_forja_minimo) {
-        throw Object.assign(new Error("Nível de Forja insuficiente pra esse pergaminho."), { statusCode: 400 });
-      }
-      entradaPergaminho = await CharacterInventory.findOne({
-        where: { id_personagem: characterId, id_item: id_item_pergaminho },
+      const { scroll, erro, entrada } = await validarPergaminho(characterId, id_item_pergaminho, nivelForja, {
         transaction,
         lock: transaction.LOCK.UPDATE,
       });
-      if (!entradaPergaminho || entradaPergaminho.quantidade < 1) {
-        throw Object.assign(new Error("Você não possui esse pergaminho."), { statusCode: 400 });
-      }
+      if (erro) throw Object.assign(new Error(erro), { statusCode: 400 });
+      entradaPergaminho = entrada;
       bonusPergaminho = scroll.bonus_percentual;
+      nomePergaminho = scroll.item.nome;
     }
 
     // Resultado sorteado JÁ AGORA — consumo de material/ouro/pergaminho
@@ -285,7 +356,17 @@ async function iniciarRefinamento(characterId, { id_instancia, id_item_pergaminh
         id_personagem: characterId,
         slot: SLOTS_FORJA.FORJA,
         tipo_acao: TIPOS_ACAO_FORJA.REFINAMENTO,
-        referencia: { id_instancia, alvo: info.alvo, chance_final_ppm: chancePpm },
+        // id/nome do pergaminho snapshotados aqui pra auditoria (spec
+        // §6.2) — sobrevive mesmo se o Item do pergaminho for renomeado
+        // depois, e não depende de re-consultar forge_scrolls só pra
+        // saber o que foi usado nessa tentativa específica.
+        referencia: {
+          id_instancia,
+          alvo: info.alvo,
+          chance_final_ppm: chancePpm,
+          id_item_pergaminho: id_item_pergaminho ?? null,
+          nome_pergaminho: nomePergaminho,
+        },
         payload_resultado: { sucesso, xp: xpGanho },
         iniciado_em: iniciadoEm,
         pronto_em: prontoEm,
@@ -297,4 +378,9 @@ async function iniciarRefinamento(characterId, { id_instancia, id_item_pergaminh
   });
 }
 
-module.exports = { previaRefinamento, iniciarRefinamento, calcularMateriaisNecessarios };
+module.exports = {
+  previaRefinamento,
+  iniciarRefinamento,
+  calcularMateriaisNecessarios,
+  listarPergaminhosDisponiveis,
+};
