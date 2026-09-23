@@ -111,15 +111,54 @@ const RODADAS_PARA_INIMIGO_MATAR_JOGADOR = 4.2;
 // dano_base calibrados pros PRÓPRIOS atributos daquele personagem
 // nível 12 (ver gerarInimigo) — o "nível 50" ficava só no nome, o
 // rótulo de perigo (calcularPerigo, ver adventureConfig.js) prometia
-// "EXTREMO" e a luta não entregava nada disso. Só escala pra cima
-// (nunca pra baixo): um personagem ACIMA do nível do monstro já fica
-// mais fácil de forma orgânica, porque a calibração usa os atributos
-// REAIS dele (que crescem com o nível) — não precisa de mais um fator
-// pra essa direção.
+// "EXTREMO" e a luta não entregava nada disso.
 const FATOR_ESCALA_POR_NIVEL_ACIMA_DO_JOGADOR = 0.07;
 // Teto pra essa escala não sair de controle numa zona futura com uma
 // faixa de nível muito mais larga que as atuais.
 const ESCALA_MAXIMA_POR_DIFERENCA_DE_NIVEL = 6;
+
+// Fila (pedido do jogador): o nível do monstro tinha PESO ZERO pra
+// baixo — um personagem nível 107 caçando um "Javali Selvagem (Nv. 1)"
+// recebia um inimigo calibrado 100% em cima dos atributos REAIS do
+// próprio jogador (ver gerarInimigo), então esse Javali sobrevivia a um
+// hit e ainda batia de volta por dano relevante, exatamente como
+// qualquer outro monstro "nível 1" contra qualquer outro nível de
+// jogador — o número do nível virava só rótulo. Faltava a mesma ideia
+// do fator ACIMA, só que na direção contrária: quanto mais o nível do
+// monstro fica pra TRÁS do nível real do jogador, mais essa calibração
+// relativa encolhe — um monstro bem abaixo vira picada mesmo, mas um
+// monstro pertinho do nível do jogador (mesmo os dois sendo altos,
+// tipo 100 vs 107) continua entregando quase a luta cheia de ~4
+// rodadas, porque a diferença é pequena.
+//
+// Fator pequeno de propósito: com 0.07 (o de cima) a fórmula bateria no
+// piso já uns 13 níveis abaixo, e "um pouco mais fraco" viraria
+// "praticamente nada" cedo demais — a faixa de decaimento perto do
+// jogador precisa ficar suave, só a distância grande é que precisa
+// esmagar de verdade.
+const FATOR_ENFRAQUECIMENTO_POR_NIVEL_ABAIXO_DO_JOGADOR = 0.015;
+// Piso — nunca vira 100% inofensivo (ainda é uma luta de verdade, só
+// que trivial), mas fica perto disso pra diferenças de dezenas de
+// níveis.
+const PISO_ESCALA_POR_NIVEL_ABAIXO_DO_JOGADOR = 0.08;
+
+// Fator de escala assinado (positivo = monstro no nível do jogador ou
+// acima, negativo = abaixo) — mesma curva usada tanto no solo
+// (gerarInimigo) quanto no grupo (gerarInimigoDeGrupo), pra nunca
+// divergir entre os dois modos.
+function calcularEscalaPorNivel(nivelMonstro, nivelReferencia) {
+  const diferenca = nivelMonstro - (nivelReferencia ?? 1);
+  if (diferenca >= 0) {
+    return Math.min(
+      ESCALA_MAXIMA_POR_DIFERENCA_DE_NIVEL,
+      1 + diferenca * FATOR_ESCALA_POR_NIVEL_ACIMA_DO_JOGADOR,
+    );
+  }
+  return Math.max(
+    PISO_ESCALA_POR_NIVEL_ABAIXO_DO_JOGADOR,
+    1 + diferenca * FATOR_ENFRAQUECIMENTO_POR_NIVEL_ABAIXO_DO_JOGADOR,
+  );
+}
 
 // Gera um inimigo calibrado a partir dos ATRIBUTOS DE VERDADE do
 // personagem (já com bônus de equipamento somado) — não mais só o nível.
@@ -158,11 +197,7 @@ function gerarInimigo(jogador, nomeAlvo, opcoes = {}) {
   const vidaJogador = vidaMaximaDe(jogador);
   const ataqueJogador = Math.max(1, danoBasicoEsperado(jogador));
 
-  const diferencaDeNivel = Math.max(0, nivel - (jogador.nivel ?? 1));
-  const escalaPorNivel = Math.min(
-    ESCALA_MAXIMA_POR_DIFERENCA_DE_NIVEL,
-    1 + diferencaDeNivel * FATOR_ESCALA_POR_NIVEL_ACIMA_DO_JOGADOR,
-  );
+  const escalaPorNivel = calcularEscalaPorNivel(nivel, jogador.nivel);
 
   const vidaMaxima = Math.max(
     20,
@@ -224,11 +259,7 @@ function gerarInimigoDeGrupo(
   const nivel = Math.max(1, nivelForcado ?? nivelMedio ?? 1);
   const variacao = () => 0.9 + Math.random() * 0.2;
 
-  const diferencaDeNivel = Math.max(0, nivel - (nivelMedio ?? 1));
-  const escalaPorNivel = Math.min(
-    ESCALA_MAXIMA_POR_DIFERENCA_DE_NIVEL,
-    1 + diferencaDeNivel * FATOR_ESCALA_POR_NIVEL_ACIMA_DO_JOGADOR,
-  );
+  const escalaPorNivel = calcularEscalaPorNivel(nivel, nivelMedio);
 
   const vidaMaxima = Math.max(
     20,
@@ -261,6 +292,7 @@ function gerarInimigoDeGrupo(
 
 exports.gerarInimigo = gerarInimigo;
 exports.gerarInimigoDeGrupo = gerarInimigoDeGrupo;
+exports.calcularEscalaPorNivel = calcularEscalaPorNivel;
 
 // GET /api/combat/enemy/:characterId
 // Gera um inimigo compatível com o nível do personagem.
