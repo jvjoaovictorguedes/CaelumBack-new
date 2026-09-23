@@ -28,6 +28,7 @@ const { adicionarExperiencia } = require("../services/experienceService");
 const { concederOuro } = require("../services/goldService");
 const { rolarDropDeVitoria } = require("../services/dropService");
 const { sortearMonstroDaZona, sortearNivelMonstro } = require("../services/adventureRollService");
+const { persistirEstadoFinalDoMembro } = require("../services/partyBattleService");
 const { gerarInimigoDeGrupo } = require("../controllers/combatController");
 const { custoManaEfetivo, danoBasicoEsperado } = require("../services/combatFormulas");
 const {
@@ -377,9 +378,20 @@ module.exports = function registerPartyHandlers(io) {
           return socket.emit("party:erro", { mensagem: "Área de Caça sem monstros configurados." });
         }
 
-        const membros = await Promise.all(grupo.ordem.map((id) => carregarLutador(id)));
+        // vidaCheia: false — batalha de grupo entra com a vida/mana REAL
+        // de cada um (bug reportado: iniciar a party curava geral de
+        // graça, mesmo pra quem já estava machucado). Ver comentário em
+        // carregarLutador (pvpLiveSocket.js) sobre por que Duelo/
+        // Ranqueado/Torneio continuam entrando com vida cheia normalmente.
+        const membros = await Promise.all(grupo.ordem.map((id) => carregarLutador(id, { vidaCheia: false })));
         if (membros.some((m) => !m)) {
           return socket.emit("party:erro", { mensagem: "Não foi possível carregar todos os personagens do grupo." });
+        }
+        const derrotados = membros.filter((m) => m.estado.vida_atual <= 0);
+        if (derrotados.length > 0) {
+          return socket.emit("party:erro", {
+            mensagem: `${derrotados.map((m) => m.nome).join(", ")} está derrotado e precisa se recuperar antes de entrar em batalha.`,
+          });
         }
 
         const vidaTotalGrupo = membros.reduce((soma, m) => soma + m.vidaMax, 0);
@@ -745,20 +757,28 @@ async function finalizarBatalha(io, battleId, vitoria, motivo = vitoria ? "comba
   const recompensas = {};
   const drops = {};
 
-  if (vitoria) {
-    // Recompensa por membro — cada aventureiro leva XP/ouro cheios (não
-    // dividido pelo tamanho do grupo, de propósito: o motivo de ir em
-    // grupo é enfrentar algo mais forte que valha a pena, não uma fatia
-    // menor da mesma recompensa solo).
-    for (const id of batalha.ordem) {
-      try {
-        await sequelize.transaction(async (transaction) => {
-          const character = await Character.findByPk(id, {
-            transaction,
-            lock: transaction.LOCK.UPDATE,
-          });
-          if (!character) return;
+  // Persiste vida/mana de TODO MUNDO no grupo, vitória ou derrota — sem
+  // isso, o "estado" em memória da batalha (inclusive um vida_atual=0 de
+  // quem morreu) nunca voltava pro personagem de verdade no banco, e ele
+  // seguia pra próxima aventura solo com a vida antiga intacta, furando
+  // o bloqueio normal de "derrotado, precisa se recuperar" (bug
+  // reportado: morrer numa party e voltar com vida cheia na aventura
+  // solo). Recompensa (XP/ouro/drop) continua só na vitória, cheia por
+  // membro (não dividida pelo tamanho do grupo, de propósito: o motivo
+  // de ir em grupo é enfrentar algo mais forte que valha a pena).
+  for (const id of batalha.ordem) {
+    const membro = batalha.membros.get(id);
+    try {
+      await sequelize.transaction(async (transaction) => {
+        const character = await Character.findByPk(id, {
+          transaction,
+          lock: transaction.LOCK.UPDATE,
+        });
+        if (!character) return;
 
+        persistirEstadoFinalDoMembro(character, membro);
+
+        if (vitoria) {
           const xpConcedida = Math.max(10, Math.round(batalha.inimigo.nivel * 8));
           const resultadoXp = await adicionarExperiencia(id, xpConcedida, { transaction, personagem: character });
 
@@ -768,18 +788,18 @@ async function finalizarBatalha(io, battleId, vitoria, motivo = vitoria ? "comba
           const drop = await rolarDropDeVitoria(character, batalha.inimigo, transaction);
           if (drop) drops[id] = drop;
 
-          await character.save({ transaction });
-
           recompensas[id] = {
             experiencia: xpConcedida,
             dinheiro: ouro,
             nivel: resultadoXp.nivel,
             pontos_distribuir: resultadoXp.pontos_distribuir,
           };
-        });
-      } catch (error) {
-        console.error(`Erro ao conceder recompensa de grupo pro personagem ${id}:`, error);
-      }
+        }
+
+        await character.save({ transaction });
+      });
+    } catch (error) {
+      console.error(`Erro ao finalizar batalha de grupo pro personagem ${id}:`, error);
     }
   }
 

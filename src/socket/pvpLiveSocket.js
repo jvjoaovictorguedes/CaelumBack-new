@@ -70,7 +70,13 @@ function chaveOnline(id) {
   return String(id);
 }
 
-async function carregarLutador(characterId) {
+// `vidaCheia` (default true) faz todo mundo entrar em combate com
+// vida/mana no máximo — correto pra Duelo/Ranqueado/Torneio (é uma
+// disputa formal isolada, não deveria herdar dano de outra coisa).
+// Batalha de Party passa `{ vidaCheia: false }` porque ali o
+// personagem tem que entrar com a vida REAL que já estava (bug
+// reportado: grupo curava geral de graça ao iniciar a aventura).
+async function carregarLutador(characterId, { vidaCheia = true } = {}) {
   const personagem = await Character.findByPk(characterId, { include: [{ model: Class }] });
   if (!personagem) return null;
   const poderes = await buscarPoderesDoPersonagem(characterId);
@@ -80,6 +86,8 @@ async function carregarLutador(characterId) {
     personagemComBonus(personagem.toJSON(), bonus),
     personagem.Class,
   );
+  const vidaMax = vidaMaximaDe(base);
+  const manaMax = manaMaximaDe(base);
   return {
     id: base.id,
     nome: base.nome,
@@ -89,11 +97,11 @@ async function carregarLutador(characterId) {
     consumiveis,
     estado: {
       ...base,
-      vida_atual: vidaMaximaDe(base),
-      mana_atual: manaMaximaDe(base),
+      vida_atual: vidaCheia ? vidaMax : Math.max(0, Math.min(base.vida_atual ?? vidaMax, vidaMax)),
+      mana_atual: vidaCheia ? manaMax : Math.max(0, Math.min(base.mana_atual ?? manaMax, manaMax)),
     },
-    vidaMax: vidaMaximaDe(base),
-    manaMax: manaMaximaDe(base),
+    vidaMax,
+    manaMax,
   };
 }
 
