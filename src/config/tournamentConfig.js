@@ -19,6 +19,22 @@ const VITORIAS_NECESSARIAS = { MD3: 2, MD5: 3 };
 // em vez de sortear um vencedor.
 const READY_CHECK_SEGUNDOS = 180;
 
+// Bug reportado: uma série "EmAndamento" (os dois já confirmaram o
+// ready check) só ganha um duelo de verdade quando iniciarJogoDaSerie
+// roda com sucesso — e ela só roda automaticamente em dois momentos (o
+// instante em que a série vira EmAndamento, e 3s depois de cada jogo
+// terminar). Se QUALQUER um dos dois estiver momentaneamente offline
+// ou preso em outro duelo bem nessa hora (reconexão, troca de aba), a
+// tentativa falha silenciosamente e nada mais tenta de novo — a série
+// fica presa em EmAndamento pra sempre, e tournamentService.emSerieAtiva
+// continua bloqueando ranqueada indefinidamente mesmo sem partida
+// nenhuma realmente em andamento. Esse tempo é quanto uma série pode
+// ficar "EmAndamento" sem nenhum duelo ativo antes da varredura
+// (tournamentSocket.iniciarVarreduraSeriesTravadas) forçar uma
+// resolução (W.O. pra quem estiver online, ou PendenteAdm se nenhum
+// dos dois estiver).
+const JOGO_TRAVADO_SEGUNDOS = 300;
+
 module.exports = {
   MAX_PARTICIPANTES,
   CONTAGENS_VALIDAS_PARA_INICIAR,
@@ -26,4 +42,5 @@ module.exports = {
   FORMATO_PADRAO,
   VITORIAS_NECESSARIAS,
   READY_CHECK_SEGUNDOS,
+  JOGO_TRAVADO_SEGUNDOS,
 };

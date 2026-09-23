@@ -15,7 +15,11 @@ const TournamentSeries = require("../models/TournamentSeries");
 const TournamentMatch = require("../models/TournamentMatch");
 const tournamentBracketService = require("./tournamentBracketService");
 const tournamentService = require("./tournamentService");
-const { VITORIAS_NECESSARIAS, READY_CHECK_SEGUNDOS } = require("../config/tournamentConfig");
+const { VITORIAS_NECESSARIAS, READY_CHECK_SEGUNDOS, JOGO_TRAVADO_SEGUNDOS } = require("../config/tournamentConfig");
+// Só pra checar quem está online/livre (resolverSerieTravada) — sem
+// ciclo de dependência: pvpLiveSocket.js nunca exige nenhum service de
+// torneio.
+const pvpLiveSocket = require("../socket/pvpLiveSocket");
 
 function log(evento, dados) {
   console.log(`[torneio] ${evento}`, JSON.stringify(dados));
@@ -97,6 +101,55 @@ async function resolverReadyCheckExpirado(serieId) {
     serie: serie.id,
     torneio: serie.tournament_id,
     motivo: "nenhum participante confirmou o ready check",
+  });
+  return serie;
+}
+
+// Bug reportado: uma série "EmAndamento" (os dois já confirmaram o
+// ready check) só ganha um duelo de verdade quando tournamentSocket.
+// iniciarJogoDaSerie roda com sucesso — e isso só é chamado
+// automaticamente em dois momentos (o instante em que a série vira
+// EmAndamento, e 3s depois de cada jogo terminar). Se um dos dois
+// estava momentaneamente offline ou preso em outro duelo bem nessa
+// hora, a tentativa falhava silenciosamente e nada tentava de novo: a
+// série ficava presa em EmAndamento pra sempre, bloqueando ranqueada
+// (tournamentService.emSerieAtiva) mesmo sem partida nenhuma
+// acontecendo de verdade. Chamada pela varredura periódica
+// (tournamentSocket.iniciarVarreduraSeriesTravadas) só quando já se
+// passou JOGO_TRAVADO_SEGUNDOS desde a última atividade da série
+// (updatedAt) SEM nenhum duelo ativo pra ela — dá tempo de sobra pra
+// reconexão normal antes de forçar uma resolução.
+async function resolverSerieTravada(serieId) {
+  const serie = await TournamentSeries.findByPk(serieId);
+  if (!serie || serie.status !== "EmAndamento") return null;
+  const inativaDesde = Date.now() - new Date(serie.updatedAt).getTime();
+  if (inativaDesde < JOGO_TRAVADO_SEGUNDOS * 1000) return null;
+
+  const [a, b] = await Promise.all([
+    serie.participant_a_id ? TournamentParticipant.findByPk(serie.participant_a_id) : null,
+    serie.participant_b_id ? TournamentParticipant.findByPk(serie.participant_b_id) : null,
+  ]);
+
+  const aOnline = a ? pvpLiveSocket.online.has(pvpLiveSocket.chaveOnline(a.character_id)) : false;
+  const bOnline = b ? pvpLiveSocket.online.has(pvpLiveSocket.chaveOnline(b.character_id)) : false;
+
+  if (aOnline && !bOnline) {
+    log("serie:travada:wo", { serie: serie.id, vencedor: serie.participant_a_id, ausente: serie.participant_b_id });
+    return finalizarSerie({ serieId, vencedorParticipantId: serie.participant_a_id, porWO: true });
+  }
+  if (bOnline && !aOnline) {
+    log("serie:travada:wo", { serie: serie.id, vencedor: serie.participant_b_id, ausente: serie.participant_a_id });
+    return finalizarSerie({ serieId, vencedorParticipantId: serie.participant_b_id, porWO: true });
+  }
+
+  // Nenhum dos dois online, ou os dois online mas o jogo ainda assim
+  // não engatou (algo mais profundo travando) — mesmo raciocínio do
+  // ready check sem confirmação: não escolhe vencedor sozinho.
+  await serie.update({ status: "PendenteAdm" });
+  log("serie:travada:pendente-adm", {
+    serie: serie.id,
+    torneio: serie.tournament_id,
+    motivo: "série EmAndamento sem duelo ativo além do prazo",
   });
   return serie;
 }
@@ -354,6 +407,7 @@ module.exports = {
   vitoriasNecessarias,
   confirmarPronto,
   resolverReadyCheckExpirado,
+  resolverSerieTravada,
   registrarResultadoDeJogo,
   finalizarSerie,
   serieAtivaDoPersonagem,

@@ -211,8 +211,55 @@ function iniciarVarreduraReadyCheck(io) {
   return timer;
 }
 
+// Varredura periódica de séries "EmAndamento" sem nenhum duelo ativo
+// (bug reportado: jogador não conseguia entrar na ranqueada porque o
+// sistema achava que ele tinha um torneio em andamento, mesmo sem
+// nenhuma partida de verdade rolando). iniciarJogoDaSerie só roda
+// automaticamente logo que a série vira EmAndamento e 3s depois de
+// cada jogo terminar — se um dos dois estava offline bem nessa hora, a
+// tentativa falhava e nada mais tentava de novo, travando a série pra
+// sempre. Esta varredura tenta de novo (self-healing pro caso comum de
+// reconexão) e, se continuar travada além do prazo, força uma
+// resolução via tournamentMatchService.resolverSerieTravada (W.O. ou
+// PendenteAdm).
+const INTERVALO_VARREDURA_SERIES_TRAVADAS_MS = 30000;
+
+function iniciarVarreduraSeriesTravadas(io) {
+  const timer = setInterval(async () => {
+    try {
+      const emAndamento = await TournamentSeries.findAll({
+        where: { status: "EmAndamento" },
+        limit: 50,
+      });
+      const duelosDeTorneioAtivos = new Set(
+        Array.from(pvpLiveSocket.duelos.values())
+          .filter((d) => d.torneio)
+          .map((d) => d.serieId),
+      );
+      for (const serie of emAndamento) {
+        if (duelosDeTorneioAtivos.has(serie.id)) continue;
+        const iniciado = await iniciarJogoDaSerie(io, serie.id);
+        if (iniciado) continue;
+        const resolvida = await tournamentMatchService.resolverSerieTravada(serie.id);
+        if (resolvida) {
+          io.to(salaDaSerie(serie.id)).emit("torneio:serie:atualizada", {
+            serieId: serie.id,
+            status: resolvida.status,
+            vencedorSerie: resolvida.winner_participant_id ?? null,
+          });
+        }
+      }
+    } catch (error) {
+      console.error("[torneio] Falha na varredura de séries travadas:", error);
+    }
+  }, INTERVALO_VARREDURA_SERIES_TRAVADAS_MS);
+  if (timer.unref) timer.unref();
+  return timer;
+}
+
 module.exports = function registerTournamentHandlers(io) {
   iniciarVarreduraReadyCheck(io);
+  iniciarVarreduraSeriesTravadas(io);
 
   io.on("connection", (socket) => {
     // Reaproveita socket.characterId de pvpLiveSocket."identificar".
