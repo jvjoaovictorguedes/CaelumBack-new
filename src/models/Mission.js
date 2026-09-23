@@ -7,13 +7,30 @@ const Mission = sequelize.define(
     id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
     nome: { type: DataTypes.STRING(100), allowNull: false },
     descricao: { type: DataTypes.TEXT, allowNull: false },
+    // Valores CompletarExpedicoes/Fabricar/CompletarContratosGuilda
+    // adicionados ao ENUM real do banco pela migration
+    // 20260930750000-guilda-aventureiros-tabelas.js (ALTER TYPE
+    // enum_missions_tipo) — o model só declarava os 4 valores
+    // originais, desalinhado do schema real (bug reportado: um form
+    // administrativo de criação de missão precisa ver as 3 opções
+    // novas também).
     tipo: {
-      type: DataTypes.ENUM("MatarInimigos", "VencerDuelos", "GanharOuro", "AlcancarNivel"),
+      type: DataTypes.ENUM(
+        "MatarInimigos",
+        "VencerDuelos",
+        "GanharOuro",
+        "AlcancarNivel",
+        "CompletarExpedicoes",
+        "Fabricar",
+        "CompletarContratosGuilda",
+      ),
       allowNull: false,
     },
     meta: { type: DataTypes.INTEGER, allowNull: false },
+    // Semanal/Mensal adicionados pela mesma migration (ALTER TYPE
+    // enum_missions_categoria) — mesmo desalinhamento do campo acima.
     categoria: {
-      type: DataTypes.ENUM("Diaria", "Unica"),
+      type: DataTypes.ENUM("Diaria", "Unica", "Semanal", "Mensal"),
       allowNull: false,
       defaultValue: "Diaria",
     },
