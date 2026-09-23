@@ -135,7 +135,7 @@ testeComBanco("Fundador consegue enviar o emblema, e ele passa a ser servido de 
   await guildEmblemController.enviarEmblema(envio.req, envio.res);
   const { statusCode, corpo } = envio.resultado();
   assert.equal(statusCode, 200, JSON.stringify(corpo));
-  assert.ok(corpo.data.emblema_url.includes(`/guilds/${guild.id}/emblem?v=`));
+  assert.ok(corpo.data.emblema_url.includes(`/api/guilds/${guild.id}/emblem?v=`));
 
   const leitura = reqRes({ params: { id: String(guild.id) } });
   await guildEmblemController.obterEmblema(leitura.req, leitura.res);

@@ -27,13 +27,16 @@ exports.enviarEmblema = async (req, res) => {
         emblema_imagem: buffer,
         emblema_mime: mime,
         emblema_atualizado_em: agora,
-        // Relativo à raiz da API (SEM "/api" — o backend não sabe com
-        // segurança qual é a própria origem pública por trás de proxy/
-        // load balancer; quem resolve isso é o frontend, prefixando com
-        // NEXT_PUBLIC_API_URL, que já termina em "/api"). Cache-busting
-        // via ?v=<timestamp>: a URL muda a cada upload, então um
-        // <img src> já em cache não continua mostrando o emblema antigo.
-        emblema_url: `/guilds/${req.params.id}/emblem?v=${agora.getTime()}`,
+        // Relativo à ORIGEM (protocolo+host, sem path) — mesma convenção
+        // que resolveMediaUrl (caelumfront-new/src/utils/media-url.ts)
+        // já usa pra resolver qualquer imagem_url que não seja um
+        // asset estático do frontend (/images ou /icons): resolve
+        // contra a origem da API, então precisa do "/api" aqui, já que
+        // as rotas de guilda são montadas em /api/guilds (ver app.js).
+        // Cache-busting via ?v=<timestamp>: a URL muda a cada upload,
+        // então um <img src> já em cache não continua mostrando o
+        // emblema antigo.
+        emblema_url: `/api/guilds/${req.params.id}/emblem?v=${agora.getTime()}`,
       },
       { where: { id: req.params.id } },
     );
