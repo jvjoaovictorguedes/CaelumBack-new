@@ -11,7 +11,7 @@ const TournamentSeries = sequelize.define(
     id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
     tournament_id: { type: DataTypes.INTEGER, allowNull: false },
     round: {
-      type: DataTypes.ENUM("Quartas", "Semifinal", "TerceiroLugar", "Final"),
+      type: DataTypes.ENUM("Oitavas", "Quartas", "Semifinal", "TerceiroLugar", "Final"),
       allowNull: false,
     },
     // Ordem dentro da rodada (0,1,2,3) — define quem encontra quem na

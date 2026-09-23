@@ -121,13 +121,13 @@ testeComBanco("admin cria torneio com parâmetros válidos", async () => {
   assert.equal(torneio.created_by, admin.id);
 });
 
-testeComBanco("criação rejeita mais de 8 participantes e datas inválidas", async () => {
+testeComBanco("criação rejeita formato de participantes fora de 4/8/16 e datas inválidas", async () => {
   const admin = await adminDeTeste();
   await assert.rejects(
     () =>
       tournamentService.criar({
         criadoPorUserId: admin.id,
-        dados: { name: "X", starts_at: new Date().toISOString(), max_participants: 16 },
+        dados: { name: "X", starts_at: new Date().toISOString(), max_participants: 6 },
       }),
     /max_participants/,
   );
@@ -148,7 +148,7 @@ testeComBanco("inscrição respeita faixa de nível e lotação", async () => {
     dados: {
       name: `Faixa ${Date.now()}`,
       starts_at: new Date(Date.now() + 3600_000).toISOString(),
-      max_participants: 2,
+      max_participants: 4,
       level_min: 10,
       level_max: 20,
     },
@@ -162,27 +162,49 @@ testeComBanco("inscrição respeita faixa de nível e lotação", async () => {
 
   const { personagem: a } = await criarPersonagem({ nivel: 12 });
   const { personagem: b } = await criarPersonagem({ nivel: 15 });
+  const { personagem: c } = await criarPersonagem({ nivel: 15 });
+  const { personagem: d } = await criarPersonagem({ nivel: 15 });
   await tournamentService.inscrever({ torneioId: torneio.id, personagem: a });
   await tournamentService.inscrever({ torneioId: torneio.id, personagem: b });
+  await tournamentService.inscrever({ torneioId: torneio.id, personagem: c });
+  await tournamentService.inscrever({ torneioId: torneio.id, personagem: d });
 
-  // Inscrição repetida e torneio lotado.
+  // Inscrição repetida e torneio lotado (4/4 já preenchido acima).
   await assert.rejects(
     () => tournamentService.inscrever({ torneioId: torneio.id, personagem: a }),
     /já está inscrito/,
   );
-  const { personagem: c } = await criarPersonagem({ nivel: 15 });
+  const { personagem: e } = await criarPersonagem({ nivel: 15 });
   await assert.rejects(
-    () => tournamentService.inscrever({ torneioId: torneio.id, personagem: c }),
+    () => tournamentService.inscrever({ torneioId: torneio.id, personagem: e }),
     /lotado/,
   );
 });
 
 // -------------------- Chaveamento --------------------
 
-testeComBanco("start com 5 inscritos é recusado (4 ou 8 nesta versão)", async () => {
+testeComBanco("start com 5 inscritos (menos que o formato de 8) dá bye pra 3 deles", async () => {
   const admin = await adminDeTeste();
   const { torneio } = await torneioComInscritos(5, { adminUserId: admin.id });
-  await assert.rejects(() => tournamentService.iniciar({ torneioId: torneio.id }), /4 ou 8/);
+  const { bracketSeed } = await tournamentService.iniciar({ torneioId: torneio.id });
+  assert.equal(bracketSeed.tamanhoChave, 8);
+  assert.equal(bracketSeed.primeiraRodada, "Quartas");
+
+  const quartas = await TournamentSeries.findAll({
+    where: { tournament_id: torneio.id, round: "Quartas" },
+  });
+  assert.equal(quartas.length, 4);
+  assert.equal(quartas.filter((s) => s.status === "WO").length, 3, "3 sobras viram bye");
+  assert.equal(quartas.filter((s) => s.status === "ReadyCheck").length, 1, "1 confronto real");
+  assert.ok(quartas.filter((s) => s.status === "WO").every((s) => s.winner_participant_id));
+
+  // Torneio de 5 inscritos só tem 1 participante < 2, então ele nunca
+  // seria recusado por contagem — só por MIN_PARTICIPANTES_PARA_INICIAR.
+  const { torneio: sozinho } = await torneioComInscritos(1, { adminUserId: admin.id });
+  await assert.rejects(
+    () => tournamentService.iniciar({ torneioId: sozinho.id }),
+    /pelo menos 2 participantes/,
+  );
 });
 
 testeComBanco("chaveamento é sorteado, persistido e nunca regerado", async () => {

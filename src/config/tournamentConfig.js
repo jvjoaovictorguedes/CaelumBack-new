@@ -1,13 +1,19 @@
 // Torneios (PvP v2 §16) — números de regra centralizados aqui, nunca
 // espalhados pelos services/controllers.
 
-// Máximo absoluto da spec. Nesta primeira versão o torneio só INICIA
-// com exatamente 4 ou 8 inscritos: a spec permite explicitamente essa
-// simplificação ("pode-se exigir 4 ou 8 participantes para simplificar")
-// justamente pra não precisar de BYE determinístico já no primeiro
-// corte. Contagens 5–7 são recusadas com erro claro.
-const MAX_PARTICIPANTES = 8;
-const CONTAGENS_VALIDAS_PARA_INICIAR = [4, 8];
+// Formatos de chave suportados (sempre potência de 2 — Oitavas/Quartas/
+// Semifinal/Final). "16x16" adicionado como novo formato ao lado dos já
+// existentes 4 e 8.
+const MAX_PARTICIPANTES = 16;
+const TAMANHOS_DE_CHAVE_VALIDOS = [4, 8, 16];
+
+// Torneio agora inicia com QUALQUER contagem >= a este mínimo — não
+// precisa mais bater exatamente 4/8/16 inscritos. Quem sobra sem
+// oponente na primeira rodada (chave preenchida até o próximo tamanho
+// válido acima do número de inscritos) recebe um "bye" e avança direto
+// pra próxima fase por W.O., sem jogar (ver tournamentBracketService.
+// calcularTamanhoDeChave/montarEstrutura e tournamentService.iniciar).
+const MIN_PARTICIPANTES_PARA_INICIAR = 2;
 
 // §16 — Final é MD5, todo o resto MD3.
 const FORMATO_FINAL = "MD5";
@@ -37,7 +43,8 @@ const JOGO_TRAVADO_SEGUNDOS = 300;
 
 module.exports = {
   MAX_PARTICIPANTES,
-  CONTAGENS_VALIDAS_PARA_INICIAR,
+  TAMANHOS_DE_CHAVE_VALIDOS,
+  MIN_PARTICIPANTES_PARA_INICIAR,
   FORMATO_FINAL,
   FORMATO_PADRAO,
   VITORIAS_NECESSARIAS,

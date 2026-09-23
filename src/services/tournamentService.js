@@ -14,7 +14,8 @@ const CharacterEquipment = require("../models/CharacterEquipment");
 const tournamentBracketService = require("./tournamentBracketService");
 const {
   MAX_PARTICIPANTES,
-  CONTAGENS_VALIDAS_PARA_INICIAR,
+  TAMANHOS_DE_CHAVE_VALIDOS,
+  MIN_PARTICIPANTES_PARA_INICIAR,
   READY_CHECK_SEGUNDOS,
 } = require("../config/tournamentConfig");
 
@@ -32,10 +33,10 @@ class TournamentError extends Error {
 
 async function criar({ criadoPorUserId, dados }) {
   const maxParticipantes = Number(dados.max_participants ?? MAX_PARTICIPANTES);
-  if (!Number.isInteger(maxParticipantes) || maxParticipantes < 2 || maxParticipantes > MAX_PARTICIPANTES) {
+  if (!TAMANHOS_DE_CHAVE_VALIDOS.includes(maxParticipantes)) {
     throw new TournamentError(
       "max-participantes-invalido",
-      `max_participants precisa ser um inteiro entre 2 e ${MAX_PARTICIPANTES}.`,
+      `max_participants precisa ser um destes formatos: ${TAMANHOS_DE_CHAVE_VALIDOS.join(", ")}.`,
     );
   }
   if (!dados.name || !String(dados.name).trim()) {
@@ -189,10 +190,10 @@ async function iniciar({ torneioId }) {
       transaction,
     });
 
-    if (!tournamentBracketService.contagemValida(participantes.length)) {
+    if (participantes.length < MIN_PARTICIPANTES_PARA_INICIAR) {
       throw new TournamentError(
         "contagem-invalida",
-        `Este torneio precisa de exatamente ${CONTAGENS_VALIDAS_PARA_INICIAR.join(" ou ")} participantes para começar (tem ${participantes.length}).`,
+        `Este torneio precisa de pelo menos ${MIN_PARTICIPANTES_PARA_INICIAR} participantes para começar (tem ${participantes.length}).`,
         409,
       );
     }
@@ -230,10 +231,52 @@ async function iniciar({ torneioId }) {
       );
     }
 
-    // Primeira rodada entra em ready check imediatamente.
+    // Bye (§16-bis): série da primeira rodada com só um lado preenchido
+    // — ninguém pra enfrentar, então o presente avança sozinho por W.O.,
+    // sem abrir ready check nenhum. Resolve aqui mesmo (as séries ainda
+    // estão todas em memória em `criadas`, sem precisar reconsultar o
+    // banco) e empurra o vencedor pra série seguinte via destinoDoVencedor
+    // — se essa seguinte também ficar completa só de vencedores de bye
+    // (dois byes adjacentes na rodada anterior), ela vira uma partida de
+    // verdade entre os dois, tratada normalmente pelo loop de ready
+    // check abaixo. Bye nunca tem perdedor: nada a mandar pro 3º lugar
+    // (ver tournamentBracketService.montarEstrutura, que já nem cria a
+    // série de 3º lugar quando ela seria estruturalmente inalcançável).
+    for (const serie of criadas) {
+      const ehPrimeiraRodada = serie.round === bracketSeed.primeiraRodada;
+      const temBye = ehPrimeiraRodada && Boolean(serie.participant_a_id) !== Boolean(serie.participant_b_id);
+      if (!temBye) continue;
+
+      const vencedorId = serie.participant_a_id ?? serie.participant_b_id;
+      await serie.update(
+        {
+          winner_participant_id: vencedorId,
+          status: "WO",
+          score_a: serie.participant_a_id ? 1 : 0,
+          score_b: serie.participant_b_id ? 1 : 0,
+        },
+        { transaction },
+      );
+      log("serie:bye", { serie: serie.id, torneio: torneioId, round: serie.round, vencedor: vencedorId });
+
+      const destino = tournamentBracketService.destinoDoVencedor(serie.round, serie.posicao);
+      if (destino) {
+        const alvo = criadas.find((s) => s.round === destino.round && s.posicao === destino.posicao);
+        if (alvo) {
+          const campo = destino.lado === "a" ? "participant_a_id" : "participant_b_id";
+          await alvo.update({ [campo]: vencedorId }, { transaction });
+        }
+      }
+    }
+
+    // Toda série (de qualquer rodada) que ficou completa — de verdade ou
+    // via bye em cascata — entra em ready check imediatamente. Antes só
+    // checava a primeira rodada porque só ela podia nascer completa; com
+    // bye, uma rodada seguinte também pode nascer completa (dois byes
+    // adjacentes se enfrentando de verdade na rodada seguinte).
     const expiraEm = new Date(Date.now() + READY_CHECK_SEGUNDOS * 1000);
     for (const serie of criadas) {
-      if (serie.round === bracketSeed.primeiraRodada && serie.participant_a_id && serie.participant_b_id) {
+      if (serie.status === "Aguardando" && serie.participant_a_id && serie.participant_b_id) {
         await serie.update({ status: "ReadyCheck", ready_check_expira_em: expiraEm }, { transaction });
         for (const participanteId of [serie.participant_a_id, serie.participant_b_id]) {
           const participante = participantes.find((p) => p.id === participanteId);

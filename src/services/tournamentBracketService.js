@@ -6,10 +6,24 @@
 // nunca regerado — reler o torneio sempre devolve o mesmo chaveamento,
 // inclusive depois de um restart.
 const {
-  CONTAGENS_VALIDAS_PARA_INICIAR,
+  TAMANHOS_DE_CHAVE_VALIDOS,
+  MIN_PARTICIPANTES_PARA_INICIAR,
   FORMATO_FINAL,
   FORMATO_PADRAO,
 } = require("../config/tournamentConfig");
+
+// Nome da PRIMEIRA rodada por tamanho de chave — 16 → Oitavas (8 séries),
+// 8 → Quartas (4), 4 → Semifinal (2).
+const PRIMEIRA_RODADA_POR_TAMANHO = { 4: "Semifinal", 8: "Quartas", 16: "Oitavas" };
+
+// Rodadas vazias a criar ENTRE a primeira rodada e a Final, em ordem —
+// cada uma com metade das séries da anterior. Semifinal nunca aparece
+// aqui como vazia quando ela PRÓPRIA é a primeira rodada (tamanho 4).
+const RODADAS_INTERMEDIARIAS_POR_PRIMEIRA = {
+  Oitavas: ["Quartas", "Semifinal"],
+  Quartas: ["Semifinal"],
+  Semifinal: [],
+};
 
 function embaralhar(lista) {
   const copia = [...lista];
@@ -20,42 +34,89 @@ function embaralhar(lista) {
   return copia;
 }
 
-function contagemValida(total) {
-  return CONTAGENS_VALIDAS_PARA_INICIAR.includes(total);
-}
-
-// Monta as séries da PRIMEIRA rodada a partir da ordem sorteada.
-// 8 inscritos → Quartas (4 séries MD3). 4 inscritos → Semifinal
-// (2 séries MD3). A Final (MD5) e a série de 3º lugar (MD3) são criadas
-// vazias e preenchidas conforme as rodadas resolvem.
-function montarEstrutura(participantIdsEmbaralhados) {
-  const total = participantIdsEmbaralhados.length;
-  if (!contagemValida(total)) {
+// Menor tamanho de chave (4/8/16) que comporta `totalInscritos`, sobrando
+// vagas pra "bye" (jogador sem oponente que avança direto — ver
+// montarEstrutura). Não exige mais bater um número exato.
+function calcularTamanhoDeChave(totalInscritos) {
+  if (totalInscritos < MIN_PARTICIPANTES_PARA_INICIAR) {
     throw new Error(
-      `Torneio precisa de exatamente ${CONTAGENS_VALIDAS_PARA_INICIAR.join(" ou ")} participantes para iniciar (tem ${total}).`,
+      `Torneio precisa de pelo menos ${MIN_PARTICIPANTES_PARA_INICIAR} participantes para iniciar (tem ${totalInscritos}).`,
     );
   }
+  const tamanho = TAMANHOS_DE_CHAVE_VALIDOS.find((t) => t >= totalInscritos);
+  if (!tamanho) {
+    const maiorFormato = TAMANHOS_DE_CHAVE_VALIDOS[TAMANHOS_DE_CHAVE_VALIDOS.length - 1];
+    throw new Error(
+      `Torneio tem participantes demais para o maior formato suportado (${maiorFormato}) — tem ${totalInscritos}.`,
+    );
+  }
+  return tamanho;
+}
+
+// Mantido por compatibilidade — hoje só usado por quem quer checar se um
+// NÚMERO é, em si, um tamanho de chave válido (4/8/16), não mais pra
+// validar contagem de inscritos (que agora aceita qualquer valor >=
+// MIN_PARTICIPANTES_PARA_INICIAR via calcularTamanhoDeChave).
+function contagemValida(total) {
+  return TAMANHOS_DE_CHAVE_VALIDOS.includes(total);
+}
+
+// Monta as séries da PRIMEIRA rodada a partir da ordem sorteada e do
+// tamanho de chave escolhido (ver calcularTamanhoDeChave). Quando
+// `totalReal` (inscritos de verdade) é menor que `tamanhoChave`, os
+// primeiros `numByes` da ordem sorteada recebem "bye" — nascem SEM
+// adversário (participant_b_id nulo) pra tournamentService.iniciar
+// resolver como vitória automática assim que a série é criada. Como
+// tamanhoChave é sempre o MENOR válido >= totalReal, numByes nunca passa
+// de totalReal - 1 — ou seja, nunca sobra bye pra emparelhar com outro
+// bye na mesma série.
+//
+// A Final (MD5) é sempre criada. O 3º lugar só é criado quando os dois
+// lados da Semifinal vão de fato ser jogados: se a própria Semifinal é a
+// primeira rodada (tamanho 4) e tem bye ali, não existe perdedor de
+// semifinal nenhum pra disputar o 3º lugar (ver tournamentService.
+// iniciar, resolução de bye) — formatos maiores nunca têm esse problema,
+// porque bye só existe na primeira rodada, e pra eles a Semifinal sempre
+// é alimentada por rodadas anteriores realmente jogadas.
+function montarEstrutura(participantIdsEmbaralhados, tamanhoChave) {
+  const totalReal = participantIdsEmbaralhados.length;
+  const primeiraRodada = PRIMEIRA_RODADA_POR_TAMANHO[tamanhoChave];
+  if (!primeiraRodada) {
+    throw new Error(`Tamanho de chave não suportado: ${tamanhoChave}.`);
+  }
+
+  const numByes = tamanhoChave - totalReal;
+  const comBye = participantIdsEmbaralhados.slice(0, numByes);
+  const semBye = participantIdsEmbaralhados.slice(numByes);
 
   const series = [];
-  const primeiraRodada = total === 8 ? "Quartas" : "Semifinal";
-
-  for (let i = 0; i < total; i += 2) {
+  let posicao = 0;
+  for (const participantId of comBye) {
     series.push({
       round: primeiraRodada,
-      posicao: i / 2,
-      participant_a_id: participantIdsEmbaralhados[i],
-      participant_b_id: participantIdsEmbaralhados[i + 1],
+      posicao: posicao++,
+      participant_a_id: participantId,
+      participant_b_id: null,
+      format: FORMATO_PADRAO,
+    });
+  }
+  for (let i = 0; i < semBye.length; i += 2) {
+    series.push({
+      round: primeiraRodada,
+      posicao: posicao++,
+      participant_a_id: semBye[i],
+      participant_b_id: semBye[i + 1],
       format: FORMATO_PADRAO,
     });
   }
 
-  if (total === 8) {
-    // Semifinais nascem vazias: os vencedores das quartas 0/1 e 2/3
-    // caem, respectivamente, nas semis 0 e 1.
-    for (let posicao = 0; posicao < 2; posicao += 1) {
+  let seriesNaRodadaAnterior = series.length;
+  for (const rodada of RODADAS_INTERMEDIARIAS_POR_PRIMEIRA[primeiraRodada]) {
+    seriesNaRodadaAnterior = seriesNaRodadaAnterior / 2;
+    for (let p = 0; p < seriesNaRodadaAnterior; p += 1) {
       series.push({
-        round: "Semifinal",
-        posicao,
+        round: rodada,
+        posicao: p,
         participant_a_id: null,
         participant_b_id: null,
         format: FORMATO_PADRAO,
@@ -63,13 +124,16 @@ function montarEstrutura(participantIdsEmbaralhados) {
     }
   }
 
-  series.push({
-    round: "TerceiroLugar",
-    posicao: 0,
-    participant_a_id: null,
-    participant_b_id: null,
-    format: FORMATO_PADRAO,
-  });
+  const semifinalTemBye = primeiraRodada === "Semifinal" && numByes > 0;
+  if (!semifinalTemBye) {
+    series.push({
+      round: "TerceiroLugar",
+      posicao: 0,
+      participant_a_id: null,
+      participant_b_id: null,
+      format: FORMATO_PADRAO,
+    });
+  }
   series.push({
     round: "Final",
     posicao: 0,
@@ -85,12 +149,14 @@ function montarEstrutura(participantIdsEmbaralhados) {
 // é a ORDEM sorteada (ids de participante), que é o que permite auditar
 // e reconstruir o chaveamento exatamente como foi gerado.
 function sortearChaveamento(participantIds) {
+  const tamanhoChave = calcularTamanhoDeChave(participantIds.length);
   const ordem = embaralhar(participantIds);
-  const { primeiraRodada, series } = montarEstrutura(ordem);
+  const { primeiraRodada, series } = montarEstrutura(ordem, tamanhoChave);
   return {
     bracketSeed: {
       ordem,
       total: ordem.length,
+      tamanhoChave,
       primeiraRodada,
       sorteadoEm: new Date().toISOString(),
     },
@@ -101,6 +167,9 @@ function sortearChaveamento(participantIds) {
 // Pra onde o vencedor de uma série avança. Retorna { round, posicao,
 // lado } ou null (Final e 3º lugar não avançam).
 function destinoDoVencedor(round, posicao) {
+  if (round === "Oitavas") {
+    return { round: "Quartas", posicao: Math.floor(posicao / 2), lado: posicao % 2 === 0 ? "a" : "b" };
+  }
   if (round === "Quartas") {
     return { round: "Semifinal", posicao: Math.floor(posicao / 2), lado: posicao % 2 === 0 ? "a" : "b" };
   }
@@ -120,6 +189,7 @@ function destinoDoPerdedor(round, posicao) {
 
 module.exports = {
   embaralhar,
+  calcularTamanhoDeChave,
   contagemValida,
   montarEstrutura,
   sortearChaveamento,
