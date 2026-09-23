@@ -238,6 +238,12 @@ async function coletar(id_personagem, id_regiao) {
         ...inimigo,
         criadoEm: Date.now(),
         statsPersonagem,
+        // Motor de Status/Cooldown (§37 da Especificação Consolidada
+        // Poder/Status/Cooldown/Balanceamento) — mesmo estado vazio
+        // inicial da Aventura.
+        statusEffects: { player: [], enemy: [] },
+        cooldowns: { player: {}, enemy: {} },
+        combatTurn: 0,
       };
 
       // O cooldown de coleta é consumido igual (o clique já foi gasto),

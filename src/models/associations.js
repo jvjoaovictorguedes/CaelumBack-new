@@ -251,4 +251,12 @@ WorldMapNode.belongsTo(WorldTerritory, { foreignKey: "id_territorio", as: "terri
 WorldMapConnection.belongsTo(WorldMapNode, { foreignKey: "id_origem", as: "origem" });
 WorldMapConnection.belongsTo(WorldMapNode, { foreignKey: "id_destino", as: "destino" });
 
+// Motor de Status (§30 da Especificação Consolidada Poder/Status/
+// Cooldown/Balanceamento) — uma Power pode ter zero, uma ou várias
+// linhas de efeito (habilidade com dois efeitos diferentes, por ex.).
+const Power = require("./Power");
+const PowerStatusEffect = require("./PowerStatusEffect");
+Power.hasMany(PowerStatusEffect, { foreignKey: "id_power", as: "efeitosDeStatus" });
+PowerStatusEffect.belongsTo(Power, { foreignKey: "id_power", as: "power" });
+
 module.exports = {};

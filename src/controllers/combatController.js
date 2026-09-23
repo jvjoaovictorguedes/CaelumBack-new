@@ -45,6 +45,22 @@ const { concederOuro } = require("../services/goldService");
 const { registrarProgressoContrato } = require("../services/adventureGuildObjectiveService");
 const { registrarProgressoMissaoGuilda } = require("../services/guildMissionService");
 const { bonusesAtivosPara } = require("../services/guildBuffService");
+const statusEffectService = require("../services/statusEffectService");
+const cooldownService = require("../services/cooldownService");
+const { resolverEfeitosDoUso } = require("../services/combatEffectResolver");
+const { definicaoDoStatus } = require("../config/statusEffectConfig");
+
+// Motor de Status/Cooldown (Especificação Consolidada Poder/Status/
+// Cooldown/Balanceamento, §37) — devolve o estado de combate já
+// inicializado, tolerando encontros antigos sem essas chaves (ausência =
+// vazio, nunca erro).
+function estadoDeStatusECooldown(inimigoAtual) {
+  return {
+    statusEffects: inimigoAtual.statusEffects ?? { player: [], enemy: [] },
+    cooldowns: inimigoAtual.cooldowns ?? { player: {}, enemy: {} },
+    combatTurn: (inimigoAtual.combatTurn ?? 0) + 1,
+  };
+}
 
 const NOMES_INIMIGOS = [
   "Lobo das Sombras",
@@ -381,6 +397,11 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
         id_area: zona.id,
         id_monstro: escolhido.id_monstro,
         tipo_aparicao: escolhido.tipo_aparicao,
+        // Motor de Status/Cooldown (§37) — estado vazio no início do
+        // encontro; executarTurno preenche conforme o combate avança.
+        statusEffects: { player: [], enemy: [] },
+        cooldowns: { player: {}, enemy: {} },
+        combatTurn: 0,
       };
       await character.save({ transaction });
 
@@ -496,6 +517,52 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
     }
 
     // ==========================================================
+    // MOTOR DE STATUS/COOLDOWN — INÍCIO DO TURNO DO JOGADOR
+    // (Especificação Consolidada Poder/Status/Cooldown/Balanceamento,
+    // §23 passos 1/2) — ticks de Burn/Bleed/Poison que estejam no
+    // próprio jogador podem matá-lo ANTES de agir; nesse caso a ação
+    // nem chega a acontecer.
+    // ==========================================================
+    const { statusEffects, cooldowns, combatTurn } = estadoDeStatusECooldown(inimigoAtual);
+    const cooldownsPlayerAplicadosNesteTurno = new Set();
+    const cooldownsEnemyAplicadosNesteTurno = new Set();
+
+    personagemAtual.vida_atual = statusEffectService.processarTicksDeInicio({
+      vidaAtual: personagemAtual.vida_atual,
+      defensor: personagemAtual,
+      lista: statusEffects.player,
+      log,
+      nomeAlvo: "Você",
+    });
+
+    if (personagemAtual.vida_atual <= 0) {
+      character.vida_atual = 0;
+      character.mana_atual = personagemAtual.mana_atual;
+      character.ultima_atualizacao_vida = new Date();
+      character.ultima_atualizacao_mana = new Date();
+      character.encontro_pve = null;
+      log.push("Você foi derrotado e precisa se recuperar antes de lutar de novo.");
+      await character.save({ transaction });
+      return res.status(200).json({
+        status: "success",
+        data: {
+          done: true,
+          victory: false,
+          log,
+          character: {
+            vida_atual: 0,
+            mana_atual: personagemAtual.mana_atual,
+            nivel: character.nivel,
+            experiencia: character.experiencia,
+            pontos_distribuir: character.pontos_distribuir,
+          },
+          enemy: inimigoAtual,
+          statusEffects,
+        },
+      });
+    }
+
+    // ==========================================================
     // TURNO DO JOGADOR
     // ==========================================================
 
@@ -503,6 +570,15 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
     let nivelHabilidadeUsada = 1;
 
     if (action.type === "power") {
+      // Silêncio bloqueia habilidades ativas, não o ataque básico nem
+      // itens (§26) — checado antes de qualquer outra coisa, pra uma
+      // tentativa bloqueada nunca iniciar cooldown (§35).
+      if (statusEffectService.bloqueiaHabilidadesAtivas(statusEffects.player)) {
+        return res.status(403).json({
+          message: "Você está silenciado e não pode usar habilidades.",
+        });
+      }
+
       poderUsado = await Power.findByPk(action.powerId);
 
       if (!poderUsado) {
@@ -538,6 +614,12 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       if (poderUsado.tipo_poder !== "Ativo") {
         return res.status(403).json({
           message: "Este poder não pode ser usado manualmente em combate.",
+        });
+      }
+
+      if (!cooldownService.podeUsar(cooldowns.player, poderUsado.id)) {
+        return res.status(400).json({
+          message: `Esta habilidade ainda está em cooldown (${cooldownService.turnosRestantes(cooldowns.player, poderUsado.id)} turno(s)).`,
         });
       }
 
@@ -598,12 +680,23 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       personagemAtual.mana_atual -=
         custoManaEfetivo(poderUsado, nivelHabilidadeUsada);
 
-      const { dano, cura } =
+      // Cooldown só entra AGORA — a habilidade já passou por todas as
+      // validações e foi consumida como ação válida (§35). Marcado como
+      // "aplicado neste turno" pra decrementarCooldowns (fim do turno do
+      // jogador, mais abaixo) não descontar um turno dela hoje mesmo
+      // (ver cooldownService.js).
+      cooldowns.player = cooldownService.iniciarCooldown(cooldowns.player, poderUsado.id, poderUsado.cooldown);
+      cooldownsPlayerAplicadosNesteTurno.add(cooldownService.chaveDoPoder(poderUsado.id));
+
+      const { dano: danoBase, cura } =
         calcularEfeitoPoder(
           poderUsado,
           personagemAtual,
           nivelHabilidadeUsada
         );
+      // Enfraquecimento (§45) reduz o dano de SAÍDA de quem está com o
+      // status, antes de qualquer mitigação do alvo.
+      const dano = Math.round(danoBase * statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.player));
 
       if (dano > 0) {
         if (
@@ -625,6 +718,20 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
           log.push(
             `Você usou ${poderUsado.nome} e causou ${danoMitigado} de dano em ${inimigoAtual.nome}.`
           );
+
+          // Efeitos de status configurados da Power (§19/§29-31) — só
+          // rola/aplica quando o golpe de fato acerta.
+          const novosEfeitos = await resolverEfeitosDoUso({
+            power: poderUsado,
+            personagemCaster: personagemAtual,
+            casterActorId: "player",
+            turno: combatTurn,
+          });
+          for (const efeito of novosEfeitos) {
+            statusEffects.enemy = statusEffectService.aplicarStatus(statusEffects.enemy, efeito);
+            const def = definicaoDoStatus(efeito.key);
+            log.push(`${inimigoAtual.nome} recebeu ${def.nomeUi} por ${efeito.remainingTurns} turno(s).`);
+          }
         }
       }
 
@@ -692,8 +799,12 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
           `${inimigoAtual.nome} esquivou do seu ataque!`
         );
       } else {
+        const danoBasicoEnfraquecido = Math.round(
+          calcularDanoBasico(personagemAtual) *
+            statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.player),
+        );
         const dano = aplicarMitigacaoDeDefesa(
-          calcularDanoBasico(personagemAtual),
+          danoBasicoEnfraquecido,
           inimigoAtual,
         );
 
@@ -708,11 +819,16 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       }
     }
 
+    // Fim do turno do JOGADOR (§23 passos 8/9) — decrementa cooldown e
+    // duração de status do jogador, exceto o que acabou de entrar agora.
+    cooldowns.player = cooldownService.decrementarCooldowns(cooldowns.player, cooldownsPlayerAplicadosNesteTurno);
+    statusEffects.player = statusEffectService.decrementarDuracoes(statusEffects.player);
+
     // ==========================================================
     // CHECA VITÓRIA
     // ==========================================================
 
-    if (inimigoAtual.vida_atual <= 0) {
+    async function concederVitoriaEResponder() {
       // Encontro do Modo Aventura (tem id_area, ver
       // gerarInimigoParaPersonagem) usa recompensa/espólio de ZONA
       // (§11/§12/§13), com contadores de sessão persistidos por kill
@@ -863,8 +979,30 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
 
           drop,
           espolio: espolioDeZona,
+          statusEffects,
         },
       });
+    }
+
+    if (inimigoAtual.vida_atual <= 0) {
+      return await concederVitoriaEResponder();
+    }
+
+    // ==========================================================
+    // MOTOR DE STATUS/COOLDOWN — INÍCIO DO TURNO DO INIMIGO (§23
+    // passos 1/2) — ticks de Burn/Bleed/Poison aplicados nele por
+    // poderes do jogador podem matá-lo ANTES do contra-ataque.
+    // ==========================================================
+    inimigoAtual.vida_atual = statusEffectService.processarTicksDeInicio({
+      vidaAtual: inimigoAtual.vida_atual,
+      defensor: inimigoAtual,
+      lista: statusEffects.enemy,
+      log,
+      nomeAlvo: inimigoAtual.nome,
+    });
+
+    if (inimigoAtual.vida_atual <= 0) {
+      return await concederVitoriaEResponder();
     }
 
     // ==========================================================
@@ -881,14 +1019,17 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
         `Você esquivou do ataque de ${inimigoAtual.nome}!`
       );
     } else {
-      const danoRecebido = aplicarMitigacaoDeDefesa(
+      const danoRecebidoEnfraquecido = Math.round(
         Math.max(
           1,
           Math.round(
             inimigoAtual.dano_base *
               (0.85 + Math.random() * 0.3)
           )
-        ),
+        ) * statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.enemy),
+      );
+      const danoRecebido = aplicarMitigacaoDeDefesa(
+        danoRecebidoEnfraquecido,
         personagemAtual,
       );
 
@@ -903,6 +1044,12 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
         `${inimigoAtual.nome} atacou e causou ${danoRecebido} de dano em você.`
       );
     }
+
+    // Fim do turno do INIMIGO (§23 passos 8/9) — decrementa cooldown
+    // (hoje sempre vazio: monstro de PvE ainda não usa Power nenhuma,
+    // só ataque básico — mas fica pronto) e duração de status dele.
+    cooldowns.enemy = cooldownService.decrementarCooldowns(cooldowns.enemy, cooldownsEnemyAplicadosNesteTurno);
+    statusEffects.enemy = statusEffectService.decrementarDuracoes(statusEffects.enemy);
 
     // ==========================================================
     // DERROTA DO PERSONAGEM
@@ -923,8 +1070,11 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
     character.ultima_atualizacao_mana = new Date();
     // Combate derrotado encerra o encontro (precisa buscar um novo
     // inimigo pra tentar de novo); senão, persiste o estado atualizado
-    // do inimigo (vida restante) pro próximo turno.
-    character.encontro_pve = derrotado ? null : inimigoAtual;
+    // do inimigo (vida restante) E o estado de status/cooldown/turno
+    // pro próximo turno (§37 — extensão do JSONB já existente).
+    character.encontro_pve = derrotado
+      ? null
+      : { ...inimigoAtual, statusEffects, cooldowns, combatTurn };
     await character.save({ transaction });
 
     return res.status(200).json({
@@ -950,6 +1100,8 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
         },
 
         enemy: inimigoAtual,
+        statusEffects: derrotado ? { player: [], enemy: [] } : statusEffects,
+        cooldowns: derrotado ? { player: {}, enemy: {} } : { player: cooldowns.player },
       },
     });
 }

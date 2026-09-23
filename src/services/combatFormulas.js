@@ -134,6 +134,35 @@ function custoManaEfetivo(power, nivelHabilidade = 1) {
   return Math.round(power.custo_mana * multiplicadorCustoManaPorNivelHabilidade(nivelHabilidade));
 }
 
+// Versão DETERMINÍSTICA de calcularEfeitoPoder — mesma fórmula, mas com
+// variação fixa em 1,00 (sem Math.random). Usada pelo Power Score
+// (combatPowerService.js), que por definição nunca pode depender de RNG
+// (Especificação Consolidada Poder/Status/Cooldown/Balanceamento, §14):
+// dois cálculos do mesmo snapshot precisam sempre bater o mesmo número.
+function calcularEfeitoPoderEsperado(power, personagem, nivelHabilidade = 1) {
+  const campoAtributo = ATRIBUTO_PARA_CAMPO[power.escala_atributo] || "forca";
+  const valorAtributo = personagem[campoAtributo] || 0;
+  const bonusNivel = bonusPorNivel(personagem, DANO_MAGICO_BASE_POR_NIVEL);
+  const multiplicadorNivelHabilidade = multiplicadorEfeitoPorNivelHabilidade(nivelHabilidade);
+  const multiplicadorMagico = personagem.multiplicador_dano_magico ?? 1;
+
+  const dano = power.dano_base
+    ? Math.round(
+        (power.dano_base + valorAtributo * power.valor_escala + bonusNivel) *
+          multiplicadorMagico *
+          multiplicadorNivelHabilidade,
+      )
+    : 0;
+
+  const cura = power.cura_base
+    ? Math.round(
+        (power.cura_base + valorAtributo * power.valor_escala + bonusNivel) * multiplicadorNivelHabilidade,
+      )
+    : 0;
+
+  return { dano, cura };
+}
+
 // Constante de "diminishing returns" da mitigação por defesa — cada
 // ponto de defesa vale cada vez menos, então armadura nunca deixa o
 // personagem invulnerável, só reduz. Com K=50: 12 de defesa (um set
@@ -200,9 +229,11 @@ function comMultiplicadoresDeClasse(personagem, classe) {
 
 module.exports = {
   ATRIBUTO_PARA_CAMPO,
+  CONSTANTE_MITIGACAO_DEFESA,
   calcularDanoBasico,
   danoBasicoEsperado,
   calcularEfeitoPoder,
+  calcularEfeitoPoderEsperado,
   custoManaEfetivo,
   aplicarMitigacaoDeDefesa,
   chanceDeEsquiva,
