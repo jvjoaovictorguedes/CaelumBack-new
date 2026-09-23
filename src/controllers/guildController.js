@@ -8,6 +8,7 @@ const GuildApplication = require("../models/GuildApplication");
 const GuildLog = require("../models/GuildLog");
 const GuildTreasuryTransaction = require("../models/GuildTreasuryTransaction");
 const GuildContribution = require("../models/GuildContribution");
+const GuildMuralMessage = require("../models/GuildMuralMessage");
 const Character = require("../models/Character");
 const { temPermissao, podeGerenciarCargo, PADRAO, HIERARQUIA } = require("../services/guildPermissionService");
 const { pontuarContribuicao, pontosPorDoacao } = require("../services/guildContributionService");
@@ -250,10 +251,28 @@ exports.buscarGuildPorId = async (req, res) => {
       ? guild.membros.some((m) => m.id_personagem === req.personagemAtual.id)
       : false;
 
+    // Fila: notificação de mural até o player abrir — não lido = existe
+    // pelo menos uma mensagem mais recente que a última leitura desse
+    // membro (nunca abriu = null = qualquer mensagem já conta).
+    let muralNaoLido = false;
+    if (ehMembro) {
+      const meuMembro = guild.membros.find((m) => m.id_personagem === req.personagemAtual.id);
+      const ultimaMensagem = await GuildMuralMessage.findOne({
+        where: { id_guild: guild.id },
+        order: [["createdAt", "DESC"]],
+        attributes: ["createdAt"],
+      });
+      muralNaoLido = Boolean(
+        ultimaMensagem &&
+          (!meuMembro.mural_ultima_leitura_em || ultimaMensagem.createdAt > meuMembro.mural_ultima_leitura_em),
+      );
+    }
+
     return res.status(200).json({
       status: "success",
       data: {
         guild: ehMembro ? guildDetalhada(guild) : guildPublica(guild),
+        muralNaoLido,
         membros: guild.membros.map((m) => ({
           id_personagem: m.id_personagem,
           nome: m.Character?.nome,

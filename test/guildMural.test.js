@@ -6,7 +6,7 @@ const assert = require("node:assert/strict");
 const { bancoDisponivel, criarPersonagem, sufixo, sequelize } = require("./helpers/db");
 const Guild = require("../src/models/Guild");
 const GuildMember = require("../src/models/GuildMember");
-require("../src/controllers/guildController");
+const guildController = require("../src/controllers/guildController");
 const guildMuralController = require("../src/controllers/guildMuralController");
 
 let temBanco = false;
@@ -124,6 +124,41 @@ testeComBanco("mensagem vazia é rejeitada (400)", async () => {
   await guildMuralController.criar(post.req, post.res);
   assert.equal(post.resultado().statusCode, 400);
 });
+
+testeComBanco(
+  "notificação de mural: fica não lido até o membro abrir, e some depois",
+  async () => {
+    const { guild, personagem: fundador } = await criarGuildComMembro("Fundador");
+    const { personagem: membro } = await criarPersonagem({ nivel: 5 });
+    await GuildMember.create({ id_guild: guild.id, id_personagem: membro.id, cargo: "Membro" });
+
+    async function buscarGuild(idPersonagem) {
+      const chamada = reqRes({ params: { id: String(guild.id) }, personagemAtual: { id: idPersonagem } });
+      await guildController.buscarGuildPorId(chamada.req, chamada.res);
+      return chamada.resultado().corpo;
+    }
+
+    // Ainda não existe nenhuma mensagem — nada pra notificar.
+    assert.equal((await buscarGuild(membro.id)).data.muralNaoLido, false);
+
+    await guildMuralController.criar(
+      reqRes({ params: { id: String(guild.id) }, body: { texto: "Aviso novo" }, personagemAtual: { id: fundador.id } }).req,
+      reqRes({ params: { id: String(guild.id) }, body: { texto: "Aviso novo" }, personagemAtual: { id: fundador.id } }).res,
+    );
+
+    // Mensagem postada — quem ainda não abriu o mural vê o indicador.
+    assert.equal((await buscarGuild(membro.id)).data.muralNaoLido, true);
+
+    // Abrir o mural (listar) marca como lido — some.
+    const list = reqRes({ params: { id: String(guild.id) }, personagemAtual: { id: membro.id } });
+    await guildMuralController.listar(list.req, list.res);
+    assert.equal((await buscarGuild(membro.id)).data.muralNaoLido, false);
+
+    // O autor da mensagem (que já "viu" ao postar? não — só listar marca
+    // leitura) continua vendo o indicador até ele mesmo abrir o mural.
+    assert.equal((await buscarGuild(fundador.id)).data.muralNaoLido, true);
+  },
+);
 
 test.after(async () => {
   if (temBanco) await sequelize.close();

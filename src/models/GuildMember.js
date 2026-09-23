@@ -34,6 +34,15 @@ const GuildMember = sequelize.define(
       allowNull: false,
       defaultValue: DataTypes.NOW,
     },
+    // Fila: "notificação até o player abrir" — marca quando esse membro
+    // viu o Mural pela última vez. null = nunca abriu (qualquer post
+    // existente conta como não lido). Atualizado em guildMuralController
+    // (listar), comparado em guildController (buscarGuildPorId).
+    mural_ultima_leitura_em: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      defaultValue: null,
+    },
   },
   {
     tableName: "GuildMembers",

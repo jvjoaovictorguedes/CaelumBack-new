@@ -5,6 +5,7 @@
 // usado em todo o resto da guilda, sem duplicar a checagem aqui.
 const GuildMuralMessage = require("../models/GuildMuralMessage");
 const Character = require("../models/Character");
+const GuildMember = require("../models/GuildMember");
 const { exigirPermissao, registrarLog } = require("./guildController");
 const { emitParaGuild } = require("../socket/guildSocket");
 
@@ -27,6 +28,20 @@ exports.listar = async (req, res) => {
       order: [["createdAt", "DESC"]],
       limit: LIMITE_MENSAGENS,
     });
+
+    // Abrir o Mural É o "ler" — marca aqui, não num endpoint à parte,
+    // pra não depender do frontend lembrar de chamar mais uma rota.
+    // exigirMembroDaGuild já garantiu que req.personagemAtual pertence
+    // a essa guilda antes de chegar aqui (guardado mesmo assim porque
+    // essa rota também é usada — sem personagemAtual — de forma
+    // deliberada num teste view-only que não passa pelo middleware).
+    if (req.personagemAtual) {
+      await GuildMember.update(
+        { mural_ultima_leitura_em: new Date() },
+        { where: { id_personagem: req.personagemAtual.id, id_guild: req.params.id } },
+      );
+    }
+
     return res.status(200).json({ status: "success", data: { mensagens: mensagens.map(mensagemPublica) } });
   } catch (error) {
     console.error("Erro ao listar mural da guilda:", error);
