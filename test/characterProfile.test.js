@@ -7,6 +7,8 @@ const { bancoDisponivel, criarPersonagem, sufixo, sequelize } = require("./helpe
 require("../src/controllers/guildController");
 
 const AdventureMonster = require("../src/models/AdventureMonster");
+const Item = require("../src/models/Item");
+const CharacterEquipment = require("../src/models/CharacterEquipment");
 const monsterKillService = require("../src/services/monsterKillService");
 const achievementService = require("../src/services/achievementService");
 const characterProfileService = require("../src/services/characterProfileService");
@@ -161,6 +163,58 @@ testeComBanco("highlights não duplicam e respeitam no máximo 3 slots", async (
       }),
     (err) => err.status === 400,
   );
+});
+
+async function equiparItemQualquer(idPersonagem) {
+  const item = await Item.create({
+    nome: `Espada Perfil ${sufixo()}`,
+    descricao: "teste",
+    tipo_item: "Arma",
+    raridade: "Comum",
+  });
+  await CharacterEquipment.create({ id_personagem: idPersonagem, slot: "ArmaPrincipal", id_item: item.id });
+  return item;
+}
+
+testeComBanco("ocultar equipamentos: visitante não recebe a lista, dono continua recebendo", async () => {
+  const { personagem, usuario } = await criarPersonagem({ nivel: 5 });
+  const item = await equiparItemQualquer(personagem.id);
+
+  const antes = await characterProfileService.obterPerfilPublico(personagem.id, null);
+  assert.equal(antes.equipment.length, 1);
+  assert.equal(antes.equipment_oculto, false);
+
+  const proprio = await characterProfileService.atualizarPersonalizacao(personagem.id, { ocultar_equipamentos: true });
+  assert.equal(proprio.privacidade.ocultar_equipamentos, true);
+  assert.equal(proprio.equipment.length, 1, "o dono sempre vê o próprio equipamento");
+  assert.equal(proprio.equipment[0].id_item, item.id);
+
+  const visitante = await characterProfileService.obterPerfilPublico(personagem.id, usuario.id + 999999);
+  assert.deepEqual(visitante.equipment, []);
+  assert.equal(visitante.equipment_oculto, true);
+  assert.equal(visitante.privacidade, undefined, "visitante nunca vê a configuração de privacidade");
+
+  const reaberto = await characterProfileService.atualizarPersonalizacao(personagem.id, { ocultar_equipamentos: false });
+  assert.equal(reaberto.privacidade.ocultar_equipamentos, false);
+  const visitanteDepois = await characterProfileService.obterPerfilPublico(personagem.id, null);
+  assert.equal(visitanteDepois.equipment.length, 1);
+});
+
+testeComBanco("ocultar_equipamentos só aceita booleano", async () => {
+  const { personagem } = await criarPersonagem({ nivel: 5 });
+  await assert.rejects(
+    () => characterProfileService.atualizarPersonalizacao(personagem.id, { ocultar_equipamentos: "sim" }),
+    (err) => err.status === 400,
+  );
+});
+
+testeComBanco("PvP do perfil traz só Arena Ranqueada (sem PvP casual nem Torneio)", async () => {
+  const { personagem } = await criarPersonagem({ nivel: 5 });
+  const perfil = await characterProfileService.obterPerfilPublico(personagem.id, null);
+  assert.equal("melhor_sequencia" in perfil.pvp, false);
+  assert.equal("trofeus_torneio" in perfil.pvp, false);
+  assert.ok(perfil.pvp.medalhas);
+  assert.equal(typeof perfil.pvp.vitorias_temporada, "number");
 });
 
 test.after(async () => {

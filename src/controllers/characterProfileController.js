@@ -3,6 +3,7 @@
 // characterProfileService.js.
 const Character = require("../models/Character");
 const characterProfileService = require("../services/characterProfileService");
+const combatPowerService = require("../services/combatPowerService");
 
 // GET /api/characters/:id/profile
 exports.getPerfil = async (req, res) => {
@@ -45,5 +46,18 @@ exports.atualizarPerfilProprio = async (req, res) => {
     const status = error.status || 500;
     if (status === 500) console.error("Erro ao atualizar Perfil de Jogador:", error);
     res.status(status).json({ message: status ? error.message : "Erro interno do servidor ao atualizar o perfil." });
+  }
+};
+
+// GET /api/characters/me/combat-power — Poder do personagem atual, sem
+// montar o perfil inteiro (aba Status de "Meu Personagem").
+exports.getMeuPoder = async (req, res) => {
+  try {
+    const poder = await combatPowerService.calcularPoderPersonagem(req.personagemAtual.id);
+    if (!poder) return res.status(404).json({ message: "Personagem não encontrado." });
+    res.status(200).json({ status: "success", data: { total: poder.combatPower, version: poder.version } });
+  } catch (error) {
+    console.error("Erro ao calcular Poder de Combate:", error);
+    res.status(500).json({ message: "Erro interno do servidor ao calcular o Poder." });
   }
 };

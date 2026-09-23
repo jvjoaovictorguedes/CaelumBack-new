@@ -35,6 +35,10 @@ router
   .route("/me/profile")
   .patch(authMiddleware, carregarPersonagemAtual, characterProfileController.atualizarPerfilProprio);
 
+router
+  .route("/me/combat-power")
+  .get(authMiddleware, carregarPersonagemAtual, characterProfileController.getMeuPoder);
+
 router.route("/:id/profile").get(authMiddleware, characterProfileController.getPerfil);
 
 // Precisa vir antes de "/:id" pelo mesmo motivo — senão "/:id/public"

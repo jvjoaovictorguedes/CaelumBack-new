@@ -25,6 +25,9 @@ const CharacterProfile = sequelize.define(
     },
     // Reservado pra v2 — não usado na v1.
     background_key: { type: DataTypes.STRING(60), allowNull: true },
+    // Visitantes deixam de receber a lista de equipados no perfil — o
+    // próprio dono continua vendo normalmente.
+    ocultar_equipamentos: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   },
   { tableName: "character_profiles" },
 );

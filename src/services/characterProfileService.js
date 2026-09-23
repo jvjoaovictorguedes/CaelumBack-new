@@ -22,7 +22,6 @@ const CharacterProfileAchievementHighlight = require("../models/CharacterProfile
 const CharacterProfileMonsterHighlight = require("../models/CharacterProfileMonsterHighlight");
 const AdventureMonster = require("../models/AdventureMonster");
 const CharacterMonsterKill = require("../models/CharacterMonsterKill");
-const PvpStatus = require("../models/PvpStatus");
 
 const { formatarEquipado } = require("./equipmentInstanceService");
 const { nivelPorXpTotal: nivelExpedicaoPorXp } = require("./expeditionProgressionService");
@@ -32,7 +31,6 @@ const combatPowerService = require("./combatPowerService");
 const rankedSeasonService = require("./rankedSeasonService");
 const rankedRatingService = require("./rankedRatingService");
 const rankedTierService = require("./rankedTierService");
-const tournamentStatsService = require("./tournamentStatsService");
 
 class ProfileError extends Error {
   constructor(mensagem, status = 400) {
@@ -155,17 +153,17 @@ async function montarProgressao(idPersonagem, character) {
   };
 }
 
-// §17 — reaproveita as mesmas fontes do PvpStatsCard (rankedRatingService
-// + rankedTierService + tournamentStatsService), nunca reimplementa.
+// §17 — só Arena Ranqueada (temporada atual + medalhas de temporadas
+// encerradas). PvP casual e Torneio ficam fora do perfil de propósito.
 async function montarPvp(idPersonagem) {
   const temporada = await rankedSeasonService.obterOuIniciarTemporadaAtiva();
-  const [participacao, casual, podio] = await Promise.all([
+  const [participacao, medalhas] = await Promise.all([
     temporada ? rankedRatingService.obterOuCriarParticipacao(idPersonagem, temporada.id) : null,
-    PvpStatus.findOne({ where: { id_personagem: idPersonagem } }),
-    tournamentStatsService.podioDoPersonagem(idPersonagem),
+    rankedSeasonService.medalhasDoPersonagem(idPersonagem),
   ]);
 
   const resumoTier = participacao ? rankedTierService.resumoTier(participacao.rating) : null;
+  const resumoPico = participacao?.peak_rating ? rankedTierService.resumoTier(participacao.peak_rating) : null;
   const vitoriasTemporada = participacao?.vitorias ?? 0;
   const derrotasTemporada = participacao?.derrotas ?? 0;
   const totalJogosTemporada = vitoriasTemporada + derrotasTemporada;
@@ -177,19 +175,16 @@ async function montarPvp(idPersonagem) {
           divisao: resumoTier.divisao,
           tier_label: resumoTier.tierLabel,
           rating: participacao.rating,
+          pico_rating: participacao.peak_rating ?? participacao.rating,
+          pico_tier_label: resumoPico?.tierLabel ?? resumoTier.tierLabel,
         }
       : null,
+    temporada: temporada ? { id: temporada.id, nome: temporada.nome ?? null } : null,
     vitorias_temporada: vitoriasTemporada,
     derrotas_temporada: derrotasTemporada,
     taxa_vitoria_temporada:
       totalJogosTemporada > 0 ? Math.round((vitoriasTemporada / totalJogosTemporada) * 1000) / 10 : null,
-    // "Melhor sequência" usa a maior sequência de vitórias do PvP casual
-    // (único lugar do sistema atual que rastreia sequência) — sinalizado
-    // como escolha, não uma fonte "de sequência ranqueada" separada, que
-    // não existe hoje.
-    melhor_sequencia: casual?.maximo_sequencia_vitorias ?? 0,
-    trofeus_torneio: podio.trofeus,
-    medalhas: { ouro: podio.ouro, prata: podio.prata, bronze: podio.bronze },
+    medalhas: { ouro: medalhas.ouro, prata: medalhas.prata, bronze: medalhas.bronze },
   };
 }
 
@@ -282,9 +277,15 @@ async function obterPerfilPublico(idPersonagem, viewerUserId) {
     include: [{ model: Title, as: "tituloSelecionado" }],
   });
 
+  const ehProprio = Boolean(viewerUserId) && Number(viewerUserId) === Number(character.id_usuario);
+  const ocultarEquipamentos = Boolean(perfilCustom?.ocultar_equipamentos);
+  // Visitante com equipamento oculto nem dispara a consulta — a lista
+  // nunca sai do servidor.
+  const equipamentoOcultoParaViewer = ocultarEquipamentos && !ehProprio;
+
   const [guild, equipment, progression, pvp, bestiary, destaques, conquistas, combatPower] = await Promise.all([
     montarGuilda(idPersonagem),
-    montarEquipamentosPublicos(idPersonagem),
+    equipamentoOcultoParaViewer ? [] : montarEquipamentosPublicos(idPersonagem),
     montarProgressao(idPersonagem, character),
     montarPvp(idPersonagem),
     montarBestiarioResumo(idPersonagem),
@@ -292,8 +293,6 @@ async function obterPerfilPublico(idPersonagem, viewerUserId) {
     montarConquistasResumo(idPersonagem),
     montarPoder(idPersonagem),
   ]);
-
-  const ehProprio = Boolean(viewerUserId) && Number(viewerUserId) === Number(character.id_usuario);
 
   return {
     identity: {
@@ -304,6 +303,7 @@ async function obterPerfilPublico(idPersonagem, viewerUserId) {
     combatPower,
     guild,
     equipment,
+    equipment_oculto: equipamentoOcultoParaViewer,
     progression,
     pvp,
     bestiary,
@@ -338,8 +338,12 @@ async function obterPerfilProprio(idPersonagem) {
   };
   // Só o dono precisa saber QUAIS títulos pode escolher (§25/§43 —
   // TitleSelector é "somente próprio perfil").
-  const titulosDesbloqueados = await achievementService.listarTitulosDoPersonagem(idPersonagem);
+  const [titulosDesbloqueados, perfilCustom] = await Promise.all([
+    achievementService.listarTitulosDoPersonagem(idPersonagem),
+    CharacterProfile.findByPk(idPersonagem, { attributes: ["ocultar_equipamentos"] }),
+  ]);
   perfil.titulos_disponiveis = titulosDesbloqueados.map((t) => ({ id: t.id_title, nome: t.title.nome }));
+  perfil.privacidade = { ocultar_equipamentos: Boolean(perfilCustom?.ocultar_equipamentos) };
   return perfil;
 }
 
@@ -378,6 +382,13 @@ async function atualizarPersonalizacao(idPersonagem, payload) {
       if (!possui) throw new ProfileError("Você não desbloqueou esse título.", 403);
       perfil.id_titulo_selecionado = payload.id_titulo_selecionado;
     }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, "ocultar_equipamentos")) {
+    if (typeof payload.ocultar_equipamentos !== "boolean") {
+      throw new ProfileError("ocultar_equipamentos precisa ser true ou false.", 400);
+    }
+    perfil.ocultar_equipamentos = payload.ocultar_equipamentos;
   }
 
   await perfil.save();
