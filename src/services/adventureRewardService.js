@@ -1,12 +1,18 @@
 // Recompensa/espólio de vitória em zona do Modo Aventura (§11/§12/§13/
-// §15/§16 da spec) — chamado só quando o encontro tem id_area (ver
-// combatController.processarTurno). Some ao lado de, e não em cima de,
-// o pool genérico de drop (rolarDropDeVitoria/dropService.js): §14 pede
-// pra Aventura NÃO virar fonte principal de Material de Expedição, por
-// isso zona derrotada rola SÓ no pool próprio de AdventureZoneLoot, com
-// item de categoria "Espolio", nunca no pool genérico.
+// §15/§16 da spec original + Expansão Aventura Beta §20/§21/§22). Some
+// ao lado de, e não em cima de, o pool genérico de drop
+// (rolarDropDeVitoria/dropService.js): §14 pede pra Aventura NÃO virar
+// fonte principal de Material de Expedição.
+//
+// Expansão Aventura Beta §20/§21: loot passou a ser por MONSTRO
+// (AdventureMonsterLoot), não mais por zona — o modelo antigo
+// (AdventureZoneLoot) deixava um monstro receber o drop de outro da
+// mesma área (bug de design corrigido pela expansão). Cada entrada do
+// monstro rola INDEPENDENTE (nunca uma escolha exclusiva entre os
+// drops), permitindo 0..N espólios por vitória — Comum tem até 2
+// entradas, Raro até 3 (ver adventureExpansionData.js).
 const crypto = require("crypto");
-const AdventureZoneLoot = require("../models/AdventureZoneLoot");
+const AdventureMonsterLoot = require("../models/AdventureMonsterLoot");
 const CharacterAdventureSession = require("../models/CharacterAdventureSession");
 const Item = require("../models/Item");
 const { concederItem } = require("./dropService");
@@ -18,41 +24,32 @@ const {
 } = require("../config/adventureConfig");
 const { aplicarBonusDeMaestria } = require("./masteryBonusService");
 
-// Mesmo truque de escala inteira do dropService.sortearComPeso.
-const ESCALA = 1000;
+const ESCALA_PPM = 1_000_000;
 
-function sortearComPeso(itens, pesoDe) {
-  const pesoTotal = itens.reduce((soma, item) => soma + pesoDe(item), 0);
-  if (pesoTotal <= 0) return null;
-  let alvo = crypto.randomInt(0, Math.round(pesoTotal * ESCALA));
-  for (const item of itens) {
-    alvo -= pesoDe(item) * ESCALA;
-    if (alvo < 0) return item;
-  }
-  return itens[itens.length - 1];
-}
+// Rola cada entrada de loot do monstro de forma independente — devolve
+// um array (pode ser vazio, ou ter mais de um espólio na mesma vitória).
+async function sortearEspoliosDoMonstro(idMonstro, transaction) {
+  if (!idMonstro) return [];
 
-// Sorteia UM espólio da zona (§13/§15) — entradas `exclusivo_raro` só
-// entram no sorteio quando o encontro derrotado era o Raro da zona
-// (§12: Raro pode ter drop exclusivo).
-async function sortearEspolioDaZona(idArea, ehRaro, transaction) {
-  const where = { id_area: idArea, ativo: true };
-  if (!ehRaro) where.exclusivo_raro = false;
-
-  const opcoes = await AdventureZoneLoot.findAll({
-    where,
+  const opcoes = await AdventureMonsterLoot.findAll({
+    where: { id_monstro: idMonstro, ativo: true },
     include: [{ model: Item, as: "item" }],
     transaction,
   });
-  const escolhido = sortearComPeso(opcoes, (o) => o.peso);
-  if (!escolhido) return null;
 
-  const quantidade =
-    escolhido.quantidade_max <= escolhido.quantidade_min
-      ? escolhido.quantidade_min
-      : crypto.randomInt(escolhido.quantidade_min, escolhido.quantidade_max + 1);
+  const espolios = [];
+  for (const opcao of opcoes) {
+    const rolagem = crypto.randomInt(0, ESCALA_PPM);
+    if (rolagem >= opcao.chance_ppm) continue;
 
-  return { id_item: escolhido.id_item, nome: escolhido.item.nome, quantidade };
+    const quantidade =
+      opcao.quantidade_max <= opcao.quantidade_min
+        ? opcao.quantidade_min
+        : crypto.randomInt(opcao.quantidade_min, opcao.quantidade_max + 1);
+
+    espolios.push({ id_item: opcao.id_item, nome: opcao.item.nome, quantidade });
+  }
+  return espolios;
 }
 
 // Concede XP/ouro/espólio de uma vitória DENTRO de uma zona e atualiza
@@ -72,20 +69,20 @@ async function concederRecompensaDeZona(character, inimigoAtual, transaction) {
     ouroBaseDoNivel(inimigoAtual.nivel) * (ehRaro ? MULTIPLICADOR_RARO_OURO : 1),
   );
 
-  const espolioBase = await sortearEspolioDaZona(inimigoAtual.id_area, ehRaro, transaction);
+  const espoliosBase = await sortearEspoliosDoMonstro(inimigoAtual.id_monstro, transaction);
 
   // Bônus de Maestria Regional (Bestiário — §14/§16) — usa os abates
   // JÁ existentes antes desta vitória (registrarMorte só roda depois,
   // em combatController.js), então nunca conta o kill atual duas vezes
   // na hora de decidir se o bônus está ativo.
-  const { xpGanho, dinheiroGanho, espolio } = await aplicarBonusDeMaestria(
+  const { xpGanho, dinheiroGanho, espolios } = await aplicarBonusDeMaestria(
     character.id,
     inimigoAtual.id_area,
-    { xpGanho: xpBase, dinheiroGanho: dinheiroBase, espolio: espolioBase },
+    { xpGanho: xpBase, dinheiroGanho: dinheiroBase, espolios: espoliosBase },
     transaction,
   );
 
-  if (espolio) {
+  for (const espolio of espolios) {
     await concederItem(character.id, espolio.id_item, espolio.quantidade, transaction);
   }
 
@@ -103,11 +100,11 @@ async function concederRecompensaDeZona(character, inimigoAtual, transaction) {
     if (ehRaro) sessao.raros_encontrados += 1;
     sessao.xp_obtida += xpGanho;
     sessao.ouro_obtido += dinheiroGanho;
-    if (espolio) sessao.espolios_obtidos += espolio.quantidade;
+    sessao.espolios_obtidos += espolios.reduce((soma, e) => soma + e.quantidade, 0);
     await sessao.save({ transaction });
   }
 
-  return { xpGanho, dinheiroGanho, espolio };
+  return { xpGanho, dinheiroGanho, espolios };
 }
 
-module.exports = { concederRecompensaDeZona };
+module.exports = { concederRecompensaDeZona, sortearEspoliosDoMonstro };

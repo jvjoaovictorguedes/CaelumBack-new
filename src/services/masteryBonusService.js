@@ -14,26 +14,30 @@ async function bonusAtivoNaRegiao(idPersonagem, idArea, transaction) {
 }
 
 // Aplica o bônus regional em cima de uma recompensa de zona já
-// calculada (xpGanho/dinheiroGanho/espolio de
+// calculada (xpGanho/dinheiroGanho/espolios de
 // adventureRewardService.concederRecompensaDeZona). Nunca CRIA um
-// espólio do nada — só rola uma chance (igual ao percentual de bônus)
-// de aumentar em +1 a quantidade do que já tinha caído (§16).
+// espólio do nada — só rola uma chance (igual ao percentual de bônus),
+// INDEPENDENTE por espólio já caído, de aumentar em +1 a quantidade
+// dele (§16 da spec original; Expansão Aventura Beta §21: agora pode
+// haver mais de um espólio na mesma vitória, cada um rola seu próprio
+// bônus separadamente — nunca um bônus só pro primeiro da lista).
 async function aplicarBonusDeMaestria(idPersonagem, idArea, recompensa, transaction) {
   const bonus = await bonusAtivoNaRegiao(idPersonagem, idArea, transaction);
 
   const xpGanho = Math.round(recompensa.xpGanho * (1 + bonus.xp));
   const dinheiroGanho = Math.round(recompensa.dinheiroGanho * (1 + bonus.ouro));
 
-  let espolio = recompensa.espolio;
-  if (espolio && bonus.espolio > 0) {
-    const ESCALA = 10000;
+  const ESCALA = 10000;
+  const espolios = recompensa.espolios.map((espolio) => {
+    if (bonus.espolio <= 0) return espolio;
     const rolagem = crypto.randomInt(0, ESCALA);
     if (rolagem < bonus.espolio * ESCALA) {
-      espolio = { ...espolio, quantidade: espolio.quantidade + 1 };
+      return { ...espolio, quantidade: espolio.quantidade + 1 };
     }
-  }
+    return espolio;
+  });
 
-  return { xpGanho, dinheiroGanho, espolio };
+  return { xpGanho, dinheiroGanho, espolios };
 }
 
 module.exports = { bonusAtivoNaRegiao, aplicarBonusDeMaestria };

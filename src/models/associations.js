@@ -54,6 +54,7 @@ const AdventureZone = require("./AdventureZone");
 const AdventureMonster = require("./AdventureMonster");
 const AdventureZoneMonster = require("./AdventureZoneMonster");
 const AdventureZoneLoot = require("./AdventureZoneLoot");
+const AdventureMonsterLoot = require("./AdventureMonsterLoot");
 const CharacterAdventureSession = require("./CharacterAdventureSession");
 const CharacterAdventureGuildProgress = require("./CharacterAdventureGuildProgress");
 const AdventureGuildMission = require("./AdventureGuildMission");
@@ -161,6 +162,11 @@ AdventureMonster.hasMany(AdventureZoneMonster, { foreignKey: "id_monstro" });
 AdventureZone.hasMany(AdventureZoneLoot, { foreignKey: "id_area", as: "espolios" });
 AdventureZoneLoot.belongsTo(AdventureZone, { foreignKey: "id_area" });
 AdventureZoneLoot.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+
+// Expansão Aventura Beta §20 — loot por monstro (ver AdventureMonsterLoot.js).
+AdventureMonster.hasMany(AdventureMonsterLoot, { foreignKey: "id_monstro", as: "espolios" });
+AdventureMonsterLoot.belongsTo(AdventureMonster, { foreignKey: "id_monstro" });
+AdventureMonsterLoot.belongsTo(Item, { foreignKey: "id_item", as: "item" });
 
 CharacterAdventureSession.belongsTo(Character, { foreignKey: "id_personagem" });
 CharacterAdventureSession.belongsTo(AdventureZone, { foreignKey: "id_area", as: "area" });

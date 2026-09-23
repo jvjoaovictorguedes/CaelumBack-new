@@ -21,6 +21,7 @@ async function listarZonas(nivelPersonagem) {
     nome: zona.nome,
     descricao: zona.descricao,
     imagem_url: zona.imagem_url,
+    battle_background_url: zona.battle_background_url,
     nivel_monstro_min: zona.nivel_monstro_min,
     nivel_monstro_max: zona.nivel_monstro_max,
     nivel_recomendado: `${zona.nivel_monstro_min}-${zona.nivel_monstro_max}`,

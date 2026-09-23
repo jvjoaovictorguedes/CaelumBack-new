@@ -100,6 +100,7 @@ async function obterRegiao(idPersonagem, idZona) {
       raridade: v.tipo_aparicao,
       descricao: v.monstro.descricao,
       imagem_url: v.monstro.imagem_url,
+      sprite_key: v.monstro.sprite_key,
       nivel_min: v.nivel_min_override ?? zona.nivel_monstro_min,
       nivel_max: v.nivel_max_override ?? zona.nivel_monstro_max,
       abates: kill.quantidade,

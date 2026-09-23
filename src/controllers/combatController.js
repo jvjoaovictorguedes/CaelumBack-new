@@ -398,6 +398,10 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
         id_area: zona.id,
         id_monstro: escolhido.id_monstro,
         tipo_aparicao: escolhido.tipo_aparicao,
+        // Expansão Aventura Beta §29 — frontend resolve sprite por essa
+        // chave, nunca mais por nome (null até a arte ser enviada, cai
+        // no EnemySprite genérico).
+        sprite_key: escolhido.monstro?.sprite_key ?? null,
         // Motor de Status/Cooldown (§37) — estado vazio no início do
         // encontro; executarTurno preenche conforme o combate avança.
         statusEffects: { player: [], enemy: [] },
@@ -838,13 +842,13 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       const ehEncontroDeZona = Boolean(inimigoAtual.id_area);
       let xpGanho;
       let dinheiroGanho;
-      let espolioDeZona = null;
+      let espoliosDeZona = [];
 
       if (ehEncontroDeZona) {
         const recompensa = await concederRecompensaDeZona(character, inimigoAtual, transaction);
         xpGanho = recompensa.xpGanho;
         dinheiroGanho = recompensa.dinheiroGanho;
-        espolioDeZona = recompensa.espolio;
+        espoliosDeZona = recompensa.espolios;
       } else {
         xpGanho = 15 + inimigoAtual.nivel * 8;
         dinheiroGanho = 5 + inimigoAtual.nivel * 4;
@@ -915,8 +919,8 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       } else if (drop?.tipo === "ouro") {
         log.push(`Você também encontrou ${drop.dinheiro} moedas extras!`);
       }
-      if (espolioDeZona) {
-        log.push(`Você recolheu: ${espolioDeZona.nome} x${espolioDeZona.quantidade}!`);
+      for (const espolio of espoliosDeZona) {
+        log.push(`Você recolheu: ${espolio.nome} x${espolio.quantidade}!`);
       }
 
       const dinheiroGanhoTotal = dinheiroGanho + (drop?.tipo === "ouro" ? drop.dinheiro : 0);
@@ -984,7 +988,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
           },
 
           drop,
-          espolio: espolioDeZona,
+          espolios: espoliosDeZona,
           statusEffects,
         },
       });

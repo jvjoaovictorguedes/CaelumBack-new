@@ -5,8 +5,20 @@
 // que é a fonte de verdade (mesmo raciocínio de nunca aceitar do
 // cliente algo que o servidor já pode derivar com segurança).
 const CharacterMonsterKill = require("../models/CharacterMonsterKill");
+const CharacterZoneMasteryFloor = require("../models/CharacterZoneMasteryFloor");
 const { monstrosDaZona } = require("./adventureService");
 const { NIVEL_MAXIMO_MAESTRIA, REQUISITOS_ABATES_POR_NIVEL } = require("../config/bestiaryConfig");
+
+// Expansão Aventura Beta §35 — nunca deixa o nível cair abaixo do que
+// já foi conquistado antes do catálogo da área crescer (ver comentário
+// em CharacterZoneMasteryFloor.js).
+async function buscarPisoDeMaestria(idPersonagem, idArea, transaction) {
+  const piso = await CharacterZoneMasteryFloor.findOne({
+    where: { id_personagem: idPersonagem, id_area: idArea },
+    transaction,
+  });
+  return piso?.nivel_piso ?? 0;
+}
 
 // Um monstro só é "descoberto" quando primeira_derrota_em existe —
 // encontrar e perder não conta (§6): registrarMorte só roda no ramo de
@@ -61,8 +73,16 @@ function progressoParaProximoNivel(monstros, nivelAtual) {
 
 async function calcularMaestriaDaRegiao(idPersonagem, idArea, transaction) {
   const monstros = await progressoDosMonstros(idPersonagem, idArea, transaction);
+  const piso = await buscarPisoDeMaestria(idPersonagem, idArea, transaction);
+
   if (monstros.length === 0) {
-    return { nivel: 0, descobertos: 0, total: 0, progresso_pct_proximo_nivel: 0, monstros: [] };
+    return {
+      nivel: piso,
+      descobertos: 0,
+      total: 0,
+      progresso_pct_proximo_nivel: piso >= NIVEL_MAXIMO_MAESTRIA ? 100 : 0,
+      monstros: [],
+    };
   }
 
   const descobertos = monstros.filter((m) => m.descoberto).length;
@@ -70,15 +90,24 @@ async function calcularMaestriaDaRegiao(idPersonagem, idArea, transaction) {
 
   // §10 — sem estágio intermediário de "desbloqueada, nível 0":
   // completar o Bestiário já concede Maestria I direto.
-  const nivel = bestiarioCompleto ? nivelAtingidoPorAbates(monstros) : 0;
+  const nivelDerivado = bestiarioCompleto ? nivelAtingidoPorAbates(monstros) : 0;
+  // Nunca abaixo do piso histórico (§35) — só importa quando o
+  // catálogo cresceu e o cálculo ao vivo, com o roster novo, ainda não
+  // alcançou de volta o que já tinha sido conquistado antes.
+  const nivel = Math.max(nivelDerivado, piso);
+
+  let progresso;
+  if (nivel >= NIVEL_MAXIMO_MAESTRIA) progresso = 100;
+  else if (nivel === nivelDerivado && bestiarioCompleto) progresso = progressoParaProximoNivel(monstros, nivel);
+  else progresso = 100;
 
   return {
     nivel,
     descobertos,
     total: monstros.length,
-    progresso_pct_proximo_nivel: bestiarioCompleto ? progressoParaProximoNivel(monstros, nivel) : 0,
+    progresso_pct_proximo_nivel: progresso,
     monstros,
   };
 }
 
-module.exports = { calcularMaestriaDaRegiao };
+module.exports = { calcularMaestriaDaRegiao, buscarPisoDeMaestria };

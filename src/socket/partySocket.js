@@ -432,6 +432,9 @@ module.exports = function registerPartyHandlers(io) {
           escolhido.monstro.nome,
           { nivelForcado: nivelSorteado, multiplicadores },
         );
+        // Expansão Aventura Beta §29/§39 — Party usa o mesmo sprite_key
+        // do catálogo, nunca uma resolução própria por nome.
+        inimigo.sprite_key = escolhido.monstro.sprite_key ?? null;
 
         const battleId = proximaBatalhaId++;
         const sala = `party-batalha:${battleId}`;
@@ -470,7 +473,13 @@ module.exports = function registerPartyHandlers(io) {
         io.to(sala).emit("party:batalha-iniciada", {
           battleId,
           zona: batalha.zona,
-          inimigo: { nome: inimigo.nome, nivel: inimigo.nivel, vida_atual: inimigo.vida_atual, vida_maxima: inimigo.vida_maxima },
+          inimigo: {
+            nome: inimigo.nome,
+            nivel: inimigo.nivel,
+            vida_atual: inimigo.vida_atual,
+            vida_maxima: inimigo.vida_maxima,
+            sprite_key: inimigo.sprite_key,
+          },
           membros: membros.map((m) => ({
             id: m.id,
             nome: m.nome,

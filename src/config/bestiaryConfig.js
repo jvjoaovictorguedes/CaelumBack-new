@@ -8,11 +8,16 @@ const NIVEL_MAXIMO_MAESTRIA = 5;
 // requisito ACUMULADO de abates (§11), nunca adicional, e o Raro
 // sempre exige bem menos que o Comum (§12) por causa da chance de
 // aparição menor.
+// Recalibrado pela Expansão Aventura Beta (§34) — os números antigos
+// (Comum 30/70/120/200, Raro 5/8/12/20) foram pensados pra áreas largas
+// de 15 níveis; com 10 áreas de 5 níveis cada, ficariam grind
+// desproporcional numa região que o jogador já supera rápido. Ponto de
+// partida a validar em telemetria do Beta, não número final.
 const REQUISITOS_ABATES_POR_NIVEL = {
-  2: { Comum: 30, Raro: 5 },
-  3: { Comum: 70, Raro: 8 },
-  4: { Comum: 120, Raro: 12 },
-  5: { Comum: 200, Raro: 20 },
+  2: { Comum: 10, Raro: 2 },
+  3: { Comum: 25, Raro: 4 },
+  4: { Comum: 50, Raro: 7 },
+  5: { Comum: 80, Raro: 10 },
 };
 
 // Bônus regionais por nível de Maestria (§14/§15) — pequenos de
