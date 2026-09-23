@@ -69,6 +69,15 @@ const User = sequelize.define(
       allowNull: true,
       field: "senha_alterada_em",
     },
+    // Login com Google (fila) — o "sub" do ID token verificado (ver
+    // googleAuthService.js), nunca o e-mail sozinho. null = conta nunca
+    // vinculada a uma conta Google.
+    googleId: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+      unique: true,
+      field: "google_id",
+    },
   },
   {
     tableName: "users",

@@ -19,6 +19,7 @@ const limitadorTrocaSenha = criarLimitador({ janelaMs: 15 * 60 * 1000, maxTentat
 
 router.post("/register", limitadorRegistro, userController.registerUser);
 router.post("/login", limitadorLogin, userController.loginUser);
+router.post("/google-login", limitadorLogin, userController.loginComGoogle);
 router.post("/forgot-password", limitadorResetSenha, userController.forgotPassword);
 router.post("/reset-password", limitadorResetSenha, userController.resetPassword);
 router.post("/change-password", limitadorTrocaSenha, authMiddleware, userController.changePassword);

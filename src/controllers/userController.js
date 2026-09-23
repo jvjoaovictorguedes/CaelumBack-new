@@ -5,6 +5,8 @@ const jwt = require("jsonwebtoken");
 const Character = require("../models/Character");
 const { emitirTicket } = require("../services/socketTicketService");
 const { enviarEmailRedefinicaoSenha } = require("../services/emailService");
+const { verificarIdTokenGoogle } = require("../services/googleAuthService");
+const { resolverOuCriarUsuarioGoogle } = require("../services/googleLoginService");
 
 require("dotenv").config();
 const { JWT_SECRET } = require("../config/jwt");
@@ -142,6 +144,58 @@ exports.loginUser = async (req, res) => {
     res
       .status(500)
       .json({ message: "Erro interno do servidor ao fazer login." });
+  }
+};
+
+// POST /api/users/google-login
+// body: { idToken } — o "credential" que o botão "Sign in with Google"
+// (Google Identity Services) devolve pro FRONTEND; nunca um
+// authorization code. A mesma resposta de loginUser (token + hasCharacter),
+// pra login.tsx tratar os dois fluxos do jeito idêntico dali pra frente.
+exports.loginComGoogle = async (req, res) => {
+  try {
+    const idToken = req.body?.idToken;
+    if (!idToken) {
+      return res.status(400).json({ message: "Token do Google ausente." });
+    }
+
+    let perfil;
+    try {
+      perfil = await verificarIdTokenGoogle(idToken);
+    } catch (erro) {
+      // GOOGLE_CLIENT_ID ausente no servidor — bug de configuração, não
+      // uma tentativa de login inválida (ver comentário em
+      // googleAuthService.verificarIdTokenGoogle).
+      console.error("Erro ao verificar token do Google:", erro);
+      return res.status(500).json({ message: "Login com Google não está disponível no momento." });
+    }
+    if (!perfil) {
+      return res.status(401).json({ message: "Não foi possível verificar sua conta Google." });
+    }
+
+    const user = await resolverOuCriarUsuarioGoogle(perfil);
+    // Sem checkbox de "lembrar-me" nesse fluxo — o próprio Google já
+    // exige reautenticação periódica do usuário na conta dele, então a
+    // sessão mais longa (7d) é o padrão razoável aqui, igual o login
+    // normal com "lembrar-me" marcado.
+    const token = signToken(user.id, { rememberMe: true });
+
+    user.ultimoLogin = new Date();
+    await user.save();
+
+    const character = await Character.findOne({ where: { id_usuario: user.id } });
+
+    return res.status(200).json({
+      status: "success",
+      token,
+      data: {
+        user: { id: user.id, username: user.username, email: user.email },
+        hasCharacter: !!character,
+      },
+    });
+  } catch (error) {
+    console.error("Erro ao fazer login com Google:", error);
+    return res.status(500).json({ message: "Erro interno do servidor ao fazer login com Google." });
   }
 };
 
