@@ -964,7 +964,40 @@ exports.listarLogs = async (req, res) => {
       order: [["createdAt", "DESC"]],
       limit: 200,
     });
-    return res.status(200).json({ status: "success", data: { logs } });
+
+    // Bug relatado: o log só mostrava O QUE foi feito, nunca QUEM fez —
+    // GuildLog sempre guardou id_personagem_responsavel/id_personagem_alvo,
+    // mas essa rota nunca resolvia esses IDs pra nome antes de responder.
+    // Um único lookup em lote (não N+1 por linha) pros dois campos juntos.
+    const idsPersonagens = [
+      ...new Set(
+        logs
+          .flatMap((log) => [log.id_personagem_responsavel, log.id_personagem_alvo])
+          .filter((id) => id != null),
+      ),
+    ];
+    const personagens = idsPersonagens.length
+      ? await Character.findAll({ where: { id: idsPersonagens }, attributes: ["id", "nome"] })
+      : [];
+    const nomePorId = new Map(personagens.map((p) => [p.id, p.nome]));
+
+    // Personagem pode ter sido removido/a conta excluída depois do log —
+    // nome vem null nesse caso (nunca quebra a listagem), o frontend
+    // decide como exibir.
+    const logsComNomes = logs.map((log) => ({
+      id: log.id,
+      tipo: log.tipo,
+      id_personagem_responsavel: log.id_personagem_responsavel,
+      nome_responsavel: log.id_personagem_responsavel != null
+        ? nomePorId.get(log.id_personagem_responsavel) ?? null
+        : null,
+      id_personagem_alvo: log.id_personagem_alvo,
+      nome_alvo: log.id_personagem_alvo != null ? nomePorId.get(log.id_personagem_alvo) ?? null : null,
+      detalhes: log.detalhes,
+      createdAt: log.createdAt,
+    }));
+
+    return res.status(200).json({ status: "success", data: { logs: logsComNomes } });
   } catch (error) {
     console.error("Erro ao listar logs:", error);
     return res.status(500).json({ message: "Erro interno do servidor." });
