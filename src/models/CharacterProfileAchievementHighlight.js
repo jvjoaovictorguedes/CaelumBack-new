@@ -24,9 +24,15 @@ const CharacterProfileAchievementHighlight = sequelize.define(
   },
   {
     tableName: "character_profile_achievement_highlights",
+    // Nomes iguais aos das constraints criadas em
+    // 20261026340000-perfil-jogador-schema.js — sem isso, o Sequelize
+    // gera um nome default diferente pro índice, não reconhece a
+    // constraint já existente no banco e tenta recriá-la a cada
+    // `sequelize.sync()` (fora de produção, no boot), falhando com
+    // "already exists" e entrando num loop de retry.
     indexes: [
-      { unique: true, fields: ["id_personagem", "slot"] },
-      { unique: true, fields: ["id_personagem", "id_achievement"] },
+      { unique: true, fields: ["id_personagem", "slot"], name: "perfil_achv_highlight_personagem_slot_unique" },
+      { unique: true, fields: ["id_personagem", "id_achievement"], name: "perfil_achv_highlight_personagem_achievement_unique" },
     ],
   },
 );
