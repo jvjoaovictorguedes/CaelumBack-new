@@ -84,6 +84,12 @@ exports.criarAnuncio = async (req, res) => {
       if (["QuestItem", "Currencia"].includes(item.tipo_item)) {
         throw erro(`Item do tipo "${item.tipo_item}" não pode ser anunciado.`);
       }
+      // Painel Administrativo §14 — bloqueio configurável por item (ex.:
+      // recompensa exclusiva de evento), sem precisar de código novo
+      // pra cada caso.
+      if (!item.negociavel_mercado) {
+        throw erro(`"${item.nome}" não pode ser anunciado no Mercado.`);
+      }
 
       // Inventário v2 (§4/§11/§12) — equipamento não é mais empilhável:
       // anuncia UMA instância específica (cada uma pode ter refinamento

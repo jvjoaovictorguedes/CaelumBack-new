@@ -73,6 +73,10 @@ const EquipmentSet = require("./EquipmentSet");
 const EquipmentSetPiece = require("./EquipmentSetPiece");
 const EquipmentSetBonus = require("./EquipmentSetBonus");
 const WeaponStatusEffect = require("./WeaponStatusEffect");
+const AdminRole = require("./AdminRole");
+const AdminPermission = require("./AdminPermission");
+const AdminRolePermission = require("./AdminRolePermission");
+const UserAdminRole = require("./UserAdminRole");
 
 Item.hasOne(WeaponProperties, { foreignKey: "id_item", as: "weaponProperties" });
 WeaponProperties.belongsTo(Item, { foreignKey: "id_item" });
@@ -322,5 +326,33 @@ EquipmentSet.hasMany(EquipmentSetBonus, { foreignKey: "equipment_set_id", as: "b
 // com registro de arma pode ter WeaponStatusEffect.
 WeaponProperties.hasMany(WeaponStatusEffect, { foreignKey: "id_item", as: "statusEffects" });
 WeaponStatusEffect.belongsTo(WeaponProperties, { foreignKey: "id_item", as: "arma" });
+
+// Painel Administrativo (§6/§7) — permissões granulares por role;
+// User<->AdminRole é N:N via UserAdminRole (um usuário pode acumular
+// mais de uma role, ex.: Conteúdo + Eventos).
+AdminRole.belongsToMany(AdminPermission, {
+  through: AdminRolePermission,
+  foreignKey: "id_role",
+  otherKey: "id_permission",
+  as: "permissoes",
+});
+AdminPermission.belongsToMany(AdminRole, {
+  through: AdminRolePermission,
+  foreignKey: "id_permission",
+  otherKey: "id_role",
+  as: "roles",
+});
+User.belongsToMany(AdminRole, {
+  through: UserAdminRole,
+  foreignKey: "id_user",
+  otherKey: "id_role",
+  as: "adminRoles",
+});
+AdminRole.belongsToMany(User, {
+  through: UserAdminRole,
+  foreignKey: "id_role",
+  otherKey: "id_user",
+  as: "usuarios",
+});
 
 module.exports = {};

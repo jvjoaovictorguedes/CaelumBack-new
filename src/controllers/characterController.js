@@ -483,11 +483,28 @@ exports.getMeuPersonagem = async (req, res) => {
     // em cada rota administrativa).
     const usuario = await User.findByPk(req.user.id, { attributes: ["isAdmin"] });
 
+    // Permissões granulares (Painel Administrativo §6/§8) — só
+    // consultadas pra quem já é isAdmin; refletem sempre o banco, nunca
+    // algo que o frontend possa forjar de volta numa próxima chamada.
+    let adminPermissions = [];
+    if (usuario?.isAdmin) {
+      const [linhas] = await sequelize.query(
+        `SELECT DISTINCT ap.chave
+           FROM user_admin_roles uar
+           JOIN admin_role_permissions arp ON arp.id_role = uar.id_role
+           JOIN admin_permissions ap ON ap.id = arp.id_permission
+          WHERE uar.id_user = :idUser;`,
+        { replacements: { idUser: req.user.id } },
+      );
+      adminPermissions = linhas.map((l) => l.chave);
+    }
+
     res.status(200).json({
       status: "success",
       data: {
         character: await carregarRespostaDoPersonagem(character),
         isAdmin: Boolean(usuario?.isAdmin),
+        adminPermissions,
       },
     });
   } catch (error) {

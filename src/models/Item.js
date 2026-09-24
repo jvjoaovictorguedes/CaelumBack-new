@@ -88,6 +88,24 @@ const Item = sequelize.define("Item", {
     allowNull: true,
     validate: { min: 1, max: 5 },
   },
+  // Painel Administrativo §13/§48 — desativar é a ação PADRÃO em vez de
+  // deletar (item pode estar em inventários, instâncias de
+  // equipamento, Mercado, Forja, missões, histórico ou recompensas).
+  // Nenhum código de jogo além do próprio painel administrativo lê este
+  // campo ainda — ele não filtra automaticamente listagens existentes.
+  ativo: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+  },
+  // Painel Administrativo §14 — QuestItem e Currencia permanecem não
+  // negociáveis por regra de domínio (não só por este campo); itens de
+  // evento também podem ser bloqueados sem código.
+  negociavel_mercado: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+  },
 });
 
 module.exports = Item;

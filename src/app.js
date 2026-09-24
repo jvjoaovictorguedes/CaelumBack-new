@@ -70,6 +70,9 @@ const adventureGuildRoutes = require("./routes/adventureGuildRoutes");
 const equipmentInstanceRoutes = require("./routes/equipmentInstanceRoutes");
 const inventoryV2Routes = require("./routes/inventoryV2Routes");
 const adminTournamentRoutes = require("./routes/adminTournamentRoutes");
+const adminItemRoutes = require("./routes/adminItemRoutes");
+const adminAuditRoutes = require("./routes/adminAuditRoutes");
+const adminRoleRoutes = require("./routes/adminRoleRoutes");
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -212,6 +215,9 @@ app.use("/api/onboarding", onboardingRoutes);
 // Torneios — administração (criar/iniciar/cancelar/prêmio). Toda rota
 // aqui exige authMiddleware + adminMiddleware (ver o arquivo).
 app.use("/api/admin/pvp/tournaments", adminTournamentRoutes);
+app.use("/api/admin/items", adminItemRoutes);
+app.use("/api/admin/audit", adminAuditRoutes);
+app.use("/api/admin/admins", adminRoleRoutes);
 
 // Nenhuma rota acima bateu — sem isso, o Express respondia com a página
 // de erro padrão dele (texto puro tipo "Cannot GET /api/xyz"), que o
