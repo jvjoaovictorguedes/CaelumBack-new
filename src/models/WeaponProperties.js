@@ -49,9 +49,14 @@ const WeaponProperties = sequelize.define("WeaponProperties", {
     ),
     allowNull: false,
   },
+  // INTEGER pra combinar com as colunas de bônus equivalentes em
+  // ArmorProperties (bonus_forca/bonus_vitalidade/...) — bug real:
+  // migrations antigas de forja arredondavam pra 1 casa decimal em vez
+  // de inteiro (1.1/1.3/1.5...), e como a coluna era FLOAT o Postgres
+  // deixava passar. Ver migration 20261101020000.
   valor_bonus_atributo: {
-    type: DataTypes.FLOAT,
-    defaultValue: 0.0,
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
     allowNull: false,
   },
 });
