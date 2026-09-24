@@ -76,6 +76,8 @@ async function iniciarJogoDaSerie(io, serieId) {
     b: lutadorB,
     turnoDe: primeiro,
     acoes: 0,
+    danoTotalA: 0,
+    danoTotalB: 0,
     timer: null,
     torneio: true,
     serieId,

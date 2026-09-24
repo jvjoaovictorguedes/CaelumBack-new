@@ -106,6 +106,8 @@ function simularDuelo({ desafiante, desafiado, poderesDesafiante, poderesDesafia
   const primeiro = estadoA.velocidade >= estadoB.velocidade ? "A" : "B";
   const turnos = [];
   const log = [`${desafiante.nome} desafiou ${desafiado.nome} pra um duelo na ${NOME_ARENA}!`];
+  let danoTotalA = 0;
+  let danoTotalB = 0;
 
   function executarAcao(chave) {
     const atacante = chave === "A" ? estadoA : estadoB;
@@ -128,6 +130,8 @@ function simularDuelo({ desafiante, desafiado, poderesDesafiante, poderesDesafia
       log.push(`${nomeDefensor} esquivou de ${nomeAcao} de ${nomeAtacante}!`);
     } else if (dano > 0) {
       log.push(`${nomeAtacante} usou ${nomeAcao} e causou ${dano} de dano em ${nomeDefensor}.`);
+      if (chave === "A") danoTotalA += dano;
+      else danoTotalB += dano;
     } else if (cura > 0) {
       log.push(`${nomeAtacante} usou ${nomeAcao} e recuperou ${cura} de vida.`);
     }
@@ -161,19 +165,30 @@ function simularDuelo({ desafiante, desafiado, poderesDesafiante, poderesDesafia
   } else if (estadoB.vida_atual <= 0) {
     vencedorKey = "A";
   } else {
-    const percA = estadoA.vida_atual / vidaMaxA;
-    const percB = estadoB.vida_atual / vidaMaxB;
-    // `percA >= percB` sempre favorecia o desafiante A num empate exato
-    // de porcentagem de vida (ex.: os dois zerando a MAX_RODADAS com a
-    // vida cheia) — o desafiado nunca ganhava um empate, só quem abriu o
-    // duelo. Empate de verdade sorteia com CSPRNG em vez de decidir por
-    // ordem de parâmetro.
-    if (percA === percB) {
-      vencedorKey = crypto.randomInt(2) === 0 ? "A" : "B";
+    // Bug real reportado no duelo ao vivo (mesmo motor, mesmo bug aqui):
+    // bater o limite de rodadas e decidir só por % de vida restante
+    // deixava quem passou o duelo inteiro só curando (sem nunca chegar
+    // perto de derrubar o oponente) vencer um oponente que de fato
+    // causou dano de verdade. Critério agora é dano total causado —
+    // % de vida vira desempate de dano igual, sorteio só no empate
+    // completo.
+    if (danoTotalA !== danoTotalB) {
+      vencedorKey = danoTotalA > danoTotalB ? "A" : "B";
     } else {
-      vencedorKey = percA > percB ? "A" : "B";
+      const percA = estadoA.vida_atual / vidaMaxA;
+      const percB = estadoB.vida_atual / vidaMaxB;
+      // `percA >= percB` sempre favorecia o desafiante A num empate exato
+      // de porcentagem de vida (ex.: os dois zerando a MAX_RODADAS com a
+      // vida cheia) — o desafiado nunca ganhava um empate, só quem abriu o
+      // duelo. Empate de verdade sorteia com CSPRNG em vez de decidir por
+      // ordem de parâmetro.
+      if (percA === percB) {
+        vencedorKey = crypto.randomInt(2) === 0 ? "A" : "B";
+      } else {
+        vencedorKey = percA > percB ? "A" : "B";
+      }
     }
-    log.push("O tempo da arena se esgotou! O combate foi decidido pela vida restante.");
+    log.push("O tempo da arena se esgotou! O combate foi decidido pelo dano causado.");
   }
 
   log.push(

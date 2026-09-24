@@ -311,6 +311,8 @@ module.exports = function registerPvpLiveHandlers(io) {
           b: lutadorB,
           turnoDe: primeiro,
           acoes: 0,
+          danoTotalA: 0,
+          danoTotalB: 0,
           timer: null,
         };
         duelos.set(duelId, duelo);
@@ -531,6 +533,10 @@ function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
   });
 
   duelo.acoes += 1;
+  if (dano > 0) {
+    if (chave === "A") duelo.danoTotalA += dano;
+    else duelo.danoTotalB += dano;
+  }
 
   const payloadTurno = {
     duelId,
@@ -553,15 +559,26 @@ function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
     if (defensorInfo.estado.vida_atual <= 0) {
       vencedorChave = chave;
     } else {
-      const percA = duelo.a.estado.vida_atual / duelo.a.vidaMax;
-      const percB = duelo.b.estado.vida_atual / duelo.b.vidaMax;
-      // Mesmo cuidado do PvP assíncrono (pvpController.js) — empate de
-      // porcentagem de vida não pode sempre favorecer A só por ordem de
+      // Bug real reportado: duelo batia no limite de 80 ações e quem só
+      // ficou curando (nunca chegou perto de derrubar o oponente)
+      // ganhava só por estar com % de vida maior — "o inimigo ganhou
+      // usando vida". Critério agora é quem causou mais dano de
+      // verdade na luta (dano não sofre a mitigação de defesa que a
+      // cura nunca teve, então é a medida real de quem "venceu" o
+      // combate); % de vida vira só desempate de dano total igual, e
+      // sorteio só no empate completo — mesmo cuidado do PvP
+      // assíncrono (pvpController.js) pra não favorecer A por ordem de
       // comparação.
-      if (percA === percB) {
-        vencedorChave = crypto.randomInt(2) === 0 ? "A" : "B";
+      if (duelo.danoTotalA !== duelo.danoTotalB) {
+        vencedorChave = duelo.danoTotalA > duelo.danoTotalB ? "A" : "B";
       } else {
-        vencedorChave = percA > percB ? "A" : "B";
+        const percA = duelo.a.estado.vida_atual / duelo.a.vidaMax;
+        const percB = duelo.b.estado.vida_atual / duelo.b.vidaMax;
+        if (percA === percB) {
+          vencedorChave = crypto.randomInt(2) === 0 ? "A" : "B";
+        } else {
+          vencedorChave = percA > percB ? "A" : "B";
+        }
       }
     }
     io.to(duelo.sala).emit("pvp:turno-resultado", { ...payloadTurno, turnoDe: null });

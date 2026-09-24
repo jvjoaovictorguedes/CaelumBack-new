@@ -394,6 +394,8 @@ async function iniciarPartidaAssincrona(io, { idDesafiante }) {
       b: lutadorB,
       turnoDe: primeiro,
       acoes: 0,
+      danoTotalA: 0,
+      danoTotalB: 0,
       timer: null,
       timerIA: null,
       ranked: true,
