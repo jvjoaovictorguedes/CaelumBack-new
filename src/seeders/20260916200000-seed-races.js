@@ -81,6 +81,11 @@ module.exports = {
         bonus_agilidade: 3,
         bonus_inteligencia: 5,
         bonus_velocidade: 3,
+        // Sem isso, Celestial aparecia normal na tela de criação de
+        // personagem pra qualquer jogador — raceController.getAllRaces
+        // só filtra raro:false (correto, "nunca na lista normal"), mas
+        // este seed nunca marcava a flag, então o filtro não pegava.
+        raro: true,
         createdAt: new Date(),
         updatedAt: new Date(),
       },
