@@ -1,7 +1,8 @@
 // Motor de Status (Especificação Consolidada Poder/Status/Cooldown/
-// Balanceamento, §19-32). Chaves ESTÁVEIS — nome de exibição fica só
-// aqui e no frontend; banco/API nunca usam o nome em português como
-// identificador.
+// Balanceamento, §19-32; evoluído pela Especificação Evolução do Motor
+// de Status — Habilidades + Armas). Chaves ESTÁVEIS — nome de exibição
+// fica só aqui e no frontend; banco/API nunca usam o nome em português
+// como identificador.
 //
 // Cada status entra numa destas categorias de stack (§25):
 // - "RENEW_MAX_POTENCY": sem stack; reaplicar renova a duração e
@@ -10,10 +11,10 @@
 //   pra potência total; reaplicar sempre atualiza a duração pro maior
 //   valor (BLEED, POISON).
 // - "RENEW_MAX_DURATION": sem stack; reaplicar só estende se a nova
-//   duração for maior que a restante (SILENCE).
+//   duração for maior que a restante (SILENCE, FREEZE, STUN).
 // - "MAX_INTENSITY": sem stack; ao reaplicar, fica com a MAIOR potência
 //   entre a existente e a nova, e a duração é a da aplicação mais
-//   recente (SLOW, WEAKEN).
+//   recente (WEAKEN, PARALYZE, BLIND).
 const REGRA_STACK = {
   RENEW_MAX_POTENCY: "RENEW_MAX_POTENCY",
   STACK_CAP: "STACK_CAP",
@@ -36,6 +37,18 @@ const STACKS_MAXIMOS = {
   BLEED: 3,
   POISON: 5,
 };
+
+// Tipos de ação que um status de controle pode bloquear (Evolução do
+// Motor de Status §6) — usado por combatController.resolverPermissaoDeAcao
+// em vez de checks espalhados por controller.
+const ACTION_TYPE = {
+  BASIC_ATTACK: "BASIC_ATTACK",
+  POWER: "POWER",
+  ITEM: "ITEM",
+  PASS: "PASS",
+};
+
+const TODAS_ACOES_DE_TURNO = [ACTION_TYPE.BASIC_ATTACK, ACTION_TYPE.POWER, ACTION_TYPE.ITEM];
 
 const STATUS = {
   BURN: {
@@ -61,24 +74,9 @@ const STATUS = {
     ehDot: false,
     stack: REGRA_STACK.RENEW_MAX_DURATION,
     mitigacao: MITIGACAO.NONE,
-    bloqueiaHabilidadesAtivas: true,
-  },
-  SLOW: {
-    nomeUi: "Lentidão",
-    ehDot: false,
-    stack: REGRA_STACK.MAX_INTENSITY,
-    mitigacao: MITIGACAO.NONE,
-    // Reduz `velocidade` em `potency`% enquanto ativo. Hoje nenhuma
-    // fórmula de combate (combatFormulas.js) lê `velocidade` durante a
-    // resolução de turno — é usada só pra CALIBRAR o inimigo no momento
-    // em que ele é gerado (gerarInimigo/gerarInimigoDeGrupo). Ou seja:
-    // o status É rastreado, aparece no log/UI e decrementa certinho,
-    // mas hoje não muda dano/esquiva/iniciativa de ninguém, porque não
-    // existe sistema de iniciativa/turno-por-velocidade no motor atual.
-    // Sinalizado de propósito (ver §45 e o relatório final) em vez de
-    // inventar uma mecânica de iniciativa não pedida — fica pronto pra
-    // plugar numa fórmula futura sem mudar schema.
-    modificaAtributo: "velocidade",
+    // Bloqueia habilidades ativas; ataque básico e item continuam
+    // permitidos (§4 do catálogo canônico).
+    bloqueiaAcoes: [ACTION_TYPE.POWER],
   },
   WEAKEN: {
     nomeUi: "Enfraquecimento",
@@ -90,20 +88,51 @@ const STATUS = {
     // dano já calculado, depois de toda a rolagem normal.
     modificaSaidaDeDano: true,
   },
+  // Hard control (§4/§5.1) — o ator não executa nenhuma ação; é
+  // removido imediatamente ao receber DANO DIRETO (não DoT, e não pelo
+  // próprio golpe que o aplicou — ver
+  // statusEffectService.removerFreezeAoReceberDanoDireto).
+  FREEZE: {
+    nomeUi: "Congelamento",
+    ehDot: false,
+    stack: REGRA_STACK.RENEW_MAX_DURATION,
+    mitigacao: MITIGACAO.NONE,
+    bloqueiaAcoes: [ACTION_TYPE.BASIC_ATTACK, ACTION_TYPE.POWER, ACTION_TYPE.ITEM],
+    quebraPorDanoDireto: true,
+  },
+  // Hard control (§5.2) — igual a Freeze na ação bloqueada, mas dano
+  // recebido NUNCA remove Stun (só a duração expirando).
+  STUN: {
+    nomeUi: "Atordoamento",
+    ehDot: false,
+    stack: REGRA_STACK.RENEW_MAX_DURATION,
+    mitigacao: MITIGACAO.NONE,
+    bloqueiaAcoes: [ACTION_TYPE.BASIC_ATTACK, ACTION_TYPE.POWER, ACTION_TYPE.ITEM],
+  },
+  // Controle probabilístico (§5.3) — `potency` é a chance percentual
+  // (0..100) de perder a ação NESTE turno; uma única rolagem por
+  // ator/turno (nunca por request), ver
+  // combatController.resolverChecagemDeParalyze.
+  PARALYZE: {
+    nomeUi: "Paralisia",
+    ehDot: false,
+    stack: REGRA_STACK.MAX_INTENSITY,
+    mitigacao: MITIGACAO.NONE,
+    controleProbabilistico: true,
+    bloqueiaAcoes: [ACTION_TYPE.BASIC_ATTACK, ACTION_TYPE.POWER, ACTION_TYPE.ITEM],
+  },
+  // Precisão (§5.4) — `potency` é a chance ADICIONAL de errar (pontos
+  // percentuais, 0..100) do ATACANTE afetado; não bloqueia ação, só
+  // altera o resultado de acerto (ver
+  // combatFormulas.resolverResultadoDeAcerto). Não afeta cura/self.
+  BLIND: {
+    nomeUi: "Cegueira",
+    ehDot: false,
+    stack: REGRA_STACK.MAX_INTENSITY,
+    mitigacao: MITIGACAO.NONE,
+    afetaAcerto: true,
+  },
 };
-
-// §21 — deliberadamente NÃO implementados nesta primeira versão (Stun,
-// Freeze, Regeneration, Shield, Haste, Vulnerability, imunidades
-// complexas). Listados aqui só pra quem for ler o config saber que a
-// ausência é intencional, não esquecimento.
-const STATUS_ADIADOS_PARA_DEPOIS = [
-  "STUN",
-  "FREEZE",
-  "REGENERATION",
-  "SHIELD",
-  "HASTE",
-  "VULNERABILITY",
-];
 
 const CHAVES_VALIDAS = Object.keys(STATUS);
 
@@ -117,7 +146,8 @@ module.exports = {
   MITIGACAO,
   MITIGACAO_DOT_PADRAO,
   STACKS_MAXIMOS,
-  STATUS_ADIADOS_PARA_DEPOIS,
+  ACTION_TYPE,
+  TODAS_ACOES_DE_TURNO,
   CHAVES_VALIDAS,
   definicaoDoStatus,
 };

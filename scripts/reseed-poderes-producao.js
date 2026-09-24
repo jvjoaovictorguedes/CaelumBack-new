@@ -22,6 +22,7 @@
 // Como rodar: railway run node scripts/reseed-poderes-producao.js
 
 const Power = require("../src/models/Power");
+const PowerStatusEffect = require("../src/models/PowerStatusEffect");
 const Class = require("../src/models/Class");
 const Race = require("../src/models/Race");
 const ClassAbilities = require("../src/models/ClassAbilities");
@@ -264,6 +265,22 @@ async function limparTudo(transaction) {
   );
 }
 
+// Cria as linhas PowerStatusEffect de um Power recém-criado (Evolução
+// do Motor de Status §10) — este reseed apaga Powers do zero, e
+// power_status_effects cai junto por ON DELETE CASCADE; sem isto aqui,
+// nenhum Power reseedado nunca mais recuperava seus efeitos de status.
+// `efeitosDeStatus` ausente/vazio = Power sem efeito nenhum, formato:
+//   efeitosDeStatus: [{ status_key: "BURN", chance_ppm: 300000,
+//     duration_turns: 3, potency_base: 8, potency_scale_attribute: null,
+//     potency_scale_value: 0, target: "Enemy" }]
+// Nenhum poder do catálogo abaixo usa isso ainda — não inventar
+// balanceamento aqui; cadastrar de verdade é uma etapa de conteúdo à parte.
+async function criarEfeitosDeStatus(idPower, efeitosDeStatus, transaction) {
+  for (const efeito of efeitosDeStatus) {
+    await PowerStatusEffect.create({ id_power: idPower, ...efeito }, { transaction });
+  }
+}
+
 async function criarPoderesDeClasse(nomeClasse, poderes, transaction) {
   const classe = await Class.findOne({ where: { nome: nomeClasse }, transaction });
   if (!classe) {
@@ -272,8 +289,9 @@ async function criarPoderesDeClasse(nomeClasse, poderes, transaction) {
   }
 
   let criados = 0;
-  for (const { nivel_aprendizagem, ...dadosPoder } of poderes) {
+  for (const { nivel_aprendizagem, efeitosDeStatus = [], ...dadosPoder } of poderes) {
     const poder = await Power.create(dadosPoder, { transaction });
+    await criarEfeitosDeStatus(poder.id, efeitosDeStatus, transaction);
     await ClassAbilities.create(
       { id_classe: classe.id, id_poder: poder.id, nivel_aprendizagem },
       { transaction },
@@ -295,8 +313,9 @@ async function criarPoderesDeRaca(nomeRaca, poderes, transaction) {
   }
 
   let criados = 0;
-  for (const { nivel_aprendizado, ...dadosPoder } of poderes) {
+  for (const { nivel_aprendizado, efeitosDeStatus = [], ...dadosPoder } of poderes) {
     const poder = await Power.create(dadosPoder, { transaction });
+    await criarEfeitosDeStatus(poder.id, efeitosDeStatus, transaction);
     await RaceAbilities.create(
       { id_raca: raca.id, id_power: poder.id, nivel_aprendizado },
       { transaction },

@@ -19,16 +19,27 @@ const HORIZONTE_PADRAO = 4;
 // o simulador (Fase 6, ainda não construído) puder calibrar de verdade.
 const POWER_DISPLAY_SCALE = 12;
 
-// §45 — fator de utilidade de status de controle (Silence/Slow/Weaken):
-// conservador e com CAP, pra uma chance pequena de controle nunca inflar
-// o Poder mais que diferenças reais de DPS/EHP.
-const UTILITY_PESO_POR_STATUS_DE_CONTROLE = 0.05;
+// §45/Evolução do Motor de Status §24 — peso de utilidade POR status de
+// controle: conservador e com CAP, pra uma chance pequena de controle
+// nunca inflar o Poder mais que diferenças reais de DPS/EHP. Hard
+// controls (Freeze/Stun) pesam um pouco mais que os parciais/
+// probabilísticos (Paralyze/Blind/Silence/Weaken) — ainda assim números
+// de estimativa de utilidade, não de balanceamento de gameplay; a
+// calibrar quando o simulador (Fase 6) existir.
+const UTILITY_PESO_POR_STATUS = {
+  SILENCE: 0.05,
+  WEAKEN: 0.05,
+  FREEZE: 0.08,
+  STUN: 0.08,
+  PARALYZE: 0.06,
+  BLIND: 0.04,
+};
 const UTILITY_CAP_CONTROLE = 1.15;
 
 module.exports = {
   COMBAT_POWER_VERSION,
   HORIZONTE_PADRAO,
   POWER_DISPLAY_SCALE,
-  UTILITY_PESO_POR_STATUS_DE_CONTROLE,
+  UTILITY_PESO_POR_STATUS,
   UTILITY_CAP_CONTROLE,
 };

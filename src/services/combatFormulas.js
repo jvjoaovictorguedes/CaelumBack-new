@@ -191,6 +191,25 @@ function chanceDeEsquiva(defensor, atacante) {
   return Math.random() < Math.min(chance, 0.35);
 }
 
+// Unifica Cegueira (BLIND) e esquiva num único resultado de acerto
+// (Evolução do Motor de Status §17) — Blind é checado primeiro (chance
+// ADICIONAL de erro do ATACANTE afetado, em pontos percentuais),
+// esquiva continua exatamente como já era. `blindPotency` vem de quem
+// chama (o status BLIND mora no ATACANTE, não no defensor) — nunca lido
+// daqui pra dentro, pra não criar dependência circular com
+// statusEffectService. Não muda Agilidade permanentemente; é só um
+// resultado de acerto por golpe.
+function resolverResultadoDeAcerto({ atacante, defensor, blindPotency = 0 }) {
+  const chanceCegueira = Math.min(100, Math.max(0, blindPotency || 0)) / 100;
+  if (chanceCegueira > 0 && Math.random() < chanceCegueira) {
+    return { hit: false, reason: "BLIND_MISS" };
+  }
+  if (chanceDeEsquiva(defensor, atacante)) {
+    return { hit: false, reason: "DODGE" };
+  }
+  return { hit: true, reason: "HIT" };
+}
+
 // multiplicador_vida_por_nivel/multiplicador_mana_por_nivel vêm da
 // Classe (guerreiro é mais vida e menos mana, mago o contrário) — sem
 // esses multiplicadores, todo mundo tem a mesma vida/mana pra mesma
@@ -237,6 +256,7 @@ module.exports = {
   custoManaEfetivo,
   aplicarMitigacaoDeDefesa,
   chanceDeEsquiva,
+  resolverResultadoDeAcerto,
   vidaMaximaDe,
   manaMaximaDe,
   comMultiplicadoresDeClasse,

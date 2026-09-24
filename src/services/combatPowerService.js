@@ -28,9 +28,10 @@ const {
   COMBAT_POWER_VERSION,
   HORIZONTE_PADRAO,
   POWER_DISPLAY_SCALE,
-  UTILITY_PESO_POR_STATUS_DE_CONTROLE,
+  UTILITY_PESO_POR_STATUS,
   UTILITY_CAP_CONTROLE,
 } = require("../config/combatPowerConfig");
+const WeaponStatusEffect = require("../models/WeaponStatusEffect");
 
 function ehpAjustado(personagem) {
   const vidaMax = vidaMaximaDe(personagem);
@@ -73,17 +74,21 @@ function otimizarJanelaDeDano({ personagem, habilidadesAtivas, horizonte }) {
   return danoTotal;
 }
 
-// §45 — bônus conservador e limitado por status de controle configurados
-// nas habilidades ativas (Silence/Slow/Weaken), ponderado pela chance de
-// cada um disparar. `efeitosDeStatus` já vem resolvido (ver
-// calcularPoderPersonagem) pra esta função continuar 100% síncrona.
-function fatorDeUtilidade(habilidadesAtivas) {
+// §45/Evolução do Motor de Status §24 — bônus conservador e limitado por
+// status de controle configurados nas habilidades ATIVAS e na arma
+// equipada (Silence/Weaken/Freeze/Stun/Paralyze/Blind), ponderado pela
+// chance de cada um disparar. `efeitosDeStatus` já vem resolvido (ver
+// calcularPoderPersonagem) pra esta função continuar 100% síncrona e
+// determinística (nunca soma o mesmo efeito duas vezes: cada fonte —
+// Power ou arma — entra como um item separado da lista).
+function fatorDeUtilidade(fontesDeEfeito) {
   let bonus = 0;
-  for (const { efeitosDeStatus = [] } of habilidadesAtivas) {
+  for (const { efeitosDeStatus = [] } of fontesDeEfeito) {
     for (const efeito of efeitosDeStatus) {
-      if (!["SILENCE", "SLOW", "WEAKEN"].includes(efeito.status_key)) continue;
+      const peso = UTILITY_PESO_POR_STATUS[efeito.status_key];
+      if (!peso) continue;
       const chance = Math.min(1, (efeito.chance_ppm || 0) / 1_000_000);
-      bonus += chance * UTILITY_PESO_POR_STATUS_DE_CONTROLE;
+      bonus += chance * peso;
     }
   }
   return Math.min(UTILITY_CAP_CONTROLE, 1 + bonus);
@@ -97,7 +102,13 @@ function calcularPoderPersonagemDeSnapshot(snapshot) {
   const habilidadesAtivas = snapshot.habilidadesAtivas || [];
   const dpr = otimizarJanelaDeDano({ personagem: snapshot, habilidadesAtivas, horizonte: HORIZONTE_PADRAO });
   const ehp = ehpAjustado(snapshot);
-  const utilityFactor = fatorDeUtilidade(habilidadesAtivas);
+  // Utilidade considera as habilidades ativas E o proc de arma equipada
+  // (Evolução do Motor de Status §24) — lista separada de habilidadesAtivas
+  // pra nunca confundir otimizarJanelaDeDano (que espera `power` de
+  // verdade em cada entrada) com a fonte de arma, que não tem Power
+  // nenhum por trás.
+  const fontesDeEfeito = snapshot.fontesDeEfeitoParaUtilidade ?? habilidadesAtivas;
+  const utilityFactor = fatorDeUtilidade(fontesDeEfeito);
   const rawPower = Math.sqrt(Math.max(1, dpr) * Math.max(1, ehp));
 
   return {
@@ -139,7 +150,18 @@ async function calcularPoderPersonagem(characterId) {
     habilidadesAtivas.push({ power, nivelHabilidade: ability.nivel_habilidade ?? 1, efeitosDeStatus });
   }
 
-  return calcularPoderPersonagemDeSnapshot({ ...jogadorEfetivo, habilidadesAtivas });
+  // Efeito esperado de arma entra na utilidade do Poder uma única vez
+  // (§24) — nunca somado de novo em otimizarJanelaDeDano, que só olha
+  // `habilidadesAtivas` (sem a arma) pra calcular DPR.
+  const efeitosDaArma = jogadorEfetivo.arma_equipada?.id_item
+    ? await WeaponStatusEffect.findAll({ where: { id_item: jogadorEfetivo.arma_equipada.id_item, ativo: true } })
+    : [];
+  const fontesDeEfeitoParaUtilidade = [
+    ...habilidadesAtivas,
+    { efeitosDeStatus: efeitosDaArma.map((e) => ({ status_key: e.status_key, chance_ppm: e.chance_ppm })) },
+  ];
+
+  return calcularPoderPersonagemDeSnapshot({ ...jogadorEfetivo, habilidadesAtivas, fontesDeEfeitoParaUtilidade });
 }
 
 // Poder do monstro (§16) — calculado a partir do SNAPSHOT REAL do

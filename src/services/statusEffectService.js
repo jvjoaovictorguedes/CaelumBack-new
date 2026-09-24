@@ -1,16 +1,21 @@
-// Motor de Status (§19 da Especificação Consolidada) — aplicar,
-// renovar/empilhar, processar ticks, processar modificadores e expirar.
-// Único lugar que entende as regras de cada status; ninguém mais deve
-// escrever `if (efeito_status === 'Queimadura')` num controller.
+// Motor de Status (§19 da Especificação Consolidada; evoluído pela
+// Especificação Evolução do Motor de Status — Habilidades + Armas) —
+// aplicar, renovar/empilhar, processar ticks, processar modificadores,
+// resolver controle de turno e expirar. Único lugar que entende as
+// regras de cada status; ninguém mais deve escrever
+// `if (efeito_status === 'Queimadura')` num controller.
 //
-// Instância de status em combate (§24):
+// Instância de status em combate:
 // { key, sourceActorId, sourcePowerId, sourceItemId, remainingTurns,
-//   stacks, potency, appliedAtTurn }
+//   stacks, potency, appliedAtTurn, target? }
+// PARALYZE ganha dois campos internos extras (checkedTurn,
+// blockedThisTurn) pra nunca rerrolar duas vezes no mesmo turno.
 //
 // Toda função aqui é pura — recebe a lista atual e devolve uma NOVA
 // lista, nunca muta o array recebido. Quem chama é responsável por
 // persistir o resultado de volta em encontro_pve/partyBattleState/etc.
-const { REGRA_STACK, STACKS_MAXIMOS, definicaoDoStatus } = require("../config/statusEffectConfig");
+const crypto = require("crypto");
+const { REGRA_STACK, STACKS_MAXIMOS, ACTION_TYPE, definicaoDoStatus } = require("../config/statusEffectConfig");
 const { aplicarMitigacaoDeDefesa } = require("./combatFormulas");
 
 function listaVazia() {
@@ -57,15 +62,16 @@ function aplicarStatus(lista, novaInstancia) {
       ];
     }
 
-    // SILENCE: sem stack; reaplicar só estende se a nova duração for maior.
+    // SILENCE/FREEZE/STUN: sem stack; reaplicar só estende se a nova
+    // duração for maior (RENEW_MAX_DURATION).
     case REGRA_STACK.RENEW_MAX_DURATION:
       return [
         ...resto,
         { ...existente, remainingTurns: Math.max(existente.remainingTurns, novaInstancia.remainingTurns) },
       ];
 
-    // SLOW/WEAKEN: sem stack; fica com a maior potência, duração é a da
-    // aplicação mais recente.
+    // WEAKEN/PARALYZE/BLIND: sem stack; fica com a maior potência,
+    // duração é a da aplicação mais recente.
     case REGRA_STACK.MAX_INTENSITY:
       return [
         ...resto,
@@ -118,29 +124,77 @@ function possuiStatus(lista, chave) {
   return lista.some((s) => s.key === chave);
 }
 
+// Mantido por compatibilidade de nome (só cobre SILENCE bloqueando
+// Power) — resolverAcoesBloqueadasDoTurno abaixo é a checagem central
+// que também cobre os hard controls (FREEZE/STUN/PARALYZE).
 function bloqueiaHabilidadesAtivas(lista) {
-  return lista.some((s) => definicaoDoStatus(s.key)?.bloqueiaHabilidadesAtivas);
+  return lista.some((s) => definicaoDoStatus(s.key)?.bloqueiaAcoes?.includes(ACTION_TYPE.POWER));
 }
 
-// WEAKEN (§45): multiplicador aplicado sobre o dano JÁ calculado (básico
-// ou de poder) de quem está enfraquecido — nunca sobre o dano recebido.
+// WEAKEN (§45/§5): multiplicador aplicado sobre o dano JÁ calculado
+// (básico ou de poder) de quem está enfraquecido — nunca sobre o dano
+// recebido.
 function multiplicadorDeDanoDeSaida(lista) {
   const weaken = lista.find((s) => s.key === "WEAKEN");
   if (!weaken) return 1;
   return Math.max(0, 1 - weaken.potency / 100);
 }
 
-// SLOW (§45): reduz `velocidade` no snapshot de stats efetivos do turno.
-// Ver statusEffectConfig.js — hoje nenhuma fórmula de combate consome
-// `velocidade` durante a resolução de turno, então isto fica pronto sem
-// ter efeito mecânico ainda (rastreado/exibido normalmente).
-function aplicarModificadoresDeAtributos(statsBase, lista) {
-  const slow = lista.find((s) => s.key === "SLOW");
-  if (!slow) return statsBase;
+// PARALYZE (Evolução do Motor de Status §5.3/§19): uma única rolagem
+// por ator/turno — decisão persistida na própria instância
+// (checkedTurn/blockedThisTurn), nunca rerrolada por request repetido
+// no mesmo turno (mesmo duplo clique ou nova tentativa de ação depois
+// de bloqueada). Devolve a lista (com a instância atualizada, se havia
+// PARALYZE) e se o ator está bloqueado por ela NESTE turno.
+function resolverChecagemDeParalyze(lista, turnoAtual) {
+  const paralyze = lista.find((s) => s.key === "PARALYZE");
+  if (!paralyze) return { lista, bloqueadoPorParalyze: false };
+
+  if (paralyze.checkedTurn === turnoAtual) {
+    return { lista, bloqueadoPorParalyze: Boolean(paralyze.blockedThisTurn) };
+  }
+
+  const chance = Math.min(100, Math.max(0, paralyze.potency || 0)) / 100;
+  const bloqueado = crypto.randomInt(0, 1_000_000) < chance * 1_000_000;
+  const atualizado = { ...paralyze, checkedTurn: turnoAtual, blockedThisTurn: bloqueado };
   return {
-    ...statsBase,
-    velocidade: Math.max(1, Math.round((statsBase.velocidade || 0) * (1 - slow.potency / 100))),
+    lista: [...lista.filter((s) => s.key !== "PARALYZE"), atualizado],
+    bloqueadoPorParalyze: bloqueado,
   };
+}
+
+const PRIORIDADE_BLOQUEIO_TOTAL = ["FREEZE", "STUN", "PARALYZE"];
+
+// Função central de política de ações (Evolução do Motor de Status §6)
+// — resolve, num só lugar, quais ACTION_TYPE estão bloqueados pro ator
+// neste turno e por qual status (pra log/UI), evitando checks
+// espalhados pelo controller. Sempre chamada uma vez por ator/turno,
+// ANTES de decidir o que a ação pedida vai fazer.
+function resolverAcoesBloqueadasDoTurno(lista, turnoAtual) {
+  const { lista: listaAtualizada, bloqueadoPorParalyze } = resolverChecagemDeParalyze(lista, turnoAtual);
+  const presentes = new Map(listaAtualizada.map((s) => [s.key, s]));
+  const bloqueadas = new Set();
+  let motivoBloqueioTotal = null;
+
+  for (const chave of PRIORIDADE_BLOQUEIO_TOTAL) {
+    if (!presentes.has(chave)) continue;
+    if (chave === "PARALYZE" && !bloqueadoPorParalyze) continue;
+    for (const acao of definicaoDoStatus(chave).bloqueiaAcoes) bloqueadas.add(acao);
+    motivoBloqueioTotal = motivoBloqueioTotal ?? chave;
+  }
+
+  if (presentes.has("SILENCE")) bloqueadas.add(ACTION_TYPE.POWER);
+
+  return { lista: listaAtualizada, bloqueadas, motivoBloqueioTotal };
+}
+
+// FREEZE quebra por dano DIRETO (nunca DoT, nunca pelo próprio hit que
+// acabou de aplicá-lo — quem chama executa isto ANTES de aplicar novos
+// efeitos do mesmo golpe, §18/§5.1).
+function removerFreezeAoReceberDanoDireto(lista, danoDireto) {
+  if (!(danoDireto > 0)) return { lista, quebrou: false };
+  if (!lista.some((s) => s.key === "FREEZE")) return { lista, quebrou: false };
+  return { lista: lista.filter((s) => s.key !== "FREEZE"), quebrou: true };
 }
 
 // §65 — APIs de dispel/cleanse, pra consumíveis (Bandagem/Antídoto) e
@@ -152,7 +206,9 @@ function removerStatus(lista, chave) {
 
 function removerStatusPorCategoria(lista, categoria) {
   if (categoria === "DOT") return lista.filter((s) => !definicaoDoStatus(s.key)?.ehDot);
-  if (categoria === "CONTROLE") return lista.filter((s) => !["SILENCE", "SLOW", "WEAKEN"].includes(s.key));
+  if (categoria === "CONTROLE") {
+    return lista.filter((s) => !["SILENCE", "WEAKEN", "FREEZE", "STUN", "PARALYZE", "BLIND"].includes(s.key));
+  }
   return lista;
 }
 
@@ -165,7 +221,9 @@ module.exports = {
   possuiStatus,
   bloqueiaHabilidadesAtivas,
   multiplicadorDeDanoDeSaida,
-  aplicarModificadoresDeAtributos,
+  resolverChecagemDeParalyze,
+  resolverAcoesBloqueadasDoTurno,
+  removerFreezeAoReceberDanoDireto,
   removerStatus,
   removerStatusPorCategoria,
 };

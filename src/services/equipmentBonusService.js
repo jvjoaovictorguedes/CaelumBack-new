@@ -122,6 +122,7 @@ async function buscarBonusDeAtributos(idPersonagem, transaction) {
     // usar no ataque básico, em vez de só olhar a força.
     if (equipamento.slot === "ArmaPrincipal" && weaponEfetivo) {
       arma = {
+        id_item: item.id,
         dano_min: weaponEfetivo.dano_min,
         dano_max: weaponEfetivo.dano_max,
       };

@@ -22,6 +22,7 @@ const {
   calcularEfeitoPoder,
   custoManaEfetivo,
   chanceDeEsquiva,
+  resolverResultadoDeAcerto,
   vidaMaximaDe,
   manaMaximaDe,
   danoBasicoEsperado,
@@ -49,10 +50,12 @@ const achievementService = require("../services/achievementService");
 const statusEffectService = require("../services/statusEffectService");
 const cooldownService = require("../services/cooldownService");
 const { resolverEfeitosDoUso } = require("../services/combatEffectResolver");
-const { definicaoDoStatus } = require("../config/statusEffectConfig");
+const { resolverEfeitosDeArmaNoHit } = require("../services/weaponEffectResolver");
+const { definicaoDoStatus, ACTION_TYPE } = require("../config/statusEffectConfig");
 const { calcularMaestriaDaRegiao } = require("../services/masteryService");
 const AdventureZone = require("../models/AdventureZone");
 const { BONUS_POR_NIVEL } = require("../config/bestiaryConfig");
+const WeaponStatusEffect = require("../models/WeaponStatusEffect");
 
 // Motor de Status/Cooldown (Especificação Consolidada Poder/Status/
 // Cooldown/Balanceamento, §37) — devolve o estado de combate já
@@ -369,6 +372,19 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
         classe,
       );
 
+      // Evolução do Motor de Status §32 (Performance) — captura os
+      // efeitos de status da arma equipada UMA vez, no início do
+      // encontro (mesmo princípio já usado pra dano_min/dano_max da
+      // arma logo abaixo), pra executarTurno nunca consultar o banco a
+      // cada hit. Arma sem nenhuma linha configurada = arma normal
+      // (opt-in, §12.1).
+      const efeitosDaArmaEquipada = jogadorEfetivo.arma_equipada?.id_item
+        ? await WeaponStatusEffect.findAll({
+            where: { id_item: jogadorEfetivo.arma_equipada.id_item, ativo: true },
+            transaction,
+          })
+        : [];
+
       // Aplica a regeneração passiva acumulada antes de calibrar/entrar
       // em combate — sem isso, um jogador que ficou horas offline entrava
       // na luta com a vida/mana velha (baixa), mesmo já tendo regenerado.
@@ -413,6 +429,16 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
         velocidade: jogadorEfetivo.velocidade,
         defesa: jogadorEfetivo.defesa,
         arma_equipada: jogadorEfetivo.arma_equipada,
+        armaEquipadaEfeitos: efeitosDaArmaEquipada.map((e) => ({
+          status_key: e.status_key,
+          chance_ppm: e.chance_ppm,
+          duration_turns: e.duration_turns,
+          potency_base: e.potency_base,
+          potency_scale_attribute: e.potency_scale_attribute,
+          potency_scale_value: e.potency_scale_value,
+          trigger: e.trigger,
+          ativo: e.ativo,
+        })),
         multiplicador_vida_por_nivel: jogadorEfetivo.multiplicador_vida_por_nivel,
         multiplicador_mana_por_nivel: jogadorEfetivo.multiplicador_mana_por_nivel,
         multiplicador_dano_fisico: jogadorEfetivo.multiplicador_dano_fisico,
@@ -603,8 +629,28 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
     // TURNO DO JOGADOR
     // ==========================================================
 
+    // Motor de Status §6/§7 — política central de bloqueio de ação:
+    // resolve de uma vez (inclusive a única rolagem de Paralyze do
+    // turno) quais ACTION_TYPE o jogador não pode executar agora. Hard
+    // control (Freeze/Stun/Paralyze bloqueado) nunca deixa a API
+    // esperando uma ação impossível — o servidor consome o turno sem
+    // mana/cooldown/item e segue o fluxo normal (§7), evitando deadlock.
+    const controleDoTurnoJogador = statusEffectService.resolverAcoesBloqueadasDoTurno(
+      statusEffects.player,
+      combatTurn,
+    );
+    statusEffects.player = controleDoTurnoJogador.lista;
+    const jogadorBloqueadoNesteTurno = controleDoTurnoJogador.bloqueadas.has(ACTION_TYPE.BASIC_ATTACK);
+    if (jogadorBloqueadoNesteTurno) {
+      log.push(
+        `Você está ${definicaoDoStatus(controleDoTurnoJogador.motivoBloqueioTotal).nomeUi} e não conseguiu agir neste turno!`,
+      );
+    }
+
     let poderUsado = null;
     let nivelHabilidadeUsada = 1;
+
+    if (!jogadorBloqueadoNesteTurno) {
 
     if (action.type === "power") {
       // Silêncio bloqueia habilidades ativas, não o ataque básico nem
@@ -735,15 +781,38 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       // status, antes de qualquer mitigação do alvo.
       const dano = Math.round(danoBase * statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.player));
 
+      // Motor de Status §11 — resolverEfeitosDoUso preserva `target`
+      // (Self/Enemy) de cada linha configurada; quem decide em qual
+      // lista aplicar é aqui, nunca descartado como antes.
+      const efeitosConfigurados = await resolverEfeitosDoUso({
+        power: poderUsado,
+        personagemCaster: personagemAtual,
+        casterActorId: "player",
+        turno: combatTurn,
+      });
+      const efeitosEmSiMesmo = efeitosConfigurados.filter((e) => e.target === "Self");
+      const efeitosNoInimigo = efeitosConfigurados.filter((e) => e.target !== "Self");
+
+      // Efeito em Self não depende de acerto/esquiva — não existe
+      // "esquivar do próprio buff". Aplica sempre que a Power é
+      // efetivamente usada, dano ou não.
+      for (const efeito of efeitosEmSiMesmo) {
+        statusEffects.player = statusEffectService.aplicarStatus(statusEffects.player, efeito);
+        log.push(`Você recebeu ${definicaoDoStatus(efeito.key).nomeUi} por ${efeito.remainingTurns} turno(s).`);
+      }
+
       if (dano > 0) {
-        if (
-          chanceDeEsquiva(
-            inimigoAtual,
-            personagemAtual
-          )
-        ) {
+        const blindDoAtacante = statusEffects.player.find((s) => s.key === "BLIND");
+        const resultadoAcerto = resolverResultadoDeAcerto({
+          atacante: personagemAtual,
+          defensor: inimigoAtual,
+          blindPotency: blindDoAtacante?.potency ?? 0,
+        });
+        if (!resultadoAcerto.hit) {
           log.push(
-            `${inimigoAtual.nome} esquivou de ${poderUsado.nome}!`
+            resultadoAcerto.reason === "BLIND_MISS"
+              ? `Cego, você errou ${poderUsado.nome} contra ${inimigoAtual.nome}!`
+              : `${inimigoAtual.nome} esquivou de ${poderUsado.nome}!`,
           );
         } else {
           const danoMitigado = aplicarMitigacaoDeDefesa(dano, inimigoAtual);
@@ -756,15 +825,17 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
             `Você usou ${poderUsado.nome} e causou ${danoMitigado} de dano em ${inimigoAtual.nome}.`
           );
 
-          // Efeitos de status configurados da Power (§19/§29-31) — só
-          // rola/aplica quando o golpe de fato acerta.
-          const novosEfeitos = await resolverEfeitosDoUso({
-            power: poderUsado,
-            personagemCaster: personagemAtual,
-            casterActorId: "player",
-            turno: combatTurn,
-          });
-          for (const efeito of novosEfeitos) {
+          // Freeze existente quebra por ESTE dano direto antes de
+          // qualquer novo efeito do mesmo golpe ser aplicado (§18) —
+          // um Freeze recém-aplicado por este mesmo golpe não é afetado
+          // (ele só entra na lista depois, no loop abaixo).
+          const quebraFreeze = statusEffectService.removerFreezeAoReceberDanoDireto(statusEffects.enemy, danoMitigado);
+          statusEffects.enemy = quebraFreeze.lista;
+          if (quebraFreeze.quebrou) log.push(`${inimigoAtual.nome} descongelou com o impacto!`);
+
+          // Efeitos de status configurados da Power (§19/§29-31), só os
+          // de alvo Enemy — só rola/aplica quando o golpe de fato acerta.
+          for (const efeito of efeitosNoInimigo) {
             statusEffects.enemy = statusEffectService.aplicarStatus(statusEffects.enemy, efeito);
             const def = definicaoDoStatus(efeito.key);
             log.push(`${inimigoAtual.nome} recebeu ${def.nomeUi} por ${efeito.remainingTurns} turno(s).`);
@@ -826,14 +897,18 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
     // ==========================================================
 
     else {
-      if (
-        chanceDeEsquiva(
-          inimigoAtual,
-          personagemAtual
-        )
-      ) {
+      const blindDoAtacante = statusEffects.player.find((s) => s.key === "BLIND");
+      const resultadoAcerto = resolverResultadoDeAcerto({
+        atacante: personagemAtual,
+        defensor: inimigoAtual,
+        blindPotency: blindDoAtacante?.potency ?? 0,
+      });
+
+      if (!resultadoAcerto.hit) {
         log.push(
-          `${inimigoAtual.nome} esquivou do seu ataque!`
+          resultadoAcerto.reason === "BLIND_MISS"
+            ? `Cego, você errou o ataque contra ${inimigoAtual.nome}!`
+            : `${inimigoAtual.nome} esquivou do seu ataque!`,
         );
       } else {
         const danoBasicoEnfraquecido = Math.round(
@@ -853,8 +928,35 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
         log.push(
           `Você atacou e causou ${dano} de dano em ${inimigoAtual.nome}.`
         );
+
+        // Freeze existente no inimigo quebra por ESTE dano direto,
+        // antes de qualquer proc de arma deste mesmo golpe (§18).
+        const quebraFreeze = statusEffectService.removerFreezeAoReceberDanoDireto(statusEffects.enemy, dano);
+        statusEffects.enemy = quebraFreeze.lista;
+        if (quebraFreeze.quebrou) log.push(`${inimigoAtual.nome} descongelou com o impacto!`);
+
+        // Proc de arma (§13) — só em ataque básico bem-sucedido com dano
+        // direto > 0; nunca em Power/DoT (checado por não ser chamado
+        // desses caminhos). armaEquipadaEfeitos já veio pré-carregado no
+        // início do encontro (zero N+1 por hit).
+        const efeitosDaArma = personagemAtual.armaEquipadaEfeitos ?? [];
+        if (efeitosDaArma.length > 0) {
+          const novosEfeitosDeArma = resolverEfeitosDeArmaNoHit({
+            efeitosDaArma,
+            personagemCaster: personagemAtual,
+            casterActorId: "player",
+            itemId: personagemAtual.arma_equipada?.id_item ?? null,
+            turno: combatTurn,
+          });
+          for (const efeito of novosEfeitosDeArma) {
+            statusEffects.enemy = statusEffectService.aplicarStatus(statusEffects.enemy, efeito);
+            const def = definicaoDoStatus(efeito.key);
+            log.push(`Sua arma aplicou ${def.nomeUi} em ${inimigoAtual.nome} por ${efeito.remainingTurns} turno(s)!`);
+          }
+        }
       }
     }
+    } // fecha `if (!jogadorBloqueadoNesteTurno)`
 
     // Fim do turno do JOGADOR (§23 passos 8/9) — decrementa cooldown e
     // duração de status do jogador, exceto o que acabou de entrar agora.
@@ -1080,40 +1182,63 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
     // TURNO DO INIMIGO
     // ==========================================================
 
-    if (
-      chanceDeEsquiva(
-        personagemAtual,
-        inimigoAtual
-      )
-    ) {
+    // Mesma política central do jogador (§7 "se o inimigo estiver
+    // bloqueado, seu contra-ataque deve ser pulado sem exigir chamada
+    // adicional") — um Freeze/Stun/Paralyze que o jogador aplicou no
+    // inimigo também precisa consumir o turno dele aqui, sem deadlock.
+    const controleDoTurnoInimigo = statusEffectService.resolverAcoesBloqueadasDoTurno(statusEffects.enemy, combatTurn);
+    statusEffects.enemy = controleDoTurnoInimigo.lista;
+    const inimigoBloqueadoNesteTurno = controleDoTurnoInimigo.bloqueadas.has(ACTION_TYPE.BASIC_ATTACK);
+
+    if (inimigoBloqueadoNesteTurno) {
       log.push(
-        `Você esquivou do ataque de ${inimigoAtual.nome}!`
+        `${inimigoAtual.nome} está ${definicaoDoStatus(controleDoTurnoInimigo.motivoBloqueioTotal).nomeUi} e não conseguiu agir!`,
       );
     } else {
-      const danoRecebidoEnfraquecido = Math.round(
-        Math.max(
-          1,
-          Math.round(
-            inimigoAtual.dano_base *
-              (0.85 + Math.random() * 0.3)
-          )
-        ) * statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.enemy),
-      );
-      const danoRecebido = aplicarMitigacaoDeDefesa(
-        danoRecebidoEnfraquecido,
-        personagemAtual,
-      );
+      const blindDoInimigo = statusEffects.enemy.find((s) => s.key === "BLIND");
+      const resultadoAcerto = resolverResultadoDeAcerto({
+        atacante: inimigoAtual,
+        defensor: personagemAtual,
+        blindPotency: blindDoInimigo?.potency ?? 0,
+      });
 
-      personagemAtual.vida_atual =
-        Math.max(
-          0,
-          personagemAtual.vida_atual -
-            danoRecebido
+      if (!resultadoAcerto.hit) {
+        log.push(
+          resultadoAcerto.reason === "BLIND_MISS"
+            ? `${inimigoAtual.nome}, cego, errou o ataque!`
+            : `Você esquivou do ataque de ${inimigoAtual.nome}!`,
+        );
+      } else {
+        const danoRecebidoEnfraquecido = Math.round(
+          Math.max(
+            1,
+            Math.round(
+              inimigoAtual.dano_base *
+                (0.85 + Math.random() * 0.3)
+            )
+          ) * statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.enemy),
+        );
+        const danoRecebido = aplicarMitigacaoDeDefesa(
+          danoRecebidoEnfraquecido,
+          personagemAtual,
         );
 
-      log.push(
-        `${inimigoAtual.nome} atacou e causou ${danoRecebido} de dano em você.`
-      );
+        personagemAtual.vida_atual =
+          Math.max(
+            0,
+            personagemAtual.vida_atual -
+              danoRecebido
+          );
+
+        log.push(
+          `${inimigoAtual.nome} atacou e causou ${danoRecebido} de dano em você.`
+        );
+
+        // Freeze existente no jogador quebra por ESTE dano direto (§18).
+        const quebraFreeze = statusEffectService.removerFreezeAoReceberDanoDireto(statusEffects.player, danoRecebido);
+        statusEffects.player = quebraFreeze.lista;
+        if (quebraFreeze.quebrou) log.push("Você descongelou com o impacto!");
+      }
     }
 
     // Fim do turno do INIMIGO (§23 passos 8/9) — decrementa cooldown

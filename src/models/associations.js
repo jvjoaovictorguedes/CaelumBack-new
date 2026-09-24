@@ -72,6 +72,7 @@ const GuildBossContribution = require("./GuildBossContribution");
 const EquipmentSet = require("./EquipmentSet");
 const EquipmentSetPiece = require("./EquipmentSetPiece");
 const EquipmentSetBonus = require("./EquipmentSetBonus");
+const WeaponStatusEffect = require("./WeaponStatusEffect");
 
 Item.hasOne(WeaponProperties, { foreignKey: "id_item", as: "weaponProperties" });
 WeaponProperties.belongsTo(Item, { foreignKey: "id_item" });
@@ -315,5 +316,11 @@ EquipmentSet.hasMany(EquipmentSetPiece, { foreignKey: "equipment_set_id", as: "p
 
 EquipmentSetBonus.belongsTo(EquipmentSet, { foreignKey: "equipment_set_id", as: "equipmentSet" });
 EquipmentSet.hasMany(EquipmentSetBonus, { foreignKey: "equipment_set_id", as: "bonuses" });
+
+// Evolução do Motor de Status §12.1 — efeitos de status por arma,
+// ligados a WeaponProperties.id_item (nunca Item.id direto): só um item
+// com registro de arma pode ter WeaponStatusEffect.
+WeaponProperties.hasMany(WeaponStatusEffect, { foreignKey: "id_item", as: "statusEffects" });
+WeaponStatusEffect.belongsTo(WeaponProperties, { foreignKey: "id_item", as: "arma" });
 
 module.exports = {};

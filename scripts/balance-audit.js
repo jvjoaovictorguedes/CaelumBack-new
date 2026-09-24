@@ -96,7 +96,6 @@ async function auditarAbilities() {
     dano_base: power.dano_base,
     cura_base: power.cura_base,
     cooldown: power.cooldown ?? 0,
-    efeito_status_legado: power.efeito_status,
     efeitosDeStatus: power.efeitosDeStatus.map((e) => ({
       status_key: e.status_key,
       chance_ppm: e.chance_ppm,

@@ -36,14 +36,6 @@ const Power = sequelize.define("Power", {
     defaultValue: 0,
     allowNull: true,
   },
-  efeito_status: {
-    type: DataTypes.STRING(100),
-    allowNull: true,
-  },
-  duracao_efeito: {
-    type: DataTypes.INTEGER,
-    allowNull: true,
-  },
   cooldown: {
     type: DataTypes.INTEGER,
     allowNull: true,
