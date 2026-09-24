@@ -409,6 +409,18 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
         nivelForcado: nivelSorteado,
         multiplicadores,
       });
+      // Expansão Aventura Beta §29 — frontend resolve sprite por essa
+      // chave, nunca mais por nome (null até a arte ser enviada, cai
+      // no EnemySprite genérico). Setado aqui (não só embaixo, em
+      // encontro_pve) porque a resposta deste endpoint usa `inimigo`
+      // direto quando é um encontro NOVO — sem isso, sprite_key só
+      // chegava no frontend a partir do 2º turno (a 1ª resposta saía
+      // sem essa chave, mesmo o encontro persistido já tendo).
+      // imagem_url é a foto estática entregue pro monstro (Bestiário/
+      // Mapa) — passa a servir também de sprite de combate quando ainda
+      // não existe sprite_key dedicado (monstro sem arte animada).
+      inimigo.sprite_key = escolhido.monstro?.sprite_key ?? null;
+      inimigo.imagem_url = escolhido.monstro?.imagem_url ?? null;
 
       // Snapshot dos atributos ESTRUTURAIS do personagem no exato momento
       // em que o encontro começa (força/vitalidade/etc já com bônus de
@@ -456,10 +468,7 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
         id_area: zona.id,
         id_monstro: escolhido.id_monstro,
         tipo_aparicao: escolhido.tipo_aparicao,
-        // Expansão Aventura Beta §29 — frontend resolve sprite por essa
-        // chave, nunca mais por nome (null até a arte ser enviada, cai
-        // no EnemySprite genérico).
-        sprite_key: escolhido.monstro?.sprite_key ?? null,
+        // sprite_key/imagem_url já vêm de `...inimigo` (setados acima).
         // Motor de Status/Cooldown (§37) — estado vazio no início do
         // encontro; executarTurno preenche conforme o combate avança.
         statusEffects: { player: [], enemy: [] },
