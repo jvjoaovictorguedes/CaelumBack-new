@@ -51,13 +51,31 @@ exports.postSmelt = async (req, res) => {
   }
 };
 
-// GET /api/crafting/blueprints
+// GET /api/crafting/blueprints?categoria=Arma — `categoria` opcional
+// (Arma/Armadura/Acessorio1/Acessorio2): a tela de Fabricação carrega
+// as seções FECHADAS por padrão e só pede os blueprints de uma
+// categoria quando o jogador abre aquela seção, em vez de resolver
+// ingrediente de todo o catálogo de uma vez (era o que deixava a busca
+// lenta/às vezes travando — ver listarBlueprints).
 exports.getBlueprints = async (req, res) => {
   try {
-    const blueprints = await forgeCraftingService.listarBlueprints(req.personagemAtual.id);
+    const categoria = typeof req.query.categoria === "string" ? req.query.categoria : null;
+    const blueprints = await forgeCraftingService.listarBlueprints(req.personagemAtual.id, categoria);
     res.status(200).json({ status: "success", data: { blueprints } });
   } catch (error) {
     tratarErro(res, error, "Erro interno do servidor ao buscar blueprints.");
+  }
+};
+
+// GET /api/crafting/blueprints/summary — contagem por categoria, sem
+// resolver ingredientes (rápido) — usado pra desenhar os cabeçalhos de
+// seção ainda FECHADOS antes do jogador pedir os dados completos.
+exports.getBlueprintsSummary = async (req, res) => {
+  try {
+    const resumo = await forgeCraftingService.listarResumoPorCategoria();
+    res.status(200).json({ status: "success", data: { categorias: resumo } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao buscar resumo de blueprints.");
   }
 };
 

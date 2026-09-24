@@ -20,6 +20,7 @@ router.post("/collect", authMiddleware, carregarPersonagemAtual, craftingControl
 router.get("/progress", authMiddleware, carregarPersonagemAtual, forgeController.getProgresso);
 router.get("/smelting", authMiddleware, carregarPersonagemAtual, forgeController.getSmelting);
 router.post("/smelt", authMiddleware, carregarPersonagemAtual, forgeController.postSmelt);
+router.get("/blueprints/summary", authMiddleware, carregarPersonagemAtual, forgeController.getBlueprintsSummary);
 router.get("/blueprints", authMiddleware, carregarPersonagemAtual, forgeController.getBlueprints);
 router.post("/craft", authMiddleware, carregarPersonagemAtual, forgeController.postCraft);
 router.get("/instances", authMiddleware, carregarPersonagemAtual, forgeController.getInstances);
