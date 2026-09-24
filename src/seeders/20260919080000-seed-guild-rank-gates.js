@@ -1,11 +1,24 @@
 "use strict";
 
-// 8 Portais de Guilda (F até S+) — pool de vida gigante de propósito
-// (BIGINT), pensada pra exigir dano somado de vários membros dentro da
-// janela, não uma pessoa só. Ajuste depois de observar quantas guildas
-// conseguem fechar cada ranque dentro do prazo.
+// DESATIVADO — o Portal de Guilda por ranque (guild_rank_gates) foi
+// migrado pro sistema de Guild Boss em
+// 20261001020000-guildas-2-portal-para-boss.js, que dropa a tabela
+// guild_rank_gates depois de copiar o catálogo pra GuildBossConfig.
+// Esse seed nunca foi desativado junto — como `npm run seed` roda
+// TODOS os seeders em sequência e para no primeiro erro, um setup do
+// zero (`npm run setup:local` = migrate && seed) sempre quebrava bem
+// aqui com "relation guild_rank_gates does not exist", travando todo
+// seed que vem depois na lista (missões, fragmentos de missão etc.).
+// Guard de tabela mantido (em vez de desativar liso) só por segurança,
+// mas ela nunca deve existir mais num banco pós-migrations atual.
 module.exports = {
   async up(queryInterface) {
+    const tabelas = await queryInterface.showAllTables();
+    if (!tabelas.includes("guild_rank_gates")) {
+      console.log("[seed] guild_rank_gates não existe mais (substituída por Guild Boss) — pulando.");
+      return;
+    }
+
     const [rows] = await queryInterface.sequelize.query(
       "SELECT COUNT(*)::int AS count FROM guild_rank_gates;",
     );
@@ -36,6 +49,8 @@ module.exports = {
   },
 
   async down(queryInterface) {
+    const tabelas = await queryInterface.showAllTables();
+    if (!tabelas.includes("guild_rank_gates")) return;
     await queryInterface.bulkDelete("guild_rank_gates", null, {});
   },
 };
