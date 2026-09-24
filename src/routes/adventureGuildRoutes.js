@@ -2,6 +2,7 @@
 const express = require("express");
 const controller = require("../controllers/adventureGuildController");
 const spoilController = require("../controllers/spoilCounterController");
+const huntController = require("../controllers/adventureHuntController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const { carregarPersonagemAtual } = require("../middlewares/currentCharacterMiddleware");
 
@@ -33,5 +34,11 @@ router.post("/spoils/sell", spoilController.venderEspoliosDoBalcao);
 router.get("/spoils/sales", spoilController.obterHistoricoDeVendas);
 router.get("/spoil-orders", spoilController.obterEncomendas);
 router.post("/spoil-orders/:orderId/deliver", spoilController.entregarEncomendaDoBalcao);
+
+// Caçadas — mesma casa (/api/adventure-guild), ver spec "Caçadas da
+// Guilda dos Aventureiros" §24.
+router.get("/hunt", huntController.obterEstadoDaCacada);
+router.post("/hunt/:huntId/accept", huntController.aceitarCacada);
+router.post("/hunt/:huntId/abandon", huntController.abandonarCacadaAtiva);
 
 module.exports = router;

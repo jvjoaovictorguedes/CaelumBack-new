@@ -28,6 +28,10 @@ const CharacterAdventureGuildProgress = sequelize.define(
     // valor (spoilReputationService) — nunca persistir nivel_reputacao
     // como segunda fonte de verdade (spec §6.3).
     reputacao_encomendas: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    // Caçadas §11.1/§13.3 — total PERMANENTE de encomendas do Balcão
+    // concluídas (nunca conta o bônus 5/5, só cada entrega individual).
+    // Incrementado uma vez em spoilOrderService.entregarEncomenda.
+    total_spoil_orders_completed: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
   },
   {
     tableName: "character_adventure_guild_progress",

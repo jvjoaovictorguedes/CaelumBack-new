@@ -63,6 +63,8 @@ const AdventureGuildOffer = require("./AdventureGuildOffer");
 const CharacterAdventureGuildContract = require("./CharacterAdventureGuildContract");
 const CharacterInventory = require("./CharacterInventory");
 const CharacterSpoilPreference = require("./CharacterSpoilPreference");
+const CharacterHunterProgress = require("./CharacterHunterProgress");
+const CharacterAdventureHunt = require("./CharacterAdventureHunt");
 const CharacterSpoilSale = require("./CharacterSpoilSale");
 const CharacterSpoilSaleItem = require("./CharacterSpoilSaleItem");
 const CharacterSpoilOrderCycle = require("./CharacterSpoilOrderCycle");
@@ -229,6 +231,12 @@ CharacterSpoilOrderCycle.belongsTo(Character, { foreignKey: "id_personagem" });
 CharacterSpoilOrderCycle.hasMany(CharacterSpoilOrder, { foreignKey: "id_ciclo", as: "encomendas" });
 CharacterSpoilOrder.belongsTo(CharacterSpoilOrderCycle, { foreignKey: "id_ciclo", as: "ciclo" });
 CharacterSpoilOrder.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+
+// Caçadas da Guilda dos Aventureiros.
+CharacterHunterProgress.belongsTo(Character, { foreignKey: "id_personagem" });
+CharacterAdventureHunt.belongsTo(Character, { foreignKey: "id_personagem" });
+CharacterAdventureHunt.belongsTo(AdventureMonster, { foreignKey: "id_monstro", as: "monstro" });
+CharacterAdventureHunt.belongsTo(AdventureZone, { foreignKey: "id_zona_referencia", as: "zona" });
 
 // Aprimoramento do Sistema de Guildas — Buffs (1 linha por tipo/guilda),
 // Missões da Guilda (catálogo -> ciclo ativo -> progresso individual) e

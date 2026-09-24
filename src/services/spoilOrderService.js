@@ -125,6 +125,9 @@ async function entregarEncomenda(idPersonagem, idOrder, transaction) {
   await order.save({ transaction });
 
   progresso.reputacao_encomendas += SPOIL_ORDER_REPUTATION;
+  // Caçadas §11.1 — total permanente, incrementado UMA vez por
+  // encomenda individual concluída; o bônus 5/5 nunca soma aqui.
+  progresso.total_spoil_orders_completed += 1;
 
   const setBonus = await concederBonusDeLoteSeCompleto(ciclo, progresso, character, transaction);
 

@@ -56,6 +56,7 @@ const { calcularMaestriaDaRegiao } = require("../services/masteryService");
 const AdventureZone = require("../models/AdventureZone");
 const { BONUS_POR_NIVEL } = require("../config/bestiaryConfig");
 const WeaponStatusEffect = require("../models/WeaponStatusEffect");
+const { resolverModificadorParaEncontro, registrarMorteDaCacada } = require("../services/adventureHuntCombatService");
 
 // Motor de Status/Cooldown (Especificação Consolidada Poder/Status/
 // Cooldown/Balanceamento, §37) — devolve o estado de combate já
@@ -369,6 +370,21 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       // não existe sprite_key dedicado (monstro sem arte animada).
       inimigo.sprite_key = escolhido.monstro?.sprite_key ?? null;
       inimigo.imagem_url = escolhido.monstro?.imagem_url ?? null;
+
+      // Caçadas §6 — compõe um SEGUNDO multiplicador por cima do perfil
+      // normal, só no snapshot deste encontro e só se o alvo sorteado
+      // bater com o alvo da Caçada Ativa do personagem. Nunca faz UPDATE
+      // no AdventureMonster nem afeta outro jogador.
+      const modificadorCacada = await resolverModificadorParaEncontro(character.id, escolhido.id_monstro, transaction);
+      if (modificadorCacada) {
+        inimigo.vida_maxima = Math.round(inimigo.vida_maxima * (1 + modificadorCacada.hpMultiplier));
+        inimigo.vida_atual = inimigo.vida_maxima;
+        inimigo.dano_base = Math.round(inimigo.dano_base * (1 + modificadorCacada.damageMultiplier));
+        inimigo.huntTarget = true;
+        inimigo.huntId = modificadorCacada.huntId;
+        inimigo.huntDifficulty = modificadorCacada.difficulty;
+        inimigo.huntDifficultyLabel = modificadorCacada.difficultyLabel;
+      }
 
       // Snapshot dos atributos ESTRUTURAIS do personagem no exato momento
       // em que o encontro começa (força/vitalidade/etc já com bônus de
@@ -1069,6 +1085,18 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       await registrarProgressoMissaoGuilda(character, "MatarInimigos", 1, transaction);
       await registrarProgressoMissaoGuilda(character, "GanharOuro", dinheiroGanhoTotal, transaction);
 
+      // Caçadas §6.1/§16 — mesma vitória real, agora também alimentando
+      // a Caçada Ativa (se o monstro derrotado for o alvo dela). ouro/
+      // reputação de conclusão já ficam somados em `character`/na linha
+      // de progresso aqui dentro; character.save() abaixo persiste tudo
+      // junto (mesmo princípio do resto desta função).
+      const huntUpdate = await registrarMorteDaCacada(character, inimigoAtual, transaction);
+      if (huntUpdate?.completed) {
+        log.push(
+          `Caçada concluída! Você recebeu ${huntUpdate.goldReward} ouro e ${huntUpdate.reputationReward} de Reputação de Caçador.`,
+        );
+      }
+
       await character.save({ transaction });
 
       return res.status(200).json({
@@ -1110,6 +1138,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
           espolios: espoliosDeZona,
           statusEffects,
           bestiarioCompletoAgora,
+          huntUpdate,
         },
       });
     }
