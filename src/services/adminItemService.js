@@ -133,20 +133,32 @@ async function updateAdminItem(idItem, payload, { idAdmin, req } = {}) {
   if (erros.length > 0) throw erroDeValidacao(erros);
 
   return sequelize.transaction(async (transaction) => {
+    // FOR UPDATE não pode ser combinado com os LEFT OUTER JOIN das
+    // propriedades (weapon/armor/consumable — cada item só preenche UMA
+    // delas, as outras duas entram NULL pelo join): Postgres recusa com
+    // "FOR UPDATE cannot be applied to the nullable side of an outer
+    // join" pra QUALQUER item, sempre — travava a edição de item inteira
+    // no Painel Administrativo. Trava só a linha do Item (sem include) e
+    // carrega as propriedades depois, com um SELECT comum — a trava no
+    // Item já impede outra edição concorrente do mesmo item nesta
+    // transaction.
     const item = await Item.findByPk(idItem, {
       transaction,
       lock: transaction.LOCK.UPDATE,
-      include: [
-        { model: WeaponProperties, as: "weaponProperties" },
-        { model: ArmorProperties, as: "armorProperties" },
-        { model: ConsumableProperties, as: "consumableProperties" },
-      ],
     });
     if (!item) {
       const erro = new Error("Item não encontrado.");
       erro.statusCode = 404;
       throw erro;
     }
+    await item.reload({
+      transaction,
+      include: [
+        { model: WeaponProperties, as: "weaponProperties" },
+        { model: ArmorProperties, as: "armorProperties" },
+        { model: ConsumableProperties, as: "consumableProperties" },
+      ],
+    });
 
     const dadosAntes = item.toJSON();
     await item.update(dadosItem, { transaction });
@@ -164,6 +176,20 @@ async function updateAdminItem(idItem, payload, { idAdmin, req } = {}) {
       if (item.consumableProperties) await item.consumableProperties.update(camposConsumable, { transaction });
       else await ConsumableProperties.create({ id_item: item.id, ...camposConsumable }, { transaction });
     }
+
+    // As três ramificações acima criam a propriedade direto pelo Model
+    // (não por item.createWeaponProperties/...), então a associação em
+    // memória do `item` não se atualiza sozinha — sem isso, a resposta
+    // dessa mesma chamada mostrava a propriedade recém-criada como null
+    // (só sumia no próximo GET, que recarrega do zero).
+    await item.reload({
+      transaction,
+      include: [
+        { model: WeaponProperties, as: "weaponProperties" },
+        { model: ArmorProperties, as: "armorProperties" },
+        { model: ConsumableProperties, as: "consumableProperties" },
+      ],
+    });
 
     await registrarAcao({
       idAdmin,
