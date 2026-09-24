@@ -50,6 +50,9 @@ const statusEffectService = require("../services/statusEffectService");
 const cooldownService = require("../services/cooldownService");
 const { resolverEfeitosDoUso } = require("../services/combatEffectResolver");
 const { definicaoDoStatus } = require("../config/statusEffectConfig");
+const { calcularMaestriaDaRegiao } = require("../services/masteryService");
+const AdventureZone = require("../models/AdventureZone");
+const { BONUS_POR_NIVEL } = require("../config/bestiaryConfig");
 
 // Motor de Status/Cooldown (Especificação Consolidada Poder/Status/
 // Cooldown/Balanceamento, §37) — devolve o estado de combate já
@@ -967,12 +970,28 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       const dinheiroGanhoTotal = dinheiroGanho + (drop?.tipo === "ouro" ? drop.dinheiro : 0);
       await registrarProgresso(character, "MatarInimigos", 1, transaction);
       await registrarProgresso(character, "GanharOuro", dinheiroGanhoTotal, transaction);
-      await registrarMorte(character.id, inimigoAtual.nome, transaction);
+      const resultadoMorte = await registrarMorte(character.id, inimigoAtual.nome, transaction);
       // Perfil de Jogador (§23) — mesmo evento de abate alimenta
       // conquistas de caça e de Bestiário (descoberta/maestria mudam
       // junto com o abate).
       await achievementService.checkMonsterKillAchievements(character.id, transaction);
       await achievementService.checkBestiaryAchievements(character.id, transaction);
+
+      // Bestiário — "mostrar benefícios da conclusão": só quando ESTE
+      // abate foi a primeira derrota do monstro (resultadoMorte.descobertoAgora)
+      // é sequer possível a zona ter acabado de fechar o Bestiário agora
+      // (senão ela já estaria completa antes deste combate).
+      let bestiarioCompletoAgora = null;
+      if (ehEncontroDeZona && resultadoMorte.descobertoAgora && inimigoAtual.id_area) {
+        const maestria = await calcularMaestriaDaRegiao(character.id, inimigoAtual.id_area, transaction);
+        if (maestria.total > 0 && maestria.descobertos === maestria.total) {
+          const zona = await AdventureZone.findByPk(inimigoAtual.id_area, { transaction });
+          bestiarioCompletoAgora = {
+            zona: { id: inimigoAtual.id_area, nome: zona?.nome ?? null },
+            beneficiosPorNivel: BONUS_POR_NIVEL,
+          };
+        }
+      }
 
       // Guilda dos Aventureiros (§23/§45) — mesmo evento real, agora
       // também alimentando contratos de Rank ativos. id_monstro/id_area
@@ -1031,6 +1050,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
           drop,
           espolios: espoliosDeZona,
           statusEffects,
+          bestiarioCompletoAgora,
         },
       });
     }

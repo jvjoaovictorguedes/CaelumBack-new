@@ -12,12 +12,17 @@ async function registrarMorte(idPersonagem, nomeMonstro, transaction) {
     defaults: { quantidade: 0 },
     transaction,
   });
+  const descobertoAgora = !linha.primeira_derrota_em;
   linha.quantidade += 1;
-  if (!linha.primeira_derrota_em) {
+  if (descobertoAgora) {
     linha.primeira_derrota_em = new Date();
   }
   await linha.save({ transaction });
-  return linha.quantidade;
+  // `descobertoAgora` sinaliza que ESTE abate foi a primeira derrota do
+  // monstro — usado pelo combatController pra saber se o Bestiário de
+  // uma zona acabou de ser completado pela primeira vez (Bestiário v?
+  // "mostrar benefícios da conclusão").
+  return { quantidade: linha.quantidade, descobertoAgora };
 }
 
 async function contarMortes(idPersonagem, nomeMonstro, transaction) {
