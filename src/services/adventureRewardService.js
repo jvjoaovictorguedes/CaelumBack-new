@@ -47,7 +47,13 @@ async function sortearEspoliosDoMonstro(idMonstro, transaction) {
         ? opcao.quantidade_min
         : crypto.randomInt(opcao.quantidade_min, opcao.quantidade_max + 1);
 
-    espolios.push({ id_item: opcao.id_item, nome: opcao.item.nome, quantidade });
+    espolios.push({
+      id_item: opcao.id_item,
+      nome: opcao.item.nome,
+      quantidade,
+      imagem_url: opcao.item.imagem_url,
+      raridade: opcao.item.raridade,
+    });
   }
   return espolios;
 }
