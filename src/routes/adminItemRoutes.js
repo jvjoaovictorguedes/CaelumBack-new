@@ -11,7 +11,7 @@ router.use(authMiddleware, adminMiddleware, requireAdminPermission("items.manage
 
 router.get("/", adminItemController.listar);
 router.post("/", adminItemController.criar);
-router.put("/:id", adminItemController.atualizar);
+router.patch("/:id", adminItemController.atualizar);
 router.post("/:id/deactivate", adminItemController.desativar);
 
 module.exports = router;
