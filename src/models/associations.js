@@ -69,6 +69,9 @@ const GuildMemberMissionProgress = require("./GuildMemberMissionProgress");
 const GuildBossConfig = require("./GuildBossConfig");
 const GuildBossAttempt = require("./GuildBossAttempt");
 const GuildBossContribution = require("./GuildBossContribution");
+const EquipmentSet = require("./EquipmentSet");
+const EquipmentSetPiece = require("./EquipmentSetPiece");
+const EquipmentSetBonus = require("./EquipmentSetBonus");
 
 Item.hasOne(WeaponProperties, { foreignKey: "id_item", as: "weaponProperties" });
 WeaponProperties.belongsTo(Item, { foreignKey: "id_item" });
@@ -298,5 +301,19 @@ Character.hasMany(CharacterProfileAchievementHighlight, { foreignKey: "id_person
 CharacterProfileMonsterHighlight.belongsTo(Character, { foreignKey: "id_personagem" });
 CharacterProfileMonsterHighlight.belongsTo(AdventureMonster, { foreignKey: "id_monstro", as: "monstro" });
 Character.hasMany(CharacterProfileMonsterHighlight, { foreignKey: "id_personagem", as: "destaquesDeMonstro" });
+
+// Sistema de Conjuntos de Equipamentos (§4/§20) — EquipmentSetPiece
+// liga um Item do catálogo a um conjunto (deduplicado por piece_key,
+// nunca por id_item/instância); EquipmentSetBonus são os thresholds
+// (2/6, 4/6, 6/6, ...) do próprio conjunto. `Item.hasMany(..., as:
+// "setPieces")` é o que equipmentSetService usa pra descobrir, a partir
+// de um item equipado, a quais conjuntos ele pertence.
+Item.hasMany(EquipmentSetPiece, { foreignKey: "item_id", as: "setPieces" });
+EquipmentSetPiece.belongsTo(Item, { foreignKey: "item_id", as: "item" });
+EquipmentSetPiece.belongsTo(EquipmentSet, { foreignKey: "equipment_set_id", as: "equipmentSet" });
+EquipmentSet.hasMany(EquipmentSetPiece, { foreignKey: "equipment_set_id", as: "pecas" });
+
+EquipmentSetBonus.belongsTo(EquipmentSet, { foreignKey: "equipment_set_id", as: "equipmentSet" });
+EquipmentSet.hasMany(EquipmentSetBonus, { foreignKey: "equipment_set_id", as: "bonuses" });
 
 module.exports = {};

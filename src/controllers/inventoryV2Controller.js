@@ -10,6 +10,7 @@ const ArmorProperties = require("../models/ArmorProperties");
 const WeaponProperties = require("../models/WeaponProperties");
 const ConsumableProperties = require("../models/ConsumableProperties");
 const { listarInstancias, formatarInstancia, formatarEquipado, ESTADOS } = require("../services/equipmentInstanceService");
+const { resolverConjuntosEquipados } = require("../services/equipmentSetService");
 
 function formatarStack(entrada) {
   const item = entrada.Item;
@@ -30,7 +31,7 @@ exports.obterInventarioV2 = async (req, res) => {
   try {
     const idPersonagem = req.personagemAtual.id;
 
-    const [stacks, instancias, equipados] = await Promise.all([
+    const [stacks, instancias, equipados, conjuntos] = await Promise.all([
       CharacterInventory.findAll({
         where: { id_personagem: idPersonagem },
         include: [{ model: Item, include: [{ model: ConsumableProperties, as: "consumableProperties" }] }],
@@ -50,6 +51,10 @@ exports.obterInventarioV2 = async (req, res) => {
           { model: CharacterEquipmentInstance, as: "instancia" },
         ],
       }),
+      // Sistema de Conjuntos de Equipamentos — visão já resolvida
+      // (peças/thresholds/ativação), pra tela de equipamentos não
+      // precisar recalcular regra nenhuma (§10 da Especificação).
+      resolverConjuntosEquipados(idPersonagem),
     ]);
 
     res.status(200).json({
@@ -60,6 +65,7 @@ exports.obterInventarioV2 = async (req, res) => {
         // `equipped`/reservadas ao Mercado, nunca duplicadas aqui.
         equipmentInstances: instancias.filter((i) => i.estado === ESTADOS.INVENTARIO).map(formatarInstancia),
         equipped: equipados.map(formatarEquipado),
+        equipmentSets: conjuntos.sets,
       },
     });
   } catch (error) {

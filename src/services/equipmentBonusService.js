@@ -15,6 +15,7 @@ const Power = require("../models/Power");
 const { ATRIBUTO_PARA_CAMPO } = require("./combatFormulas");
 const { multiplicadorEfeito } = require("./abilityLevelService");
 const { propriedadesEfetivasArma, propriedadesEfetivasArmadura } = require("./equipmentRefinementService");
+const { resolverConjuntosEquipados } = require("./equipmentSetService");
 // Só o require garante que a associação (com alias explícito) já foi
 // declarada — ver models/associations.js pra fonte única.
 require("../models/associations");
@@ -31,7 +32,7 @@ function bonusZerado() {
 // rodaria numa conexão separada e não enxergaria a alteração ainda não
 // commitada).
 async function buscarBonusDeAtributos(idPersonagem, transaction) {
-  const [equipamentos, passivasAtivas] = await Promise.all([
+  const [equipamentos, passivasAtivas, setState] = await Promise.all([
     CharacterEquipment.findAll({
       where: { id_personagem: idPersonagem },
       include: [
@@ -58,6 +59,11 @@ async function buscarBonusDeAtributos(idPersonagem, transaction) {
       where: { id_personagem: idPersonagem, is_active: true },
       transaction,
     }),
+    // Sistema de Conjuntos de Equipamentos — contagem/thresholds/soma de
+    // stats já resolvidos por equipmentSetService (fonte única, nunca
+    // recalculado aqui); roda em paralelo por fazer sua própria query
+    // independente de CharacterEquipment.
+    resolverConjuntosEquipados(idPersonagem, transaction),
   ]);
 
   const bonus = bonusZerado();
@@ -122,13 +128,26 @@ async function buscarBonusDeAtributos(idPersonagem, transaction) {
     }
   }
 
+  // Sistema de Conjuntos de Equipamentos (§7 da Especificação) — soma os
+  // stats de todos os thresholds ativos por cima do bônus de
+  // equipamento/passivas de habilidade já calculado acima. Refinamento
+  // NUNCA multiplica bônus de conjunto (§3/§15) — statBonus já vem
+  // pronto de equipmentSetService, sem passar por
+  // propriedadesEfetivas*.
+  bonus.forca += setState.statBonus.forca || 0;
+  bonus.vitalidade += setState.statBonus.vitalidade || 0;
+  bonus.agilidade += setState.statBonus.agilidade || 0;
+  bonus.inteligencia += setState.statBonus.inteligencia || 0;
+  bonus.velocidade += setState.statBonus.velocidade || 0;
+  bonus.defesa += setState.statBonus.defesa || 0;
+
   // Arredonda aqui pra já sair um número limpo tanto pro combate quanto
   // pra exibição — bônus de arma (valor_bonus_atributo) é FLOAT.
   for (const campo of Object.keys(bonus)) {
     bonus[campo] = Math.round(bonus[campo]);
   }
 
-  return { ...bonus, arma };
+  return { ...bonus, arma, activeSetEffects: setState.activeEffects };
 }
 
 // Devolve uma cópia do personagem com os atributos somados ao bônus de
