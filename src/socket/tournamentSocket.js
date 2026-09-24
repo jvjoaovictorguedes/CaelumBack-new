@@ -78,6 +78,7 @@ async function iniciarJogoDaSerie(io, serieId) {
     acoes: 0,
     danoTotalA: 0,
     danoTotalB: 0,
+    statusEffects: { A: [], B: [] },
     timer: null,
     torneio: true,
     serieId,

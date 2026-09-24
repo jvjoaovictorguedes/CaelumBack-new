@@ -396,6 +396,7 @@ async function iniciarPartidaAssincrona(io, { idDesafiante }) {
       acoes: 0,
       danoTotalA: 0,
       danoTotalB: 0,
+      statusEffects: { A: [], B: [] },
       timer: null,
       timerIA: null,
       ranked: true,
