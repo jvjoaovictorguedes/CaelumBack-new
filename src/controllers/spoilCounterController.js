@@ -26,7 +26,7 @@ async function obterPontosDeReputacao(idPersonagem, transaction) {
 function formatarLinhaDeVenda(linha) {
   return {
     id: linha.id_item ?? linha.item?.id,
-    nome: linha.item?.nome ?? null,
+    nome: linha.item?.nome ?? linha.nome ?? null,
     quantidade: linha.quantidade,
     valor_unitario_snapshot: linha.valor_unitario_snapshot,
     total_linha: linha.total_linha,

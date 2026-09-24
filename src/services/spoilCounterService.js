@@ -98,6 +98,7 @@ async function venderEspolios(idPersonagem, linhasPedido, idempotencyKey, transa
   if (vendaExistente) {
     const linhasExistentes = await CharacterSpoilSaleItem.findAll({
       where: { id_sale: vendaExistente.id },
+      include: [{ model: Item, as: "item" }],
       transaction,
     });
     const assinaturaExistente = new Map(linhasExistentes.map((l) => [l.id_item, l.quantidade]));
@@ -192,7 +193,16 @@ async function venderEspolios(idPersonagem, linhasPedido, idempotencyKey, transa
     { transaction, returning: true },
   );
 
-  return { totalOuro: totalVenda, linhas: linhasPersistidas, repetida: false };
+  // bulkCreate não carrega a associação `item` — devolve os nomes já
+  // validados em memória em vez de forçar mais uma query (a resposta
+  // imediata da venda não precisa reconsultar o banco pro que acabou de
+  // ser escrito por ele mesmo).
+  const linhasComNome = linhasPersistidas.map((linha, indice) => ({
+    ...linha.toJSON(),
+    nome: linhasValidadas[indice]?.nome ?? null,
+  }));
+
+  return { totalOuro: totalVenda, linhas: linhasComNome, repetida: false };
 }
 
 // §4.6/§10 — GET /spoils/sales, histórico paginado.
