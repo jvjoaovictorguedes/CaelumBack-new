@@ -15,7 +15,7 @@ const { resolverConjuntosEquipados } = require("../services/equipmentSetService"
 function formatarStack(entrada) {
   const item = entrada.Item;
   return {
-    id: entrada.id_personagem_inventario,
+    id_personagem_inventario: entrada.id_personagem_inventario,
     id_item: entrada.id_item,
     nome: item?.nome,
     tipo_item: item?.tipo_item,
