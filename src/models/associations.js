@@ -61,6 +61,12 @@ const AdventureGuildMission = require("./AdventureGuildMission");
 const AdventureGuildMissionReward = require("./AdventureGuildMissionReward");
 const AdventureGuildOffer = require("./AdventureGuildOffer");
 const CharacterAdventureGuildContract = require("./CharacterAdventureGuildContract");
+const CharacterInventory = require("./CharacterInventory");
+const CharacterSpoilPreference = require("./CharacterSpoilPreference");
+const CharacterSpoilSale = require("./CharacterSpoilSale");
+const CharacterSpoilSaleItem = require("./CharacterSpoilSaleItem");
+const CharacterSpoilOrderCycle = require("./CharacterSpoilOrderCycle");
+const CharacterSpoilOrder = require("./CharacterSpoilOrder");
 const Guild = require("./Guild");
 const GuildBuff = require("./GuildBuff");
 const GuildMission = require("./GuildMission");
@@ -198,6 +204,31 @@ AdventureGuildOffer.belongsTo(AdventureGuildMission, { foreignKey: "id_mission",
 CharacterAdventureGuildContract.belongsTo(Character, { foreignKey: "id_personagem" });
 CharacterAdventureGuildContract.belongsTo(AdventureGuildOffer, { foreignKey: "id_offer", as: "oferta" });
 CharacterAdventureGuildContract.belongsTo(AdventureGuildMission, { foreignKey: "id_mission", as: "missao" });
+
+// Balcão de Espólios — preferências/histórico de venda por personagem,
+// e o ciclo de 5 encomendas (id_ciclo -> N CharacterSpoilOrder), tudo
+// independente do catálogo/rotação de Rank acima (ver spec "Balcão de
+// Espólios").
+CharacterSpoilPreference.belongsTo(Character, { foreignKey: "id_personagem" });
+CharacterSpoilPreference.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+
+// spoilCounterService precisa fazer join de CharacterInventory -> Item
+// (listar espólios vendáveis) sem depender de characterInventoryController.js
+// registrar essa associação primeiro (esse controller usa alias
+// default, nem sempre carregado antes — ver bug real de teste corrigido
+// na spec "Balcão de Espólios"). Alias PRÓPRIO evita colisão com
+// qualquer associação default que outro módulo registre depois.
+CharacterInventory.belongsTo(Item, { foreignKey: "id_item", as: "itemEspolio" });
+
+CharacterSpoilSale.belongsTo(Character, { foreignKey: "id_personagem" });
+CharacterSpoilSale.hasMany(CharacterSpoilSaleItem, { foreignKey: "id_sale", as: "linhas" });
+CharacterSpoilSaleItem.belongsTo(CharacterSpoilSale, { foreignKey: "id_sale" });
+CharacterSpoilSaleItem.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+
+CharacterSpoilOrderCycle.belongsTo(Character, { foreignKey: "id_personagem" });
+CharacterSpoilOrderCycle.hasMany(CharacterSpoilOrder, { foreignKey: "id_ciclo", as: "encomendas" });
+CharacterSpoilOrder.belongsTo(CharacterSpoilOrderCycle, { foreignKey: "id_ciclo", as: "ciclo" });
+CharacterSpoilOrder.belongsTo(Item, { foreignKey: "id_item", as: "item" });
 
 // Aprimoramento do Sistema de Guildas — Buffs (1 linha por tipo/guilda),
 // Missões da Guilda (catálogo -> ciclo ativo -> progresso individual) e

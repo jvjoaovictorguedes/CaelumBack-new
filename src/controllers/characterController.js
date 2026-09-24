@@ -15,6 +15,8 @@ const RaceAbilities = require("../models/RaceAbilities");
 const CharacterAbilities = require("../models/CharacterAbilities");
 const Evolution = require("../models/Evolution");
 const CharacterEvolution = require("../models/CharacterEvolution");
+const CharacterAdventureGuildProgress = require("../models/CharacterAdventureGuildProgress");
+const { formatarResumoReputacao } = require("../services/spoilReputationService");
 const {
   buscarBonusDeAtributos,
   personagemComBonus,
@@ -367,6 +369,15 @@ async function carregarRespostaDoPersonagem(character) {
     include: [{ model: Guild, attributes: ["id", "nome", "sigla"] }],
   });
 
+  // Balcão de Espólios §12 — Reputação da Guilda dos Aventureiros no
+  // perfil, sem criar linha de progresso à toa: quem nunca mexeu no
+  // Balcão nem tem CharacterAdventureGuildProgress ainda, e o resumo
+  // deve mostrar nível I / 0 pontos mesmo assim (nunca 404/undefined).
+  const progressoGuildaAventureiros = await CharacterAdventureGuildProgress.findOne({
+    where: { id_personagem: character.id },
+    attributes: ["reputacao_encomendas"],
+  });
+
   return {
     ...character.toJSON(),
     vida_atual: personagemEfetivo.vida_atual,
@@ -379,6 +390,7 @@ async function carregarRespostaDoPersonagem(character) {
     guilda: membroGuild?.Guild
       ? { id: membroGuild.Guild.id, nome: membroGuild.Guild.nome, sigla: membroGuild.Guild.sigla }
       : null,
+    adventureGuildReputation: formatarResumoReputacao(progressoGuildaAventureiros?.reputacao_encomendas ?? 0),
   };
 }
 

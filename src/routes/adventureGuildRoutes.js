@@ -1,6 +1,7 @@
 // src/routes/adventureGuildRoutes.js
 const express = require("express");
 const controller = require("../controllers/adventureGuildController");
+const spoilController = require("../controllers/spoilCounterController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const { carregarPersonagemAtual } = require("../middlewares/currentCharacterMiddleware");
 
@@ -22,5 +23,15 @@ router.post("/contracts/:contractId/claim", controller.resgatarContrato);
 router.get("/trial", controller.obterProvacao);
 router.post("/trial/start", controller.iniciarProvacaoDoRank);
 router.post("/trial/fail", controller.falharProvacaoDoRank);
+
+// Balcão de Espólios — deliberadamente dentro de /api/adventure-guild
+// (não é a Guilda social de /dashboard/guilds, ver spec "Balcão de
+// Espólios" §3 IMPORTANTE).
+router.get("/spoils", spoilController.obterEspolios);
+router.patch("/spoils/:itemId/preferences", spoilController.atualizarPreferenciaDeEspolio);
+router.post("/spoils/sell", spoilController.venderEspoliosDoBalcao);
+router.get("/spoils/sales", spoilController.obterHistoricoDeVendas);
+router.get("/spoil-orders", spoilController.obterEncomendas);
+router.post("/spoil-orders/:orderId/deliver", spoilController.entregarEncomendaDoBalcao);
 
 module.exports = router;

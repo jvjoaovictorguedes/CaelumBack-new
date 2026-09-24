@@ -21,6 +21,13 @@ const CharacterAdventureGuildProgress = sequelize.define(
     apto_para_promocao: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     // §30 — cooldown depois de uma tentativa de Provação falhada.
     ultima_falha_provacao_em: { type: DataTypes.DATE, allowNull: true },
+    // Balcão de Espólios §6 — pontos de Reputação das encomendas.
+    // Progressão PERMANENTE e independente do Rank F..S acima: nunca
+    // zera por promoção, falha de Provação ou troca de janela. Nível/
+    // nome/multiplicador são sempre CALCULADOS a partir deste único
+    // valor (spoilReputationService) — nunca persistir nivel_reputacao
+    // como segunda fonte de verdade (spec §6.3).
+    reputacao_encomendas: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
   },
   {
     tableName: "character_adventure_guild_progress",
