@@ -15,6 +15,10 @@ const RaceAbilities = require("../models/RaceAbilities");
 const CharacterAbilities = require("../models/CharacterAbilities");
 const Evolution = require("../models/Evolution");
 const CharacterEvolution = require("../models/CharacterEvolution");
+const CharacterAdventureGuildProgress = require("../models/CharacterAdventureGuildProgress");
+const CharacterHunterProgress = require("../models/CharacterHunterProgress");
+const { formatarResumoReputacao } = require("../services/spoilReputationService");
+const { formatarResumoReputacao: formatarResumoReputacaoCacador } = require("../services/hunterReputationService");
 const {
   buscarBonusDeAtributos,
   personagemComBonus,
@@ -367,6 +371,20 @@ async function carregarRespostaDoPersonagem(character) {
     include: [{ model: Guild, attributes: ["id", "nome", "sigla"] }],
   });
 
+  // Balcão de Espólios §12 / Caçadas §18 — progressões da Guilda dos
+  // Aventureiros no perfil, sem criar linha à toa: quem nunca mexeu no
+  // Balcão/Caçadas ainda não tem essas linhas, e o resumo deve mostrar
+  // nível I / 0 pontos mesmo assim (nunca 404/undefined).
+  const [progressoGuildaAventureiros, progressoCacador] = await Promise.all([
+    CharacterAdventureGuildProgress.findOne({
+      where: { id_personagem: character.id },
+      attributes: ["reputacao_encomendas", "total_spoil_orders_completed"],
+    }),
+    CharacterHunterProgress.findOne({ where: { id_personagem: character.id } }),
+  ]);
+  const reputacaoComercial = formatarResumoReputacao(progressoGuildaAventureiros?.reputacao_encomendas ?? 0);
+  const reputacaoCacador = formatarResumoReputacaoCacador(progressoCacador?.reputation_points ?? 0);
+
   return {
     ...character.toJSON(),
     vida_atual: personagemEfetivo.vida_atual,
@@ -379,6 +397,32 @@ async function carregarRespostaDoPersonagem(character) {
     guilda: membroGuild?.Guild
       ? { id: membroGuild.Guild.id, nome: membroGuild.Guild.nome, sigla: membroGuild.Guild.sigla }
       : null,
+    adventureGuildReputation: reputacaoComercial,
+    // Caçadas §18 — resumo consolidado da Guilda dos Aventureiros pro
+    // perfil (Rank + Reputação Comercial + Reputação de Caçador), sem
+    // misturar o SIGNIFICADO das três progressões entre si.
+    adventureGuildProfile: {
+      adventurerRank: character.rank ?? "F",
+      commercialReputation: {
+        points: reputacaoComercial.points,
+        level: reputacaoComercial.level,
+        title: reputacaoComercial.name,
+        ordersCompleted: progressoGuildaAventureiros?.total_spoil_orders_completed ?? 0,
+      },
+      hunterReputation: {
+        points: reputacaoCacador.points,
+        level: reputacaoCacador.level,
+        title: reputacaoCacador.title,
+        huntsCompleted: progressoCacador?.hunts_completed_total ?? 0,
+        byDifficulty: {
+          dangerous: progressoCacador?.hunts_completed_dangerous ?? 0,
+          difficult: progressoCacador?.hunts_completed_difficult ?? 0,
+          deadly: progressoCacador?.hunts_completed_deadly ?? 0,
+          nightmare: progressoCacador?.hunts_completed_nightmare ?? 0,
+          extermination: progressoCacador?.hunts_completed_extermination ?? 0,
+        },
+      },
+    },
   };
 }
 

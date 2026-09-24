@@ -100,6 +100,47 @@ function fimDoCicloAtual(categoria, agora = new Date()) {
   return new Date(inicioDoCicloDiario(agora) + 24 * 60 * 60 * 1000);
 }
 
+// ---------------------------------------------------------------------
+// Balcão de Espólios (Especificação "Balcão de Espólios, Venda,
+// Encomendas e Reputação da Guilda dos Aventureiros") — ciclo PRÓPRIO
+// de 4h, deliberadamente separado do ROTACAO_MS (6h) dos contratos de
+// Rank acima: não reaproveitar inicioDaJanelaAtual pras encomendas,
+// senão as duas rotações ficariam acopladas por engano.
+// ---------------------------------------------------------------------
+const SPOIL_ORDER_ROTATION_HOURS = 4;
+const SPOIL_ORDER_ROTATION_MS = SPOIL_ORDER_ROTATION_HOURS * 60 * 60 * 1000;
+const SPOIL_ORDERS_PER_ROTATION = 5;
+const SPOIL_ORDER_REPUTATION = 5;
+const SPOIL_ORDER_SET_BONUS_REPUTATION = 25;
+
+function inicioDaJanelaDeEncomendas(agora = new Date()) {
+  return new Date(Math.floor(agora.getTime() / SPOIL_ORDER_ROTATION_MS) * SPOIL_ORDER_ROTATION_MS);
+}
+
+// §6.1 — 5 níveis permanentes de Reputação. Limites deliberadamente
+// altos (o nível V em 35.500 pontos leva ~119 dias mesmo completando
+// 5/5 em toda janela de 4h, sem parar) — é progressão de longuíssimo
+// prazo, não algo alcançável em poucos dias. `minimo` é o piso
+// (inclusive) de pontos pra alcançar aquele nível.
+const SPOIL_REPUTATION_LEVELS = [
+  { nivel: 1, roman: "I", nome: "Desconhecido", minimo: 0, multiplicador: 1.2, bonusFaixa: [0.1, 0.2] },
+  { nivel: 2, roman: "II", nome: "Reconhecido", minimo: 2000, multiplicador: 1.3, bonusFaixa: [0.15, 0.25] },
+  { nivel: 3, roman: "III", nome: "Confiável", minimo: 7000, multiplicador: 1.42, bonusFaixa: [0.2, 0.3] },
+  { nivel: 4, roman: "IV", nome: "Prestigiado", minimo: 17000, multiplicador: 1.55, bonusFaixa: [0.25, 0.4] },
+  { nivel: 5, roman: "V", nome: "Renomado", minimo: 35500, multiplicador: 1.7, bonusFaixa: [0.35, 0.5] },
+];
+
+// §5.3 — faixa de quantidade exigida por encomenda, sorteada por
+// raridade do espólio (mesmos valores de Item.raridade).
+const SPOIL_ORDER_QUANTITY_RANGES = {
+  Comum: [12, 25],
+  Incomum: [8, 18],
+  Raro: [5, 12],
+  Epico: [3, 8],
+  Lendario: [2, 5],
+  Mitico: [1, 3],
+};
+
 module.exports = {
   RANKS_AVENTUREIRO,
   indiceDoRankAventureiro,
@@ -116,4 +157,12 @@ module.exports = {
   fimDoCicloAtual,
   COOLDOWN_PROVACAO_MS,
   REQUISITOS_PROMOCAO,
+  SPOIL_ORDER_ROTATION_HOURS,
+  SPOIL_ORDER_ROTATION_MS,
+  SPOIL_ORDERS_PER_ROTATION,
+  SPOIL_ORDER_REPUTATION,
+  SPOIL_ORDER_SET_BONUS_REPUTATION,
+  inicioDaJanelaDeEncomendas,
+  SPOIL_REPUTATION_LEVELS,
+  SPOIL_ORDER_QUANTITY_RANGES,
 };

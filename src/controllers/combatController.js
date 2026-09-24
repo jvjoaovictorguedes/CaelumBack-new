@@ -56,6 +56,7 @@ const { calcularMaestriaDaRegiao } = require("../services/masteryService");
 const AdventureZone = require("../models/AdventureZone");
 const { BONUS_POR_NIVEL } = require("../config/bestiaryConfig");
 const WeaponStatusEffect = require("../models/WeaponStatusEffect");
+const { resolverModificadorParaEncontro, registrarMorteDaCacada } = require("../services/adventureHuntCombatService");
 
 // Motor de Status/Cooldown (Especificação Consolidada Poder/Status/
 // Cooldown/Balanceamento, §37) — devolve o estado de combate já
@@ -102,90 +103,57 @@ function sortear(lista) {
 // de pveEncounterService.js — ver comentário lá sobre o motivo de terem
 // saído daqui.)
 
-// Quantos turnos de ataque básico, em média, cada lado precisa pra matar
-// o outro. O do inimigo é maior de propósito: o jogador sai na frente
-// (folga pra usar poder/errar um turno/tomar uma esquiva ruim), mas
-// ainda precisa jogar direito — não é vitória de graça.
-const RODADAS_PARA_MATAR_INIMIGO = 4;
-const RODADAS_PARA_INIMIGO_MATAR_JOGADOR = 4.2;
-
-// Quanto vida_maxima/dano_base do inimigo escalam pra CIMA por nível
-// sorteado acima do nível ATUAL do jogador (§5 — zonas nunca bloqueiam
-// entrada, mas precisam ser de verdade mais perigosas). Sem isso, um
-// personagem nível 12 caçando no Covil do Minotauro (30-50) podia
-// sortear um Minotauro "nível 50" que, na prática, tinha vida_maxima/
-// dano_base calibrados pros PRÓPRIOS atributos daquele personagem
-// nível 12 (ver gerarInimigo) — o "nível 50" ficava só no nome, o
-// rótulo de perigo (calcularPerigo, ver adventureConfig.js) prometia
-// "EXTREMO" e a luta não entregava nada disso.
-const FATOR_ESCALA_POR_NIVEL_ACIMA_DO_JOGADOR = 0.07;
-// Teto pra essa escala não sair de controle numa zona futura com uma
-// faixa de nível muito mais larga que as atuais.
-const ESCALA_MAXIMA_POR_DIFERENCA_DE_NIVEL = 6;
-
-// Fila (pedido do jogador): o nível do monstro tinha PESO ZERO pra
-// baixo — um personagem nível 107 caçando um "Javali Selvagem (Nv. 1)"
-// recebia um inimigo calibrado 100% em cima dos atributos REAIS do
-// próprio jogador (ver gerarInimigo), então esse Javali sobrevivia a um
-// hit e ainda batia de volta por dano relevante, exatamente como
-// qualquer outro monstro "nível 1" contra qualquer outro nível de
-// jogador — o número do nível virava só rótulo.
+// Fila (pedido explícito do jogador, reafirmado depois de já ter sido
+// mexido uma vez): o inimigo NÃO PODE se adaptar aos atributos de quem
+// está caçando — nem aos dele, nem escalado relativo ao nível dele. Vida/
+// dano/agilidade/velocidade do monstro são função SÓ do nível do
+// monstro (nivelForcado, vindo da zona/expedição — nunca do jogador),
+// sempre os mesmos pra qualquer personagem que enfrente aquele nível,
+// com qualquer build/equipamento. Por isso um lvl 10 perde de verdade
+// pra um monstro lvl 50 (e um lvl 50 bem construído arrasa um lvl 10) —
+// é assim que deveria ser.
 //
-// Primeira tentativa de correção usava DIFERENÇA ABSOLUTA de nível
-// (como o fator ACIMA usa) — e não funcionava: um gap de "10 níveis" é
-// desprezível pra um jogador nível 107 (quase no mesmo patamar), mas
-// ESMAGADOR pra um nível 14 (o monstro tem menos de 1/3 do nível dele).
-// Bug real reportado por causa disso: nível 4 vs nível 14 só caía pra
-// ~85% de força (diferença absoluta pequena), continuando forte o
-// bastante pra matar o jogador. Diferença absoluta não captura "quão
-// pra trás, proporcionalmente" — RAZÃO entre os níveis captura.
-//
-// razão² (não razão linear): precisa cair rápido o bastante pra um gap
-// de metade do nível (razão 0.5) já ficar claramente fraco (~25%), sem
-// zerar de propósito uma diferença pequena (razão 0.9+ fica perto de
-// 0.8+, ainda dá luta).
-const PISO_ESCALA_POR_NIVEL_ABAIXO_DO_JOGADOR = 0.05;
+// Versão anterior tentava resolver "o javali nível 1 não pode ameaçar
+// um jogador nível 107" com uma escala RELATIVA ao nível de quem
+// caçava (calcularEscalaPorNivel, removida) por cima de uma BASE que
+// ainda vinha dos atributos reais do próprio jogador (vidaMaximaDe/
+// danoBasicoEsperado dele) — então dois personagens do MESMO nível,
+// com equipamento diferente, ainda recebiam o "mesmo" monstro com
+// vida_maxima/dano_base bem diferentes entre si. Substituída por um
+// personagem de REFERÊNCIA que existe só na memória, construído do
+// zero a partir do nível do monstro (nunca lido do banco, nunca vindo
+// de quem está jogando) — mesma fórmula de vida/dano que o jogo já usa
+// pro personagem de verdade (vidaMaximaDe/danoBasicoEsperado), só que
+// alimentada com atributos assumidos (crescimento médio de pontos por
+// nível), não os do jogador.
+const ATRIBUTO_REFERENCIA_BASE = 2; // média dos 5 atributos iniciais de raça (~10 no total ÷ 5)
+const ATRIBUTO_REFERENCIA_POR_NIVEL = 0.8; // PONTOS_POR_NIVEL (4, ver experienceService.js) ÷ 5 atributos
 
-// Fator de escala assinado (positivo = monstro no nível do jogador ou
-// acima, negativo = abaixo) — mesma curva usada tanto no solo
-// (gerarInimigo) quanto no grupo (gerarInimigoDeGrupo), pra nunca
-// divergir entre os dois modos.
-function calcularEscalaPorNivel(nivelMonstro, nivelReferencia) {
-  const nivelRef = Math.max(1, nivelReferencia ?? 1);
-  const diferenca = nivelMonstro - nivelRef;
-  if (diferenca >= 0) {
-    return Math.min(
-      ESCALA_MAXIMA_POR_DIFERENCA_DE_NIVEL,
-      1 + diferenca * FATOR_ESCALA_POR_NIVEL_ACIMA_DO_JOGADOR,
-    );
-  }
-  const razao = nivelMonstro / nivelRef;
-  return Math.max(PISO_ESCALA_POR_NIVEL_ABAIXO_DO_JOGADOR, razao * razao);
+function statsDeReferenciaPorNivel(nivel) {
+  const nivelValido = Math.max(1, nivel || 1);
+  const atributo = Math.round(
+    ATRIBUTO_REFERENCIA_BASE + ATRIBUTO_REFERENCIA_POR_NIVEL * (nivelValido - 1),
+  );
+  return {
+    nivel: nivelValido,
+    forca: atributo,
+    vitalidade: atributo,
+    agilidade: atributo,
+    velocidade: atributo,
+    inteligencia: atributo,
+  };
 }
 
-// Gera um inimigo calibrado a partir dos ATRIBUTOS DE VERDADE do
-// personagem (já com bônus de equipamento somado) — não mais só o nível.
-// Antes o inimigo era pensado pra um "personagem médio" daquele nível
-// (uma quantidade assumida de força/vitalidade); quem não investia
-// pontos em vida, por exemplo, sempre enfrentava um inimigo tanque
-// demais pro tanto de dano que conseguia causar, e vice-versa. Agora a
-// vida do inimigo escala com o ataque real do jogador (se você bate
-// forte, o inimigo aguenta mais golpes, mas você ainda mata em ~4
-// turnos) e o dano do inimigo escala com a vida real do jogador (se
-// você é frágil, o inimigo bate mais fraco, mas ainda ameaça em ~6
-// turnos) — o resultado da luta depende do seu build de verdade, não
-// de uma média que talvez nem seja a sua.
 // `nomeAlvo` é só o nome do monstro já sorteado (por
 // sortearMonstroDaZona, no controller) — nunca uma escolha do jogador
 // (removida a pedido dele: a Aventura agora é sempre 100% aleatória).
 //
-// `opcoes.nivelForcado` e `opcoes.multiplicadores` vêm do Modo Aventura
-// (§8/§9/§10 da spec, ver gerarInimigoParaPersonagem): o nível do
-// monstro sorteado pela zona substitui o nível do PRÓPRIO jogador (uma
-// zona de nível baixo precisa gerar monstro de nível baixo mesmo pra um
-// personagem de nível alto caçando lá), e os multiplicadores do
-// AdventureMonster dão identidade de combate própria a cada criatura em
-// cima da MESMA calibração — nunca uma escala nova.
+// `opcoes.nivelForcado` vem do Modo Aventura/Expedição (nível sorteado
+// pela zona) e é o único nível que importa aqui — `jogador.nivel` só
+// serve de fallback pra quem chamar sem forçar nível nenhum.
+// `opcoes.multiplicadores` (do AdventureMonster) dão identidade de
+// combate própria a cada criatura em cima da MESMA base fixa — nunca
+// uma escala relativa a quem está caçando.
 function gerarInimigo(jogador, nomeAlvo, opcoes = {}) {
   const { nivelForcado, multiplicadores } = opcoes;
   const mult = {
@@ -194,30 +162,15 @@ function gerarInimigo(jogador, nomeAlvo, opcoes = {}) {
     agilidade: multiplicadores?.agilidade ?? 1,
     velocidade: multiplicadores?.velocidade ?? 1,
   };
-  const nivel = Math.max(1, nivelForcado ?? jogador.nivel ?? 1);
+  const nivel = Math.max(1, nivelForcado ?? jogador?.nivel ?? 1);
   const variacao = () => 0.9 + Math.random() * 0.2; // ±10%
 
-  const vidaJogador = vidaMaximaDe(jogador);
-  const ataqueJogador = Math.max(1, danoBasicoEsperado(jogador));
+  const referencia = statsDeReferenciaPorNivel(nivel);
 
-  const escalaPorNivel = calcularEscalaPorNivel(nivel, jogador.nivel);
-
-  const vidaMaxima = Math.max(
-    20,
-    Math.round(ataqueJogador * RODADAS_PARA_MATAR_INIMIGO * variacao() * mult.vida * escalaPorNivel),
-  );
-  const danoBase = Math.max(
-    1,
-    Math.round(
-      (vidaJogador / RODADAS_PARA_INIMIGO_MATAR_JOGADOR) * variacao() * mult.dano * escalaPorNivel,
-    ),
-  );
-
-  // Agilidade/velocidade espelham as do próprio jogador (com variação),
-  // pra esquiva e ordem de turno ficarem parelhas com o que ele tem —
-  // em vez de, de novo, assumir uma agilidade "média" pro nível.
-  const agilidade = Math.max(1, Math.round((jogador.agilidade || 1) * variacao() * mult.agilidade));
-  const velocidade = Math.max(1, Math.round((jogador.velocidade || 1) * variacao() * mult.velocidade));
+  const vidaMaxima = Math.max(20, Math.round(vidaMaximaDe(referencia) * variacao() * mult.vida));
+  const danoBase = Math.max(1, Math.round(danoBasicoEsperado(referencia) * variacao() * mult.dano));
+  const agilidade = Math.max(1, Math.round(referencia.agilidade * variacao() * mult.agilidade));
+  const velocidade = Math.max(1, Math.round(referencia.velocidade * variacao() * mult.velocidade));
 
   // forca/vitalidade do inimigo aqui são só pra manter o formato da
   // resposta (a API sempre devolveu esses campos) — quem decide o
@@ -238,17 +191,17 @@ function gerarInimigo(jogador, nomeAlvo, opcoes = {}) {
   };
 }
 
-// Mesma calibração de gerarInimigo acima, só que pro modo em grupo
-// (Aventura em party — ver src/socket/partySocket.js): em vez da vida/
-// ataque de UM jogador, usa a SOMA de vida_maxima e de dano esperado do
-// grupo inteiro pra vida do monstro (N aliados batem nele por rodada,
-// então precisa aguentar os N golpes, não só o de um), mas o dano do
-// monstro continua calibrado pela vida MÉDIA de um único aliado (o
-// monstro só ataca UM aliado por vez, então escalar pela vida somada do
-// grupo inteiro deixaria esse golpe absurdamente forte contra quem for
-// atingido). Nível/agilidade/velocidade usam a média do grupo.
+// Mesma base fixa por nível de gerarInimigo acima, só que pro modo em
+// grupo (Aventura em party — ver src/socket/partySocket.js): a vida do
+// monstro escala com o TAMANHO do grupo (N aliados batem nele por
+// rodada, então precisa aguentar os N golpes, não só o de um — quem já
+// ajusta esse peso extra por cabeça é o `multiplicadores.vida` que o
+// caller monta), mas o dano continua sendo o de UM monstro daquele
+// nível (ele só ataca um aliado por vez). Nível/agilidade/velocidade
+// usam a média do grupo só como fallback de exibição, nunca pra
+// calibrar vida/dano.
 function gerarInimigoDeGrupo(
-  { vidaTotalGrupo, ataqueTotalGrupo, vidaMediaAliado, nivelMedio, agilidadeMedia, velocidadeMedia },
+  { tamanhoGrupo, nivelMedio, agilidadeMedia, velocidadeMedia },
   nomeAlvo,
   opcoes = {},
 ) {
@@ -262,21 +215,17 @@ function gerarInimigoDeGrupo(
   const nivel = Math.max(1, nivelForcado ?? nivelMedio ?? 1);
   const variacao = () => 0.9 + Math.random() * 0.2;
 
-  const escalaPorNivel = calcularEscalaPorNivel(nivel, nivelMedio);
+  const referencia = statsDeReferenciaPorNivel(nivel);
+  const tamanho = Math.max(1, tamanhoGrupo || 1);
 
   const vidaMaxima = Math.max(
     20,
-    Math.round(ataqueTotalGrupo * RODADAS_PARA_MATAR_INIMIGO * variacao() * mult.vida * escalaPorNivel),
+    Math.round(vidaMaximaDe(referencia) * tamanho * variacao() * mult.vida),
   );
-  const danoBase = Math.max(
-    1,
-    Math.round(
-      (vidaMediaAliado / RODADAS_PARA_INIMIGO_MATAR_JOGADOR) * variacao() * mult.dano * escalaPorNivel,
-    ),
-  );
+  const danoBase = Math.max(1, Math.round(danoBasicoEsperado(referencia) * variacao() * mult.dano));
 
-  const agilidade = Math.max(1, Math.round((agilidadeMedia || 1) * variacao() * mult.agilidade));
-  const velocidade = Math.max(1, Math.round((velocidadeMedia || 1) * variacao() * mult.velocidade));
+  const agilidade = Math.max(1, Math.round((agilidadeMedia || referencia.agilidade) * variacao() * mult.agilidade));
+  const velocidade = Math.max(1, Math.round((velocidadeMedia || referencia.velocidade) * variacao() * mult.velocidade));
   const forca = Math.max(1, Math.round((danoBase - 3) / 0.7));
   const vitalidade = Math.max(1, Math.round((vidaMaxima - 20) / 5));
 
@@ -295,7 +244,7 @@ function gerarInimigoDeGrupo(
 
 exports.gerarInimigo = gerarInimigo;
 exports.gerarInimigoDeGrupo = gerarInimigoDeGrupo;
-exports.calcularEscalaPorNivel = calcularEscalaPorNivel;
+exports.statsDeReferenciaPorNivel = statsDeReferenciaPorNivel;
 
 // GET /api/combat/enemy/:characterId
 // Gera um inimigo compatível com o nível do personagem.
@@ -421,6 +370,21 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       // não existe sprite_key dedicado (monstro sem arte animada).
       inimigo.sprite_key = escolhido.monstro?.sprite_key ?? null;
       inimigo.imagem_url = escolhido.monstro?.imagem_url ?? null;
+
+      // Caçadas §6 — compõe um SEGUNDO multiplicador por cima do perfil
+      // normal, só no snapshot deste encontro e só se o alvo sorteado
+      // bater com o alvo da Caçada Ativa do personagem. Nunca faz UPDATE
+      // no AdventureMonster nem afeta outro jogador.
+      const modificadorCacada = await resolverModificadorParaEncontro(character.id, escolhido.id_monstro, transaction);
+      if (modificadorCacada) {
+        inimigo.vida_maxima = Math.round(inimigo.vida_maxima * (1 + modificadorCacada.hpMultiplier));
+        inimigo.vida_atual = inimigo.vida_maxima;
+        inimigo.dano_base = Math.round(inimigo.dano_base * (1 + modificadorCacada.damageMultiplier));
+        inimigo.huntTarget = true;
+        inimigo.huntId = modificadorCacada.huntId;
+        inimigo.huntDifficulty = modificadorCacada.difficulty;
+        inimigo.huntDifficultyLabel = modificadorCacada.difficultyLabel;
+      }
 
       // Snapshot dos atributos ESTRUTURAIS do personagem no exato momento
       // em que o encontro começa (força/vitalidade/etc já com bônus de
@@ -1121,6 +1085,18 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       await registrarProgressoMissaoGuilda(character, "MatarInimigos", 1, transaction);
       await registrarProgressoMissaoGuilda(character, "GanharOuro", dinheiroGanhoTotal, transaction);
 
+      // Caçadas §6.1/§16 — mesma vitória real, agora também alimentando
+      // a Caçada Ativa (se o monstro derrotado for o alvo dela). ouro/
+      // reputação de conclusão já ficam somados em `character`/na linha
+      // de progresso aqui dentro; character.save() abaixo persiste tudo
+      // junto (mesmo princípio do resto desta função).
+      const huntUpdate = await registrarMorteDaCacada(character, inimigoAtual, transaction);
+      if (huntUpdate?.completed) {
+        log.push(
+          `Caçada concluída! Você recebeu ${huntUpdate.goldReward} ouro e ${huntUpdate.reputationReward} de Reputação de Caçador.`,
+        );
+      }
+
       await character.save({ transaction });
 
       return res.status(200).json({
@@ -1162,6 +1138,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
           espolios: espoliosDeZona,
           statusEffects,
           bestiarioCompletoAgora,
+          huntUpdate,
         },
       });
     }

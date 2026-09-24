@@ -391,6 +391,21 @@ exports.comprarAnuncio = async (req, res) => {
       if (listing.id_instancia) {
         await equipmentInstanceService.transfer(listing.id_instancia, id_personagem_comprador, transaction);
       } else {
+        // Anúncio de equipamento SEM id_instancia é lixo de antes da
+        // regra atual (criarAnuncio exige id_instancia pra tipo
+        // equipável desde a v2) — nunca deveria existir mais, mas se
+        // sobrou algum caindo aqui, criar um stack pra um item
+        // equipável seria pior que recusar a compra: o item ficaria
+        // preso num character_inventory que a tela de equipamentos
+        // nunca lê (só lê CharacterEquipmentInstance), ou seja, o
+        // jogador paga e "some". Recusa alto e claro em vez disso.
+        const itemAnunciado = await Item.findByPk(listing.id_item, { transaction });
+        if (itemAnunciado && equipmentInstanceService.ehEquipavel(itemAnunciado.tipo_item)) {
+          throw erro(
+            "Este anúncio está corrompido (equipamento sem instância vinculada) e não pode ser comprado. Avise um administrador.",
+            409,
+          );
+        }
         await addStack(id_personagem_comprador, listing.id_item, quantidadeSolicitada, transaction);
       }
 

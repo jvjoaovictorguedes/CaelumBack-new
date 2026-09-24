@@ -17,13 +17,14 @@ const Class = require("../models/Class");
 const CharacterInventory = require("../models/CharacterInventory");
 const Item = require("../models/Item");
 const ConsumableProperties = require("../models/ConsumableProperties");
+const WeaponStatusEffect = require("../models/WeaponStatusEffect");
 const {
   vidaMaximaDe,
   manaMaximaDe,
   comMultiplicadoresDeClasse,
   custoManaEfetivo,
 } = require("../services/combatFormulas");
-const { aplicarAcao } = require("../services/duelEngine");
+const { resolverTurnoComStatus } = require("../services/duelEngine");
 const { buscarPoderesDoPersonagem, aplicarResultadoDuelo } = require("../controllers/pvpController");
 const { listarConsumiveisDeCombate } = require("../services/combatConsumablesService");
 const {
@@ -99,6 +100,14 @@ async function carregarLutador(characterId, { vidaCheia = true } = {}) {
   );
   const vidaMax = vidaMaximaDe(base);
   const manaMax = manaMaximaDe(base);
+
+  // Motor de Status §32 (Performance) — mesmo princípio do PvE: captura
+  // os efeitos de status da arma equipada UMA vez, no início do duelo,
+  // pra executarTurno nunca consultar o banco a cada hit.
+  const efeitosDaArmaEquipada = base.arma_equipada?.id_item
+    ? await WeaponStatusEffect.findAll({ where: { id_item: base.arma_equipada.id_item, ativo: true } })
+    : [];
+
   return {
     id: base.id,
     nome: base.nome,
@@ -106,6 +115,16 @@ async function carregarLutador(characterId, { vidaCheia = true } = {}) {
     classe: personagem.Class?.nome,
     poderes,
     consumiveis,
+    armaEfeitos: efeitosDaArmaEquipada.map((e) => ({
+      status_key: e.status_key,
+      chance_ppm: e.chance_ppm,
+      duration_turns: e.duration_turns,
+      potency_base: e.potency_base,
+      potency_scale_attribute: e.potency_scale_attribute,
+      potency_scale_value: e.potency_scale_value,
+      trigger: e.trigger,
+      ativo: e.ativo,
+    })),
     estado: {
       ...base,
       vida_atual: vidaCheia ? vidaMax : Math.max(0, Math.min(base.vida_atual ?? vidaMax, vidaMax)),
@@ -311,6 +330,9 @@ module.exports = function registerPvpLiveHandlers(io) {
           b: lutadorB,
           turnoDe: primeiro,
           acoes: 0,
+          danoTotalA: 0,
+          danoTotalB: 0,
+          statusEffects: { A: [], B: [] },
           timer: null,
         };
         duelos.set(duelId, duelo);
@@ -512,56 +534,112 @@ function iniciarTimerDeTurno(io, duelId) {
   }, PRAZO_TURNO_MS);
 }
 
-function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
+async function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
   const duelo = duelos.get(duelId);
   if (!duelo) return;
   clearTimeout(duelo.timer);
 
+  const outraChave = chave === "A" ? "B" : "A";
   const atacanteInfo = chave === "A" ? duelo.a : duelo.b;
   const defensorInfo = chave === "A" ? duelo.b : duelo.a;
   const vidaMaxAtacante = chave === "A" ? duelo.a.vidaMax : duelo.b.vidaMax;
   const manaMaxAtacante = chave === "A" ? duelo.a.manaMax : duelo.b.manaMax;
 
-  const { nomeAcao, dano, cura, manaCurada, esquivou } = aplicarAcao({
+  duelo.acoes += 1;
+
+  // Motor de Status (Evolução do Motor de Status) — mesma engrenagem do
+  // PvE (combatController.js), agora também no duelo ao vivo (casual,
+  // ranqueado e torneio, que reaproveitam esta mesma função): ticks de
+  // DoT no início do turno do atacante, bloqueio de ação por controle
+  // duro, Enfraquecimento/Cegueira, proc de arma/poder no alvo. `turno`
+  // reaproveita duelo.acoes (já monotônico e único por chamada) — não
+  // precisa de outro contador só pra dedupe de rolagem de Paralyze.
+  const {
+    nomeAcao,
+    dano,
+    cura,
+    manaCurada,
+    esquivou,
+    morteAntesDeAgir,
+    bloqueado,
+    statusAtacante,
+    statusDefensor,
+    log: logStatus,
+  } = await resolverTurnoComStatus({
     atacante: atacanteInfo.estado,
     defensor: defensorInfo.estado,
     acao,
     vidaMaxAtacante,
     manaMaxAtacante,
+    statusAtacante: duelo.statusEffects[chave],
+    statusDefensor: duelo.statusEffects[outraChave],
+    turno: duelo.acoes,
+    casterActorId: chave,
+    armaEfeitosAtacante: atacanteInfo.armaEfeitos,
+    itemIdArmaAtacante: atacanteInfo.estado.arma_equipada?.id_item ?? null,
+    nomeAtacante: atacanteInfo.nome,
+    nomeDefensor: defensorInfo.nome,
   });
+  duelo.statusEffects[chave] = statusAtacante;
+  duelo.statusEffects[outraChave] = statusDefensor;
 
-  duelo.acoes += 1;
+  if (dano > 0) {
+    if (chave === "A") duelo.danoTotalA += dano;
+    else duelo.danoTotalB += dano;
+  }
 
   const payloadTurno = {
     duelId,
     atacante: chave,
-    nomeAcao: foiAutomatico ? `${nomeAcao} (tempo esgotado)` : nomeAcao,
+    nomeAcao: bloqueado || morteAntesDeAgir ? nomeAcao : foiAutomatico ? `${nomeAcao} (tempo esgotado)` : nomeAcao,
     dano,
     cura,
     manaCurada,
     esquivou,
+    bloqueado: Boolean(bloqueado),
+    logStatus,
+    statusA: duelo.statusEffects.A.map((s) => ({ key: s.key, remainingTurns: s.remainingTurns, stacks: s.stacks })),
+    statusB: duelo.statusEffects.B.map((s) => ({ key: s.key, remainingTurns: s.remainingTurns, stacks: s.stacks })),
     vidaA: duelo.a.estado.vida_atual,
     vidaB: duelo.b.estado.vida_atual,
     manaA: duelo.a.estado.mana_atual,
     manaB: duelo.b.estado.mana_atual,
   };
 
-  const acabou = defensorInfo.estado.vida_atual <= 0 || duelo.acoes >= MAX_ACOES;
+  // DoT pode matar o próprio atacante antes de ele conseguir agir
+  // (§23 passo 2 do PvE, mesmo caso aqui) — quem "venceu" nesse caso é
+  // sempre o defensor, sem entrar na lógica normal de "quem causou
+  // dano nesta ação" (não houve ação nenhuma).
+  const acabouPorAutoDerrota = morteAntesDeAgir && atacanteInfo.estado.vida_atual <= 0;
+  const acabou = acabouPorAutoDerrota || defensorInfo.estado.vida_atual <= 0 || duelo.acoes >= MAX_ACOES;
 
   if (acabou) {
     let vencedorChave;
-    if (defensorInfo.estado.vida_atual <= 0) {
+    if (acabouPorAutoDerrota) {
+      vencedorChave = outraChave;
+    } else if (defensorInfo.estado.vida_atual <= 0) {
       vencedorChave = chave;
     } else {
-      const percA = duelo.a.estado.vida_atual / duelo.a.vidaMax;
-      const percB = duelo.b.estado.vida_atual / duelo.b.vidaMax;
-      // Mesmo cuidado do PvP assíncrono (pvpController.js) — empate de
-      // porcentagem de vida não pode sempre favorecer A só por ordem de
+      // Bug real reportado: duelo batia no limite de 80 ações e quem só
+      // ficou curando (nunca chegou perto de derrubar o oponente)
+      // ganhava só por estar com % de vida maior — "o inimigo ganhou
+      // usando vida". Critério agora é quem causou mais dano de
+      // verdade na luta (dano não sofre a mitigação de defesa que a
+      // cura nunca teve, então é a medida real de quem "venceu" o
+      // combate); % de vida vira só desempate de dano total igual, e
+      // sorteio só no empate completo — mesmo cuidado do PvP
+      // assíncrono (pvpController.js) pra não favorecer A por ordem de
       // comparação.
-      if (percA === percB) {
-        vencedorChave = crypto.randomInt(2) === 0 ? "A" : "B";
+      if (duelo.danoTotalA !== duelo.danoTotalB) {
+        vencedorChave = duelo.danoTotalA > duelo.danoTotalB ? "A" : "B";
       } else {
-        vencedorChave = percA > percB ? "A" : "B";
+        const percA = duelo.a.estado.vida_atual / duelo.a.vidaMax;
+        const percB = duelo.b.estado.vida_atual / duelo.b.vidaMax;
+        if (percA === percB) {
+          vencedorChave = crypto.randomInt(2) === 0 ? "A" : "B";
+        } else {
+          vencedorChave = percA > percB ? "A" : "B";
+        }
       }
     }
     io.to(duelo.sala).emit("pvp:turno-resultado", { ...payloadTurno, turnoDe: null });

@@ -2,6 +2,7 @@
 // compatibilidade (§53) e balanceamento (§55) da especificação.
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { Op } = require("sequelize");
 
 const { bancoDisponivel, sequelize } = require("./helpers/db");
 const AdventureZone = require("../src/models/AdventureZone");
@@ -18,6 +19,16 @@ const { MONSTROS } = require("../src/config/adventureExpansionData");
 // próprios) — nunca assumir que os únicos monstros ativos no banco são
 // os 40 da expansão; sempre filtrar pelos nomes conhecidos dela.
 const NOMES_DOS_40 = MONSTROS.map((m) => m.nome);
+
+// Mesmo raciocínio pra ZONA: outros arquivos de teste (ex.:
+// adventureHunts.test.js) criam AdventureZone/AdventureMonster
+// descartáveis próprios pra testar geração de conteúdo dinâmico — como
+// node --test roda arquivos em paralelo, um `ativa: true` sem filtro
+// aqui pode contar uma zona/monstro de outro arquivo no meio da
+// execução. Toda fixture de teste deste projeto usa sufixo() no nome
+// (helpers/db.js), que sempre inclui a palavra "Teste" — nunca usado
+// nos nomes reais do catálogo de produção.
+const SEM_FIXTURES_DE_TESTE = { [Op.notLike]: "%Teste%" };
 
 let temBanco = false;
 test.before(async () => {
@@ -36,7 +47,10 @@ function testeComBanco(nome, fn) {
 // ---------------------------------------------------------------------
 
 testeComBanco("exatamente 10 áreas ativas, em ordem 1..10, sem lacunas de nível", async () => {
-  const zonas = await AdventureZone.findAll({ where: { ativa: true }, order: [["ordem", "ASC"]] });
+  const zonas = await AdventureZone.findAll({
+    where: { ativa: true, nome: SEM_FIXTURES_DE_TESTE },
+    order: [["ordem", "ASC"]],
+  });
   assert.equal(zonas.length, 10);
   zonas.forEach((z, i) => assert.equal(z.ordem, i + 1));
 
@@ -48,7 +62,7 @@ testeComBanco("exatamente 10 áreas ativas, em ordem 1..10, sem lacunas de níve
 });
 
 testeComBanco("cada área tem exatamente 4 vínculos ativos: 3 Comuns + 1 Raro, pesos somando 1000", async () => {
-  const zonas = await AdventureZone.findAll({ where: { ativa: true } });
+  const zonas = await AdventureZone.findAll({ where: { ativa: true, nome: SEM_FIXTURES_DE_TESTE } });
   for (const zona of zonas) {
     const vinculos = await AdventureZoneMonster.findAll({ where: { id_area: zona.id, ativo: true } });
     assert.equal(vinculos.length, 4, `área ${zona.nome} não tem 4 vínculos ativos`);
@@ -91,7 +105,7 @@ testeComBanco("todo AdventureMonsterLoot aponta pra um Item válido do tipo Esp�
 });
 
 testeComBanco("cada monstro Comum tem 2 entradas de loot (Principal+Secundário); Raro tem 3", async () => {
-  const monstros = await AdventureMonster.findAll({ where: { ativo: true } });
+  const monstros = await AdventureMonster.findAll({ where: { ativo: true, nome: { [Op.in]: NOMES_DOS_40 } } });
   const vinculos = await AdventureZoneMonster.findAll({ where: { ativo: true } });
   const tipoPorMonstro = new Map(vinculos.map((v) => [v.id_monstro, v.tipo_aparicao]));
 
@@ -169,7 +183,7 @@ testeComBanco("Raro pode entregar mais de um espólio na mesma vitória (rolagem
 // ---------------------------------------------------------------------
 
 testeComBanco("Raro é mais perigoso que os Comuns da mesma área (vida e dano maiores)", async () => {
-  const zonas = await AdventureZone.findAll({ where: { ativa: true } });
+  const zonas = await AdventureZone.findAll({ where: { ativa: true, nome: SEM_FIXTURES_DE_TESTE } });
   for (const zona of zonas) {
     const vinculos = await AdventureZoneMonster.findAll({
       where: { id_area: zona.id, ativo: true },

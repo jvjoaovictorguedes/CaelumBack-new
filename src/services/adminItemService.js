@@ -42,6 +42,23 @@ const CAMPOS_ARMOR = [
 ];
 const CAMPOS_CONSUMABLE = ["efeito_vida", "efeito_mana", "efeito_atributo", "valor_atributo", "duracao_efeito"];
 
+// Poção de cura e bônus de atributo nunca podem coexistir no mesmo item
+// (bug real: "Poção de Vida Pequena dando +2 Vitalidade") — quem
+// realmente usa o item só lê efeito_vida/efeito_mana, então um
+// efeito_atributo preenchido nunca faz efeito nenhum, só aparece como
+// um bônus falso na tela. `dadosExistentes` é o registro já salvo (pra
+// edição parcial que só manda um dos dois campos ainda barrar a
+// combinação).
+function limparAtributoDePocaoDeCura(camposConsumable, dadosExistentes = {}) {
+  const efeitoVida = camposConsumable.efeito_vida ?? dadosExistentes.efeito_vida ?? 0;
+  const efeitoMana = camposConsumable.efeito_mana ?? dadosExistentes.efeito_mana ?? 0;
+  if (efeitoVida > 0 || efeitoMana > 0) {
+    camposConsumable.efeito_atributo = null;
+    camposConsumable.valor_atributo = 0;
+  }
+  return camposConsumable;
+}
+
 // Nunca passar req.body inteiro pro Model.create/update (§53) — só os
 // campos explicitamente permitidos entram na query.
 function somenteCampos(origem = {}, permitidos) {
@@ -56,6 +73,17 @@ function erroDeValidacao(mensagens) {
   const erro = new Error(mensagens.join(" "));
   erro.statusCode = 400;
   return erro;
+}
+
+// Bug real: "alguns atributos de equipamentos dão valores quebrados
+// (1.1/1.3/1.5/etc)" — valor_bonus_atributo de arma sempre foi FLOAT
+// (ArmorProperties já era INTEGER) e nada aqui barrava fração. Sempre
+// arredonda pra inteiro antes de salvar, tanto criando quanto editando.
+function arredondarBonusDeArma(camposWeapon) {
+  if (camposWeapon.valor_bonus_atributo != null) {
+    camposWeapon.valor_bonus_atributo = Math.round(Number(camposWeapon.valor_bonus_atributo));
+  }
+  return camposWeapon;
 }
 
 function validarCamposBase(dadosItem) {
@@ -81,12 +109,15 @@ function validarCamposBase(dadosItem) {
 
 async function criarPropriedadesDoTipo(item, payload, transaction) {
   if (TIPOS_ARMA.includes(item.tipo_item)) {
-    await WeaponProperties.create({ id_item: item.id, ...somenteCampos(payload.weapon, CAMPOS_WEAPON) }, { transaction });
+    await WeaponProperties.create(
+      { id_item: item.id, ...arredondarBonusDeArma(somenteCampos(payload.weapon, CAMPOS_WEAPON)) },
+      { transaction },
+    );
   } else if (TIPOS_ARMADURA.includes(item.tipo_item)) {
     await ArmorProperties.create({ id_item: item.id, ...somenteCampos(payload.armor, CAMPOS_ARMOR) }, { transaction });
   } else if (TIPOS_CONSUMIVEL.includes(item.tipo_item)) {
     await ConsumableProperties.create(
-      { id_item: item.id, ...somenteCampos(payload.consumable, CAMPOS_CONSUMABLE) },
+      { id_item: item.id, ...limparAtributoDePocaoDeCura(somenteCampos(payload.consumable, CAMPOS_CONSUMABLE)) },
       { transaction },
     );
   }
@@ -164,7 +195,7 @@ async function updateAdminItem(idItem, payload, { idAdmin, req } = {}) {
     await item.update(dadosItem, { transaction });
 
     if (TIPOS_ARMA.includes(item.tipo_item) && payload.weapon) {
-      const camposWeapon = somenteCampos(payload.weapon, CAMPOS_WEAPON);
+      const camposWeapon = arredondarBonusDeArma(somenteCampos(payload.weapon, CAMPOS_WEAPON));
       if (item.weaponProperties) await item.weaponProperties.update(camposWeapon, { transaction });
       else await WeaponProperties.create({ id_item: item.id, ...camposWeapon }, { transaction });
     } else if (TIPOS_ARMADURA.includes(item.tipo_item) && payload.armor) {
@@ -172,7 +203,10 @@ async function updateAdminItem(idItem, payload, { idAdmin, req } = {}) {
       if (item.armorProperties) await item.armorProperties.update(camposArmor, { transaction });
       else await ArmorProperties.create({ id_item: item.id, ...camposArmor }, { transaction });
     } else if (TIPOS_CONSUMIVEL.includes(item.tipo_item) && payload.consumable) {
-      const camposConsumable = somenteCampos(payload.consumable, CAMPOS_CONSUMABLE);
+      const camposConsumable = limparAtributoDePocaoDeCura(
+        somenteCampos(payload.consumable, CAMPOS_CONSUMABLE),
+        item.consumableProperties?.toJSON() ?? {},
+      );
       if (item.consumableProperties) await item.consumableProperties.update(camposConsumable, { transaction });
       else await ConsumableProperties.create({ id_item: item.id, ...camposConsumable }, { transaction });
     }

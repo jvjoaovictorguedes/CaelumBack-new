@@ -1,6 +1,7 @@
 // src/controllers/classController.js
 const { sequelize } = require("../config/database");
 const Class = require("../models/Class");
+const ClassEvolutionPath = require("../models/ClassEvolutionPath");
 const CharacterCreationRoll = require("../models/CharacterCreationRoll");
 const {
   PROPOSITO_CLASSE,
@@ -76,6 +77,32 @@ exports.getClassById = async (req, res) => {
     res
       .status(500)
       .json({ message: "Erro interno do servidor ao buscar classe." });
+  }
+};
+
+// GET /classes/:id/evolution-paths
+// Prévia pública dos caminhos de evolução de classe (sem depender de um
+// personagem já existente) — usada na tela de criação de personagem
+// (Registro V2) pra mostrar "essa classe evolui pra X ou Y" antes mesmo
+// de o jogador ter escolhido a classe. Os campos de requisito (nível,
+// item, monstro, ouro) aparecem como informação, não como gate — quem
+// checa se PODE evoluir de verdade é characterController.getEvolucaoDeClasse,
+// já com o personagem criado.
+exports.getEvolutionPathsPreview = async (req, res) => {
+  try {
+    const caminhos = await ClassEvolutionPath.findAll({
+      where: { id_classe: req.params.id },
+      order: [["ordem", "ASC"]],
+    });
+    res.status(200).json({
+      status: "success",
+      data: { caminhos },
+    });
+  } catch (error) {
+    console.error("Erro ao buscar evoluções de classe:", error);
+    res
+      .status(500)
+      .json({ message: "Erro interno do servidor ao buscar evoluções de classe." });
   }
 };
 

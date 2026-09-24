@@ -100,16 +100,24 @@ function calcularEfeitoPoder(power, personagem, nivelHabilidade = 1) {
   const variacao = 0.9 + Math.random() * 0.2;
   const bonusNivel = bonusPorNivel(personagem, DANO_MAGICO_BASE_POR_NIVEL);
   const multiplicadorNivelHabilidade = multiplicadorEfeitoPorNivelHabilidade(nivelHabilidade);
-  // multiplicador_dano_magico só afeta o dano do poder, não a cura —
-  // um mago forte em dano não devia automaticamente curar mais forte
+  // O multiplicador de classe aplicado ao DANO depende de como o poder
+  // escala: um poder de Inteligencia é mágico e usa multiplicador_dano_magico;
+  // qualquer outra escala (Forca/Vitalidade/Agilidade/Velocidade) é marcial
+  // e usa multiplicador_dano_fisico — senão um Guerreiro com habilidade de
+  // Força era punido pelo multiplicador mágico fraco da própria classe dele,
+  // igual ataque básico ficar mais forte que a habilidade. Nunca afeta a
+  // cura — um mago forte em dano não devia automaticamente curar mais forte
   // só por isso.
-  const multiplicadorMagico = personagem.multiplicador_dano_magico ?? 1;
+  const multiplicadorClassePorPoder =
+    power.escala_atributo === "Inteligencia"
+      ? (personagem.multiplicador_dano_magico ?? 1)
+      : (personagem.multiplicador_dano_fisico ?? 1);
 
   const dano = power.dano_base
     ? Math.round(
         (power.dano_base + valorAtributo * power.valor_escala + bonusNivel) *
           variacao *
-          multiplicadorMagico *
+          multiplicadorClassePorPoder *
           multiplicadorNivelHabilidade,
       )
     : 0;
@@ -144,12 +152,15 @@ function calcularEfeitoPoderEsperado(power, personagem, nivelHabilidade = 1) {
   const valorAtributo = personagem[campoAtributo] || 0;
   const bonusNivel = bonusPorNivel(personagem, DANO_MAGICO_BASE_POR_NIVEL);
   const multiplicadorNivelHabilidade = multiplicadorEfeitoPorNivelHabilidade(nivelHabilidade);
-  const multiplicadorMagico = personagem.multiplicador_dano_magico ?? 1;
+  const multiplicadorClassePorPoder =
+    power.escala_atributo === "Inteligencia"
+      ? (personagem.multiplicador_dano_magico ?? 1)
+      : (personagem.multiplicador_dano_fisico ?? 1);
 
   const dano = power.dano_base
     ? Math.round(
         (power.dano_base + valorAtributo * power.valor_escala + bonusNivel) *
-          multiplicadorMagico *
+          multiplicadorClassePorPoder *
           multiplicadorNivelHabilidade,
       )
     : 0;
