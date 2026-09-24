@@ -36,6 +36,7 @@ const {
   chaveOnline,
   carregarLutador,
   poderesPublicos,
+  registrarAoIdentificar,
 } = require("./pvpLiveSocket");
 
 const TAMANHO_MAXIMO_GRUPO = 4;
@@ -118,6 +119,34 @@ function removerDoGrupo(io, characterId) {
 }
 
 module.exports = function registerPartyHandlers(io) {
+  // Convite de party some do estado do React no cliente (é só
+  // `useState`, ver PvpSocketContext) assim que a página recarrega —
+  // refresh, aba reaberta, queda de rede — mesmo que o convite continue
+  // válido aqui no servidor dentro do prazo. Sem isso, o convidado nunca
+  // mais via o convite (só o anfitrião via "expirou" bem depois), tanto
+  // faz se ele tivesse respondido ou não. Reenvia com o tempo restante
+  // (não o prazo cheio de novo) assim que o characterId dele se
+  // identifica de novo em QUALQUER socket.
+  registrarAoIdentificar((_io, socket, chave) => {
+    const pendente = convitesPendentes.get(chave);
+    if (!pendente) return;
+
+    const restanteMs = pendente.criadoEm + PRAZO_CONVITE_MS - Date.now();
+    if (restanteMs <= 0) return;
+
+    const grupo = grupos.get(pendente.partyId);
+    const convidante = grupo?.membros.get(pendente.idConvidante);
+    if (!grupo || !convidante) return;
+
+    socket.emit("party:convite-recebido", {
+      idConvidante: pendente.idConvidante,
+      nomeConvidante: convidante.nome,
+      partyId: grupo.id,
+      membros: membrosPublicos(grupo),
+      prazoSegundos: Math.ceil(restanteMs / 1000),
+    });
+  });
+
   io.on("connection", (socket) => {
     // Nomes dos jogadores online pra convidar — a UI só tinha o id (via
     // `online`, que só guarda characterId -> socketId) e mostrava
@@ -239,6 +268,7 @@ module.exports = function registerPartyHandlers(io) {
         partyId: grupo.id,
         socketIdConvidante: socket.id,
         timeoutHandle,
+        criadoEm: Date.now(),
       });
 
       socket.emit("party:convite-enviado", { idConvidado: chaveConvidado, prazoSegundos: PRAZO_CONVITE_MS / 1000 });

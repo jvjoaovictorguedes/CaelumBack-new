@@ -43,6 +43,17 @@ const MAX_ACOES = 80;
 
 // characterId (string) -> socket.id
 const online = new Map();
+// Callbacks chamados toda vez que um socket se identifica (login inicial
+// ou reconexão — refresh de página, aba nova, queda de rede). Outros
+// módulos usam `registrarAoIdentificar` pra ressincronizar estado
+// pendente (ex.: convite de party) com o socket novo, já que um
+// characterId pode trocar de socket.id a qualquer momento e nada
+// reenviava automaticamente o que já tinha sido emitido pro socket
+// antigo.
+const aoIdentificarCallbacks = [];
+function registrarAoIdentificar(callback) {
+  aoIdentificarCallbacks.push(callback);
+}
 // characterId do desafiado (string) -> { idDesafiante, socketIdDesafiante, timeoutHandle }
 const desafiosPendentes = new Map();
 // characterId do desafiante (string) -> characterId do desafiado (string)
@@ -167,6 +178,16 @@ module.exports = function registerPvpLiveHandlers(io) {
       if (duelIdAtivo) {
         const duelo = duelos.get(duelIdAtivo);
         duelo?.aoReconectar?.(io, socket, duelIdAtivo);
+      }
+
+      // Outros módulos (ex.: partySocket.js — convite de party pendente)
+      // se inscrevem aqui via registrarAoIdentificar pra ressincronizar
+      // estado com o socket novo. Callback por módulo, não por duelo
+      // (diferente do aoReconectar acima), porque não há "um objeto"
+      // pra pendurar a função — é um evento genérico de "esta conexão é
+      // este personagem agora".
+      for (const callback of aoIdentificarCallbacks) {
+        callback(io, socket, chave);
       }
     });
 
@@ -632,6 +653,7 @@ function estaOnline(idPersonagem) {
 }
 
 module.exports.estaOnline = estaOnline;
+module.exports.registrarAoIdentificar = registrarAoIdentificar;
 
 // Exports adicionais só pra rankedLiveSocket.js reaproveitar a MESMA
 // infraestrutura de presença/duelo ao vivo (§3 da spec — "usar a
