@@ -5,9 +5,16 @@
 const AdventureZone = require("../models/AdventureZone");
 const AdventureZoneMonster = require("../models/AdventureZoneMonster");
 const AdventureMonster = require("../models/AdventureMonster");
+const AdventureMonsterLoot = require("../models/AdventureMonsterLoot");
+const Item = require("../models/Item");
 const CharacterMonsterKill = require("../models/CharacterMonsterKill");
 const { calcularMaestriaDaRegiao } = require("./masteryService");
-const { NIVEL_MAXIMO_MAESTRIA, REQUISITOS_ABATES_POR_NIVEL, numeralRomano } = require("../config/bestiaryConfig");
+const {
+  NIVEL_MAXIMO_MAESTRIA,
+  REQUISITOS_ABATES_POR_NIVEL,
+  BONUS_POR_NIVEL,
+  numeralRomano,
+} = require("../config/bestiaryConfig");
 
 // GET /api/bestiary — visão geral (§20/§28).
 async function listarRegioes(idPersonagem) {
@@ -69,6 +76,31 @@ async function obterRegiao(idPersonagem, idZona) {
   const maestria = await calcularMaestriaDaRegiao(idPersonagem, idZona);
   const proximoNivel = maestria.nivel >= 1 && maestria.nivel < NIVEL_MAXIMO_MAESTRIA ? maestria.nivel + 1 : null;
 
+  // Drops só fazem sentido pra monstro já descoberto (§5) — busca tudo
+  // de uma vez pros monstros vinculados, em vez de N consultas dentro
+  // do map abaixo.
+  const idsMonstros = vinculos.map((v) => v.monstro.id);
+  const loots = idsMonstros.length
+    ? await AdventureMonsterLoot.findAll({
+        where: { id_monstro: idsMonstros, ativo: true },
+        include: [{ model: Item, as: "item" }],
+        order: [["chance_ppm", "DESC"]],
+      })
+    : [];
+  const lootsPorMonstro = new Map();
+  for (const loot of loots) {
+    const lista = lootsPorMonstro.get(loot.id_monstro) ?? [];
+    lista.push({
+      nome: loot.item?.nome ?? "Item",
+      imagem_url: loot.item?.imagem_url ?? null,
+      chance_pct: Math.round((loot.chance_ppm / 1_000_000) * 1000) / 10,
+      quantidade_min: loot.quantidade_min,
+      quantidade_max: loot.quantidade_max,
+      categoria: loot.categoria,
+    });
+    lootsPorMonstro.set(loot.id_monstro, lista);
+  }
+
   const monstros = vinculos.map((v) => {
     const kill = killsPorNome.get(v.monstro.nome);
     const descoberto = Boolean(kill?.primeira_derrota_em);
@@ -85,6 +117,7 @@ async function obterRegiao(idPersonagem, idZona) {
         nivel_max: null,
         abates: 0,
         requisito_proximo_nivel: null,
+        drops: [],
       };
     }
 
@@ -105,8 +138,20 @@ async function obterRegiao(idPersonagem, idZona) {
       nivel_max: v.nivel_max_override ?? zona.nivel_monstro_max,
       abates: kill.quantidade,
       requisito_proximo_nivel: proximoNivel ? REQUISITOS_ABATES_POR_NIVEL[proximoNivel][v.tipo_aparicao] : null,
+      drops: lootsPorMonstro.get(v.monstro.id) ?? [],
     };
   });
+
+  // Bônus regional por nível de Maestria (§14/§15 do bestiaryConfig) —
+  // mostra o nível atual e, quando ainda não é o máximo, o que o
+  // próximo nível libera, pra o jogador entender o motivo de caçar mais.
+  const bonusAtual = BONUS_POR_NIVEL[maestria.nivel];
+  const bonusProximoNivel = proximoNivel ? BONUS_POR_NIVEL[proximoNivel] : null;
+  const tabelaBonus = [1, 2, 3, 4, 5].map((nivel) => ({
+    nivel,
+    numeral: numeralRomano(nivel),
+    ...BONUS_POR_NIVEL[nivel],
+  }));
 
   return {
     zona: {
@@ -119,6 +164,9 @@ async function obterRegiao(idPersonagem, idZona) {
       maestria_numeral: numeralRomano(maestria.nivel),
       progresso_pct_proximo_nivel: maestria.progresso_pct_proximo_nivel,
       proximo_nivel: proximoNivel,
+      bonus_atual: bonusAtual,
+      bonus_proximo_nivel: bonusProximoNivel,
+      tabela_bonus_por_nivel: tabelaBonus,
     },
     monstros,
   };
