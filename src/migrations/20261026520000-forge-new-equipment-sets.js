@@ -24,7 +24,7 @@ const EQUIPAMENTO_SETS = [
         nome: "Elmo do Alto Julgador",
         tipo_item: "Capacete",
         tipo_propriedade: "Armor",
-        armor: { slot_equipamento: "Capacete" },
+        armor: { slot_equipamento: "Cabeca" },
         defesa_base: 6,
         raridade: "Raro",
         valor_venda: 350,
@@ -66,7 +66,7 @@ const EQUIPAMENTO_SETS = [
         nome: "Elmo Arcano Carmesim",
         tipo_item: "Capacete",
         tipo_propriedade: "Armor",
-        armor: { slot_equipamento: "Capacete" },
+        armor: { slot_equipamento: "Cabeca" },
         defesa_base: 4,
         raridade: "Raro",
         valor_venda: 320,
@@ -101,16 +101,16 @@ const EQUIPAMENTO_SETS = [
         tipo_propriedade: "Weapon",
         weapon: { tipo_arma: "Machado", tipo_dano: "Fisico", bonus_atributo: "Forca" },
         dano_base: { min: 14, max: 20 },
-        raridade: "Épico",
+        raridade: "Epico",
         valor_venda: 650,
       },
       {
         nome: "Elmo do Carrasco",
         tipo_item: "Capacete",
         tipo_propriedade: "Armor",
-        armor: { slot_equipamento: "Capacete" },
+        armor: { slot_equipamento: "Cabeca" },
         defesa_base: 8,
-        raridade: "Épico",
+        raridade: "Epico",
         valor_venda: 550,
       },
       {
@@ -119,7 +119,7 @@ const EQUIPAMENTO_SETS = [
         tipo_propriedade: "Armor",
         armor: { slot_equipamento: "Torso" },
         defesa_base: 14,
-        raridade: "Épico",
+        raridade: "Epico",
         valor_venda: 750,
       },
       {
@@ -128,7 +128,7 @@ const EQUIPAMENTO_SETS = [
         tipo_propriedade: "Armor",
         armor: { slot_equipamento: "Pes" },
         defesa_base: 6,
-        raridade: "Épico",
+        raridade: "Epico",
         valor_venda: 450,
       },
     ],
@@ -174,7 +174,7 @@ module.exports = {
 
         // Adicionar propriedades (Weapon ou Armor)
         if (item_template.tipo_propriedade === "Weapon") {
-          const escala = { "Raro": 2, "Épico": 3, "Lendário": 4.5 }[item_template.raridade] || 1;
+          const escala = { "Raro": 2, "Epico": 3, "Lendario": 4.5 }[item_template.raridade] || 1;
           const dano_min = Math.round(item_template.dano_base.min * escala);
           const dano_max = Math.round(item_template.dano_base.max * escala);
 
@@ -194,7 +194,7 @@ module.exports = {
             },
           );
         } else {
-          const escala = { "Raro": 2, "Épico": 3, "Lendário": 4.5 }[item_template.raridade] || 1;
+          const escala = { "Raro": 2, "Epico": 3, "Lendario": 4.5 }[item_template.raridade] || 1;
           const defesa = Math.round(item_template.defesa_base * escala);
 
           await queryInterface.sequelize.query(
