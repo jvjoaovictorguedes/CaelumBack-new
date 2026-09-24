@@ -24,6 +24,11 @@ router
 // o parâmetro :id.
 router.post("/sortear-raro", authMiddleware, limitadorSorteioRaro, classController.sortearClasseRara);
 
+// Precisa vir antes de "/:id" pelo mesmo motivo de "/sortear-raro" —
+// pública (sem authMiddleware) porque é usada na tela de criação de
+// personagem, antes de existir sessão de personagem.
+router.get("/:id/evolution-paths", classController.getEvolutionPathsPreview);
+
 router
   .route("/:id")
   .get(classController.getClassById)
