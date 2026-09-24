@@ -30,7 +30,7 @@ const { rolarDropDeVitoria } = require("../services/dropService");
 const { sortearMonstroDaZona, sortearNivelMonstro } = require("../services/adventureRollService");
 const { persistirEstadoFinalDoMembro } = require("../services/partyBattleService");
 const { gerarInimigoDeGrupo } = require("../controllers/combatController");
-const { custoManaEfetivo, danoBasicoEsperado } = require("../services/combatFormulas");
+const { custoManaEfetivo } = require("../services/combatFormulas");
 const {
   online,
   chaveOnline,
@@ -424,12 +424,6 @@ module.exports = function registerPartyHandlers(io) {
           });
         }
 
-        const vidaTotalGrupo = membros.reduce((soma, m) => soma + m.vidaMax, 0);
-        const vidaMediaAliado = vidaTotalGrupo / membros.length;
-        const ataqueTotalGrupo = membros.reduce(
-          (soma, m) => soma + Math.max(1, danoBasicoEsperado(m.estado)),
-          0,
-        );
         const nivelMedio = Math.round(membros.reduce((s, m) => s + (m.estado.nivel || 1), 0) / membros.length);
         const agilidadeMedia = membros.reduce((s, m) => s + (m.estado.agilidade || 1), 0) / membros.length;
         const velocidadeMedia = membros.reduce((s, m) => s + (m.estado.velocidade || 1), 0) / membros.length;
@@ -437,14 +431,13 @@ module.exports = function registerPartyHandlers(io) {
         const escolhido = sortearMonstroDaZona(monstrosDaZona);
         const nivelSorteado = sortearNivelMonstro(escolhido, zona);
 
-        // A soma de atributos do grupo (vidaTotalGrupo/ataqueTotalGrupo)
-        // já deixa o monstro mais "gordo" com mais gente, mas o monstro
-        // só ataca UM aliado por rodada — então, sem mais nada, quanto
-        // maior o grupo, mais diluído (mais fácil por pessoa) fica o
-        // risco. Esse bônus extra, por cabeça além do mínimo de
-        // TAMANHO_MINIMO_GRUPO, compensa isso com um pouco mais de vida e
-        // dano do inimigo (moderado — o resto do design já favorece ir
-        // em grupo: XP/ouro cheios pra todo mundo, não divididos).
+        // gerarInimigoDeGrupo já multiplica a vida base (fixa por nível)
+        // pelo TAMANHO do grupo (N aliados batem nele por rodada, então
+        // precisa aguentar os N golpes) — esse bônus extra, por cabeça
+        // além do mínimo de TAMANHO_MINIMO_GRUPO, empilha em cima disso
+        // um pouco mais de vida e dano (moderado — o resto do design já
+        // favorece ir em grupo: XP/ouro cheios pra todo mundo, não
+        // divididos).
         const aventureirosExtras = Math.max(0, grupo.ordem.length - TAMANHO_MINIMO_GRUPO);
         const fatorDificuldadeGrupo = {
           vida: 1 + aventureirosExtras * 0.12,
@@ -458,7 +451,7 @@ module.exports = function registerPartyHandlers(io) {
         };
 
         const inimigo = gerarInimigoDeGrupo(
-          { vidaTotalGrupo, ataqueTotalGrupo, vidaMediaAliado, nivelMedio, agilidadeMedia, velocidadeMedia },
+          { tamanhoGrupo: membros.length, nivelMedio, agilidadeMedia, velocidadeMedia },
           escolhido.monstro.nome,
           { nivelForcado: nivelSorteado, multiplicadores },
         );
