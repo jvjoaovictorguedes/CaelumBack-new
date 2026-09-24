@@ -13,5 +13,7 @@ router.get("/", adminItemController.listar);
 router.post("/", adminItemController.criar);
 router.patch("/:id", adminItemController.atualizar);
 router.post("/:id/deactivate", adminItemController.desativar);
+router.post("/:id/reactivate", adminItemController.reativar);
+router.post("/:id/duplicate", adminItemController.duplicar);
 
 module.exports = router;

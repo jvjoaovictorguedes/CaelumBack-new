@@ -67,3 +67,27 @@ exports.desativar = async (req, res) => {
     tratarErro(res, error, "Erro interno do servidor ao desativar item.");
   }
 };
+
+exports.reativar = async (req, res) => {
+  try {
+    const reativado = await adminItemService.reactivateAdminItem(req.params.id, {
+      idAdmin: req.user.id,
+      req,
+    });
+    res.status(200).json({ status: "success", data: { item: reativado } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao reativar item.");
+  }
+};
+
+exports.duplicar = async (req, res) => {
+  try {
+    const copia = await adminItemService.duplicateAdminItem(req.params.id, {
+      idAdmin: req.user.id,
+      req,
+    });
+    res.status(201).json({ status: "success", data: { item: copia } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao duplicar item.");
+  }
+};

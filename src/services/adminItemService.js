@@ -271,6 +271,86 @@ async function deactivateAdminItem(idItem, { idAdmin, motivo, req } = {}) {
   });
 }
 
+// Painel Administrativo §14 — reativar NÃO restaura disponivel_loja
+// sozinho: é uma configuração separada que a desativação zerou de
+// propósito (o item pode voltar a existir sem necessariamente voltar
+// pra vitrine da Loja). O admin liga isso de novo pela edição se quiser.
+async function reactivateAdminItem(idItem, { idAdmin, req } = {}) {
+  return sequelize.transaction(async (transaction) => {
+    const item = await Item.findByPk(idItem, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!item) {
+      const erro = new Error("Item não encontrado.");
+      erro.statusCode = 404;
+      throw erro;
+    }
+    const dadosAntes = item.toJSON();
+    await item.update({ ativo: true }, { transaction });
+
+    await registrarAcao({
+      idAdmin,
+      acao: "reativar",
+      entidade: "Item",
+      idEntidade: item.id,
+      dadosAntes,
+      dadosDepois: item.toJSON(),
+      req,
+      transaction,
+    });
+    return item;
+  });
+}
+
+// Painel Administrativo §4/§39 — Duplicar cria um NOVO Item (nunca
+// reutiliza o id original), com nome sufixado "(cópia)" e sempre
+// inativo/fora da loja, pra o admin ajustar antes de publicar de
+// verdade. Copia as propriedades específicas (arma/armadura/
+// consumível) junto.
+async function duplicateAdminItem(idItem, { idAdmin, req } = {}) {
+  return sequelize.transaction(async (transaction) => {
+    const original = await Item.findByPk(idItem, {
+      transaction,
+      include: [
+        { model: WeaponProperties, as: "weaponProperties" },
+        { model: ArmorProperties, as: "armorProperties" },
+        { model: ConsumableProperties, as: "consumableProperties" },
+      ],
+    });
+    if (!original) {
+      const erro = new Error("Item não encontrado.");
+      erro.statusCode = 404;
+      throw erro;
+    }
+
+    const dadosItem = {};
+    for (const campo of CAMPOS_ITEM) dadosItem[campo] = original[campo];
+    dadosItem.nome = `${original.nome} (cópia)`;
+    dadosItem.ativo = true;
+    dadosItem.disponivel_loja = false;
+
+    const copia = await Item.create(dadosItem, { transaction });
+
+    const payload = {
+      weapon: original.weaponProperties ? { ...original.weaponProperties.toJSON() } : undefined,
+      armor: original.armorProperties ? { ...original.armorProperties.toJSON() } : undefined,
+      consumable: original.consumableProperties ? { ...original.consumableProperties.toJSON() } : undefined,
+    };
+    await criarPropriedadesDoTipo(copia, payload, transaction);
+
+    await registrarAcao({
+      idAdmin,
+      acao: "duplicar",
+      entidade: "Item",
+      idEntidade: copia.id,
+      dadosAntes: { origemId: original.id },
+      dadosDepois: copia.toJSON(),
+      req,
+      transaction,
+    });
+
+    return copia;
+  });
+}
+
 async function listAdminItems({ pagina = 1, porPagina = 20, tipo_item, raridade, nome, apenasAtivos } = {}) {
   const { Op } = require("sequelize");
   const where = {};
@@ -301,6 +381,8 @@ module.exports = {
   createAdminItem,
   updateAdminItem,
   deactivateAdminItem,
+  reactivateAdminItem,
+  duplicateAdminItem,
   listAdminItems,
   ENUM_TIPO_ITEM,
   ENUM_RARIDADE,
