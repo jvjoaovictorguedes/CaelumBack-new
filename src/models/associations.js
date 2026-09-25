@@ -440,6 +440,8 @@ FishingRodProperties.belongsTo(Item, { foreignKey: "id_item" });
 
 FishingSpecies.belongsTo(Item, { foreignKey: "id_item", as: "item" });
 
+FishingZone.belongsTo(WorldMapNode, { foreignKey: "id_world_node" });
+
 FishingZone.hasMany(FishingZoneSpecies, { foreignKey: "id_zone", as: "pool" });
 FishingZoneSpecies.belongsTo(FishingZone, { foreignKey: "id_zone" });
 FishingZoneSpecies.belongsTo(FishingSpecies, { foreignKey: "id_species", as: "species" });
