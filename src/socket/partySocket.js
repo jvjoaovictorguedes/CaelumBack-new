@@ -413,7 +413,13 @@ module.exports = function registerPartyHandlers(io) {
         // graça, mesmo pra quem já estava machucado). Ver comentário em
         // carregarLutador (pvpLiveSocket.js) sobre por que Duelo/
         // Ranqueado/Torneio continuam entrando com vida cheia normalmente.
-        const membros = await Promise.all(grupo.ordem.map((id) => carregarLutador(id, { vidaCheia: false })));
+        // Proezas Únicas §11 — Party é PERMITIDO pra Legado (a menos que
+        // o UniquePowerEffect específico diga o contrário via
+        // allow_party), então passa o contexto certo em vez de deixar
+        // cair no default de duelo casual.
+        const membros = await Promise.all(
+          grupo.ordem.map((id) => carregarLutador(id, { vidaCheia: false, contexto: "PARTY" })),
+        );
         if (membros.some((m) => !m)) {
           return socket.emit("party:erro", { mensagem: "Não foi possível carregar todos os personagens do grupo." });
         }

@@ -59,9 +59,11 @@ async function iniciarJogoDaSerie(io, serieId) {
     return null;
   }
 
+  // Proezas Únicas §11 — Torneio PvP bloqueia Legado (Power
+  // UNIQUE_FEAT) igual Ranked, pros dois lados.
   const [lutadorA, lutadorB] = await Promise.all([
-    pvpLiveSocket.carregarLutador(a.character_id),
-    pvpLiveSocket.carregarLutador(b.character_id),
+    pvpLiveSocket.carregarLutador(a.character_id, { contexto: "TOURNAMENT" }),
+    pvpLiveSocket.carregarLutador(b.character_id, { contexto: "TOURNAMENT" }),
   ]);
   if (!lutadorA || !lutadorB) return null;
 

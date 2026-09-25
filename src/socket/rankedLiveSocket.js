@@ -361,13 +361,17 @@ async function iniciarPartidaAssincrona(io, { idDesafiante }) {
 
   let partida = null;
   try {
+    // Proezas Únicas §11 — Ranked bloqueia Legado (Power UNIQUE_FEAT)
+    // pros DOIS lados, nunca só o desafiante: se o defensor snapshot
+    // também tiver um, o enforcement em carregarLutador some com ele do
+    // loadout igual faria com o desafiante.
     const [lutadorA, lutadorB] = await Promise.all([
-      pvpLiveSocket.carregarLutador(idDesafiante),
+      pvpLiveSocket.carregarLutador(idDesafiante, { contexto: "RANKED" }),
       // §6 — snapshot COMPLETO do defensor no estado atual dele
       // (atributos, equipamento/refinamento, habilidades, passivas):
       // carregarLutador é exatamente o mesmo carregamento do duelo ao
       // vivo, então o build dele é representado do mesmo jeito.
-      pvpLiveSocket.carregarLutador(oponente.characterId),
+      pvpLiveSocket.carregarLutador(oponente.characterId, { contexto: "RANKED" }),
     ]);
     if (!lutadorA || !lutadorB) throw new Error("Personagem não encontrado ao montar partida ranqueada.");
 

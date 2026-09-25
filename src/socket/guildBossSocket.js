@@ -206,7 +206,11 @@ module.exports = function registerGuildBossHandlers(io) {
         const chefe = await GuildBossConfig.findByPk(tentativa.id_guild_boss_config);
         if (!chefe) return socket.emit("guildboss:erro", { mensagem: "Configuração do Boss não encontrada." });
 
-        const membros = await Promise.all(lobby.ordem.map((id) => carregarLutador(id)));
+        // Proezas Únicas §11 — Guild Boss é PERMITIDO pra Legado (a
+        // menos que o UniquePowerEffect específico diga o contrário via
+        // allow_guild_boss), então passa o contexto certo em vez de
+        // deixar cair no default de duelo casual.
+        const membros = await Promise.all(lobby.ordem.map((id) => carregarLutador(id, { contexto: "GUILD_BOSS" })));
         if (membros.some((m) => !m)) {
           return socket.emit("guildboss:erro", { mensagem: "Não foi possível carregar todos os personagens da sala." });
         }

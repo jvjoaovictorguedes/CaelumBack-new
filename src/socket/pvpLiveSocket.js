@@ -32,6 +32,7 @@ const {
   personagemComBonus,
 } = require("../services/equipmentBonusService");
 const { personagemViaTicket } = require("./socketAuth");
+const uniquePowerEffectRegistry = require("../services/uniquePowerEffectRegistry");
 const {
   verificarCooldownDesafiante,
   verificarAntifarmPar,
@@ -88,10 +89,23 @@ function chaveOnline(id) {
 // Batalha de Party passa `{ vidaCheia: false }` porque ali o
 // personagem tem que entrar com a vida REAL que já estava (bug
 // reportado: grupo curava geral de graça ao iniciar a aventura).
-async function carregarLutador(characterId, { vidaCheia = true } = {}) {
+// Sistema de Proezas Únicas §11 — `contexto` decide quais Powers
+// UNIQUE_FEAT sobrevivem no loadout deste lutador. Default "PVP_CASUAL"
+// (o uso mais comum desta função é o duelo ao vivo casual); cada
+// chamador que representa outro contexto real (ranked/torneio/party/
+// guild boss) passa o seu — nunca confiar no default fora do duelo
+// casual.
+async function carregarLutador(characterId, { vidaCheia = true, contexto = "PVP_CASUAL" } = {}) {
   const personagem = await Character.findByPk(characterId, { include: [{ model: Class }] });
   if (!personagem) return null;
-  const poderes = await buscarPoderesDoPersonagem(characterId);
+  const poderesCarregados = await buscarPoderesDoPersonagem(characterId);
+  const idsDesautorizados = await uniquePowerEffectRegistry.idsDesautorizadosNoContexto(poderesCarregados, contexto);
+  // §11 — nunca deixa o Power "entrar" só pra não fazer efeito: some do
+  // loadout inteiro pra este lutador, igual se o jogador nunca tivesse
+  // aprendido nele. O frontend mostra o aviso "Legado desabilitado
+  // neste modo" só como UX; a segurança real é sempre este filtro aqui.
+  const poderes =
+    idsDesautorizados.length > 0 ? poderesCarregados.filter((p) => !idsDesautorizados.includes(p.id)) : poderesCarregados;
   const consumiveis = await listarConsumiveisDeCombate(characterId);
   const bonus = await buscarBonusDeAtributos(characterId);
   const base = comMultiplicadoresDeClasse(
