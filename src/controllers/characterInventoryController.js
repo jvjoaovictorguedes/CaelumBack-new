@@ -8,16 +8,13 @@ const Item = require("../models/Item");
 const ConsumableProperties = require("../models/ConsumableProperties");
 const ArmorProperties = require("../models/ArmorProperties");
 const WeaponProperties = require("../models/WeaponProperties");
-const {
-  vidaMaximaDe,
-  manaMaximaDe,
-  comMultiplicadoresDeClasse,
-} = require("../services/combatFormulas");
+const { comMultiplicadoresDeClasse } = require("../services/combatFormulas");
 const {
   buscarBonusDeAtributos,
   personagemComBonus,
 } = require("../services/equipmentBonusService");
 const { limparEncontroExpirado } = require("../services/pveEncounterService");
+const { vidaManaMaximaComTaverna } = require("../services/tavernBuffService");
 const { addStack } = require("../services/inventoryService");
 const { ehInstanciavel, create: criarInstancia } = require("../services/equipmentInstanceService");
 
@@ -148,8 +145,10 @@ exports.useItem = async (req, res) => {
         personagemComBonus(character.toJSON(), bonusEquipamento),
         character.Class,
       );
-      const vidaMaxima = vidaMaximaDe(personagemEfetivo);
-      const manaMaxima = manaMaximaDe(personagemEfetivo);
+      // Taverna §13 — MAX_HP_PCT/MAX_MANA_PCT precisa valer aqui também
+      // (uso de poção FORA de combate), senão uma poção comprada bem
+      // depois do buff ficava presa no teto "cru" mesmo com o buff ativo.
+      const { vidaMaxima, manaMaxima } = await vidaManaMaximaComTaverna(id_personagem, personagemEfetivo, transaction);
 
       // efeito_vida/efeito_mana são percentuais (ex: 30 = 30% da vida/mana
       // máxima), não pontos fixos. Um valor fixo (tipo "cura 30 pontos")

@@ -49,6 +49,7 @@ const {
   msAteVidaRegenCompleta,
   msAteManaRegenCompleta,
 } = require("../services/regenService");
+const { vidaManaMaximaComTaverna } = require("../services/tavernBuffService");
 const {
   PROPOSITO_RACA,
   PROPOSITO_CLASSE,
@@ -385,13 +386,23 @@ async function carregarRespostaDoPersonagem(character) {
   const reputacaoComercial = formatarResumoReputacao(progressoGuildaAventureiros?.reputacao_encomendas ?? 0);
   const reputacaoCacador = formatarResumoReputacaoCacador(progressoCacador?.reputation_points ?? 0);
 
+  // Taverna §13 — MAX_HP_PCT/MAX_MANA_PCT precisam aparecer na vida/mana
+  // máxima que o jogador vê (era só usado no preview/execução do
+  // Descanso da Taverna, então o buff parecia "não fazer nada" em
+  // qualquer outra tela — bug reportado). Somado por cima do resultado
+  // puro de vidaMaximaDe/manaMaximaDe, nunca substitui essas funções.
+  const { vidaMaxima: vidaMaximaComBuff, manaMaxima: manaMaximaComBuff } = await vidaManaMaximaComTaverna(
+    character.id,
+    personagemEfetivo,
+  );
+
   return {
     ...character.toJSON(),
     vida_atual: personagemEfetivo.vida_atual,
     mana_atual: personagemEfetivo.mana_atual,
     bonus_atributos,
-    vida_maxima: vidaMaximaDe(personagemEfetivo),
-    mana_maxima: manaMaximaDe(personagemEfetivo),
+    vida_maxima: vidaMaximaComBuff,
+    mana_maxima: manaMaximaComBuff,
     regen_vida_restante_ms: msAteVidaRegenCompleta(personagemEfetivo),
     regen_mana_restante_ms: msAteManaRegenCompleta(personagemEfetivo),
     guilda: membroGuild?.Guild

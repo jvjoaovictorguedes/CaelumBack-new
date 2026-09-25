@@ -549,6 +549,26 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
     // save() mais abaixo, já dentro da mesma transação/lock.
     sincronizarRegeneracaoDeVidaEMana(character, personagemAtual);
 
+    // Sistema de Taverna §13 — busca os bônus ativos UMA vez por turno
+    // (nunca recalculado bloco a bloco) pra: MAX_HP_PCT/MAX_MANA_PCT no
+    // teto real de vida/mana do turno inteiro (cura de Poder/consumível
+    // e o próprio limite de vida_atual), PVE_DAMAGE_PCT/PVE_DEFENSE_PCT
+    // no dano trocado, e ADVENTURE_XP_PCT na recompensa no fim (reaproveita
+    // este mesmo resultado lá embaixo, nunca uma segunda query). Contexto
+    // "PVE" nunca é bloqueado (§6.1 só bloqueia competitivo). Antes desta
+    // correção só ADVENTURE_XP_PCT estava plugado — os outros 3 eram
+    // vendidos no Cardápio mas não faziam nada dentro do combate (bug
+    // reportado: "buff de prato não conta, principalmente o de HP").
+    const bonusTaverna = await bonusesTavernaAtivosPara(characterId, "PVE", transaction);
+    const vidaMaximaEfetiva = bonusTaverna.MAX_HP_PCT
+      ? Math.round(vidaMaximaDe(personagemAtual) * (1 + bonusTaverna.MAX_HP_PCT / 100))
+      : vidaMaximaDe(personagemAtual);
+    const manaMaximaEfetiva = bonusTaverna.MAX_MANA_PCT
+      ? Math.round(manaMaximaDe(personagemAtual) * (1 + bonusTaverna.MAX_MANA_PCT / 100))
+      : manaMaximaDe(personagemAtual);
+    const multiplicadorDanoTaverna = 1 + (bonusTaverna.PVE_DAMAGE_PCT ?? 0) / 100;
+    const multiplicadorDefesaTaverna = 1 - (bonusTaverna.PVE_DEFENSE_PCT ?? 0) / 100;
+
     if (personagemAtual.vida_atual <= 0) {
       return res.status(400).json({
         message:
@@ -755,8 +775,11 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
           nivelHabilidadeUsada
         );
       // Enfraquecimento (§45) reduz o dano de SAÍDA de quem está com o
-      // status, antes de qualquer mitigação do alvo.
-      const dano = Math.round(danoBase * statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.player));
+      // status, antes de qualquer mitigação do alvo. PVE_DAMAGE_PCT da
+      // Taverna soma no mesmo passo, POR CIMA (§13).
+      const dano = Math.round(
+        danoBase * statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.player) * multiplicadorDanoTaverna,
+      );
 
       // Motor de Status §11 — resolverEfeitosDoUso preserva `target`
       // (Self/Enemy) de cada linha configurada; quem decide em qual
@@ -832,7 +855,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
 
       if (cura > 0 && !curaBloqueadaPorEsquiva) {
         personagemAtual.vida_atual = Math.min(
-          vidaMaximaDe(personagemAtual),
+          vidaMaximaEfetiva,
           personagemAtual.vida_atual + cura
         );
 
@@ -849,23 +872,23 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
     else if (efeitoConsumivel) {
       // Mesma fórmula (percentual da vida/mana MÁXIMA, não pontos
       // fixos) do uso fora de combate em characterInventoryController.js
-      // — usa vidaMaximaDe/manaMaximaDe sobre personagemAtual, que já
-      // reflete o snapshot congelado do encontro (bônus de equipamento,
-      // multiplicador de classe), pro valor curado bater com o mesmo
-      // teto de vida/mana que o resto do combate está usando.
+      // — usa vidaMaximaEfetiva/manaMaximaEfetiva (vidaMaximaDe/manaMaximaDe
+      // já com MAX_HP_PCT/MAX_MANA_PCT da Taverna somado), pro valor
+      // curado bater com o mesmo teto de vida/mana que o resto do
+      // combate está usando.
       if (efeitoConsumivel.efeito_vida) {
-        const cura = Math.round(vidaMaximaDe(personagemAtual) * (efeitoConsumivel.efeito_vida / 100));
+        const cura = Math.round(vidaMaximaEfetiva * (efeitoConsumivel.efeito_vida / 100));
         personagemAtual.vida_atual = Math.min(
-          vidaMaximaDe(personagemAtual),
+          vidaMaximaEfetiva,
           personagemAtual.vida_atual + cura,
         );
         log.push(`Você usou ${itemConsumivel.nome} e recuperou ${cura} de vida.`);
       }
 
       if (efeitoConsumivel.efeito_mana) {
-        const curaMana = Math.round(manaMaximaDe(personagemAtual) * (efeitoConsumivel.efeito_mana / 100));
+        const curaMana = Math.round(manaMaximaEfetiva * (efeitoConsumivel.efeito_mana / 100));
         personagemAtual.mana_atual = Math.min(
-          manaMaximaDe(personagemAtual),
+          manaMaximaEfetiva,
           personagemAtual.mana_atual + curaMana,
         );
         log.push(`Você usou ${itemConsumivel.nome} e recuperou ${curaMana} de mana.`);
@@ -915,7 +938,8 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       } else {
         const danoBasicoEnfraquecido = Math.round(
           calcularDanoBasico(personagemAtual) *
-            statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.player),
+            statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.player) *
+            multiplicadorDanoTaverna,
         );
         const dano = aplicarMitigacaoDeDefesa(
           danoBasicoEnfraquecido,
@@ -1014,9 +1038,9 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       const bonusGlobal = await bonusesGlobaisAtivosAgora();
       // Sistema de Taverna §13 — ADVENTURE_XP_PCT soma no mesmo passo,
       // nunca aplicado separado (mesma regra: somar tudo antes de
-      // arredondar). Contexto "PVE" nunca é bloqueado (§6.1 só bloqueia
-      // competitivo).
-      const bonusTaverna = await bonusesTavernaAtivosPara(character.id, "PVE", transaction);
+      // arredondar). Reaproveita o `bonusTaverna` já buscado no início
+      // do turno (closure de processarTurno) — nunca uma segunda query
+      // pro mesmo personagem/contexto dentro do mesmo turno.
       const xpPercentualTotal = bonusGuilda.xpPercentual + bonusGlobal.xpPercentual + (bonusTaverna.ADVENTURE_XP_PCT ?? 0);
       const ouroPercentualTotal = bonusGuilda.goldPercentual + bonusGlobal.ouroPercentual;
       if (xpPercentualTotal > 0) {
@@ -1259,9 +1283,17 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
             )
           ) * statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.enemy),
         );
-        const danoRecebido = aplicarMitigacaoDeDefesa(
-          danoRecebidoEnfraquecido,
-          personagemAtual,
+        // PVE_DEFENSE_PCT da Taverna (§13) é uma mitigação A MAIS, por
+        // cima da mitigação de defesa "crua" do equipamento — nunca
+        // embutida em aplicarMitigacaoDeDefesa (que também mitiga PvP/
+        // World Boss, onde a Taverna nunca deve valer). Mesmo piso de 1
+        // dano que aplicarMitigacaoDeDefesa já garante, pra o buff nunca
+        // virar imunidade total.
+        const danoRecebido = Math.max(
+          1,
+          Math.round(
+            aplicarMitigacaoDeDefesa(danoRecebidoEnfraquecido, personagemAtual) * multiplicadorDefesaTaverna,
+          ),
         );
 
         personagemAtual.vida_atual =
