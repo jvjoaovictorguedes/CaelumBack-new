@@ -85,6 +85,10 @@ const AdminRole = require("./AdminRole");
 const AdminPermission = require("./AdminPermission");
 const AdminRolePermission = require("./AdminRolePermission");
 const UserAdminRole = require("./UserAdminRole");
+const AlchemyRecipe = require("./AlchemyRecipe");
+const AlchemyRecipeIngredient = require("./AlchemyRecipeIngredient");
+const ConsumableEffect = require("./ConsumableEffect");
+const CharacterAlchemyRecipeUnlock = require("./CharacterAlchemyRecipeUnlock");
 
 Item.hasOne(WeaponProperties, { foreignKey: "id_item", as: "weaponProperties" });
 WeaponProperties.belongsTo(Item, { foreignKey: "id_item" });
@@ -393,5 +397,20 @@ AdminRole.belongsToMany(User, {
   otherKey: "id_user",
   as: "usuarios",
 });
+
+// Alquimia / Caldeirão (spec §6.6) — domínio próprio, NUNCA reaproveita
+// as associações de ForgeBlueprint acima. Resultado e ingrediente
+// apontam pra Item por id_item_resultado/id_item (FK simples, sem
+// belongsTo com alias pra não confundir com equipamento); o `include`
+// típico do serviço de Alquimia resolve os Items num segundo passo em
+// lote (mesma técnica de forgeCraftingService.carregarResolvedorEmLote).
+AlchemyRecipe.hasMany(AlchemyRecipeIngredient, { foreignKey: "id_recipe", as: "ingredientes" });
+AlchemyRecipeIngredient.belongsTo(AlchemyRecipe, { foreignKey: "id_recipe" });
+
+Item.hasMany(ConsumableEffect, { foreignKey: "id_item", as: "consumableEffects" });
+ConsumableEffect.belongsTo(Item, { foreignKey: "id_item" });
+
+AlchemyRecipe.hasMany(CharacterAlchemyRecipeUnlock, { foreignKey: "id_recipe" });
+CharacterAlchemyRecipeUnlock.belongsTo(AlchemyRecipe, { foreignKey: "id_recipe" });
 
 module.exports = {};
