@@ -77,6 +77,7 @@ const adminPatchNoteRoutes = require("./routes/adminPatchNoteRoutes");
 const adminGameSettingRoutes = require("./routes/adminGameSettingRoutes");
 const adminAdventureRoutes = require("./routes/adminAdventureRoutes");
 const adminEquipmentSetRoutes = require("./routes/adminEquipmentSetRoutes");
+const { powersRouter: adminPowersRouter, statusEffectsRouter: adminStatusEffectsRouter, weaponStatusEffectsRouter: adminWeaponStatusEffectsRouter } = require("./routes/adminPowerRoutes");
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -226,6 +227,9 @@ app.use("/api/admin/patch-notes", adminPatchNoteRoutes);
 app.use("/api/admin/settings", adminGameSettingRoutes);
 app.use("/api/admin/adventure", adminAdventureRoutes);
 app.use("/api/admin/equipment-sets", adminEquipmentSetRoutes);
+app.use("/api/admin/powers", adminPowersRouter);
+app.use("/api/admin/status-effects", adminStatusEffectsRouter);
+app.use("/api/admin/items/:idItem/weapon-status-effects", adminWeaponStatusEffectsRouter);
 
 // Nenhuma rota acima bateu — sem isso, o Express respondia com a página
 // de erro padrão dele (texto puro tipo "Cannot GET /api/xyz"), que o
