@@ -15,6 +15,7 @@ const { registrarProgresso } = require("./missionService");
 const { registrarProgressoContrato } = require("./adventureGuildObjectiveService");
 const { registrarProgressoMissaoGuilda } = require("./guildMissionService");
 const achievementService = require("./achievementService");
+const { bonusesAtivosPara: bonusesTavernaAtivosPara } = require("./tavernBuffService");
 
 async function garantirProgresso(characterId, transaction) {
   const [progresso] = await CharacterForgeProgress.findOrCreate({
@@ -115,8 +116,15 @@ async function coletar(characterId, slot) {
       resultado = { tipo: entrada.tipo_acao };
     }
 
-    const ganho = entrada.payload_resultado.xp ?? 0;
+    let ganho = entrada.payload_resultado.xp ?? 0;
     if (progresso && ganho > 0) {
+      // FORGE_XP_PCT da Taverna (§13) — aplicado na CONCESSÃO de XP de
+      // Fabricação, nunca na chance de sucesso do degrau de qualidade
+      // (isso já foi decidido lá atrás, em forjaPontosPercentuais).
+      const bonusTaverna = await bonusesTavernaAtivosPara(characterId, "Forja", transaction);
+      if (bonusTaverna.FORGE_XP_PCT) {
+        ganho = Math.round(ganho * (1 + bonusTaverna.FORGE_XP_PCT / 100));
+      }
       const resultadoXp = aplicarGanhoDeXp(progresso.experiencia, ganho);
       progresso.experiencia = resultadoXp.xpTotal;
       progresso.nivel = resultadoXp.nivelDepois;

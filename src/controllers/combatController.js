@@ -48,6 +48,7 @@ const { registrarProgressoContrato } = require("../services/adventureGuildObject
 const { registrarProgressoMissaoGuilda } = require("../services/guildMissionService");
 const { bonusesAtivosPara } = require("../services/guildBuffService");
 const { bonusesAtivosAgora: bonusesGlobaisAtivosAgora } = require("../services/globalBuffService");
+const { bonusesAtivosPara: bonusesTavernaAtivosPara } = require("../services/tavernBuffService");
 const achievementService = require("../services/achievementService");
 const statusEffectService = require("../services/statusEffectService");
 const cooldownService = require("../services/cooldownService");
@@ -1000,7 +1001,12 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       // já arredondado do outro — dois +10% viram +20% aplicado uma vez,
       // não +10% seguido de +10% sobre um valor já maior.
       const bonusGlobal = await bonusesGlobaisAtivosAgora();
-      const xpPercentualTotal = bonusGuilda.xpPercentual + bonusGlobal.xpPercentual;
+      // Sistema de Taverna §13 — ADVENTURE_XP_PCT soma no mesmo passo,
+      // nunca aplicado separado (mesma regra: somar tudo antes de
+      // arredondar). Contexto "PVE" nunca é bloqueado (§6.1 só bloqueia
+      // competitivo).
+      const bonusTaverna = await bonusesTavernaAtivosPara(character.id, "PVE", transaction);
+      const xpPercentualTotal = bonusGuilda.xpPercentual + bonusGlobal.xpPercentual + (bonusTaverna.ADVENTURE_XP_PCT ?? 0);
       const ouroPercentualTotal = bonusGuilda.goldPercentual + bonusGlobal.ouroPercentual;
       if (xpPercentualTotal > 0) {
         xpGanho = Math.round(xpGanho * (1 + xpPercentualTotal / 100));
