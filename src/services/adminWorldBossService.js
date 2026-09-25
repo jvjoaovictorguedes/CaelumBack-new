@@ -161,7 +161,31 @@ async function listAdminWorldBossConfigs({ pagina = 1, porPagina = 20, ativo, no
     limit: limite,
     offset,
   });
-  return { total: count, pagina: paginaAtual, porPagina: limite, itens: rows };
+
+  // A listagem NUNCA carrega fases/zonas completas (evitaria N+1) —
+  // só a contagem, que é tudo que a tabela do painel precisa. Quem
+  // quiser o conteúdo de verdade usa GET /configs/:id
+  // (carregarComDetalhes), que já existe pra isso.
+  const idsDaPagina = rows.map((r) => r.id);
+  const [fasesPorConfig, zonasPorConfig] = await Promise.all([
+    WorldBossPhase.findAll({ where: { id_world_boss_config: idsDaPagina }, attributes: ["id_world_boss_config"] }),
+    WorldBossConfigZone.findAll({ where: { id_world_boss_config: idsDaPagina }, attributes: ["id_world_boss_config"] }),
+  ]);
+  const contarPor = (linhas) => {
+    const mapa = new Map();
+    for (const linha of linhas) mapa.set(linha.id_world_boss_config, (mapa.get(linha.id_world_boss_config) ?? 0) + 1);
+    return mapa;
+  };
+  const contagemFases = contarPor(fasesPorConfig);
+  const contagemZonas = contarPor(zonasPorConfig);
+
+  const itens = rows.map((config) => ({
+    ...config.toJSON(),
+    fases_count: contagemFases.get(config.id) ?? 0,
+    zonas_count: contagemZonas.get(config.id) ?? 0,
+  }));
+
+  return { total: count, pagina: paginaAtual, porPagina: limite, itens };
 }
 
 async function getAdminWorldBossConfig(id) {

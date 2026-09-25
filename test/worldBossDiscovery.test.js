@@ -901,6 +901,22 @@ testeComBanco("admin catálogo: duplicateAdminWorldBossConfig cria cópia INATIV
   assert.deepEqual(copia.zonas, original.zonas);
 });
 
+testeComBanco("admin catálogo: listAdminWorldBossConfigs devolve fases_count/zonas_count (nunca os arrays completos — evita N+1)", async () => {
+  const { usuario } = await criarPersonagem();
+  const { payload } = await payloadConfigAdmin();
+  const criado = await adminWorldBossService.createAdminWorldBossConfig(payload, { idAdmin: usuario.id });
+  configsCriados.push(criado.id);
+
+  const pagina = await adminWorldBossService.listAdminWorldBossConfigs({ nome: criado.nome });
+  assert.equal(pagina.total, 1);
+  const linha = pagina.itens[0];
+  assert.equal(linha.id, criado.id);
+  assert.equal(linha.fases_count, criado.fases.length);
+  assert.equal(linha.zonas_count, criado.zonas.length);
+  assert.equal(linha.fases, undefined);
+  assert.equal(linha.zonas, undefined);
+});
+
 testeComBanco("admin catálogo: setAtivoAdminWorldBossConfig alterna ativo/inativo", async () => {
   const { usuario } = await criarPersonagem();
   const { payload } = await payloadConfigAdmin();
