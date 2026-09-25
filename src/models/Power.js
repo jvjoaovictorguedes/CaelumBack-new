@@ -59,6 +59,16 @@ const Power = sequelize.define("Power", {
     type: DataTypes.STRING(255),
     allowNull: true,
   },
+  // Sistema de Proezas Únicas §9 — marca técnica de aquisição restrita.
+  // UNIQUE_FEAT nunca pode ser concedido por classe/raça/evolução/loja/
+  // drop/seed genérico; só pelo claim atômico de uma Proeza (ver
+  // uniqueFeatService.js). Checar este campo em qualquer ponto que
+  // conceda Powers em massa/normalmente.
+  acquisition_scope: {
+    type: DataTypes.ENUM("NORMAL", "UNIQUE_FEAT"),
+    allowNull: false,
+    defaultValue: "NORMAL",
+  },
 });
 
 module.exports = Power;

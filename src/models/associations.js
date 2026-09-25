@@ -531,4 +531,24 @@ WorldBossRewardGrant.belongsTo(WorldBossEvent, { foreignKey: "event_id" });
 Character.hasMany(WorldBossRewardGrant, { foreignKey: "character_id" });
 WorldBossRewardGrant.belongsTo(Character, { foreignKey: "character_id" });
 
+// Sistema de Proezas Únicas (Caelum_Proezas_Unicas_Claude.docx) —
+// UniqueFeat é a autoridade mecânica; Achievement/Title continuam só
+// representação pública opcional (§2/§39). id_unique_feat em
+// UniqueFeatClaim é UNIQUE (ver migration) — a garantia real de "um
+// vencedor global" mora no banco, não só nestas associações.
+const UniqueFeat = require("./UniqueFeat");
+const UniqueFeatClaim = require("./UniqueFeatClaim");
+const UniquePowerEffect = require("./UniquePowerEffect");
+
+UniqueFeat.belongsTo(Power, { foreignKey: "id_power_reward", as: "powerRecompensa" });
+UniqueFeat.belongsTo(Achievement, { foreignKey: "id_achievement_reward", as: "achievementRecompensa" });
+UniqueFeat.belongsTo(Title, { foreignKey: "id_title_reward", as: "titleRecompensa" });
+UniqueFeat.hasOne(UniqueFeatClaim, { foreignKey: "id_unique_feat", as: "claim" });
+UniqueFeatClaim.belongsTo(UniqueFeat, { foreignKey: "id_unique_feat", as: "proeza" });
+UniqueFeatClaim.belongsTo(Character, { foreignKey: "id_personagem", as: "personagem" });
+Character.hasMany(UniqueFeatClaim, { foreignKey: "id_personagem", as: "proezasConquistadas" });
+
+Power.hasOne(UniquePowerEffect, { foreignKey: "id_power", as: "efeitoUnico" });
+UniquePowerEffect.belongsTo(Power, { foreignKey: "id_power" });
+
 module.exports = {};
