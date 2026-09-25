@@ -44,6 +44,8 @@ const worldBossStatusService = require("../src/services/worldBossStatusService")
 const worldBossScheduler = require("../src/services/worldBossScheduler");
 const worldBossCombatService = require("../src/services/worldBossCombatService");
 const worldBossRewardService = require("../src/services/worldBossRewardService");
+const adminWorldBossService = require("../src/services/adminWorldBossService");
+const adminWorldBossEventService = require("../src/services/adminWorldBossEventService");
 const {
   EVENT_STATUS,
   COMBAT_SESSION_STATUS,
@@ -820,4 +822,152 @@ testeComBanco("recompensas: evento que ainda não está DEFEATED nunca processa 
 
   const grant = await WorldBossRewardGrant.findOne({ where: { event_id: evento.id } });
   assert.equal(grant, null);
+});
+
+// ---------------------------------------------------------------------
+// Fase 6 — Admin (catálogo + operação do ciclo atual)
+// ---------------------------------------------------------------------
+
+async function payloadConfigAdmin(overrides = {}) {
+  const item = await criarItemGolpeFinal();
+  const zona = await criarZona();
+  return {
+    payload: {
+      nome: `Ameaça de teste ${sufixo()}`,
+      descricao: "teste admin",
+      vida_base: 50000,
+      defesa: 5,
+      mensagem_descoberta: "descoberta",
+      mensagem_convocacao: "convocacao",
+      id_item_golpe_final: item.id,
+      gold_descoberta: 10,
+      gold_participacao: 5,
+      xp_participacao: 15,
+      fases: [
+        { ordem: 1, nome_fase: "Fase 1", hp_percentual_max: 100 },
+        { ordem: 2, nome_fase: "Fase 2", hp_percentual_max: 25, modificador_dano_percentual: 15 },
+      ],
+      zonas: [zona.id],
+      ...overrides,
+    },
+    zona,
+  };
+}
+
+testeComBanco("admin catálogo: createAdminWorldBossConfig cria config com fases e zonas aninhadas", async () => {
+  const { usuario } = await criarPersonagem();
+  const { payload } = await payloadConfigAdmin();
+
+  const criado = await adminWorldBossService.createAdminWorldBossConfig(payload, { idAdmin: usuario.id });
+  configsCriados.push(criado.id);
+
+  assert.equal(criado.nome, payload.nome);
+  assert.equal(criado.fases.length, 2);
+  assert.deepEqual(criado.zonas, payload.zonas);
+  assert.equal(criado.ativo, true);
+});
+
+testeComBanco("admin catálogo: updateAdminWorldBossConfig substitui fases/zonas quando enviadas", async () => {
+  const { usuario } = await criarPersonagem();
+  const { payload } = await payloadConfigAdmin();
+  const criado = await adminWorldBossService.createAdminWorldBossConfig(payload, { idAdmin: usuario.id });
+  configsCriados.push(criado.id);
+
+  const outraZona = await criarZona();
+  const atualizado = await adminWorldBossService.updateAdminWorldBossConfig(
+    criado.id,
+    { defesa: 42, fases: [{ ordem: 1, nome_fase: "Fase Única", hp_percentual_max: 100 }], zonas: [outraZona.id] },
+    { idAdmin: usuario.id },
+  );
+
+  assert.equal(atualizado.defesa, 42);
+  assert.equal(atualizado.fases.length, 1);
+  assert.equal(atualizado.fases[0].nome_fase, "Fase Única");
+  assert.deepEqual(atualizado.zonas, [outraZona.id]);
+});
+
+testeComBanco("admin catálogo: duplicateAdminWorldBossConfig cria cópia INATIVA com as mesmas fases/zonas", async () => {
+  const { usuario } = await criarPersonagem();
+  const { payload } = await payloadConfigAdmin();
+  const original = await adminWorldBossService.createAdminWorldBossConfig(payload, { idAdmin: usuario.id });
+  configsCriados.push(original.id);
+
+  const copia = await adminWorldBossService.duplicateAdminWorldBossConfig(original.id, { idAdmin: usuario.id });
+  configsCriados.push(copia.id);
+
+  assert.notEqual(copia.id, original.id);
+  assert.equal(copia.ativo, false);
+  assert.equal(copia.fases.length, original.fases.length);
+  assert.deepEqual(copia.zonas, original.zonas);
+});
+
+testeComBanco("admin catálogo: setAtivoAdminWorldBossConfig alterna ativo/inativo", async () => {
+  const { usuario } = await criarPersonagem();
+  const { payload } = await payloadConfigAdmin();
+  const criado = await adminWorldBossService.createAdminWorldBossConfig(payload, { idAdmin: usuario.id });
+  configsCriados.push(criado.id);
+
+  const desativado = await adminWorldBossService.setAtivoAdminWorldBossConfig(criado.id, false, { idAdmin: usuario.id });
+  assert.equal(desativado.ativo, false);
+  const reativado = await adminWorldBossService.setAtivoAdminWorldBossConfig(criado.id, true, { idAdmin: usuario.id });
+  assert.equal(reativado.ativo, true);
+});
+
+testeComBanco("admin catálogo: updateAdminWorldBossSettings rejeita discovery_threshold_min > max", async () => {
+  const { usuario } = await criarPersonagem();
+  await assert.rejects(
+    () =>
+      adminWorldBossService.updateAdminWorldBossSettings(
+        { "worldboss.discovery_threshold_min": 200, "worldboss.discovery_threshold_max": 100 },
+        { idAdmin: usuario.id },
+      ),
+    /não pode ser maior/,
+  );
+});
+
+testeComBanco("admin evento atual: força DORMANT->DISCOVERED, depois DISCOVERED->ACTIVE, com motivo obrigatório", async () => {
+  const { usuario } = await criarPersonagem();
+  const { personagem } = await criarPersonagem();
+  const evento = await criarEventoDormant({
+    config: await criarConfig(),
+    threshold: 999,
+  });
+
+  await assert.rejects(
+    () => adminWorldBossEventService.forcarDescoberta({ characterId: personagem.id, idAdmin: usuario.id }),
+    /motivo é obrigatório/,
+  );
+
+  const descoberto = await adminWorldBossEventService.forcarDescoberta({
+    characterId: personagem.id,
+    motivo: "demonstração",
+    idAdmin: usuario.id,
+  });
+  assert.equal(descoberto.status, EVENT_STATUS.DISCOVERED);
+  assert.equal(descoberto.discoverer_character_id, personagem.id);
+
+  const despertado = await adminWorldBossEventService.despertarManualmente({ motivo: "demonstração", idAdmin: usuario.id });
+  assert.equal(despertado.id, evento.id);
+  assert.equal(despertado.status, EVENT_STATUS.ACTIVE);
+  assert.ok(despertado.activated_at);
+});
+
+testeComBanco("admin evento atual: cancelarCicloAtual cancela o evento aberto e getStatusOperacional reflete", async () => {
+  const { usuario } = await criarPersonagem();
+  const config = await criarConfig();
+  const evento = await criarEventoDormant({ config, threshold: 10 });
+
+  const statusAntes = await adminWorldBossEventService.getStatusOperacional();
+  assert.equal(statusAntes.status, EVENT_STATUS.DORMANT);
+  assert.equal(statusAntes.id, evento.id);
+  // getStatusOperacional é a view ADMIN — ao contrário da pública, ela
+  // revela o threshold secreto.
+  assert.equal(statusAntes.discovery_threshold, 10);
+
+  const cancelado = await adminWorldBossEventService.cancelarCicloAtual({ motivo: "limpando pra outro teste", idAdmin: usuario.id });
+  assert.equal(cancelado.id, evento.id);
+  assert.equal(cancelado.status, EVENT_STATUS.CANCELLED);
+
+  const statusDepois = await adminWorldBossEventService.getStatusOperacional();
+  assert.equal(statusDepois.status, "Nenhum");
 });
