@@ -8,8 +8,9 @@ const { sequelize } = require("../config/database");
 const Character = require("../models/Character");
 const CharacterTavernBuff = require("../models/CharacterTavernBuff");
 const TavernMenuItem = require("../models/TavernMenuItem");
-const { CATEGORIAS_CARDAPIO } = require("../config/tavernConfig");
+const { CATEGORIAS_CARDAPIO, GAME_SETTINGS_DEFAULT } = require("../config/tavernConfig");
 const { vidaMaximaDe, manaMaximaDe } = require("./combatFormulas");
+const gameSettingCache = require("./gameSettingCache");
 
 // §6.1 — competitivo bloqueado: Ranqueada/Torneio (PvP ou Pesca) NUNCA
 // aplicam buff de Taverna. PvP casual também fica desativado na V1.
@@ -87,6 +88,8 @@ async function listarCardapioAtivo() {
 // do buff anterior, e categorias diferentes sempre coexistem.
 async function consumirOferta(characterId, menuItemId) {
   if (!menuItemId) throw erro("menuItemId é obrigatório.");
+  const tavernaAtiva = gameSettingCache.obter("tavern.enabled", GAME_SETTINGS_DEFAULT["tavern.enabled"]);
+  if (!tavernaAtiva) throw erro("A Taverna está temporariamente fechada.", 503);
 
   return sequelize.transaction(async (transaction) => {
     const character = await Character.findByPk(characterId, { transaction, lock: transaction.LOCK.UPDATE });

@@ -53,6 +53,8 @@ async function apostar(characterId, gameId, { requestId, betAmount, choiceKey })
   const valorAposta = Number(betAmount);
   if (!Number.isInteger(valorAposta) || valorAposta <= 0) throw erro("bet_amount precisa ser um inteiro positivo.");
   if (!choiceKey || typeof choiceKey !== "string") throw erro("choice_key é obrigatório.");
+  const tavernaAtiva = gameSettingCache.obter("tavern.enabled", GAME_SETTINGS_DEFAULT["tavern.enabled"]);
+  if (!tavernaAtiva) throw erro("A Taverna está temporariamente fechada.", 503);
 
   return sequelize.transaction(async (transaction) => {
     // Passo 1 (§8.2): idempotência ANTES de qualquer débito/roll — se

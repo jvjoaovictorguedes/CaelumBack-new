@@ -19,6 +19,14 @@ function erro(mensagem, statusCode = 400) {
   return e;
 }
 
+// §10 — "tavern.enabled: Feature flag operacional." Checado só nas
+// ações que gastam/alteram estado (nunca no preview, que é inofensivo
+// e ajuda o jogador a entender por que a Taverna está fechada).
+function garantirTavernaAtiva() {
+  const ativa = gameSettingCache.obter("tavern.enabled", GAME_SETTINGS_DEFAULT["tavern.enabled"]);
+  if (!ativa) throw erro("A Taverna está temporariamente fechada.", 503);
+}
+
 // §4.2 — bloqueio de descanso durante atividade de combate. encontro_pve
 // é a MESMA coluna compartilhada por Aventura e Expedição (ver
 // combatController.js/expeditionService.js) — nunca uma segunda fonte
@@ -113,6 +121,7 @@ async function confirmarDescanso(characterId) {
     if (!character) throw erro("Personagem não encontrado.", 404);
     character.Class = character.id_classe ? await Class.findByPk(character.id_classe, { transaction }) : null;
 
+    garantirTavernaAtiva();
     const bloqueio = atividadeBloqueante(character);
     if (bloqueio) throw erro(bloqueio, 409);
 
