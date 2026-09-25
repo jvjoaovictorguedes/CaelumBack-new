@@ -27,6 +27,7 @@ const {
 const { rolarBarraBonus } = require("./forgeRollService");
 const { aplicarGanhoDeXp, nivelPorXpTotal } = require("./forgeProgressionService");
 const { addStack } = require("./inventoryService");
+const forgeTelemetryService = require("./forgeTelemetryService");
 
 function indiceQualidadeMaxima(nivelForja) {
   const qualidadeMaxima = QUALIDADE_MAXIMA_FUNDICAO_POR_NIVEL[nivelForja] ?? "Comum";
@@ -186,6 +187,18 @@ async function fundir(characterId, { id_recurso, qualidade, quantidadeBarras }) 
     progressoAtualizado.experiencia = resultadoXp.xpTotal;
     progressoAtualizado.nivel = resultadoXp.nivelDepois;
     await progressoAtualizado.save({ transaction });
+
+    await forgeTelemetryService.registrarEvento(
+      {
+        tipo_acao: "Fundicao",
+        id_personagem: characterId,
+        id_recurso,
+        qualidade_base: qualidade,
+        qualidade_final: qualidade,
+        xp_ganho: ganhoXp,
+      },
+      transaction,
+    );
 
     return {
       barras_produzidas: totalBarras,

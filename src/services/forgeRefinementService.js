@@ -14,16 +14,20 @@ const CharacterInventory = require("../models/CharacterInventory");
 const ForgeScroll = require("../models/ForgeScroll");
 const Item = require("../models/Item");
 const ExpeditionResource = require("../models/ExpeditionResource");
+const forgeConfig = require("../config/forgeConfig");
 const {
   NIVEL_MAXIMO,
   UNIDADES_MATERIAL_REFINAMENTO_POR_ALVO,
   MATERIAIS_BASE_REFINAMENTO_POR_CATEGORIA,
   OURO_BASE_REFINAMENTO_POR_QUALIDADE,
   XP_REFINAMENTO_POR_ALVO,
-  FATOR_XP_REFINAMENTO_FALHA,
   SLOTS_FORJA,
   TIPOS_ACAO_FORJA,
-} = require("../config/forgeConfig");
+} = forgeConfig;
+// FATOR_XP_REFINAMENTO_FALHA fica de fora da desestruturação (mesmo
+// motivo do CAP_CHANCE_REFINAMENTO_PPM em forgeRollService.js) — é
+// balanceamento editável via Painel Administrativo (§9), lido sempre
+// por property access no momento do cálculo.
 const { REFINEMENT_COST_TIER_MULTIPLIER } = require("../config/equipmentTierConfig");
 const { resolverIdItemDoInsumo } = require("./forgeMaterialsService");
 const { chanceFinalRefinamentoPpm, rolarSucessoRefinamento } = require("./forgeRollService");
@@ -128,6 +132,14 @@ async function validarPergaminho(characterId, idItemPergaminho, nivelForja, { tr
     transaction,
   });
   if (!scroll) return { scroll: null, erro: "Esse pergaminho não existe." };
+  // Painel Administrativo da Forja §8 — pergaminho desativado some da
+  // seleção/nova produção, mas continua existindo no inventário; usar um
+  // que já foi desativado depois de comprado/ganho não é permitido (a
+  // listagem já nem oferece, então isso só protege contra um id
+  // guardado do lado do cliente).
+  if (!scroll.ativo) {
+    return { scroll, erro: "Esse pergaminho foi desativado e não pode mais ser usado." };
+  }
   if (nivelForja < scroll.nivel_forja_minimo) {
     return { scroll, erro: `Exige nível ${scroll.nivel_forja_minimo} de Forja.` };
   }
@@ -150,7 +162,7 @@ async function listarPergaminhosDisponiveis(characterId) {
   const progresso = await CharacterForgeProgress.findOne({ where: { id_personagem: characterId } });
   const nivelForja = nivelPorXpTotal(progresso?.experiencia ?? 0);
 
-  const scrolls = await ForgeScroll.findAll({ include: [{ model: Item, as: "item" }] });
+  const scrolls = await ForgeScroll.findAll({ where: { ativo: true }, include: [{ model: Item, as: "item" }] });
   const idsItens = scrolls.map((s) => s.id_item);
   const inventario = idsItens.length
     ? await CharacterInventory.findAll({ where: { id_personagem: characterId, id_item: idsItens } })
@@ -346,7 +358,7 @@ async function iniciarRefinamento(characterId, { id_instancia, id_item_pergaminh
     }
 
     const xpSucesso = XP_REFINAMENTO_POR_ALVO[info.alvo] ?? 0;
-    const xpGanho = sucesso ? xpSucesso : Math.round(xpSucesso * FATOR_XP_REFINAMENTO_FALHA);
+    const xpGanho = sucesso ? xpSucesso : Math.round(xpSucesso * forgeConfig.FATOR_XP_REFINAMENTO_FALHA);
 
     const iniciadoEm = new Date();
     const prontoEm = new Date(iniciadoEm.getTime() + 60_000); // tempo fixo curto — spec não define tempo de refino
@@ -366,6 +378,11 @@ async function iniciarRefinamento(characterId, { id_instancia, id_item_pergaminh
           chance_final_ppm: chancePpm,
           id_item_pergaminho: id_item_pergaminho ?? null,
           nome_pergaminho: nomePergaminho,
+          // Só pra telemetria administrativa (§13/forgeTelemetryService) —
+          // nunca lido de volta pra decidir nada no gameplay.
+          ouro_custo: info.ouro,
+          categoria_equipamento: info.item.tipo_item,
+          qualidade_item: info.item.raridade,
         },
         payload_resultado: { sucesso, xp: xpGanho },
         iniciado_em: iniciadoEm,

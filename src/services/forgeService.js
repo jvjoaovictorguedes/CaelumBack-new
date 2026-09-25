@@ -16,6 +16,7 @@ const { registrarProgressoContrato } = require("./adventureGuildObjectiveService
 const { registrarProgressoMissaoGuilda } = require("./guildMissionService");
 const achievementService = require("./achievementService");
 const { bonusesAtivosPara: bonusesTavernaAtivosPara } = require("./tavernBuffService");
+const forgeTelemetryService = require("./forgeTelemetryService");
 
 async function garantirProgresso(characterId, transaction) {
   const [progresso] = await CharacterForgeProgress.findOrCreate({
@@ -153,6 +154,35 @@ async function coletar(characterId, slot) {
     } else if (personagem && entrada.tipo_acao === TIPOS_ACAO_FORJA.REFINAMENTO && resultado.sucesso) {
       await registrarProgressoContrato(personagem, "Refinar", 1, {}, transaction);
       await registrarProgressoMissaoGuilda(personagem, "Refinar", 1, transaction);
+    }
+
+    if (entrada.tipo_acao === TIPOS_ACAO_FORJA.FABRICACAO) {
+      await forgeTelemetryService.registrarEvento(
+        {
+          tipo_acao: "Fabricacao",
+          id_personagem: characterId,
+          id_blueprint: entrada.referencia.id_blueprint,
+          qualidade_base: entrada.referencia.qualidade_material,
+          qualidade_final: entrada.payload_resultado.qualidade_final,
+          xp_ganho: resultado.xp_ganho ?? 0,
+        },
+        transaction,
+      );
+    } else if (entrada.tipo_acao === TIPOS_ACAO_FORJA.REFINAMENTO) {
+      await forgeTelemetryService.registrarEvento(
+        {
+          tipo_acao: "Refinamento",
+          id_personagem: characterId,
+          categoria_equipamento: entrada.referencia.categoria_equipamento ?? null,
+          qualidade_base: entrada.referencia.qualidade_item ?? null,
+          alvo_refinamento: entrada.referencia.alvo,
+          sucesso: entrada.payload_resultado.sucesso,
+          gold_delta: entrada.referencia.ouro_custo ?? 0,
+          xp_ganho: resultado.xp_ganho ?? 0,
+          id_item_pergaminho: entrada.referencia.id_item_pergaminho ?? null,
+        },
+        transaction,
+      );
     }
 
     await entrada.destroy({ transaction });

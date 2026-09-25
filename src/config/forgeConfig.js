@@ -115,7 +115,13 @@ const BONUS_FORJA_REFINAMENTO_PPM_POR_NIVEL = {
 
 // +1/+2/+3 permanecem garantidos em 100% mesmo somando os bônus (§30).
 const REFINAMENTOS_GARANTIDOS = [1, 2, 3];
-const CAP_CHANCE_REFINAMENTO_PPM = 950_000;
+// `let` (não `const`) só nestes dois — são os únicos valores PRIMITIVOS
+// editáveis via Painel Administrativo (§9); tudo o mais editável aqui é
+// um objeto (dicionário por nível/qualidade/alvo), mutado em-lugar por
+// aplicarOverridesBalanceamento no fim do arquivo, o que basta pra
+// qualquer `require("./forgeConfig")` que já tenha desestruturado esse
+// objeto enxergar a mudança sem reiniciar o processo.
+let CAP_CHANCE_REFINAMENTO_PPM = 950_000;
 
 // Bônus percentual acumulado aplicado ao atributo principal do equipamento.
 const BONUS_ATRIBUTO_REFINAMENTO_PCT = {
@@ -153,7 +159,7 @@ const OURO_BASE_REFINAMENTO_POR_QUALIDADE = {
 
 // Em falha, ~25% do XP do sucesso (§35).
 const XP_REFINAMENTO_POR_ALVO = { 1: 30, 2: 45, 3: 65, 4: 90, 5: 130, 6: 190, 7: 280, 8: 420, 9: 650, 10: 1000 };
-const FATOR_XP_REFINAMENTO_FALHA = 0.25;
+let FATOR_XP_REFINAMENTO_FALHA = 0.25;
 
 // ---------------------------------------------------------------------
 // FILA (§46-§48)
@@ -162,8 +168,106 @@ const FATOR_XP_REFINAMENTO_FALHA = 0.25;
 const SLOTS_FORJA = { FUNDICAO: "Fundicao", FORJA: "Forja" };
 const TIPOS_ACAO_FORJA = { FUNDICAO: "Fundicao", FABRICACAO: "Fabricacao", REFINAMENTO: "Refinamento" };
 
+// ---------------------------------------------------------------------
+// PAINEL ADMINISTRATIVO — hot-reload de balanceamento (§9/§10/§19 fase 5)
+// ---------------------------------------------------------------------
+//
+// Aplica overrides já VALIDADOS (forgeSettingsService, nunca chamado
+// direto por um controller) por cima destes defaults. SEMPRE por
+// mutação em-lugar dos mesmos objetos já exportados acima — nunca
+// reatribuindo o binding do módulo — porque forgeCraftingService/
+// forgeSmeltingService/forgeRefinementService/forgeRollService já
+// desestruturaram essas TABELAS (dicionários) no load: como é o mesmo
+// objeto por referência, mutar as chaves dele é visto por todo mundo
+// sem precisar re-requerir nada. Os dois primitivos editáveis
+// (CAP_CHANCE_REFINAMENTO_PPM/FATOR_XP_REFINAMENTO_FALHA) são a exceção
+// — ver comentário ao lado da declaração de cada um.
+function aplicarOverridesBalanceamento(grupo, valores) {
+  if (!valores || typeof valores !== "object") return;
+  switch (grupo) {
+    case "forge.smelting": {
+      if (valores.FRAGMENTOS_POR_BARRA) Object.assign(FRAGMENTOS_POR_BARRA, valores.FRAGMENTOS_POR_BARRA);
+      if (valores.QUALIDADE_MAXIMA_FUNDICAO_POR_NIVEL) {
+        Object.assign(QUALIDADE_MAXIMA_FUNDICAO_POR_NIVEL, valores.QUALIDADE_MAXIMA_FUNDICAO_POR_NIVEL);
+      }
+      if (valores.CHANCE_BARRA_BONUS_PPM_POR_NIVEL) {
+        Object.assign(CHANCE_BARRA_BONUS_PPM_POR_NIVEL, valores.CHANCE_BARRA_BONUS_PPM_POR_NIVEL);
+      }
+      if (valores.XP_FUNDICAO_POR_QUALIDADE_BARRA) {
+        Object.assign(XP_FUNDICAO_POR_QUALIDADE_BARRA, valores.XP_FUNDICAO_POR_QUALIDADE_BARRA);
+      }
+      break;
+    }
+    case "forge.crafting": {
+      if (valores.CHANCE_QUALIDADE_SUPERIOR_FABRICACAO_PPM_POR_NIVEL) {
+        for (const [nivel, tabela] of Object.entries(valores.CHANCE_QUALIDADE_SUPERIOR_FABRICACAO_PPM_POR_NIVEL)) {
+          CHANCE_QUALIDADE_SUPERIOR_FABRICACAO_PPM_POR_NIVEL[nivel] = { ...tabela };
+        }
+      }
+      if (valores.XP_FABRICACAO_POR_QUALIDADE_EQUIPAMENTO) {
+        Object.assign(XP_FABRICACAO_POR_QUALIDADE_EQUIPAMENTO, valores.XP_FABRICACAO_POR_QUALIDADE_EQUIPAMENTO);
+      }
+      if (valores.TEMPO_BASE_FABRICACAO_MS_POR_QUALIDADE) {
+        Object.assign(TEMPO_BASE_FABRICACAO_MS_POR_QUALIDADE, valores.TEMPO_BASE_FABRICACAO_MS_POR_QUALIDADE);
+      }
+      break;
+    }
+    case "forge.refinement": {
+      if (valores.CHANCE_BASE_REFINAMENTO_PPM_POR_ALVO) {
+        Object.assign(CHANCE_BASE_REFINAMENTO_PPM_POR_ALVO, valores.CHANCE_BASE_REFINAMENTO_PPM_POR_ALVO);
+      }
+      if (valores.BONUS_FORJA_REFINAMENTO_PPM_POR_NIVEL) {
+        Object.assign(BONUS_FORJA_REFINAMENTO_PPM_POR_NIVEL, valores.BONUS_FORJA_REFINAMENTO_PPM_POR_NIVEL);
+      }
+      if (valores.BONUS_ATRIBUTO_REFINAMENTO_PCT) {
+        Object.assign(BONUS_ATRIBUTO_REFINAMENTO_PCT, valores.BONUS_ATRIBUTO_REFINAMENTO_PCT);
+      }
+      if (valores.UNIDADES_MATERIAL_REFINAMENTO_POR_ALVO) {
+        Object.assign(UNIDADES_MATERIAL_REFINAMENTO_POR_ALVO, valores.UNIDADES_MATERIAL_REFINAMENTO_POR_ALVO);
+      }
+      if (valores.MATERIAIS_BASE_REFINAMENTO_POR_CATEGORIA) {
+        for (const [categoria, base] of Object.entries(valores.MATERIAIS_BASE_REFINAMENTO_POR_CATEGORIA)) {
+          MATERIAIS_BASE_REFINAMENTO_POR_CATEGORIA[categoria] = { ...base };
+        }
+      }
+      if (valores.OURO_BASE_REFINAMENTO_POR_QUALIDADE) {
+        Object.assign(OURO_BASE_REFINAMENTO_POR_QUALIDADE, valores.OURO_BASE_REFINAMENTO_POR_QUALIDADE);
+      }
+      if (valores.XP_REFINAMENTO_POR_ALVO) {
+        Object.assign(XP_REFINAMENTO_POR_ALVO, valores.XP_REFINAMENTO_POR_ALVO);
+      }
+      if (typeof valores.CAP_CHANCE_REFINAMENTO_PPM === "number") {
+        CAP_CHANCE_REFINAMENTO_PPM = valores.CAP_CHANCE_REFINAMENTO_PPM;
+        module.exports.CAP_CHANCE_REFINAMENTO_PPM = CAP_CHANCE_REFINAMENTO_PPM;
+      }
+      if (typeof valores.FATOR_XP_REFINAMENTO_FALHA === "number") {
+        FATOR_XP_REFINAMENTO_FALHA = valores.FATOR_XP_REFINAMENTO_FALHA;
+        module.exports.FATOR_XP_REFINAMENTO_FALHA = FATOR_XP_REFINAMENTO_FALHA;
+      }
+      break;
+    }
+    case "forge.progression": {
+      // XP_NECESSARIO_POR_ETAPA é DERIVADO em XP_TOTAL_PARA_NIVEL — mudar
+      // a curva precisa recalcular o acumulado inteiro (e é o único grupo
+      // com preview de impacto obrigatório antes de aplicar, §11.2).
+      if (valores.XP_NECESSARIO_POR_ETAPA) {
+        Object.assign(XP_NECESSARIO_POR_ETAPA, valores.XP_NECESSARIO_POR_ETAPA);
+        let acumulado = 0;
+        for (let nivel = 2; nivel <= NIVEL_MAXIMO; nivel += 1) {
+          acumulado += XP_NECESSARIO_POR_ETAPA[nivel - 1];
+          XP_TOTAL_PARA_NIVEL[nivel] = acumulado;
+        }
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
 module.exports = {
   NIVEL_MAXIMO,
+  XP_NECESSARIO_POR_ETAPA,
   XP_TOTAL_PARA_NIVEL,
   ORDEM_QUALIDADE,
   NOME_EXIBICAO_QUALIDADE,
@@ -189,4 +293,5 @@ module.exports = {
   FATOR_XP_REFINAMENTO_FALHA,
   SLOTS_FORJA,
   TIPOS_ACAO_FORJA,
+  aplicarOverridesBalanceamento,
 };

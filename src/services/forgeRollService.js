@@ -2,6 +2,7 @@
 // sorteio do jogo que "vale a pena tentar prever/manipular": drop,
 // expedição, refinamento de habilidade).
 const crypto = require("crypto");
+const forgeConfig = require("../config/forgeConfig");
 const {
   ORDEM_QUALIDADE,
   CHANCE_BARRA_BONUS_PPM_POR_NIVEL,
@@ -9,8 +10,14 @@ const {
   CHANCE_BASE_REFINAMENTO_PPM_POR_ALVO,
   BONUS_FORJA_REFINAMENTO_PPM_POR_NIVEL,
   REFINAMENTOS_GARANTIDOS,
-  CAP_CHANCE_REFINAMENTO_PPM,
-} = require("../config/forgeConfig");
+} = forgeConfig;
+// CAP_CHANCE_REFINAMENTO_PPM fica de fora da desestruturação acima DE
+// PROPÓSITO — é editável via Painel Administrativo §9 (forge.balance),
+// e forgeConfig.aplicarOverridesBalanceamento muta essa propriedade no
+// objeto exportado (nunca reatribui o módulo inteiro); lendo por
+// property access aqui (forgeConfig.CAP_CHANCE_REFINAMENTO_PPM, sempre
+// no MOMENTO do cálculo) é o que faz uma mudança de balanceamento
+// valer pro próximo refinamento sem precisar reiniciar o servidor.
 
 const BASE_SORTEIO = 1_000_000;
 
@@ -76,7 +83,7 @@ function chanceFinalRefinamentoPpm(alvo, nivelForja, bonusPergaminhoPercentual =
   const bonusForja = BONUS_FORJA_REFINAMENTO_PPM_POR_NIVEL[nivelForja] ?? 0;
   const bonusPergaminho = Math.round((bonusPergaminhoPercentual / 100) * BASE_SORTEIO);
   const somaBruta = base + bonusForja + bonusPergaminho;
-  return Math.min(somaBruta, CAP_CHANCE_REFINAMENTO_PPM);
+  return Math.min(somaBruta, forgeConfig.CAP_CHANCE_REFINAMENTO_PPM);
 }
 
 function rolarSucessoRefinamento(chancePpm) {
