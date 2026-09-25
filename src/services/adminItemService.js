@@ -368,13 +368,17 @@ async function duplicateAdminItem(idItem, { idAdmin, req } = {}) {
   });
 }
 
-async function listAdminItems({ pagina = 1, porPagina = 20, tipo_item, raridade, nome, apenasAtivos } = {}) {
+async function listAdminItems({ pagina = 1, porPagina = 20, tipo_item, raridade, nome, apenasAtivos, disponivelLoja } = {}) {
   const { Op } = require("sequelize");
   const where = {};
   if (tipo_item) where.tipo_item = tipo_item;
   if (raridade) where.raridade = raridade;
   if (nome) where.nome = { [Op.iLike]: `%${nome}%` };
   if (apenasAtivos !== undefined) where.ativo = apenasAtivos;
+  // Painel Administrativo — "Loja NPC" (Economia) reaproveita este
+  // mesmo endpoint filtrado por disponivel_loja, em vez de duplicar
+  // listagem/edição de Item numa tela própria.
+  if (disponivelLoja !== undefined) where.disponivel_loja = disponivelLoja;
 
   const limite = Math.min(100, Math.max(1, porPagina));
   const offset = (Math.max(1, pagina) - 1) * limite;

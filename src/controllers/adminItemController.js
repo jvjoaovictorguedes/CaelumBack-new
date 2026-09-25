@@ -12,7 +12,7 @@ function tratarErro(res, error, mensagemPadrao) {
 
 exports.listar = async (req, res) => {
   try {
-    const { pagina, porPagina, tipo_item, raridade, nome, apenasAtivos } = req.query;
+    const { pagina, porPagina, tipo_item, raridade, nome, apenasAtivos, disponivelLoja } = req.query;
     const resultado = await adminItemService.listAdminItems({
       pagina: pagina ? Number(pagina) : undefined,
       porPagina: porPagina ? Number(porPagina) : undefined,
@@ -20,6 +20,7 @@ exports.listar = async (req, res) => {
       raridade,
       nome,
       apenasAtivos: apenasAtivos === undefined ? undefined : apenasAtivos === "true",
+      disponivelLoja: disponivelLoja === undefined ? undefined : disponivelLoja === "true",
     });
     res.status(200).json({ status: "success", data: resultado });
   } catch (error) {
