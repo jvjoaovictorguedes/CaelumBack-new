@@ -15,10 +15,18 @@
 //      despertar automático é a garantia de que a luta sempre começa,
 //      mesmo se o descobridor sumir). Esse SIM é público — broadcast
 //      pra sala global.
+//   4. retomarRecompensasPendentes (Fase 5, §16) — rede de segurança
+//      pro lote de recompensas: o caminho rápido já dispara na hora do
+//      Golpe Final (worldBossCombatService, fire-and-forget), mas se
+//      isso falhar ou o processo cair no meio do lote, todo evento
+//      DEFEATED com participation_rewards_status Pending/Processing é
+//      retomado daqui — idempotente, nunca credita de novo o que já
+//      virou Granted.
 const { sequelize } = require("../config/database");
 const WorldBossEvent = require("../models/WorldBossEvent");
 const worldBossLifecycleService = require("./worldBossLifecycleService");
 const worldBossStatusService = require("./worldBossStatusService");
+const worldBossRewardService = require("./worldBossRewardService");
 const { emitGlobal } = require("../socket/worldBossSocket");
 const { EVENT_STATUS } = require("../config/worldBossConfig");
 
@@ -63,6 +71,12 @@ async function tick() {
     }
   } catch (error) {
     console.error("[worldBossScheduler] falha ao despertar evento descoberto:", error);
+  }
+
+  try {
+    await worldBossRewardService.retomarRecompensasPendentes();
+  } catch (error) {
+    console.error("[worldBossScheduler] falha ao retomar recompensas pendentes:", error);
   }
 }
 

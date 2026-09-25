@@ -47,6 +47,7 @@ const { custoManaEfetivo, vidaMaximaDe, manaMaximaDe, comMultiplicadoresDeClasse
 const { personagemComBonus, buscarBonusDeAtributos } = require("./equipmentBonusService");
 const { buscarPoderesDoPersonagem } = require("../controllers/pvpController");
 const worldBossStatusService = require("./worldBossStatusService");
+const worldBossRewardService = require("./worldBossRewardService");
 const { emitGlobal } = require("../socket/worldBossSocket");
 const { EVENT_STATUS, COMBAT_SESSION_STATUS } = require("../config/worldBossConfig");
 
@@ -276,6 +277,7 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
         mana_max: manaMax,
       },
       boss: {
+        event_id: evento.id,
         hp_max: Number(evento.hp_max),
         hp_current: hpDepois,
         hp_percentual: Number(evento.hp_max) > 0 ? Math.round((hpDepois / Number(evento.hp_max)) * 10000) / 100 : 0,
@@ -293,6 +295,15 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
   if (contexto.golpeFinal) {
     const status = await worldBossStatusService.obterStatusPublico();
     emitGlobal("worldboss:derrotado", status);
+    // Fase 5 (§16) — "fire and forget": processarRecompensas roda em
+    // transações PRÓPRIAS (nunca a do combate, já finalizada aqui em
+    // cima) e é idempotente, então mesmo se isso falhar ou o processo
+    // cair no meio, o scheduler retoma sozinho no próximo tick — a
+    // resposta HTTP do golpe final nunca fica esperando o lote inteiro
+    // de recompensas terminar.
+    worldBossRewardService
+      .processarRecompensas(contexto.boss.event_id)
+      .catch((error) => console.error("[worldBossCombatService] falha ao disparar recompensas:", error));
   } else {
     emitGlobal("worldboss:hp-atualizado", {
       hp_max: contexto.boss.hp_max,

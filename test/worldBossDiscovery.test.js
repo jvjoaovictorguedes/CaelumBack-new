@@ -36,12 +36,20 @@ const WorldBossEvent = require("../src/models/WorldBossEvent");
 const WorldBossActivityMetric = require("../src/models/WorldBossActivityMetric");
 const WorldBossCombatSession = require("../src/models/WorldBossCombatSession");
 const WorldBossContribution = require("../src/models/WorldBossContribution");
+const WorldBossRewardGrant = require("../src/models/WorldBossRewardGrant");
+const CharacterInventory = require("../src/models/CharacterInventory");
 const worldBossDiscoveryService = require("../src/services/worldBossDiscoveryService");
 const worldBossLifecycleService = require("../src/services/worldBossLifecycleService");
 const worldBossStatusService = require("../src/services/worldBossStatusService");
 const worldBossScheduler = require("../src/services/worldBossScheduler");
 const worldBossCombatService = require("../src/services/worldBossCombatService");
-const { EVENT_STATUS, COMBAT_SESSION_STATUS } = require("../src/config/worldBossConfig");
+const worldBossRewardService = require("../src/services/worldBossRewardService");
+const {
+  EVENT_STATUS,
+  COMBAT_SESSION_STATUS,
+  REWARD_KIND,
+  PARTICIPATION_REWARDS_STATUS,
+} = require("../src/config/worldBossConfig");
 
 let temBanco = false;
 test.before(async () => {
@@ -69,6 +77,7 @@ const eventosCriados = [];
 test.afterEach(async () => {
   if (!temBanco) return;
   if (eventosCriados.length > 0) {
+    await WorldBossRewardGrant.destroy({ where: { event_id: eventosCriados } });
     await WorldBossCombatSession.destroy({ where: { event_id: eventosCriados } });
     await WorldBossContribution.destroy({ where: { event_id: eventosCriados } });
     await WorldBossEvent.destroy({ where: { id: eventosCriados } });
@@ -81,6 +90,11 @@ test.afterEach(async () => {
     configsCriados.length = 0;
   }
   if (itensCriados.length > 0) {
+    // Sem ON DELETE CASCADE em character_inventory.id_item (migration
+    // baseline) — precisa sumir a linha de posse ANTES do Item, senão
+    // o destroy abaixo esbarra na FK (mesma ordem já usada nos outros
+    // testes de Boss Global com Items).
+    await CharacterInventory.destroy({ where: { id_item: itensCriados } });
     await Item.destroy({ where: { id: itensCriados } });
     itensCriados.length = 0;
   }
@@ -645,4 +659,165 @@ testeComBanco("combate: ação depois do evento não estar mais ACTIVE é rejeit
 
   const sessao = await WorldBossCombatSession.findOne({ where: { character_id: personagem.id, event_id: evento.id } });
   assert.equal(sessao.status, COMBAT_SESSION_STATUS.ENCERRADA);
+});
+
+// ---------------------------------------------------------------------
+// Fase 5 — Recompensas
+// ---------------------------------------------------------------------
+
+async function criarEventoDefeated({
+  hpMax = 100000,
+  goldDescoberta = 100,
+  goldParticipacao = 20,
+  xpParticipacao = 50,
+  minDanoParticipacao = null,
+  discovererId = null,
+  finalBlowId = null,
+} = {}) {
+  const item = await criarItemGolpeFinal();
+  const config = await WorldBossConfig.create({
+    nome: `Ameaça de teste ${sufixo()}`,
+    descricao: "teste",
+    ativo: true,
+    peso_selecao: 1,
+    vida_base: hpMax,
+    defesa: 0,
+    mensagem_descoberta: "descoberta",
+    mensagem_convocacao: "convocacao",
+    id_item_golpe_final: item.id,
+    gold_descoberta: goldDescoberta,
+    gold_participacao: goldParticipacao,
+    xp_participacao: xpParticipacao,
+    min_dano_participacao: minDanoParticipacao,
+  });
+  configsCriados.push(config.id);
+  const evento = await WorldBossEvent.create({
+    id_world_boss_config: config.id,
+    status: EVENT_STATUS.DEFEATED,
+    hp_max: hpMax,
+    hp_current: 0,
+    config_snapshot: {
+      nome: config.nome,
+      id_item_golpe_final: item.id,
+      gold_descoberta: goldDescoberta,
+      gold_participacao: goldParticipacao,
+      xp_participacao: xpParticipacao,
+      min_dano_participacao: minDanoParticipacao,
+    },
+    discoverer_character_id: discovererId,
+    final_blow_character_id: finalBlowId,
+    defeated_at: new Date(),
+    participation_rewards_status: PARTICIPATION_REWARDS_STATUS.PENDING,
+  });
+  eventosCriados.push(evento.id);
+  return { evento, item, config };
+}
+
+testeComBanco("recompensas: descobridor recebe gold_descoberta uma vez, idempotente em chamadas repetidas", async () => {
+  const { personagem } = await criarPersonagem({ nivel: 10 });
+  personagem.dinheiro = 0;
+  await personagem.save();
+  const { evento } = await criarEventoDefeated({ goldDescoberta: 250, discovererId: personagem.id });
+
+  await worldBossRewardService.processarRecompensas(evento.id);
+  await personagem.reload();
+  assert.equal(personagem.dinheiro, 250);
+
+  // segunda chamada — nunca credita de novo.
+  await worldBossRewardService.processarRecompensas(evento.id);
+  await personagem.reload();
+  assert.equal(personagem.dinheiro, 250);
+
+  const grant = await WorldBossRewardGrant.findOne({
+    where: { event_id: evento.id, character_id: personagem.id, reward_kind: REWARD_KIND.DISCOVERY },
+  });
+  assert.equal(grant.status, "Granted");
+
+  await evento.reload();
+  assert.equal(evento.participation_rewards_status, PARTICIPATION_REWARDS_STATUS.DONE);
+});
+
+testeComBanco("recompensas: golpe final recebe o item do catálogo, uma unidade, idempotente", async () => {
+  const { personagem } = await criarPersonagem({ nivel: 10 });
+  const { evento, item } = await criarEventoDefeated({ finalBlowId: personagem.id });
+
+  await worldBossRewardService.processarRecompensas(evento.id);
+  let posse = await CharacterInventory.findOne({ where: { id_personagem: personagem.id, id_item: item.id } });
+  assert.equal(posse.quantidade, 1);
+
+  await worldBossRewardService.processarRecompensas(evento.id);
+  posse = await CharacterInventory.findOne({ where: { id_personagem: personagem.id, id_item: item.id } });
+  assert.equal(posse.quantidade, 1, "chamar de novo não pode duplicar o item do Golpe Final");
+});
+
+testeComBanco("recompensas: participação credita gold+XP só pra quem bateu o dano mínimo", async () => {
+  const { personagem: qualificado } = await criarPersonagem({ nivel: 10 });
+  const { personagem: abaixoDoMinimo } = await criarPersonagem({ nivel: 10 });
+  const { personagem: semDano } = await criarPersonagem({ nivel: 10 });
+  qualificado.dinheiro = 0;
+  abaixoDoMinimo.dinheiro = 0;
+  semDano.dinheiro = 0;
+  await Promise.all([qualificado.save(), abaixoDoMinimo.save(), semDano.save()]);
+
+  const { evento } = await criarEventoDefeated({
+    goldParticipacao: 30,
+    xpParticipacao: 40,
+    minDanoParticipacao: 100,
+  });
+  await WorldBossContribution.create({ event_id: evento.id, character_id: qualificado.id, damage_total: 150, attacks_count: 3 });
+  await WorldBossContribution.create({ event_id: evento.id, character_id: abaixoDoMinimo.id, damage_total: 50, attacks_count: 2 });
+  await WorldBossContribution.create({ event_id: evento.id, character_id: semDano.id, damage_total: 0, attacks_count: 0 });
+
+  const experienciaAntes = qualificado.experiencia;
+  await worldBossRewardService.processarRecompensas(evento.id);
+
+  await qualificado.reload();
+  await abaixoDoMinimo.reload();
+  await semDano.reload();
+
+  assert.equal(qualificado.dinheiro, 30);
+  assert.ok(qualificado.experiencia > experienciaAntes);
+  assert.equal(abaixoDoMinimo.dinheiro, 0, "abaixo do mínimo não recebe participação");
+  assert.equal(semDano.dinheiro, 0, "sem dano nenhum não recebe participação");
+
+  const grantQualificado = await WorldBossRewardGrant.findOne({
+    where: { event_id: evento.id, character_id: qualificado.id, reward_kind: REWARD_KIND.PARTICIPATION },
+  });
+  assert.equal(grantQualificado.status, "Granted");
+  const grantAbaixo = await WorldBossRewardGrant.findOne({
+    where: { event_id: evento.id, character_id: abaixoDoMinimo.id, reward_kind: REWARD_KIND.PARTICIPATION },
+  });
+  assert.equal(grantAbaixo, null, "nunca cria nem uma linha Pending pra quem não se qualifica");
+});
+
+testeComBanco("recompensas: retomarRecompensasPendentes reprocessa eventos travados em Processing (recovery)", async () => {
+  const { personagem } = await criarPersonagem({ nivel: 10 });
+  personagem.dinheiro = 0;
+  await personagem.save();
+  const { evento } = await criarEventoDefeated({ goldDescoberta: 77, discovererId: personagem.id });
+
+  // Simula um processo que caiu NO MEIO do lote: marca Processing sem
+  // nenhum grant concedido ainda.
+  evento.participation_rewards_status = PARTICIPATION_REWARDS_STATUS.PROCESSING;
+  await evento.save();
+
+  await worldBossRewardService.retomarRecompensasPendentes();
+
+  await personagem.reload();
+  assert.equal(personagem.dinheiro, 77);
+  await evento.reload();
+  assert.equal(evento.participation_rewards_status, PARTICIPATION_REWARDS_STATUS.DONE);
+});
+
+testeComBanco("recompensas: evento que ainda não está DEFEATED nunca processa nada", async () => {
+  const { personagem } = await criarPersonagem({ nivel: 10 });
+  const evento = await criarEventoAtivo();
+  evento.discoverer_character_id = personagem.id;
+  await evento.save();
+
+  const resultado = await worldBossRewardService.processarRecompensas(evento.id);
+  assert.equal(resultado, null);
+
+  const grant = await WorldBossRewardGrant.findOne({ where: { event_id: evento.id } });
+  assert.equal(grant, null);
 });
