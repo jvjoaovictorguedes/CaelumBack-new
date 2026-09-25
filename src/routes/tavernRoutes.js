@@ -10,4 +10,8 @@ router.use(authMiddleware, carregarPersonagemAtual);
 router.get("/rest/preview", tavernController.previewDescanso);
 router.post("/rest", tavernController.confirmarDescanso);
 
+router.get("/menu", tavernController.listarCardapio);
+router.post("/menu/:id/consume", tavernController.consumirOferta);
+router.get("/buffs", tavernController.listarBuffsAtivos);
+
 module.exports = router;

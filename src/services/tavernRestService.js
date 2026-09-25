@@ -6,9 +6,10 @@
 const { sequelize } = require("../config/database");
 const Character = require("../models/Character");
 const Class = require("../models/Class");
-const { vidaMaximaDe, manaMaximaDe, comMultiplicadoresDeClasse } = require("./combatFormulas");
+const { comMultiplicadoresDeClasse } = require("./combatFormulas");
 const { buscarBonusDeAtributos, personagemComBonus } = require("./equipmentBonusService");
 const { sincronizarRegeneracaoDeVidaEMana } = require("./regenService");
+const { vidaManaMaximaComTaverna } = require("./tavernBuffService");
 const gameSettingCache = require("./gameSettingCache");
 const { GAME_SETTINGS_DEFAULT } = require("../config/tavernConfig");
 
@@ -40,9 +41,12 @@ async function personagemEfetivoDe(character) {
   );
 }
 
-function calcularCusto(character, personagemEfetivo) {
-  const vidaMaxima = vidaMaximaDe(personagemEfetivo);
-  const manaMaxima = manaMaximaDe(personagemEfetivo);
+async function calcularCusto(character, personagemEfetivo, transaction) {
+  // MAX_HP_PCT/MAX_MANA_PCT da Taverna (§13) somados por cima do
+  // máximo "cru" — o descanso sempre restaura pro máximo REAL do
+  // personagem, buff incluso, nunca um valor que a Taverna depois
+  // corrigiria de novo.
+  const { vidaMaxima, manaMaxima } = await vidaManaMaximaComTaverna(character.id, personagemEfetivo, transaction);
   const missingHp = vidaMaxima > 0 ? Math.max(0, 1 - character.vida_atual / vidaMaxima) : 0;
   const missingMp = manaMaxima > 0 ? Math.max(0, 1 - character.mana_atual / manaMaxima) : 0;
 
@@ -76,7 +80,7 @@ async function previewDescanso(characterId) {
   sincronizarRegeneracaoDeVidaEMana(character, personagemEfetivo);
 
   const bloqueio = atividadeBloqueante(character);
-  const { custo, vidaMaxima, manaMaxima, missingHp, missingMp } = calcularCusto(character, personagemEfetivo);
+  const { custo, vidaMaxima, manaMaxima, missingHp, missingMp } = await calcularCusto(character, personagemEfetivo);
 
   return {
     bloqueado: Boolean(bloqueio),
@@ -115,7 +119,7 @@ async function confirmarDescanso(characterId) {
     const personagemEfetivo = await personagemEfetivoDe(character);
     sincronizarRegeneracaoDeVidaEMana(character, personagemEfetivo);
 
-    const { custo, vidaMaxima, manaMaxima } = calcularCusto(character, personagemEfetivo);
+    const { custo, vidaMaxima, manaMaxima } = await calcularCusto(character, personagemEfetivo, transaction);
 
     if (custo > 0) {
       if (character.dinheiro < custo) throw erro("Gold insuficiente para descansar.", 400);
