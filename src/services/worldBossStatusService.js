@@ -62,4 +62,4 @@ async function obterStatusPublico() {
   };
 }
 
-module.exports = { obterStatusPublico };
+module.exports = { obterStatusPublico, faseAtualDoSnapshot };
