@@ -1,8 +1,22 @@
-// Boss Global — Fase 2: Descoberta (§4/§5). Threshold nunca vaza pro
-// jogador; só a vitória PvE de ZONA (id_area presente) conta; zona
-// fora da lista do config nunca dispara; concorrência: LOCK.UPDATE na
-// linha do evento garante um único "descobridor" mesmo com duas
+// Boss Global — Fases 2 e 3: Descoberta (§4/§5), status público
+// (§5.2/§11) e o scheduler que avança o ciclo sozinho. Threshold nunca
+// vaza pro jogador; só a vitória PvE de ZONA (id_area presente) conta;
+// zona fora da lista do config nunca dispara; concorrência: LOCK.UPDATE
+// na linha do evento garante um único "descobridor" mesmo com duas
 // vitórias simultâneas perto do threshold.
+//
+// Deliberadamente em UM ÚNICO arquivo (não splitado por fase): o
+// índice único parcial world_boss_events_um_aberto_idx (no máximo um
+// evento Dormant/Discovered/Active) e a garantia de no máximo uma
+// linha COOLDOWN (agendarProximoCiclo) são invariantes de BANCO,
+// compartilhadas por todo teste que crie um evento nesses status. Como
+// os testes deste projeto rodam em paralelo entre ARQUIVOS (mas em
+// série DENTRO de um arquivo), splitar esses testes em dois arquivos
+// os deixa em corrida um contra o outro pela mesma linha única —
+// sintoma visto na prática: um arquivo cria o evento aberto no meio do
+// outro tentando montar o cenário dele, e a asserção erra por causa de
+// estado alheio, não por bug de verdade. Um arquivo só resolve isso de
+// vez.
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
@@ -13,10 +27,13 @@ const Item = require("../src/models/Item");
 const AdventureZone = require("../src/models/AdventureZone");
 const WorldBossConfig = require("../src/models/WorldBossConfig");
 const WorldBossConfigZone = require("../src/models/WorldBossConfigZone");
+const WorldBossPhase = require("../src/models/WorldBossPhase");
 const WorldBossEvent = require("../src/models/WorldBossEvent");
 const WorldBossActivityMetric = require("../src/models/WorldBossActivityMetric");
 const worldBossDiscoveryService = require("../src/services/worldBossDiscoveryService");
 const worldBossLifecycleService = require("../src/services/worldBossLifecycleService");
+const worldBossStatusService = require("../src/services/worldBossStatusService");
+const worldBossScheduler = require("../src/services/worldBossScheduler");
 const { EVENT_STATUS } = require("../src/config/worldBossConfig");
 
 let temBanco = false;
@@ -36,25 +53,33 @@ const zonasCriadas = [];
 const configsCriados = [];
 const eventosCriados = [];
 
-// O índice único parcial world_boss_events_um_aberto_idx permite no
-// máximo UM evento aberto (Dormant/Discovered/Active) — e COOLDOWN
-// também é único por design de agendarProximoCiclo. Como os testes
-// deste arquivo compartilham o mesmo banco, cada evento criado
-// precisa ser removido ANTES do próximo teste rodar, ou o segundo
-// teste esbarra na constraint que o primeiro deixou pra trás.
+// Tudo que participa do índice único parcial (eventos) OU da roleta de
+// seleção de config (worldBossLifecycleService.selecionarConfig lê
+// TODO WorldBossConfig ativo=true) precisa sumir a cada teste, não só
+// no fim do arquivo — senão um config esquecido de um teste anterior
+// pode ser sorteado no lugar do config que o teste seguinte acabou de
+// criar.
 test.afterEach(async () => {
   if (!temBanco) return;
-  if (eventosCriados.length === 0) return;
-  await WorldBossEvent.destroy({ where: { id: eventosCriados } });
-  eventosCriados.length = 0;
+  if (eventosCriados.length > 0) {
+    await WorldBossEvent.destroy({ where: { id: eventosCriados } });
+    eventosCriados.length = 0;
+  }
+  if (configsCriados.length > 0) {
+    await WorldBossConfigZone.destroy({ where: { id_world_boss_config: configsCriados } });
+    await WorldBossPhase.destroy({ where: { id_world_boss_config: configsCriados } });
+    await WorldBossConfig.destroy({ where: { id: configsCriados } });
+    configsCriados.length = 0;
+  }
+  if (itensCriados.length > 0) {
+    await Item.destroy({ where: { id: itensCriados } });
+    itensCriados.length = 0;
+  }
 });
 
 test.after(async () => {
   if (!temBanco) return;
-  await WorldBossConfigZone.destroy({ where: { id_world_boss_config: configsCriados.length ? configsCriados : [-1] } });
-  await WorldBossConfig.destroy({ where: { id: configsCriados.length ? configsCriados : [-1] } });
   await AdventureZone.destroy({ where: { id: zonasCriadas.length ? zonasCriadas : [-1] } });
-  await Item.destroy({ where: { id: itensCriados.length ? itensCriados : [-1] } });
   await sequelize.close();
 });
 
@@ -106,6 +131,20 @@ async function criarConfig({ zonas = [] } = {}) {
   return config;
 }
 
+async function criarConfigComFases() {
+  const config = await criarConfig();
+  await WorldBossPhase.create({ id_world_boss_config: config.id, ordem: 1, nome_fase: "Fase 1", hp_percentual_max: 100 });
+  await WorldBossPhase.create({
+    id_world_boss_config: config.id,
+    ordem: 2,
+    nome_fase: "Fase 2 - Fúria",
+    hp_percentual_max: 30,
+    modificador_dano_percentual: 25,
+    texto_alerta: "Ela enfurece!",
+  });
+  return config;
+}
+
 async function criarEventoDormant({ config, threshold = 3, progress = 0 }) {
   const evento = await WorldBossEvent.create({
     id_world_boss_config: config.id,
@@ -119,6 +158,37 @@ async function criarEventoDormant({ config, threshold = 3, progress = 0 }) {
   eventosCriados.push(evento.id);
   return evento;
 }
+
+async function criarEvento({ config, status, overrides = {} }) {
+  const evento = await WorldBossEvent.create({
+    id_world_boss_config: config.id,
+    status,
+    hp_max: 1000,
+    hp_current: 1000,
+    config_snapshot: {
+      nome: config.nome,
+      descricao: config.descricao,
+      mensagem_convocacao: config.mensagem_convocacao,
+      fases: [
+        { ordem: 1, nome_fase: "Fase 1", hp_percentual_max: 100, modificador_dano_percentual: 0, texto_alerta: null },
+        {
+          ordem: 2,
+          nome_fase: "Fase 2 - Fúria",
+          hp_percentual_max: 30,
+          modificador_dano_percentual: 25,
+          texto_alerta: "Ela enfurece!",
+        },
+      ],
+    },
+    ...overrides,
+  });
+  eventosCriados.push(evento.id);
+  return evento;
+}
+
+// ---------------------------------------------------------------------
+// Fase 2 — Descoberta
+// ---------------------------------------------------------------------
 
 testeComBanco("encontro legado (sem id_area) nunca conta pra descoberta", async () => {
   const { personagem } = await criarPersonagem();
@@ -228,9 +298,13 @@ testeComBanco("sem evento DORMANT aberto, encontro elegível não faz nada (mas 
   assert.ok(Number(metrica.encontros_elegiveis) >= 1);
 });
 
+// ---------------------------------------------------------------------
+// Fase 2/3 — lifecycle (COOLDOWN -> DORMANT) e scheduler
+// ---------------------------------------------------------------------
+
 testeComBanco("lifecycle: agendarProximoCiclo cria evento COOLDOWN e não duplica se já existe um aberto/em espera", async () => {
   const zona = await criarZona();
-  const config = await criarConfig({ zonas: [zona] });
+  await criarConfig({ zonas: [zona] });
 
   let criado;
   await sequelize.transaction(async (t) => {
@@ -279,4 +353,99 @@ testeComBanco("lifecycle: ativarSeElegivel só transiciona COOLDOWN -> DORMANT a
     assert.ok(threshold >= 1);
     assert.equal(Number(resultado.discovery_progress), 0);
   });
+});
+
+testeComBanco("lifecycle.agendarProximoCiclo nunca cria uma segunda linha se já existe um evento aberto", async () => {
+  const config = await criarConfigComFases();
+  await criarEvento({ config, status: EVENT_STATUS.ACTIVE, overrides: { activated_at: new Date() } });
+
+  const resultado = await sequelize.transaction((t) => worldBossLifecycleService.agendarProximoCiclo(t));
+  assert.equal(resultado, null);
+});
+
+testeComBanco("scheduler.tick: bootstrap cria COOLDOWN quando não existe nada, e não duplica em ticks seguidos", async () => {
+  const config = await criarConfigComFases();
+
+  await worldBossScheduler.tick();
+  const evento = await WorldBossEvent.findOne({ where: { id_world_boss_config: config.id } });
+  assert.ok(evento);
+  eventosCriados.push(evento.id);
+  assert.equal(evento.status, EVENT_STATUS.COOLDOWN);
+
+  await worldBossScheduler.tick();
+  const total = await WorldBossEvent.count({ where: { id_world_boss_config: config.id } });
+  assert.equal(total, 1);
+});
+
+testeComBanco("scheduler.tick: COOLDOWN vencido vira DORMANT, e DISCOVERED vencido vira ACTIVE", async () => {
+  const config = await criarConfigComFases();
+  const evento = await criarEvento({
+    config,
+    status: EVENT_STATUS.COOLDOWN,
+    overrides: { next_eligible_at: new Date(Date.now() - 1000) },
+  });
+
+  await worldBossScheduler.tick();
+  await evento.reload();
+  assert.equal(evento.status, EVENT_STATUS.DORMANT);
+  assert.ok(Number(evento.discovery_threshold) >= 1);
+
+  evento.status = EVENT_STATUS.DISCOVERED;
+  evento.auto_awaken_at = new Date(Date.now() - 1000);
+  evento.discovered_at = new Date();
+  await evento.save();
+
+  await worldBossScheduler.tick();
+  await evento.reload();
+  assert.equal(evento.status, EVENT_STATUS.ACTIVE);
+  assert.ok(evento.activated_at);
+});
+
+// ---------------------------------------------------------------------
+// Fase 3 — status público
+// ---------------------------------------------------------------------
+
+testeComBanco("sem nenhum evento visível, status público é 'Nenhum'", async () => {
+  const status = await worldBossStatusService.obterStatusPublico();
+  assert.equal(status.status, "Nenhum");
+});
+
+testeComBanco("evento em DORMANT/COOLDOWN nunca aparece no status público (segredo até ser descoberto)", async () => {
+  const config = await criarConfigComFases();
+  await criarEvento({ config, status: EVENT_STATUS.DORMANT, overrides: { discovery_threshold: 50, discovery_progress: 10 } });
+
+  const status = await worldBossStatusService.obterStatusPublico();
+  assert.equal(status.status, "Nenhum");
+});
+
+testeComBanco("evento DISCOVERED aparece completo, sem threshold/progress, com a fase correta", async () => {
+  const config = await criarConfigComFases();
+  await criarEvento({
+    config,
+    status: EVENT_STATUS.DISCOVERED,
+    overrides: { hp_current: 1000, discovered_at: new Date(), auto_awaken_at: new Date(Date.now() + 60000) },
+  });
+
+  const status = await worldBossStatusService.obterStatusPublico();
+  assert.equal(status.status, "DISCOVERED");
+  assert.equal(status.nome, config.nome);
+  assert.equal(status.hp_percentual, 100);
+  assert.equal(status.fase_atual.nome_fase, "Fase 1");
+  assert.ok(status.auto_awaken_at);
+  assert.equal(Object.prototype.hasOwnProperty.call(status, "discovery_threshold"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(status, "discovery_progress"), false);
+});
+
+testeComBanco("HP baixo muda a fase reportada pra 'Fúria'", async () => {
+  const config = await criarConfigComFases();
+  await criarEvento({
+    config,
+    status: EVENT_STATUS.ACTIVE,
+    overrides: { hp_current: 200, activated_at: new Date() },
+  });
+
+  const status = await worldBossStatusService.obterStatusPublico();
+  assert.equal(status.hp_percentual, 20);
+  assert.equal(status.fase_atual.nome_fase, "Fase 2 - Fúria");
+  assert.equal(status.auto_awaken_at, null);
 });

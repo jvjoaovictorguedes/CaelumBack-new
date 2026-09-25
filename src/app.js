@@ -12,6 +12,7 @@ const registerGuildHandlers = require("./socket/guildSocket");
 const registerMessagesHandlers = require("./socket/messagesSocket");
 const registerPartyHandlers = require("./socket/partySocket");
 const registerGuildBossHandlers = require("./socket/guildBossSocket");
+const registerWorldBossHandlers = require("./socket/worldBossSocket");
 
 // Importa TODOS os modelos primeiro.
 // A ordem de importação dos modelos aqui geralmente não importa,
@@ -88,6 +89,7 @@ const adminTavernRoutes = require("./routes/adminTavernRoutes");
 const alchemyRoutes = require("./routes/alchemyRoutes");
 const fishingRoutes = require("./routes/fishingRoutes");
 const tavernRoutes = require("./routes/tavernRoutes");
+const worldBossRoutes = require("./routes/worldBossRoutes");
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -200,6 +202,7 @@ app.use("/api/crafting", craftingRoutes);
 app.use("/api/alchemy", alchemyRoutes);
 app.use("/api/fishing", fishingRoutes);
 app.use("/api/tavern", tavernRoutes);
+app.use("/api/world-boss", worldBossRoutes);
 app.use("/api/expeditions", expeditionRoutes);
 app.use("/api/patch-notes", patchNotesRoutes);
 app.use("/api/users", userRoutes);
@@ -304,6 +307,8 @@ registerGuildHandlers(io);
 registerMessagesHandlers(io);
 registerPartyHandlers(io);
 registerGuildBossHandlers(io);
+registerWorldBossHandlers(io);
+require("./services/worldBossScheduler").iniciar();
 // rankedController usa isso pra criar a partida ranqueada assíncrona a
 // partir de uma rota REST (POST /ranked/match/start) e emitir os
 // eventos do duelo pro socket do jogador; messageController faz o mesmo
