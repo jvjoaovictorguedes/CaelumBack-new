@@ -6,11 +6,29 @@
 // as duas progressões: são conceitualmente independentes e podem
 // divergir de regra no futuro sem se afetar).
 const crypto = require("crypto");
-const { HUNT_REPUTATION_LEVELS, HUNT_DIFFICULTY_WEIGHTS_BY_REPUTATION } = require("../config/huntConfig");
+const {
+  HUNT_REPUTATION_LEVELS: HUNT_REPUTATION_LEVELS_PADRAO,
+  HUNT_DIFFICULTY_WEIGHTS_BY_REPUTATION: HUNT_DIFFICULTY_WEIGHTS_BY_REPUTATION_PADRAO,
+} = require("../config/huntConfig");
+const gameSettingCache = require("./gameSettingCache");
+
+// Painel Administrativo Fase 11 — mesmo raciocínio de
+// spoilReputationService.js: admin pode sobrescrever via GameSetting
+// ("hunts.reputationLevels"/"hunts.difficultyWeightsByReputation", ver
+// adminHuntConfigService.js), leitura sempre síncrona via cache em
+// memória (nunca bate no banco aqui). Sem override salvo, cai
+// exatamente nos mesmos arrays/objetos hardcoded de antes.
+function niveis() {
+  return gameSettingCache.obter("hunts.reputationLevels", HUNT_REPUTATION_LEVELS_PADRAO);
+}
+function pesosPorReputacao() {
+  return gameSettingCache.obter("hunts.difficultyWeightsByReputation", HUNT_DIFFICULTY_WEIGHTS_BY_REPUTATION_PADRAO);
+}
 
 function resolverNivel(pontos) {
-  let atual = HUNT_REPUTATION_LEVELS[0];
-  for (const nivel of HUNT_REPUTATION_LEVELS) {
+  const lista = niveis();
+  let atual = lista[0];
+  for (const nivel of lista) {
     if (pontos >= nivel.minimo) atual = nivel;
     else break;
   }
@@ -18,8 +36,9 @@ function resolverNivel(pontos) {
 }
 
 function proximoNivel(nivelAtual) {
-  const indice = HUNT_REPUTATION_LEVELS.findIndex((n) => n.nivel === nivelAtual.nivel);
-  return HUNT_REPUTATION_LEVELS[indice + 1] ?? null;
+  const lista = niveis();
+  const indice = lista.findIndex((n) => n.nivel === nivelAtual.nivel);
+  return lista[indice + 1] ?? null;
 }
 
 function formatarResumoReputacao(pontos) {
@@ -40,7 +59,7 @@ function formatarResumoReputacao(pontos) {
 // adventureGuildRotationService.js.
 function sortearDificuldade(pontos) {
   const nivel = resolverNivel(pontos);
-  const pesos = HUNT_DIFFICULTY_WEIGHTS_BY_REPUTATION[nivel.nivel] ?? {};
+  const pesos = pesosPorReputacao()[nivel.nivel] ?? {};
   const entradas = nivel.pool
     .filter((dificuldade) => (pesos[dificuldade] ?? 0) > 0)
     .map((dificuldade) => [dificuldade, pesos[dificuldade]]);

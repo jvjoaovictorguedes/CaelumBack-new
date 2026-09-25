@@ -80,6 +80,8 @@ const adminEquipmentSetRoutes = require("./routes/adminEquipmentSetRoutes");
 const { powersRouter: adminPowersRouter, statusEffectsRouter: adminStatusEffectsRouter, weaponStatusEffectsRouter: adminWeaponStatusEffectsRouter } = require("./routes/adminPowerRoutes");
 const { adminMediaRouter, mediaServingRouter } = require("./routes/adminMediaRoutes");
 const adminMissionRoutes = require("./routes/adminMissionRoutes");
+const adminSpoilConfigRoutes = require("./routes/adminSpoilConfigRoutes");
+const adminHuntConfigRoutes = require("./routes/adminHuntConfigRoutes");
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -97,12 +99,14 @@ app.disable("x-powered-by");
 // O .catch() é essencial: connectDB() roda sem await, e uma promise
 // rejeitada sem handler derruba o processo inteiro (comportamento padrão
 // do Node desde a v15) mesmo depois do servidor já estar no ar.
-connectDB().catch((error) => {
-  console.error(
-    "Erro fatal e inesperado ao conectar ao banco de dados:",
-    error,
-  );
-});
+connectDB()
+  .then(() => require("./services/gameSettingCache").iniciarAtualizacaoPeriodica())
+  .catch((error) => {
+    console.error(
+      "Erro fatal e inesperado ao conectar ao banco de dados:",
+      error,
+    );
+  });
 
 // CORS_ORIGIN é opcional fora de produção (comportamento de antes:
 // sem ele, aceita qualquer origem, pra não travar quem ainda está
@@ -238,6 +242,8 @@ app.use("/api/admin/media", adminMediaRouter);
 // <img src> sem token de admin.
 app.use("/api/media", mediaServingRouter);
 app.use("/api/admin/missions", adminMissionRoutes);
+app.use("/api/admin/spoils/config", adminSpoilConfigRoutes);
+app.use("/api/admin/hunts/config", adminHuntConfigRoutes);
 
 // Nenhuma rota acima bateu — sem isso, o Express respondia com a página
 // de erro padrão dele (texto puro tipo "Cannot GET /api/xyz"), que o

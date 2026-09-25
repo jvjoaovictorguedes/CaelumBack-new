@@ -11,9 +11,21 @@ const CharacterHunterProgress = require("../models/CharacterHunterProgress");
 const AdventureZone = require("../models/AdventureZone");
 const AdventureZoneMonster = require("../models/AdventureZoneMonster");
 const AdventureMonster = require("../models/AdventureMonster");
-const { HUNT_ROTATION_MS, HUNT_DIFFICULTIES, HUNT_STORY_TEMPLATES, inicioDaJanelaDeCacada } = require("../config/huntConfig");
+const {
+  HUNT_ROTATION_MS,
+  HUNT_DIFFICULTIES: HUNT_DIFFICULTIES_PADRAO,
+  HUNT_STORY_TEMPLATES,
+  inicioDaJanelaDeCacada,
+} = require("../config/huntConfig");
 const { sortearDificuldade } = require("./hunterReputationService");
 const { sortearFatorAleatorio, calcularRecompensaOuro, calcularPoderRecomendado } = require("./hunterRewardService");
+const gameSettingCache = require("./gameSettingCache");
+
+// Painel Administrativo Fase 11 — admin pode sobrescrever via
+// GameSetting ("hunts.difficulties", ver adminHuntConfigService.js).
+function dificuldades() {
+  return gameSettingCache.obter("hunts.difficulties", HUNT_DIFFICULTIES_PADRAO);
+}
 
 function embaralhar(lista) {
   const copia = [...lista];
@@ -87,7 +99,7 @@ async function montarDadosDeOferta(idPersonagem, transaction) {
 
   const progresso = await obterOuCriarProgresso(idPersonagem, transaction);
   const dificuldadeChave = sortearDificuldade(progresso.reputation_points);
-  const difficulty = HUNT_DIFFICULTIES[dificuldadeChave];
+  const difficulty = dificuldades()[dificuldadeChave];
 
   const [minQtd, maxQtd] = difficulty.quantityRange;
   const quantidade = minQtd >= maxQtd ? minQtd : crypto.randomInt(minQtd, maxQtd + 1);

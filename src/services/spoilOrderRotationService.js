@@ -18,9 +18,21 @@ const AdventureMonsterLoot = require("../models/AdventureMonsterLoot");
 const {
   SPOIL_ORDERS_PER_ROTATION,
   SPOIL_ORDER_ROTATION_MS,
-  SPOIL_ORDER_QUANTITY_RANGES,
+  SPOIL_ORDER_QUANTITY_RANGES: SPOIL_ORDER_QUANTITY_RANGES_PADRAO,
   inicioDaJanelaDeEncomendas,
 } = require("../config/adventureGuildConfig");
+const gameSettingCache = require("./gameSettingCache");
+
+// Painel Administrativo Fase 10 — admin pode sobrescrever via
+// GameSetting ("spoils.orderQuantityRanges", ver
+// adminSpoilConfigService.js). SPOIL_ORDERS_PER_ROTATION (quantas
+// encomendas por ciclo) fica de fora de propósito: é usado também como
+// invariante de comparação em spoilOrderService.js (bônus de lote
+// completo) — mudar isso em runtime poderia descasar ciclos já gerados
+// do valor novo, então continua fixo em código.
+function faixasDeQuantidade() {
+  return gameSettingCache.obter("spoils.orderQuantityRanges", SPOIL_ORDER_QUANTITY_RANGES_PADRAO);
+}
 
 function embaralhar(lista) {
   const copia = [...lista];
@@ -59,7 +71,8 @@ async function obterPoolDeEspoliosElegiveis(transaction) {
 }
 
 function sortearQuantidade(raridade) {
-  const faixa = SPOIL_ORDER_QUANTITY_RANGES[raridade] ?? SPOIL_ORDER_QUANTITY_RANGES.Comum;
+  const faixas = faixasDeQuantidade();
+  const faixa = faixas[raridade] ?? faixas.Comum;
   const [min, max] = faixa;
   return min >= max ? min : crypto.randomInt(min, max + 1);
 }

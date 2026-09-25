@@ -4,14 +4,27 @@
 // nível/nome como segunda fonte de verdade (spec §6.3), sempre
 // recalcular a partir do ponto bruto.
 const crypto = require("crypto");
-const { SPOIL_REPUTATION_LEVELS } = require("../config/adventureGuildConfig");
+const { SPOIL_REPUTATION_LEVELS: SPOIL_REPUTATION_LEVELS_PADRAO } = require("../config/adventureGuildConfig");
+const gameSettingCache = require("./gameSettingCache");
+
+// Painel Administrativo Fase 10 — admin pode sobrescrever os níveis via
+// GameSetting (chave "spoils.reputationLevels", ver
+// adminSpoilConfigService.js); leitura sempre síncrona a partir do
+// cache em memória (gameSettingCache.js), nunca bate no banco aqui —
+// essa função roda em /characters/me, um dos endpoints mais chamados
+// do jogo. Sem override salvo, cai exatamente no mesmo array hardcoded
+// de antes.
+function niveis() {
+  return gameSettingCache.obter("spoils.reputationLevels", SPOIL_REPUTATION_LEVELS_PADRAO);
+}
 
 // Acha o nível mais alto cujo mínimo o total de pontos já alcançou —
-// SPOIL_REPUTATION_LEVELS está em ordem crescente de `minimo`, então o
-// último que bate é o nível atual.
+// a lista está em ordem crescente de `minimo`, então o último que bate
+// é o nível atual.
 function resolverNivel(pontos) {
-  let atual = SPOIL_REPUTATION_LEVELS[0];
-  for (const nivel of SPOIL_REPUTATION_LEVELS) {
+  const lista = niveis();
+  let atual = lista[0];
+  for (const nivel of lista) {
     if (pontos >= nivel.minimo) atual = nivel;
     else break;
   }
@@ -19,8 +32,9 @@ function resolverNivel(pontos) {
 }
 
 function proximoNivel(nivelAtual) {
-  const indice = SPOIL_REPUTATION_LEVELS.findIndex((n) => n.nivel === nivelAtual.nivel);
-  return SPOIL_REPUTATION_LEVELS[indice + 1] ?? null;
+  const lista = niveis();
+  const indice = lista.findIndex((n) => n.nivel === nivelAtual.nivel);
+  return lista[indice + 1] ?? null;
 }
 
 // Shape de resposta reaproveitado tanto por GET /spoil-orders quanto

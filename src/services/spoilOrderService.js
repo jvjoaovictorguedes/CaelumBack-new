@@ -15,11 +15,22 @@ const {
   sortearPercentualBonus,
 } = require("./spoilReputationService");
 const {
-  SPOIL_ORDER_REPUTATION,
-  SPOIL_ORDER_SET_BONUS_REPUTATION,
+  SPOIL_ORDER_REPUTATION: SPOIL_ORDER_REPUTATION_PADRAO,
+  SPOIL_ORDER_SET_BONUS_REPUTATION: SPOIL_ORDER_SET_BONUS_REPUTATION_PADRAO,
   SPOIL_ORDERS_PER_ROTATION,
   inicioDaJanelaDeEncomendas,
 } = require("../config/adventureGuildConfig");
+const gameSettingCache = require("./gameSettingCache");
+
+// Painel Administrativo Fase 10 — admin pode sobrescrever via
+// GameSetting ("spoils.orderReputationReward"/
+// "spoils.setBonusReputationReward", ver adminSpoilConfigService.js).
+function reputacaoPorEncomenda() {
+  return gameSettingCache.obter("spoils.orderReputationReward", SPOIL_ORDER_REPUTATION_PADRAO);
+}
+function reputacaoDoBonusDeLote() {
+  return gameSettingCache.obter("spoils.setBonusReputationReward", SPOIL_ORDER_SET_BONUS_REPUTATION_PADRAO);
+}
 
 function erroBalcao(statusCode, mensagem) {
   return Object.assign(new Error(mensagem), { statusCode });
@@ -47,11 +58,12 @@ async function concederBonusDeLoteSeCompleto(ciclo, progresso, character, transa
 
   const valorBaseTotal = encomendas.reduce((soma, o) => soma + o.quantidade_exigida * o.valor_unitario_snapshot, 0);
 
-  // §7.3 — soma os +25 do lote ANTES de decidir o nível do bônus (os +5
-  // da quinta encomenda já foram somados por quem chamou, antes desta
-  // função); se o jogador sobe de nível bem na quinta entrega, o bônus
-  // já usa o novo nível.
-  progresso.reputacao_encomendas += SPOIL_ORDER_SET_BONUS_REPUTATION;
+  // §7.3 — soma o bônus de lote ANTES de decidir o nível do bônus (a
+  // reputação da quinta encomenda já foi somada por quem chamou, antes
+  // desta função); se o jogador sobe de nível bem na quinta entrega, o
+  // bônus já usa o novo nível.
+  const reputacaoDoLote = reputacaoDoBonusDeLote();
+  progresso.reputacao_encomendas += reputacaoDoLote;
   const nivelDoBonus = resolverNivel(progresso.reputacao_encomendas);
   const percentual = sortearPercentualBonus(nivelDoBonus);
   const bonusOuro = Math.floor(valorBaseTotal * percentual);
@@ -59,12 +71,12 @@ async function concederBonusDeLoteSeCompleto(ciclo, progresso, character, transa
   concederOuro(character, bonusOuro);
 
   ciclo.bonus_lote_concedido = true;
-  ciclo.bonus_reputacao = SPOIL_ORDER_SET_BONUS_REPUTATION;
+  ciclo.bonus_reputacao = reputacaoDoLote;
   ciclo.bonus_percentual = percentual;
   ciclo.bonus_ouro = bonusOuro;
   await ciclo.save({ transaction });
 
-  return { gold: bonusOuro, reputation: SPOIL_ORDER_SET_BONUS_REPUTATION, percentual };
+  return { gold: bonusOuro, reputation: reputacaoDoLote, percentual };
 }
 
 // §9.3 — fluxo completo de entrega de UMA encomenda.
@@ -119,12 +131,13 @@ async function entregarEncomenda(idPersonagem, idOrder, transaction) {
   await removeStack(idPersonagem, order.id_item, order.quantidade_exigida, transaction);
   concederOuro(character, ouroEncomenda);
 
+  const reputacaoDaEncomenda = reputacaoPorEncomenda();
   order.concluida_em = new Date();
   order.ouro_pago = ouroEncomenda;
-  order.reputacao_paga = SPOIL_ORDER_REPUTATION;
+  order.reputacao_paga = reputacaoDaEncomenda;
   await order.save({ transaction });
 
-  progresso.reputacao_encomendas += SPOIL_ORDER_REPUTATION;
+  progresso.reputacao_encomendas += reputacaoDaEncomenda;
   // Caçadas §11.1 — total permanente, incrementado UMA vez por
   // encomenda individual concluída; o bônus 5/5 nunca soma aqui.
   progresso.total_spoil_orders_completed += 1;
@@ -136,7 +149,7 @@ async function entregarEncomenda(idPersonagem, idOrder, transaction) {
 
   return {
     order: { id: order.id, completed: true },
-    reward: { gold: ouroEncomenda, reputation: SPOIL_ORDER_REPUTATION },
+    reward: { gold: ouroEncomenda, reputation: reputacaoDaEncomenda },
     setBonus,
     reputation: formatarResumoReputacao(progresso.reputacao_encomendas),
   };

@@ -7,6 +7,7 @@
 const { sequelize } = require("../config/database");
 const GameSetting = require("../models/GameSetting");
 const { registrarAcao } = require("./adminAuditService");
+const gameSettingCache = require("./gameSettingCache");
 
 const TIPOS_VALIDOS = ["number", "boolean", "string", "json"];
 
@@ -41,6 +42,10 @@ async function listAdminGameSettings() {
   return GameSetting.findAll({ order: [["chave", "ASC"]] });
 }
 
+// Recarrega o cache em memória (gameSettingCache.js) depois de cada
+// escrita bem-sucedida — sem isso, fórmulas de jogo
+// (spoilReputationService.js/hunterReputationService.js) continuariam
+// lendo o valor antigo até o próximo ciclo de 60s do cache.
 async function upsertAdminGameSetting(chave, dados, { idAdmin, req }) {
   if (!chave || typeof chave !== "string") throw erro("chave é obrigatória.");
   const tipo = dados.tipo ?? "json";
@@ -48,7 +53,7 @@ async function upsertAdminGameSetting(chave, dados, { idAdmin, req }) {
   if (dados.valor === undefined) throw erro("valor é obrigatório.");
   validarValorPorTipo(dados.valor, tipo);
 
-  return sequelize.transaction(async (transaction) => {
+  const registro = await sequelize.transaction(async (transaction) => {
     const existente = await GameSetting.findByPk(chave, { transaction, lock: transaction.LOCK.UPDATE });
 
     if (existente && !existente.editavel_admin) {
@@ -57,7 +62,7 @@ async function upsertAdminGameSetting(chave, dados, { idAdmin, req }) {
 
     const dadosAntes = existente ? existente.toJSON() : null;
 
-    const [registro] = await GameSetting.upsert(
+    const [novoRegistro] = await GameSetting.upsert(
       {
         chave,
         valor: dados.valor,
@@ -75,13 +80,17 @@ async function upsertAdminGameSetting(chave, dados, { idAdmin, req }) {
       entidade: "GameSetting",
       idEntidade: null,
       dadosAntes,
-      dadosDepois: registro.toJSON(),
+      dadosDepois: novoRegistro.toJSON(),
       req,
       transaction,
     });
 
-    return registro;
+    return novoRegistro;
   });
+
+  // Fora da transação, só depois dela confirmar de verdade.
+  await gameSettingCache.recarregar();
+  return registro;
 }
 
 module.exports = {
