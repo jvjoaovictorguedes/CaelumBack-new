@@ -33,4 +33,16 @@ router.get("/affinities", adminFishingController.listarAfinidades);
 router.post("/affinities", adminFishingController.criarAfinidade);
 router.patch("/affinities/:id", adminFishingController.atualizarAfinidade);
 
+router.get("/vessels", adminFishingController.listarVessels);
+router.post("/vessels", adminFishingController.criarVessel);
+router.patch("/vessels/:id", adminFishingController.atualizarVessel);
+
+router.get("/routes", adminFishingController.listarRotas);
+router.post("/routes", adminFishingController.criarRota);
+router.patch("/routes/:id", adminFishingController.atualizarRota);
+
+router.get("/tournaments", adminFishingController.listarTorneios);
+router.post("/tournaments", adminFishingController.criarTorneio);
+router.patch("/tournaments/:id", adminFishingController.atualizarTorneio);
+
 module.exports = router;

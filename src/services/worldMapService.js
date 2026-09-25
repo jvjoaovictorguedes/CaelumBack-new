@@ -21,6 +21,9 @@ const WorldMapConnection = require("../models/WorldMapConnection");
 const { listarZonas, obterSessaoAtiva } = require("./adventureService");
 const { listarRegioes: listarRegioesExpedicao } = require("./expeditionService");
 const { listarRegioes: listarRegioesBestiario } = require("./bestiaryService");
+const { Op } = require("sequelize");
+const FishingZone = require("../models/FishingZone");
+const FishingPort = require("../models/FishingPort");
 
 // Chaves allowlisted pros serviços da Capital (spec §20/§50) — o
 // cliente NUNCA decide/envia rota; só resolve pra cá a partir da
@@ -49,7 +52,8 @@ function formatarTerritorio(territorio) {
   };
 }
 
-function formatarNode(node, { zonaPorId, regiaoPorId, maestriaPorZonaId }) {
+function formatarNode(node, { zonaPorId, regiaoPorId, maestriaPorZonaId, fishingPorWorldNodeId }) {
+  const pesca = fishingPorWorldNodeId.get(node.id) ?? null;
   const base = {
     id: node.id,
     nome: node.nome,
@@ -59,6 +63,12 @@ function formatarNode(node, { zonaPorId, regiaoPorId, maestriaPorZonaId }) {
     y: node.y,
     icone_url: node.icone_url,
     imagem_url: node.imagem_url,
+    // Ponto de Pesca (id_world_node de FishingZone/FishingPort) — spec
+    // do pedido do usuário: "adicionar pontos de pesca no mapa
+    // interativo, onde tem água obviamente". Independente do `tipo` do
+    // Node (pode ser um Landmark/City que também é porto de pesca), por
+    // isso é um campo à parte, não um novo valor de `tipo`.
+    pesca,
   };
 
   if (node.tipo === "Adventure") {
@@ -113,7 +123,7 @@ async function obterMapaMundial(idPersonagem) {
 
   // Cada fonte de verdade é consultada UMA vez só (nunca por node —
   // spec §39: "evitar N+1. Buscar/agrupar dados em lote").
-  const [territorios, nodes, conexoes, zonasAventura, regioesExpedicao, bestiario, sessaoAtiva] = await Promise.all([
+  const [territorios, nodes, conexoes, zonasAventura, regioesExpedicao, bestiario, sessaoAtiva, zonasPesca, portosPesca] = await Promise.all([
     WorldTerritory.findAll({ where: { ativo: true }, order: [["ordem", "ASC"]] }),
     WorldMapNode.findAll({ where: { ativo: true }, order: [["ordem", "ASC"]] }),
     WorldMapConnection.findAll({ where: { ativo: true } }),
@@ -121,15 +131,30 @@ async function obterMapaMundial(idPersonagem) {
     listarRegioesExpedicao(idPersonagem),
     listarRegioesBestiario(idPersonagem),
     obterSessaoAtiva(idPersonagem),
+    // Zonas/portos de Pesca em lote — sem N+1 (mesma regra dos outros
+    // domínios acima), filtrados só pelos que têm id_world_node setado.
+    FishingZone.findAll({ where: { ativo: true, id_world_node: { [Op.ne]: null } }, attributes: ["id", "nome", "id_world_node"] }),
+    FishingPort.findAll({ where: { ativo: true, id_world_node: { [Op.ne]: null } }, attributes: ["id", "nome", "id_world_node"] }),
   ]);
 
   const zonaPorId = new Map(zonasAventura.map((z) => [z.id, z]));
   const regiaoPorId = new Map(regioesExpedicao.map((r) => [r.id, r]));
   const maestriaPorZonaId = new Map(bestiario.regioes.map((r) => [r.id, r]));
 
+  const fishingPorWorldNodeId = new Map();
+  for (const zona of zonasPesca) {
+    fishingPorWorldNodeId.set(zona.id_world_node, { tipo: "zona", id: zona.id, nome: zona.nome });
+  }
+  for (const porto of portosPesca) {
+    // Um Node teoricamente pode ser porto E zona ao mesmo tempo — porto
+    // "ganha" (é de onde a viagem começa), mas na prática hoje são
+    // Nodes distintos.
+    fishingPorWorldNodeId.set(porto.id_world_node, { tipo: "porto", id: porto.id, nome: porto.nome });
+  }
+
   return {
     territories: territorios.map(formatarTerritorio),
-    nodes: nodes.map((node) => formatarNode(node, { zonaPorId, regiaoPorId, maestriaPorZonaId })),
+    nodes: nodes.map((node) => formatarNode(node, { zonaPorId, regiaoPorId, maestriaPorZonaId, fishingPorWorldNodeId })),
     connections: conexoes.map((c) => ({ id: c.id, id_origem: c.id_origem, id_destino: c.id_destino, tipo: c.tipo })),
     state: {
       // Derivado de CharacterAdventureSession — spec §37: sem
