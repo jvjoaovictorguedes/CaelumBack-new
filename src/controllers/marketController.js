@@ -94,7 +94,7 @@ exports.criarAnuncio = async (req, res) => {
       // Inventário v2 (§4/§11/§12) — equipamento não é mais empilhável:
       // anuncia UMA instância específica (cada uma pode ter refinamento
       // diferente), nunca uma "quantidade" solta de id_item.
-      if (equipmentInstanceService.ehEquipavel(item.tipo_item)) {
+      if (equipmentInstanceService.ehInstanciavel(item.tipo_item)) {
         if (qtd !== 1) {
           throw erro("Equipamento é anunciado um de cada vez (quantidade deve ser 1).");
         }
@@ -400,7 +400,7 @@ exports.comprarAnuncio = async (req, res) => {
         // nunca lê (só lê CharacterEquipmentInstance), ou seja, o
         // jogador paga e "some". Recusa alto e claro em vez disso.
         const itemAnunciado = await Item.findByPk(listing.id_item, { transaction });
-        if (itemAnunciado && equipmentInstanceService.ehEquipavel(itemAnunciado.tipo_item)) {
+        if (itemAnunciado && equipmentInstanceService.ehInstanciavel(itemAnunciado.tipo_item)) {
           throw erro(
             "Este anúncio está corrompido (equipamento sem instância vinculada) e não pode ser comprado. Avise um administrador.",
             409,

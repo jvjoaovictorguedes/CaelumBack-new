@@ -778,6 +778,15 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
         log.push(`Você recebeu ${definicaoDoStatus(efeito.key).nomeUi} por ${efeito.remainingTurns} turno(s).`);
       }
 
+      // Poder com dano E cura ao mesmo tempo (ex: Ciclo Vital, "rouba
+      // vida" do alvo) só pode curar se o golpe realmente acertou — sem
+      // isso, esquivar do ataque não impedia a cura, como se tivesse
+      // "roubado vida" de um golpe que nunca aconteceu (bug reportado).
+      // Fica true por padrão pra poder puramente de cura (dano === 0,
+      // nunca entra no bloco de resolução de acerto abaixo) continuar
+      // curando sempre, igual já era.
+      let curaBloqueadaPorEsquiva = false;
+
       if (dano > 0) {
         const blindDoAtacante = statusEffects.player.find((s) => s.key === "BLIND");
         const resultadoAcerto = resolverResultadoDeAcerto({
@@ -786,6 +795,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
           blindPotency: blindDoAtacante?.potency ?? 0,
         });
         if (!resultadoAcerto.hit) {
+          curaBloqueadaPorEsquiva = true;
           log.push(
             resultadoAcerto.reason === "BLIND_MISS"
               ? `Cego, você errou ${poderUsado.nome} contra ${inimigoAtual.nome}!`
@@ -820,7 +830,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
         }
       }
 
-      if (cura > 0) {
+      if (cura > 0 && !curaBloqueadaPorEsquiva) {
         personagemAtual.vida_atual = Math.min(
           vidaMaximaDe(personagemAtual),
           personagemAtual.vida_atual + cura

@@ -12,6 +12,9 @@ const FishingZoneSpecies = require("../models/FishingZoneSpecies");
 const FishingPort = require("../models/FishingPort");
 const FishingBait = require("../models/FishingBait");
 const FishingBaitAffinity = require("../models/FishingBaitAffinity");
+const Vessel = require("../models/Vessel");
+const MarineRoute = require("../models/MarineRoute");
+const FishingTournament = require("../models/FishingTournament");
 const Item = require("../models/Item");
 const WorldMapNode = require("../models/WorldMapNode");
 const { registrarAcao } = require("./adminAuditService");
@@ -438,6 +441,186 @@ async function updateAdminFishingAffinity(id, payload, { idAdmin, req }) {
   });
 }
 
+// --------------------------------------------------------- EMBARCAÇÕES
+const CAMPOS_VESSEL = ["key", "nome", "tier", "nivel_pesca_minimo", "preco", "descricao", "ativo"];
+
+async function listAdminVessels() {
+  return Vessel.findAll({ order: [["tier", "ASC"], ["nome", "ASC"]] });
+}
+
+async function createAdminVessel(payload, { idAdmin, req }) {
+  const dados = somenteCampos(payload, CAMPOS_VESSEL);
+  if (!dados.key || !dados.nome) throw erro("key e nome são obrigatórios.");
+  if (dados.preco != null && dados.preco < 0) throw erro("preco não pode ser negativo.");
+
+  return sequelize.transaction(async (transaction) => {
+    const vessel = await Vessel.create(dados, { transaction });
+    await registrarAcao({
+      idAdmin,
+      acao: "criar",
+      entidade: "Vessel",
+      idEntidade: vessel.id,
+      dadosDepois: vessel.toJSON(),
+      req,
+      transaction,
+    });
+    return vessel;
+  });
+}
+
+async function updateAdminVessel(id, payload, { idAdmin, req }) {
+  const dados = somenteCampos(payload, CAMPOS_VESSEL.filter((c) => c !== "key"));
+  if (dados.preco != null && dados.preco < 0) throw erro("preco não pode ser negativo.");
+
+  return sequelize.transaction(async (transaction) => {
+    const vessel = await Vessel.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!vessel) throw erro("Embarcação não encontrada.", 404);
+    const antes = vessel.toJSON();
+    await vessel.update(dados, { transaction });
+    await registrarAcao({
+      idAdmin,
+      acao: "editar",
+      entidade: "Vessel",
+      idEntidade: vessel.id,
+      dadosAntes: antes,
+      dadosDepois: vessel.toJSON(),
+      req,
+      transaction,
+    });
+    return vessel;
+  });
+}
+
+// ------------------------------------------------------- ROTAS MARÍTIMAS
+const CAMPOS_ROTA = ["id_world_connection", "id_port_origem", "id_zone_destino", "min_vessel_tier", "distance", "ativo"];
+
+async function listAdminMarineRoutes() {
+  return MarineRoute.findAll({
+    include: [
+      { model: FishingPort, as: "portoOrigem", attributes: ["id", "nome"] },
+      { model: FishingZone, as: "zonaDestino", attributes: ["id", "nome"] },
+    ],
+    order: [["id", "ASC"]],
+  });
+}
+
+async function createAdminMarineRoute(payload, { idAdmin, req }) {
+  const dados = somenteCampos(payload, CAMPOS_ROTA);
+  if (!dados.id_world_connection || !dados.id_port_origem || !dados.id_zone_destino) {
+    throw erro("id_world_connection, id_port_origem e id_zone_destino são obrigatórios.");
+  }
+
+  return sequelize.transaction(async (transaction) => {
+    const porto = await FishingPort.findByPk(dados.id_port_origem, { transaction });
+    if (!porto) throw erro("Porto de origem não encontrado.", 404);
+    const zona = await FishingZone.findByPk(dados.id_zone_destino, { transaction });
+    if (!zona) throw erro("Zona de destino não encontrada.", 404);
+
+    const existente = await MarineRoute.findOne({ where: { id_world_connection: dados.id_world_connection }, transaction });
+    if (existente) throw erro("Já existe uma rota marítima pra essa conexão do mapa.");
+
+    const rota = await MarineRoute.create(dados, { transaction });
+    await registrarAcao({
+      idAdmin,
+      acao: "criar",
+      entidade: "MarineRoute",
+      idEntidade: rota.id,
+      dadosDepois: rota.toJSON(),
+      req,
+      transaction,
+    });
+    return rota;
+  });
+}
+
+async function updateAdminMarineRoute(id, payload, { idAdmin, req }) {
+  const dados = somenteCampos(payload, ["min_vessel_tier", "distance", "ativo"]);
+
+  return sequelize.transaction(async (transaction) => {
+    const rota = await MarineRoute.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!rota) throw erro("Rota marítima não encontrada.", 404);
+    const antes = rota.toJSON();
+    await rota.update(dados, { transaction });
+    await registrarAcao({
+      idAdmin,
+      acao: "editar",
+      entidade: "MarineRoute",
+      idEntidade: rota.id,
+      dadosAntes: antes,
+      dadosDepois: rota.toJSON(),
+      req,
+      transaction,
+    });
+    return rota;
+  });
+}
+
+// ------------------------------------------------------------- TORNEIOS
+const CAMPOS_TORNEIO = ["nome", "id_zone", "inicia_em", "termina_em", "ativo"];
+
+async function listAdminFishingTournaments() {
+  return FishingTournament.findAll({
+    include: [{ model: FishingZone, as: "zona", attributes: ["id", "nome"] }],
+    order: [["inicia_em", "DESC"]],
+  });
+}
+
+function validarTorneio(dados) {
+  if (dados.inicia_em && dados.termina_em && new Date(dados.inicia_em) >= new Date(dados.termina_em)) {
+    throw erro("inicia_em precisa ser antes de termina_em.");
+  }
+}
+
+async function createAdminFishingTournament(payload, { idAdmin, req }) {
+  const dados = somenteCampos(payload, CAMPOS_TORNEIO);
+  if (!dados.nome || !dados.inicia_em || !dados.termina_em) {
+    throw erro("nome, inicia_em e termina_em são obrigatórios.");
+  }
+  validarTorneio(dados);
+
+  return sequelize.transaction(async (transaction) => {
+    if (dados.id_zone) {
+      const zona = await FishingZone.findByPk(dados.id_zone, { transaction });
+      if (!zona) throw erro("Zona não encontrada.", 404);
+    }
+    const torneio = await FishingTournament.create({ ...dados, id_admin_criador: idAdmin }, { transaction });
+    await registrarAcao({
+      idAdmin,
+      acao: "criar",
+      entidade: "FishingTournament",
+      idEntidade: torneio.id,
+      dadosDepois: torneio.toJSON(),
+      req,
+      transaction,
+    });
+    return torneio;
+  });
+}
+
+async function updateAdminFishingTournament(id, payload, { idAdmin, req }) {
+  const dados = somenteCampos(payload, CAMPOS_TORNEIO);
+
+  return sequelize.transaction(async (transaction) => {
+    const torneio = await FishingTournament.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!torneio) throw erro("Torneio não encontrado.", 404);
+    const antes = torneio.toJSON();
+    const mesclado = { ...antes, ...dados };
+    validarTorneio(mesclado);
+    await torneio.update(dados, { transaction });
+    await registrarAcao({
+      idAdmin,
+      acao: "editar",
+      entidade: "FishingTournament",
+      idEntidade: torneio.id,
+      dadosAntes: antes,
+      dadosDepois: torneio.toJSON(),
+      req,
+      transaction,
+    });
+    return torneio;
+  });
+}
+
 module.exports = {
   listAdminFishingZones,
   createAdminFishingZone,
@@ -457,4 +640,13 @@ module.exports = {
   listAdminFishingAffinities,
   createAdminFishingAffinity,
   updateAdminFishingAffinity,
+  listAdminVessels,
+  createAdminVessel,
+  updateAdminVessel,
+  listAdminMarineRoutes,
+  createAdminMarineRoute,
+  updateAdminMarineRoute,
+  listAdminFishingTournaments,
+  createAdminFishingTournament,
+  updateAdminFishingTournament,
 };

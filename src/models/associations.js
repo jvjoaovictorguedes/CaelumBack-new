@@ -434,6 +434,7 @@ const CharacterVessel = require("./CharacterVessel");
 const FishingPort = require("./FishingPort");
 const MarineRoute = require("./MarineRoute");
 const CharacterNavigationState = require("./CharacterNavigationState");
+const FishingTournament = require("./FishingTournament");
 
 Item.hasOne(FishingRodProperties, { foreignKey: "id_item", as: "fishingRodProperties" });
 FishingRodProperties.belongsTo(Item, { foreignKey: "id_item" });
@@ -456,6 +457,15 @@ FishingSession.belongsTo(FishingZone, { foreignKey: "id_zone" });
 FishingSession.belongsTo(FishingSpecies, { foreignKey: "id_species" });
 FishingCatchRecord.belongsTo(FishingSpecies, { foreignKey: "id_species", as: "species" });
 FishingCatchRecord.belongsTo(FishingZone, { foreignKey: "id_zone" });
+FishingCatchRecord.belongsTo(Character, { foreignKey: "id_personagem" });
+Character.hasMany(FishingCatchRecord, { foreignKey: "id_personagem" });
+CharacterFishingProgress.belongsTo(Character, { foreignKey: "id_personagem" });
+Character.hasOne(CharacterFishingProgress, { foreignKey: "id_personagem" });
+
+// Torneio da Pesca (ranking materializado na leitura — ver
+// fishingTournamentService.js) — escopo de zona é OPCIONAL (torneio
+// global quando null).
+FishingTournament.belongsTo(FishingZone, { foreignKey: "id_zone", as: "zona" });
 
 Vessel.hasMany(CharacterVessel, { foreignKey: "id_vessel" });
 CharacterVessel.belongsTo(Vessel, { foreignKey: "id_vessel", as: "vessel" });

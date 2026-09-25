@@ -15,7 +15,7 @@ const Item = require("../models/Item");
 const { concederOuro } = require("./goldService");
 const { adicionarExperiencia } = require("./experienceService");
 const { addStack } = require("./inventoryService");
-const { ehEquipavel, create: criarInstanciaEquipamento } = require("./equipmentInstanceService");
+const { ehInstanciavel, create: criarInstanciaEquipamento } = require("./equipmentInstanceService");
 const { registrarAcao } = require("./adminAuditService");
 
 function erro(mensagem, statusCode = 400) {
@@ -95,7 +95,7 @@ async function grantToCharacter(idPersonagem, payload, { idAdmin, req }) {
     for (const linha of itensValidados) {
       const item = await Item.findByPk(linha.id_item, { transaction });
       if (!item) throw erro(`Item #${linha.id_item} não encontrado.`);
-      if (ehEquipavel(item.tipo_item)) {
+      if (ehInstanciavel(item.tipo_item)) {
         for (let i = 0; i < linha.quantidade; i++) {
           await criarInstanciaEquipamento({ idPersonagem, idItem: item.id, refinamento: linha.refinamento ?? 0 }, transaction);
         }

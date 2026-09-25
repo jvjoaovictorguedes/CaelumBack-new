@@ -9,9 +9,10 @@ function tratarErro(res, error, mensagemPadrao) {
 
 exports.listar = async (req, res) => {
   try {
-    const { categoria, nome, pagina, porPagina } = req.query;
+    const { categoria, tipo, nome, pagina, porPagina } = req.query;
     const resultado = await mediaAssetService.listMediaGroups({
       categoria,
+      tipo,
       nome,
       pagina: pagina ? Number(pagina) : undefined,
       porPagina: porPagina ? Number(porPagina) : undefined,
@@ -40,9 +41,11 @@ exports.upload = async (req, res) => {
       {
         grupo: req.body.grupo,
         categoria: req.body.categoria,
+        tipo: req.body.tipo,
         descricao: req.body.descricao || null,
         buffer: req.file.buffer,
         nomeArquivoOriginal: req.file.originalname,
+        mimeDeclarado: req.file.mimetype,
       },
       { idAdmin: req.user.id, req },
     );

@@ -6,6 +6,8 @@ const fishingRodService = require("../services/fishingRodService");
 const fishingNavigationService = require("../services/fishingNavigationService");
 const fishingCatalogService = require("../services/fishingCatalogService");
 const fishingProgressionService = require("../services/fishingProgressionService");
+const fishingRankingService = require("../services/fishingRankingService");
+const fishingTournamentService = require("../services/fishingTournamentService");
 
 function tratarErro(res, error, mensagemPadrao) {
   const statusCode = error.statusCode || 500;
@@ -82,6 +84,42 @@ exports.getAlmanac = async (req, res) => {
     res.status(200).json({ status: "success", data: { especies } });
   } catch (error) {
     tratarErro(res, error, "Erro ao buscar almanaque marinho.");
+  }
+};
+
+// GET /fishing/ranking?type=total|biggest&page=1
+const TIPOS_RANKING_VALIDOS = ["total", "biggest"];
+exports.getRanking = async (req, res) => {
+  const { type, page } = req.query;
+  const tipo = TIPOS_RANKING_VALIDOS.includes(type) ? type : "total";
+  try {
+    let dados;
+    if (tipo === "biggest") {
+      dados = await fishingRankingService.rankingPescaMaiorPeixe(page);
+      dados.minhaPosicao = await fishingRankingService.posicaoPescaMaiorPeixe(req.personagemAtual.id);
+    } else {
+      dados = await fishingRankingService.rankingPescaTotal(page);
+      dados.minhaPosicao = await fishingRankingService.posicaoPescaTotal(req.personagemAtual.id);
+    }
+    res.status(200).json({ status: "success", data: dados });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao buscar ranking de Pesca.");
+  }
+};
+
+// GET /fishing/tournament — torneio atual (em andamento ou próximo) com
+// leaderboard e a posição do personagem, tudo materializado na leitura.
+exports.getTorneioAtual = async (req, res) => {
+  try {
+    const { torneio, status } = await fishingTournamentService.obterTorneioAtual();
+    if (!torneio) {
+      return res.status(200).json({ status: "success", data: { torneio: null, statusTorneio: "NENHUM", leaderboard: null, minhaPosicao: null } });
+    }
+    const leaderboard = await fishingTournamentService.listarLeaderboardTorneio(torneio.id, req.query.page);
+    const minhaPosicao = await fishingTournamentService.obterMinhaPosicaoTorneio(torneio.id, req.personagemAtual.id);
+    res.status(200).json({ status: "success", data: { torneio, statusTorneio: status, leaderboard, minhaPosicao } });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao buscar torneio de Pesca.");
   }
 };
 

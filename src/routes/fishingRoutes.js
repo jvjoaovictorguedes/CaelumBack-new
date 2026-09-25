@@ -14,6 +14,8 @@ router.get("/loadout", fishingController.getLoadout);
 router.put("/loadout/rod", fishingController.putLoadoutRod);
 router.get("/baits", fishingController.getBaits);
 router.get("/almanac", fishingController.getAlmanac);
+router.get("/ranking", fishingController.getRanking);
+router.get("/tournament", fishingController.getTorneioAtual);
 
 router.get("/sessions/active", fishingController.getSessaoAtiva);
 router.post("/sessions/start", fishingController.postStart);

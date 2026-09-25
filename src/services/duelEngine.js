@@ -92,7 +92,12 @@ function aplicarAcao({
     }
   }
 
-  if (cura > 0) {
+  // Mesmo critério do PvE (combatController.js): um poder com dano E
+  // cura ("rouba vida") só cura se o golpe realmente acertou —
+  // `esquivou` só fica true quando um golpe COM dano foi de fato
+  // resolvido e errou; poder de cura pura (dano === 0) ou item nunca
+  // passam pelo bloco de acerto acima, então continuam curando sempre.
+  if (cura > 0 && !esquivou) {
     const teto = vidaMaxAtacante ?? atacante.vida_atual + cura;
     atacante.vida_atual = Math.min(teto, atacante.vida_atual + cura);
   }

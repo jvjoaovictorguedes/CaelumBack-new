@@ -19,7 +19,7 @@ const {
 } = require("../services/equipmentBonusService");
 const { limparEncontroExpirado } = require("../services/pveEncounterService");
 const { addStack } = require("../services/inventoryService");
-const { ehEquipavel, create: criarInstancia } = require("../services/equipmentInstanceService");
+const { ehInstanciavel, create: criarInstancia } = require("../services/equipmentInstanceService");
 
 // Sem essas associações, qualquer include: [{model: Character}, {model: Item}]
 // abaixo derruba a chamada com "CharacterInventory is not associated to X!".
@@ -230,7 +230,7 @@ exports.createCharacterInventory = async (req, res) => {
       return res.status(404).json({ message: "Item não encontrado." });
     }
 
-    if (ehEquipavel(item.tipo_item)) {
+    if (ehInstanciavel(item.tipo_item)) {
       const instancias = [];
       for (let i = 0; i < quantidade; i++) {
         instancias.push(await criarInstancia({ idPersonagem: id_personagem, idItem: id_item }));

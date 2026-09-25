@@ -202,3 +202,99 @@ exports.atualizarAfinidade = async (req, res) => {
     tratarErro(res, error, "Erro interno do servidor ao atualizar afinidade.");
   }
 };
+
+// Embarcações
+exports.listarVessels = async (req, res) => {
+  try {
+    const vessels = await adminFishingService.listAdminVessels();
+    res.status(200).json({ status: "success", data: { vessels } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao listar embarcações.");
+  }
+};
+
+exports.criarVessel = async (req, res) => {
+  try {
+    const vessel = await adminFishingService.createAdminVessel(req.body ?? {}, { idAdmin: req.user.id, req });
+    res.status(201).json({ status: "success", data: { vessel } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao criar embarcação.");
+  }
+};
+
+exports.atualizarVessel = async (req, res) => {
+  try {
+    const vessel = await adminFishingService.updateAdminVessel(req.params.id, req.body ?? {}, {
+      idAdmin: req.user.id,
+      req,
+    });
+    res.status(200).json({ status: "success", data: { vessel } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao atualizar embarcação.");
+  }
+};
+
+// Rotas marítimas
+exports.listarRotas = async (req, res) => {
+  try {
+    const rotas = await adminFishingService.listAdminMarineRoutes();
+    res.status(200).json({ status: "success", data: { rotas } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao listar rotas marítimas.");
+  }
+};
+
+exports.criarRota = async (req, res) => {
+  try {
+    const rota = await adminFishingService.createAdminMarineRoute(req.body ?? {}, { idAdmin: req.user.id, req });
+    res.status(201).json({ status: "success", data: { rota } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao criar rota marítima.");
+  }
+};
+
+exports.atualizarRota = async (req, res) => {
+  try {
+    const rota = await adminFishingService.updateAdminMarineRoute(req.params.id, req.body ?? {}, {
+      idAdmin: req.user.id,
+      req,
+    });
+    res.status(200).json({ status: "success", data: { rota } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao atualizar rota marítima.");
+  }
+};
+
+// Torneios
+exports.listarTorneios = async (req, res) => {
+  try {
+    const torneios = await adminFishingService.listAdminFishingTournaments();
+    res.status(200).json({ status: "success", data: { torneios } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao listar torneios.");
+  }
+};
+
+exports.criarTorneio = async (req, res) => {
+  try {
+    const torneio = await adminFishingService.createAdminFishingTournament(req.body ?? {}, {
+      idAdmin: req.user.id,
+      req,
+    });
+    res.status(201).json({ status: "success", data: { torneio } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao criar torneio.");
+  }
+};
+
+exports.atualizarTorneio = async (req, res) => {
+  try {
+    const torneio = await adminFishingService.updateAdminFishingTournament(req.params.id, req.body ?? {}, {
+      idAdmin: req.user.id,
+      req,
+    });
+    res.status(200).json({ status: "success", data: { torneio } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao atualizar torneio.");
+  }
+};
