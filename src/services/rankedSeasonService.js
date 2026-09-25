@@ -10,6 +10,13 @@ const { DURACAO_TEMPORADA_DIAS, LEADERBOARD_MINIMO_PARTIDAS } = require("../conf
 const { Op } = require("sequelize");
 
 const MS_POR_DIA = 24 * 60 * 60 * 1000;
+
+// Chave arbitrária fixa pro advisory lock que serializa o bootstrap de
+// temporada (ver obterOuIniciarTemporadaAtiva) — só precisa ser estável
+// e não colidir com outro uso de advisory lock no processo; nenhum outro
+// serviço usa este número.
+const LOCK_BOOTSTRAP_TEMPORADA = 911_247_003;
+
 // §13 — janelas FIXAS de 14 dias corridos contadas a partir do
 // starts_at da temporada; nunca alinhadas a mês ou semana de
 // calendário.
@@ -79,8 +86,27 @@ async function obterTemporadaAtiva(transaction) {
 // Bootstrap chamado por qualquer rota/serviço ranked antes de agir: se a
 // temporada ativa já passou do ends_at, encerra e abre a próxima com
 // soft reset; se não existe nenhuma temporada ainda, cria a primeira.
+//
+// Bug real corrigido: sem lock nenhum, duas chamadas concorrentes (dois
+// jogadores acessando a Arena ao mesmo tempo, tipicamente logo após um
+// deploy ou bem no instante em que a janela de 14 dias vira) podiam cada
+// uma ver "nenhuma temporada Ativa" ANTES da outra commitar a sua e criar
+// DUAS temporadas 'Ativa' simultâneas — dali em diante, partidas e leitura
+// de status podiam resolver pra temporadas diferentes, e o jogador via o
+// rating sempre voltando pro valor inicial mesmo ganhando partidas de
+// verdade (participação nova na temporada "errada"). O advisory lock
+// serializa quem entra aqui: só uma transação por vez decide se precisa
+// criar/virar temporada, e ele é automaticamente liberado no fim da
+// transação (commit ou rollback) — nunca precisa de unlock manual. O
+// índice único parcial em pvp_seasons (migration 20261201010000) é a rede
+// de segurança final contra qualquer forma de bypassar este lock.
 async function obterOuIniciarTemporadaAtiva() {
   return sequelize.transaction(async (transaction) => {
+    await sequelize.query("SELECT pg_advisory_xact_lock(:chave);", {
+      replacements: { chave: LOCK_BOOTSTRAP_TEMPORADA },
+      transaction,
+    });
+
     let temporada = await obterTemporadaAtiva(transaction);
 
     if (temporada && temporada.ends_at.getTime() <= Date.now()) {
@@ -108,8 +134,16 @@ async function obterOuIniciarTemporadaAtiva() {
 }
 
 // Encerramento explícito (ex.: rotina/admin), fora do bootstrap por data.
+// Mesmo advisory lock do bootstrap automático (mesma chave) — nunca pode
+// correr ao mesmo tempo que obterOuIniciarTemporadaAtiva, senão os dois
+// podiam decidir "preciso criar uma temporada nova" ao mesmo tempo.
 async function encerrarTemporadaEIniciarProxima() {
   return sequelize.transaction(async (transaction) => {
+    await sequelize.query("SELECT pg_advisory_xact_lock(:chave);", {
+      replacements: { chave: LOCK_BOOTSTRAP_TEMPORADA },
+      transaction,
+    });
+
     const atual = await obterTemporadaAtiva(transaction);
     if (!atual) return criarProximaTemporada({}, transaction);
 

@@ -542,6 +542,13 @@ testeComBanco("medalha vem do 1º/2º/3º lugar da temporada ranqueada ENCERRADA
 });
 
 testeComBanco("temporada ATIVA nunca concede medalha (ainda não terminou)", async () => {
+  // Só pode existir UMA temporada 'Ativa' no banco inteiro (índice único
+  // parcial, migration 20261201010000) — encerra qualquer uma que já
+  // esteja ativa (ex.: a bootstrapada por outro teste/serviço) antes de
+  // marcar a de teste como Ativa, senão bate no mesmo índice que existe
+  // exatamente pra evitar o bug real de duas temporadas Ativa ao mesmo
+  // tempo.
+  await PvPSeason.update({ status: "Encerrada" }, { where: { status: "Ativa" } });
   const temporada = await temporadaDeTeste();
   await temporada.update({ status: "Ativa" });
 
