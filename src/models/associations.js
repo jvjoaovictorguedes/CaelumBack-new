@@ -481,4 +481,42 @@ TavernGameBet.belongsTo(Character, { foreignKey: "id_personagem" });
 TavernGame.hasMany(TavernGameBet, { foreignKey: "id_game", as: "apostas" });
 TavernGameBet.belongsTo(TavernGame, { foreignKey: "id_game", as: "jogo" });
 
+// Boss Global / Ameaça Mundial (Caelum_Boss_Global.docx) — domínio
+// separado de GuildBoss (escopo de servidor inteiro, não de guilda).
+const WorldBossConfig = require("./WorldBossConfig");
+const WorldBossConfigZone = require("./WorldBossConfigZone");
+const WorldBossPhase = require("./WorldBossPhase");
+const WorldBossEvent = require("./WorldBossEvent");
+const WorldBossContribution = require("./WorldBossContribution");
+const WorldBossCombatSession = require("./WorldBossCombatSession");
+const WorldBossRewardGrant = require("./WorldBossRewardGrant");
+
+WorldBossConfig.hasMany(WorldBossConfigZone, { foreignKey: "id_world_boss_config", as: "zonas" });
+WorldBossConfigZone.belongsTo(WorldBossConfig, { foreignKey: "id_world_boss_config" });
+WorldBossConfigZone.belongsTo(AdventureZone, { foreignKey: "id_zone", as: "zona" });
+
+WorldBossConfig.hasMany(WorldBossPhase, { foreignKey: "id_world_boss_config", as: "fases" });
+WorldBossPhase.belongsTo(WorldBossConfig, { foreignKey: "id_world_boss_config" });
+
+WorldBossConfig.hasMany(WorldBossEvent, { foreignKey: "id_world_boss_config" });
+WorldBossEvent.belongsTo(WorldBossConfig, { foreignKey: "id_world_boss_config", as: "config" });
+WorldBossEvent.belongsTo(Character, { foreignKey: "discoverer_character_id", as: "descobridor" });
+WorldBossEvent.belongsTo(AdventureZone, { foreignKey: "discovery_zone_id", as: "zonaDescoberta" });
+WorldBossEvent.belongsTo(Character, { foreignKey: "final_blow_character_id", as: "golpeFinalPor" });
+
+WorldBossEvent.hasMany(WorldBossContribution, { foreignKey: "event_id", as: "contribuicoes" });
+WorldBossContribution.belongsTo(WorldBossEvent, { foreignKey: "event_id" });
+Character.hasMany(WorldBossContribution, { foreignKey: "character_id" });
+WorldBossContribution.belongsTo(Character, { foreignKey: "character_id" });
+
+WorldBossEvent.hasMany(WorldBossCombatSession, { foreignKey: "event_id" });
+WorldBossCombatSession.belongsTo(WorldBossEvent, { foreignKey: "event_id" });
+Character.hasMany(WorldBossCombatSession, { foreignKey: "character_id" });
+WorldBossCombatSession.belongsTo(Character, { foreignKey: "character_id" });
+
+WorldBossEvent.hasMany(WorldBossRewardGrant, { foreignKey: "event_id", as: "premiacoes" });
+WorldBossRewardGrant.belongsTo(WorldBossEvent, { foreignKey: "event_id" });
+Character.hasMany(WorldBossRewardGrant, { foreignKey: "character_id" });
+WorldBossRewardGrant.belongsTo(Character, { foreignKey: "character_id" });
+
 module.exports = {};
