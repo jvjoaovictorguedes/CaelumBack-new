@@ -91,6 +91,8 @@ const alchemyRoutes = require("./routes/alchemyRoutes");
 const fishingRoutes = require("./routes/fishingRoutes");
 const tavernRoutes = require("./routes/tavernRoutes");
 const worldBossRoutes = require("./routes/worldBossRoutes");
+const adminGuildJournalRoutes = require("./routes/adminGuildJournalRoutes");
+const guildJournalRoutes = require("./routes/guildJournalRoutes");
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -206,6 +208,7 @@ app.use("/api/tavern", tavernRoutes);
 app.use("/api/world-boss", worldBossRoutes);
 app.use("/api/expeditions", expeditionRoutes);
 app.use("/api/patch-notes", patchNotesRoutes);
+app.use("/api/guild-journal", guildJournalRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/races", raceRoutes);
 app.use("/api/powers", powerRoutes);
@@ -261,6 +264,7 @@ app.use("/api/admin/grants", adminGrantRoutes);
 app.use("/api/admin/global-buffs", adminGlobalBuffRoutes);
 app.use("/api/admin/tavern", adminTavernRoutes);
 app.use("/api/admin/world-boss", adminWorldBossRoutes);
+app.use("/api/admin/guild-journal", adminGuildJournalRoutes);
 
 // Nenhuma rota acima bateu — sem isso, o Express respondia com a página
 // de erro padrão dele (texto puro tipo "Cannot GET /api/xyz"), que o
