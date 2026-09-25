@@ -241,9 +241,13 @@ async function duplicateAdminTavernGame(id, { idAdmin, req }) {
   return sequelize.transaction(async (transaction) => {
     const original = await TavernGame.findByPk(id, { transaction });
     if (!original) throw erro("Jogo não encontrado.", 404);
+    // key é STRING(40) — trunca a base pra sempre caber o sufixo de
+    // desambiguação, mesmo se a key original já estiver perto do limite.
+    const sufixoCopia = `-copia-${Date.now()}`;
+    const baseKey = original.key.slice(0, 40 - sufixoCopia.length);
     const copia = await TavernGame.create(
       {
-        key: `${original.key}-copia-${Date.now()}`,
+        key: `${baseKey}${sufixoCopia}`,
         nome: `${original.nome} (cópia)`,
         descricao: original.descricao,
         presentation_key: original.presentation_key,

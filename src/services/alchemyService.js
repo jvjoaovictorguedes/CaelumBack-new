@@ -11,6 +11,10 @@ const alchemyRecipeService = require("./alchemyRecipeService");
 const alchemyProgressionService = require("./alchemyProgressionService");
 const inventoryService = require("./inventoryService");
 const { QUANTIDADE_MAXIMA_POR_BREW } = require("../config/alchemyConfig");
+// Sistema de Taverna §13 — ALCHEMY_XP_PCT aplicado na concessão de XP de
+// Alquimia (nunca na chance/quantidade produzida), mesmo padrão de
+// FORGE_XP_PCT em forgeService.js.
+const { bonusesAtivosPara: bonusesTavernaAtivosPara } = require("./tavernBuffService");
 
 async function obterOuCriarProgresso(characterId, transaction) {
   const [progresso] = await CharacterAlchemyProgress.findOrCreate({
@@ -147,7 +151,11 @@ async function prepararLote(characterId, recipeId, { quantity, idempotencyKey } 
     const quantidadeProduzida = recipe.quantidade_resultado * quantidade;
     await inventoryService.addStack(characterId, recipe.id_item_resultado, quantidadeProduzida, transaction);
 
-    const xpGanho = recipe.xp_alquimia * quantidade;
+    const bonusTaverna = await bonusesTavernaAtivosPara(characterId, "Alquimia", transaction);
+    const xpBase = recipe.xp_alquimia * quantidade;
+    const xpGanho = bonusTaverna.ALCHEMY_XP_PCT
+      ? Math.round(xpBase * (1 + bonusTaverna.ALCHEMY_XP_PCT / 100))
+      : xpBase;
     const ganho = alchemyProgressionService.aplicarGanhoDeXp(progressoAtual.experiencia, xpGanho);
 
     const [progressoAtualizado] = await CharacterAlchemyProgress.upsert(

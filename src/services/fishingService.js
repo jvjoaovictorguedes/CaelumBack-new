@@ -30,6 +30,11 @@ const { propriedadesEfetivasVara } = require("./equipmentRefinementService");
 const { sortearEspecie } = require("./fishingEncounterService");
 const { resolverPassoDeReel } = require("./fishingEngine");
 const { aplicarGanhoDeXp, garantirProgresso } = require("./fishingProgressionService");
+// Sistema de Taverna §6.1/§13 — FISHING_CONTROL_PCT só na pesca NORMAL
+// (este arquivo), NUNCA no Torneio de Pesca (fishingTournamentService.js
+// não importa isso e não deve). Soma por cima do `controle` efetivo da
+// vara, igual ao que MAX_HP_PCT faz sobre vidaMaximaDe em combatController.
+const { bonusesAtivosPara: bonusesTavernaAtivosPara } = require("./tavernBuffService");
 const {
   sortearPesoGramas,
   qualidadeEspecime,
@@ -355,6 +360,15 @@ async function recolher(characterId, sessionId, active) {
     const especie = await require("../models/FishingSpecies").findByPk(session.id_species, { transaction });
     const rodInfo = await buscarRodEfetivo(characterId, session.id_instancia_vara, transaction);
 
+    const bonusTaverna = await bonusesTavernaAtivosPara(characterId, "Pesca", transaction);
+    let rodEfetiva = rodInfo?.efetivo ?? null;
+    if (rodEfetiva && bonusTaverna.FISHING_CONTROL_PCT) {
+      rodEfetiva = {
+        ...rodEfetiva,
+        controle: Math.round((rodEfetiva.controle ?? 100) * (1 + bonusTaverna.FISHING_CONTROL_PCT / 100)),
+      };
+    }
+
     session.sequence += 1;
     const passo = resolverPassoDeReel({
       behaviorKey: especie.comportamento_key,
@@ -362,7 +376,7 @@ async function recolher(characterId, sessionId, active) {
       sequence: session.sequence,
       tensaoAtual: session.tensao,
       progressoAtual: session.progresso,
-      rod: rodInfo?.efetivo ?? null,
+      rod: rodEfetiva,
       active: Boolean(active),
     });
     session.tensao = passo.tensao;
