@@ -32,8 +32,34 @@ function testeComBanco(nome, fn) {
   });
 }
 
+// Sem isso, cada Item/AlchemyRecipe de teste ficava pra sempre no banco
+// compartilhado — como a listagem de receitas (GET /api/alchemy/recipes)
+// é global (não filtrada por personagem), esse lixo aparecia direto na
+// tela do Caldeirão de qualquer jogador real. Rastreia tudo que este
+// arquivo cria e apaga no fim, na ordem certa de FK.
+const itensCriados = [];
+const receitasCriadas = [];
+
+test.after(async () => {
+  if (!temBanco) return;
+  if (receitasCriadas.length > 0) {
+    await CharacterAlchemyRecipeUnlock.destroy({ where: { id_recipe: receitasCriadas } });
+    await sequelize.query(`DELETE FROM alchemy_brew_idempotency WHERE id_recipe IN (:ids);`, {
+      replacements: { ids: receitasCriadas },
+    });
+    await AlchemyRecipeIngredient.destroy({ where: { id_recipe: receitasCriadas } });
+    await AlchemyRecipe.destroy({ where: { id: receitasCriadas } });
+  }
+  if (itensCriados.length > 0) {
+    await ConsumableEffect.destroy({ where: { id_item: itensCriados } });
+    await CharacterInventory.destroy({ where: { id_item: itensCriados } });
+    await ConsumableProperties.destroy({ where: { id_item: itensCriados } });
+    await Item.destroy({ where: { id: itensCriados } });
+  }
+});
+
 async function criarItem({ tipo_item = "Espolio", raridade = "Comum", nome } = {}) {
-  return Item.create({
+  const item = await Item.create({
     nome: nome ?? `Item ${sufixo()}`,
     descricao: "Item de teste",
     tipo_item,
@@ -41,6 +67,8 @@ async function criarItem({ tipo_item = "Espolio", raridade = "Comum", nome } = {
     valor_compra: 0,
     valor_venda: 1,
   });
+  itensCriados.push(item.id);
+  return item;
 }
 
 async function criarItemConsumivel({ efeito_vida = 0, efeito_mana = 0, nome } = {}) {
@@ -78,6 +106,7 @@ async function criarReceita({
     xp_alquimia: xp,
     modo_desbloqueio: modoDesbloqueio,
   });
+  receitasCriadas.push(recipe.id);
   const ings = ingredientes ?? [{ item: await criarItem(), quantidade: 2 }];
   for (const ing of ings) {
     await AlchemyRecipeIngredient.create({ id_recipe: recipe.id, id_item: ing.item.id, quantidade: ing.quantidade });
