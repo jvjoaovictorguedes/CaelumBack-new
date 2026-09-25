@@ -14,4 +14,8 @@ router.get("/menu", tavernController.listarCardapio);
 router.post("/menu/:id/consume", tavernController.consumirOferta);
 router.get("/buffs", tavernController.listarBuffsAtivos);
 
+router.get("/games", tavernController.listarJogos);
+router.get("/games/history", tavernController.historicoDeApostas);
+router.post("/games/:id/play", tavernController.apostar);
+
 module.exports = router;
