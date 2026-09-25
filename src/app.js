@@ -86,6 +86,7 @@ const adminGrantRoutes = require("./routes/adminGrantRoutes");
 const adminGlobalBuffRoutes = require("./routes/adminGlobalBuffRoutes");
 const alchemyRoutes = require("./routes/alchemyRoutes");
 const fishingRoutes = require("./routes/fishingRoutes");
+const tavernRoutes = require("./routes/tavernRoutes");
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -197,6 +198,7 @@ app.use("/api/shop", shopRoutes);
 app.use("/api/crafting", craftingRoutes);
 app.use("/api/alchemy", alchemyRoutes);
 app.use("/api/fishing", fishingRoutes);
+app.use("/api/tavern", tavernRoutes);
 app.use("/api/expeditions", expeditionRoutes);
 app.use("/api/patch-notes", patchNotesRoutes);
 app.use("/api/users", userRoutes);

@@ -463,4 +463,22 @@ MarineRoute.belongsTo(WorldMapConnection, { foreignKey: "id_world_connection" })
 MarineRoute.belongsTo(FishingPort, { foreignKey: "id_port_origem", as: "portoOrigem" });
 MarineRoute.belongsTo(FishingZone, { foreignKey: "id_zone_destino", as: "zonaDestino" });
 
+// Sistema de Taverna (§7) — CharacterTavernBuff é a linha ATUAL por
+// categoria (Refeicao/Bebida), nunca histórico; TavernGameBet é o
+// histórico imutável de apostas.
+const TavernMenuItem = require("./TavernMenuItem");
+const CharacterTavernBuff = require("./CharacterTavernBuff");
+const TavernGame = require("./TavernGame");
+const TavernGameBet = require("./TavernGameBet");
+
+Character.hasMany(CharacterTavernBuff, { foreignKey: "id_personagem", as: "buffsTaverna" });
+CharacterTavernBuff.belongsTo(Character, { foreignKey: "id_personagem" });
+CharacterTavernBuff.belongsTo(TavernMenuItem, { foreignKey: "source_menu_item_id", as: "oferta" });
+TavernMenuItem.hasMany(CharacterTavernBuff, { foreignKey: "source_menu_item_id" });
+
+Character.hasMany(TavernGameBet, { foreignKey: "id_personagem", as: "apostasTaverna" });
+TavernGameBet.belongsTo(Character, { foreignKey: "id_personagem" });
+TavernGame.hasMany(TavernGameBet, { foreignKey: "id_game", as: "apostas" });
+TavernGameBet.belongsTo(TavernGame, { foreignKey: "id_game", as: "jogo" });
+
 module.exports = {};
