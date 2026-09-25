@@ -275,7 +275,10 @@ async function finalizarCaptura(characterId, session, transaction) {
   if (session.finalized_at) return session.resultado_payload; // idempotência de retry
 
   const FishingSpecies = require("../models/FishingSpecies");
-  const especie = await FishingSpecies.findByPk(session.id_species, { transaction });
+  const especie = await FishingSpecies.findByPk(session.id_species, {
+    include: [{ model: Item, as: "item", attributes: ["id", "nome"] }],
+    transaction,
+  });
   if (!especie) throw erro("Espécie da captura não encontrada.", 500);
 
   const quality = qualidadeEspecime(session.weight_g, especie.peso_min_g, especie.peso_max_g);
@@ -330,7 +333,7 @@ async function finalizarCaptura(characterId, session, transaction) {
   const resultado = {
     resultado: "CAUGHT",
     id_species: especie.id,
-    nome_especie: null, // resolvido pelo controller via include, se necessário
+    nome_especie: especie.item?.nome ?? null,
     weight_g: session.weight_g,
     quality,
     xp: xpGanho,
