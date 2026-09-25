@@ -83,6 +83,7 @@ const adminMissionRoutes = require("./routes/adminMissionRoutes");
 const adminSpoilConfigRoutes = require("./routes/adminSpoilConfigRoutes");
 const adminHuntConfigRoutes = require("./routes/adminHuntConfigRoutes");
 const adminGrantRoutes = require("./routes/adminGrantRoutes");
+const adminGlobalBuffRoutes = require("./routes/adminGlobalBuffRoutes");
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -246,6 +247,7 @@ app.use("/api/admin/missions", adminMissionRoutes);
 app.use("/api/admin/spoils/config", adminSpoilConfigRoutes);
 app.use("/api/admin/hunts/config", adminHuntConfigRoutes);
 app.use("/api/admin/grants", adminGrantRoutes);
+app.use("/api/admin/global-buffs", adminGlobalBuffRoutes);
 
 // Nenhuma rota acima bateu — sem isso, o Express respondia com a página
 // de erro padrão dele (texto puro tipo "Cannot GET /api/xyz"), que o

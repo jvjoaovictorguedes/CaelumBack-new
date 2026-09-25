@@ -24,6 +24,7 @@ const {
 } = require("../config/expeditionConfig");
 const { sortearQualidade, sortearRecurso, sortearQuantidade, sortearInterrupcaoDeMonstro } = require("./expeditionRollService");
 const { nivelPorXpTotal, xpParaProximoNivel, aplicarGanhoDeXp } = require("./expeditionProgressionService");
+const { bonusesAtivosAgora } = require("./globalBuffService");
 const { registrarProgresso } = require("./missionService");
 const { addStack } = require("./inventoryService");
 const { registrarProgressoContrato } = require("./adventureGuildObjectiveService");
@@ -325,7 +326,10 @@ async function coletar(id_personagem, id_regiao) {
       };
     }
 
-    const progresso = aplicarGanhoDeXp(profissao.experiencia, resultado);
+    // Buff Global "XpExpedicao" (Painel Administrativo Fase 15) — evento
+    // temporal server-wide, some sobre o XP desta coleta.
+    const bonusGlobal = await bonusesAtivosAgora();
+    const progresso = aplicarGanhoDeXp(profissao.experiencia, resultado, bonusGlobal.xpExpedicaoPercentual);
     profissao.experiencia = progresso.xpTotal;
 
     // Grava o mesmo cooldown nas 3 linhas (não só na que coletou agora)

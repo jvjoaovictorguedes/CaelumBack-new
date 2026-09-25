@@ -30,11 +30,17 @@ function xpParaProximoNivel(nivelAtual) {
 
 // Aplica o ganho de XP de um resultado de coleta ("Nada" incluso) sobre
 // o XP total já acumulado e retorna o novo estado + se houve level up.
-function aplicarGanhoDeXp(xpTotalAtual, resultado) {
+// bonusPercentual (Buff Global "XpExpedicao", Fase 15) aplica DEPOIS do
+// multiplicador por nível, nunca em cima dele — os dois são fatores
+// independentes, não somados entre si.
+function aplicarGanhoDeXp(xpTotalAtual, resultado, bonusPercentual = 0) {
   const nivelAntes = nivelPorXpTotal(xpTotalAtual);
   const base = XP_POR_RESULTADO[resultado] ?? 0;
   const multiplicador = MULTIPLICADOR_XP_POR_NIVEL[nivelAntes] ?? 1;
-  const ganho = base > 0 ? Math.max(1, Math.round(base * multiplicador)) : 0;
+  let ganho = base > 0 ? Math.max(1, Math.round(base * multiplicador)) : 0;
+  if (ganho > 0 && bonusPercentual > 0) {
+    ganho = Math.round(ganho * (1 + bonusPercentual / 100));
+  }
   const xpTotalNovo = xpTotalAtual + ganho;
   const nivelDepois = nivelPorXpTotal(xpTotalNovo);
 
