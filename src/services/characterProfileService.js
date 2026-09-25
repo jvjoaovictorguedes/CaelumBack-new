@@ -15,6 +15,7 @@ const CharacterForgeProgress = require("../models/CharacterForgeProgress");
 const CharacterProfession = require("../models/CharacterProfession");
 const CharacterAdventureGuildProgress = require("../models/CharacterAdventureGuildProgress");
 const CharacterAdventureGuildContract = require("../models/CharacterAdventureGuildContract");
+const CharacterHunterProgress = require("../models/CharacterHunterProgress");
 const CharacterProfile = require("../models/CharacterProfile");
 const Title = require("../models/Title");
 const Achievement = require("../models/Achievement");
@@ -31,6 +32,8 @@ const combatPowerService = require("./combatPowerService");
 const rankedSeasonService = require("./rankedSeasonService");
 const rankedRatingService = require("./rankedRatingService");
 const rankedTierService = require("./rankedTierService");
+const { formatarResumoReputacao } = require("./spoilReputationService");
+const { formatarResumoReputacao: formatarResumoReputacaoCacador } = require("./hunterReputationService");
 
 class ProfileError extends Error {
   constructor(mensagem, status = 400) {
@@ -124,13 +127,14 @@ async function montarEquipamentosPublicos(idPersonagem) {
 // CharacterAdventureGuildProgress.missoes_concluidas_no_rank, que zera
 // a cada promoção).
 async function montarProgressao(idPersonagem, character) {
-  const [forja, profissoes, progressoAventureiro, contratosConcluidos] = await Promise.all([
+  const [forja, profissoes, progressoAventureiro, contratosConcluidos, progressoCacador] = await Promise.all([
     CharacterForgeProgress.findOne({ where: { id_personagem: idPersonagem } }),
     CharacterProfession.findAll({ where: { id_personagem: idPersonagem } }),
     CharacterAdventureGuildProgress.findOne({ where: { id_personagem: idPersonagem } }),
     CharacterAdventureGuildContract.count({
       where: { id_personagem: idPersonagem, status: ["Concluido", "Resgatado"] },
     }),
+    CharacterHunterProgress.findOne({ where: { id_personagem: idPersonagem } }),
   ]);
 
   const profissaoPorTipo = {};
@@ -138,11 +142,30 @@ async function montarProgressao(idPersonagem, character) {
     profissaoPorTipo[p.tipo] = nivelExpedicaoPorXp(p.experiencia);
   }
 
+  const reputacaoComercial = formatarResumoReputacao(progressoAventureiro?.reputacao_encomendas ?? 0);
+  const reputacaoCacador = formatarResumoReputacaoCacador(progressoCacador?.reputation_points ?? 0);
+
   return {
     nivel: character.nivel,
     rank_aventureiro: {
       rank: progressoAventureiro?.rank ?? character.rank ?? "F",
       contratos_concluidos: contratosConcluidos,
+    },
+    // Balcão de Espólios §12 / Caçadas §18 — mesmas duas progressões que
+    // já aparecem em /characters/me (adventureGuildProfile), agora
+    // também na vitrine pública: nenhuma delas expõe algo mais sensível
+    // que o próprio Rank de Aventureiro acima.
+    reputacao_comercial: {
+      pontos: reputacaoComercial.points,
+      nivel: reputacaoComercial.level,
+      titulo: reputacaoComercial.name,
+      encomendas_concluidas: progressoAventureiro?.total_spoil_orders_completed ?? 0,
+    },
+    reputacao_cacador: {
+      pontos: reputacaoCacador.points,
+      nivel: reputacaoCacador.level,
+      titulo: reputacaoCacador.title,
+      cacadas_concluidas: progressoCacador?.hunts_completed_total ?? 0,
     },
     forja: { nivel: forja?.nivel ?? 1 },
     expedicao: {
