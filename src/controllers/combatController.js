@@ -61,6 +61,7 @@ const AdventureZone = require("../models/AdventureZone");
 const { BONUS_POR_NIVEL } = require("../config/bestiaryConfig");
 const WeaponStatusEffect = require("../models/WeaponStatusEffect");
 const { resolverModificadorParaEncontro, registrarMorteDaCacada } = require("../services/adventureHuntCombatService");
+const uniqueFeatService = require("../services/uniqueFeatService");
 
 // Motor de Status/Cooldown (Especificação Consolidada Poder/Status/
 // Cooldown/Balanceamento, §37) — devolve o estado de combate já
@@ -1173,6 +1174,37 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       );
       if (worldBoss?.descoberto) {
         log.push(`Uma Ameaça Mundial foi descoberta: ${worldBoss.nome}!`);
+      }
+
+      // Sistema de Proezas Únicas §16 — MESMO ponto que já confirma uma
+      // vitória PvE legítima (igual Boss Global logo acima), nunca um
+      // endpoint separado. itemIds junta o espólio de zona com o drop
+      // do fallback legado — nunca os dois ao mesmo tempo na prática
+      // (ehEncontroDeZona decide qual caminho rodou), mas o array cobre
+      // ambos sem precisar de outro campo de contexto.
+      const itemIdsDoEncontro = [
+        ...espoliosDeZona.map((espolio) => espolio.id_item),
+        ...(drop?.tipo === "item" ? [drop.item.id] : []),
+      ];
+      const proezasConquistadas = await uniqueFeatService.check(
+        "ADVENTURE_VICTORY",
+        {
+          zoneId: inimigoAtual.id_area ?? null,
+          monsterId: inimigoAtual.id_monstro ?? null,
+          hpRestante: personagemAtual.vida_atual,
+          manaRestante: personagemAtual.mana_atual,
+          turno: combatTurn,
+          itemIds: itemIdsDoEncontro,
+        },
+        { transaction, characterId: character.id, sourceEventId: `adventure:${character.id}:${Date.now()}` },
+      );
+      for (const { feat } of proezasConquistadas) {
+        // §12 — o texto de revelação completo (nome/lore/Legado) é
+        // responsabilidade do modal/anúncio global (UX pública, fase
+        // futura); aqui só confirma no log que ALGO histórico aconteceu,
+        // sem vazar a condição secreta nem depender do frontend saber
+        // renderizar a Proeza ainda.
+        log.push(`✦ Você escreveu uma nova página na história de Caelum: "${feat.nome}"!`);
       }
 
       await character.save({ transaction });
