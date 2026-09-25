@@ -75,6 +75,7 @@ const adminAuditRoutes = require("./routes/adminAuditRoutes");
 const adminRoleRoutes = require("./routes/adminRoleRoutes");
 const adminPatchNoteRoutes = require("./routes/adminPatchNoteRoutes");
 const adminGameSettingRoutes = require("./routes/adminGameSettingRoutes");
+const adminAdventureRoutes = require("./routes/adminAdventureRoutes");
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -222,6 +223,7 @@ app.use("/api/admin/audit", adminAuditRoutes);
 app.use("/api/admin/admins", adminRoleRoutes);
 app.use("/api/admin/patch-notes", adminPatchNoteRoutes);
 app.use("/api/admin/settings", adminGameSettingRoutes);
+app.use("/api/admin/adventure", adminAdventureRoutes);
 
 // Nenhuma rota acima bateu — sem isso, o Express respondia com a página
 // de erro padrão dele (texto puro tipo "Cannot GET /api/xyz"), que o
