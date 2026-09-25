@@ -24,6 +24,8 @@ const {
 } = require("../config/expeditionConfig");
 const { sortearQualidade, sortearRecurso, sortearQuantidade, sortearInterrupcaoDeMonstro } = require("./expeditionRollService");
 const { nivelPorXpTotal, xpParaProximoNivel, aplicarGanhoDeXp } = require("./expeditionProgressionService");
+const { bonusesAtivosAgora } = require("./globalBuffService");
+const { bonusesAtivosPara: bonusesTavernaAtivosPara } = require("./tavernBuffService");
 const { registrarProgresso } = require("./missionService");
 const { addStack } = require("./inventoryService");
 const { registrarProgressoContrato } = require("./adventureGuildObjectiveService");
@@ -325,7 +327,14 @@ async function coletar(id_personagem, id_regiao) {
       };
     }
 
-    const progresso = aplicarGanhoDeXp(profissao.experiencia, resultado);
+    // Buff Global "XpExpedicao" (Painel Administrativo Fase 15) — evento
+    // temporal server-wide — soma com EXPEDITION_XP_PCT da Taverna
+    // (§13) ANTES de arredondar, mesma regra de sempre: dois +5% viram
+    // +10% aplicado uma vez.
+    const bonusGlobal = await bonusesAtivosAgora();
+    const bonusTaverna = await bonusesTavernaAtivosPara(id_personagem, "Expedicao", transaction);
+    const bonusExpedicaoTotal = bonusGlobal.xpExpedicaoPercentual + (bonusTaverna.EXPEDITION_XP_PCT ?? 0);
+    const progresso = aplicarGanhoDeXp(profissao.experiencia, resultado, bonusExpedicaoTotal);
     profissao.experiencia = progresso.xpTotal;
 
     // Grava o mesmo cooldown nas 3 linhas (não só na que coletou agora)

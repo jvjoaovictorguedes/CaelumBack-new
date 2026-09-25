@@ -23,12 +23,16 @@ const {
   ouroBaseDoNivel,
 } = require("../config/adventureConfig");
 const { aplicarBonusDeMaestria } = require("./masteryBonusService");
+const { bonusesAtivosAgora } = require("./globalBuffService");
 
 const ESCALA_PPM = 1_000_000;
 
 // Rola cada entrada de loot do monstro de forma independente — devolve
 // um array (pode ser vazio, ou ter mais de um espólio na mesma vitória).
-async function sortearEspoliosDoMonstro(idMonstro, transaction) {
+// dropPercentual (Buff Global "DropAventura", Fase 15) escala a chance_ppm
+// de cada entrada pra cima, nunca troca o item sorteado nem a quantidade —
+// sempre limitado em ESCALA_PPM (100%), nunca "chance negativa" a menos.
+async function sortearEspoliosDoMonstro(idMonstro, transaction, dropPercentual = 0) {
   if (!idMonstro) return [];
 
   const opcoes = await AdventureMonsterLoot.findAll({
@@ -39,8 +43,12 @@ async function sortearEspoliosDoMonstro(idMonstro, transaction) {
 
   const espolios = [];
   for (const opcao of opcoes) {
+    const chanceEfetiva =
+      dropPercentual > 0
+        ? Math.min(ESCALA_PPM, Math.round(opcao.chance_ppm * (1 + dropPercentual / 100)))
+        : opcao.chance_ppm;
     const rolagem = crypto.randomInt(0, ESCALA_PPM);
-    if (rolagem >= opcao.chance_ppm) continue;
+    if (rolagem >= chanceEfetiva) continue;
 
     const quantidade =
       opcao.quantidade_max <= opcao.quantidade_min
@@ -75,7 +83,16 @@ async function concederRecompensaDeZona(character, inimigoAtual, transaction) {
     ouroBaseDoNivel(inimigoAtual.nivel) * (ehRaro ? MULTIPLICADOR_RARO_OURO : 1),
   );
 
-  const espoliosBase = await sortearEspoliosDoMonstro(inimigoAtual.id_monstro, transaction);
+  // Buff Global "DropAventura" (Fase 15) — evento temporal server-wide,
+  // some com o Bônus de Maestria Regional (aplicado depois, abaixo) em
+  // vez de competir com ele: um escala a CHANCE do drop rolar, o outro
+  // ADICIONA espólio extra sobre o que já rolou.
+  const bonusGlobal = await bonusesAtivosAgora();
+  const espoliosBase = await sortearEspoliosDoMonstro(
+    inimigoAtual.id_monstro,
+    transaction,
+    bonusGlobal.dropAventuraPercentual,
+  );
 
   // Bônus de Maestria Regional (Bestiário — §14/§16) — usa os abates
   // JÁ existentes antes desta vitória (registrarMorte só roda depois,

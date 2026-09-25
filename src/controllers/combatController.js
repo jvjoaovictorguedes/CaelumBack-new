@@ -47,6 +47,8 @@ const { concederOuro } = require("../services/goldService");
 const { registrarProgressoContrato } = require("../services/adventureGuildObjectiveService");
 const { registrarProgressoMissaoGuilda } = require("../services/guildMissionService");
 const { bonusesAtivosPara } = require("../services/guildBuffService");
+const { bonusesAtivosAgora: bonusesGlobaisAtivosAgora } = require("../services/globalBuffService");
+const { bonusesAtivosPara: bonusesTavernaAtivosPara } = require("../services/tavernBuffService");
 const achievementService = require("../services/achievementService");
 const statusEffectService = require("../services/statusEffectService");
 const cooldownService = require("../services/cooldownService");
@@ -993,11 +995,24 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       // em transferências/vendas (§20). Bônus TOTAL do nível, não
       // cumulativo entre níveis.
       const bonusGuilda = await bonusesAtivosPara(character.id, transaction);
-      if (bonusGuilda.xpPercentual > 0) {
-        xpGanho = Math.round(xpGanho * (1 + bonusGuilda.xpPercentual / 100));
+      // Painel Administrativo Fase 15 — Buff Global (evento temporal,
+      // server-wide) soma com o bônus de Guilda (permanente,
+      // por-personagem) ANTES de arredondar, nunca em cima do resultado
+      // já arredondado do outro — dois +10% viram +20% aplicado uma vez,
+      // não +10% seguido de +10% sobre um valor já maior.
+      const bonusGlobal = await bonusesGlobaisAtivosAgora();
+      // Sistema de Taverna §13 — ADVENTURE_XP_PCT soma no mesmo passo,
+      // nunca aplicado separado (mesma regra: somar tudo antes de
+      // arredondar). Contexto "PVE" nunca é bloqueado (§6.1 só bloqueia
+      // competitivo).
+      const bonusTaverna = await bonusesTavernaAtivosPara(character.id, "PVE", transaction);
+      const xpPercentualTotal = bonusGuilda.xpPercentual + bonusGlobal.xpPercentual + (bonusTaverna.ADVENTURE_XP_PCT ?? 0);
+      const ouroPercentualTotal = bonusGuilda.goldPercentual + bonusGlobal.ouroPercentual;
+      if (xpPercentualTotal > 0) {
+        xpGanho = Math.round(xpGanho * (1 + xpPercentualTotal / 100));
       }
-      if (bonusGuilda.goldPercentual > 0) {
-        dinheiroGanho = Math.round(dinheiroGanho * (1 + bonusGuilda.goldPercentual / 100));
+      if (ouroPercentualTotal > 0) {
+        dinheiroGanho = Math.round(dinheiroGanho * (1 + ouroPercentualTotal / 100));
       }
 
       // O personagem já está travado (LOCK.UPDATE) desde o início desta
