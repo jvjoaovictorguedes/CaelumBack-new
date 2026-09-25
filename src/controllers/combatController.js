@@ -15,6 +15,7 @@ const Power = require("../models/Power");
 const CharacterInventory = require("../models/CharacterInventory");
 const Item = require("../models/Item");
 const ConsumableProperties = require("../models/ConsumableProperties");
+const consumableEffectService = require("../services/consumableEffectService");
 const { adicionarExperiencia } = require("../services/experienceService");
 const {
   calcularDanoBasico,
@@ -857,6 +858,21 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
         );
         log.push(`Você usou ${itemConsumivel.nome} e recuperou ${curaMana} de mana.`);
       }
+
+      // Efeitos novos de Alquimia (Antídotos/cleanse — spec Caldeirão
+      // §12/§21): resolvidos via consumableEffectService/registry, que
+      // delega em statusEffectService — nunca duplica regra de status
+      // aqui. Self-target sempre (o jogador consome em si mesmo).
+      const { statusEffects: statusJogadorPosEfeito, log: logEfeitos } = await consumableEffectService.aplicarEfeitosDoItem(
+        {
+          idItem: action.itemId,
+          statusEffects: statusEffects.player,
+          nomeAlvo: "Você",
+          transaction,
+        },
+      );
+      statusEffects.player = statusJogadorPosEfeito;
+      log.push(...logEfeitos);
 
       inventoryEntry.quantidade -= 1;
       if (inventoryEntry.quantidade <= 0) {

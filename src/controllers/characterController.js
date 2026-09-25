@@ -473,6 +473,21 @@ exports.getCharacterPublico = async (req, res) => {
       include: [{ model: Guild, attributes: ["id", "nome", "sigla"] }],
     });
 
+    // Progresso da Guilda dos Aventureiros (Rank/Reputação Comercial/
+    // Reputação de Caçador) é vitrine de jogador, igual nível ou guilda —
+    // nada aqui expõe dinheiro/inventário/localização, então entra na
+    // versão pública do mesmo jeito que carregarRespostaDoPersonagem já
+    // monta pro dono em /characters/me e /:id (ver adventureGuildProfile).
+    const [progressoGuildaAventureiros, progressoCacador] = await Promise.all([
+      CharacterAdventureGuildProgress.findOne({
+        where: { id_personagem: character.id },
+        attributes: ["reputacao_encomendas", "total_spoil_orders_completed"],
+      }),
+      CharacterHunterProgress.findOne({ where: { id_personagem: character.id } }),
+    ]);
+    const reputacaoComercial = formatarResumoReputacao(progressoGuildaAventureiros?.reputacao_encomendas ?? 0);
+    const reputacaoCacador = formatarResumoReputacaoCacador(progressoCacador?.reputation_points ?? 0);
+
     res.status(200).json({
       status: "success",
       data: {
@@ -492,6 +507,21 @@ exports.getCharacterPublico = async (req, res) => {
           guilda: membroGuild?.Guild
             ? { id: membroGuild.Guild.id, nome: membroGuild.Guild.nome, sigla: membroGuild.Guild.sigla }
             : null,
+          adventureGuildProfile: {
+            adventurerRank: character.rank ?? "F",
+            commercialReputation: {
+              points: reputacaoComercial.points,
+              level: reputacaoComercial.level,
+              title: reputacaoComercial.name,
+              ordersCompleted: progressoGuildaAventureiros?.total_spoil_orders_completed ?? 0,
+            },
+            hunterReputation: {
+              points: reputacaoCacador.points,
+              level: reputacaoCacador.level,
+              title: reputacaoCacador.title,
+              huntsCompleted: progressoCacador?.hunts_completed_total ?? 0,
+            },
+          },
         },
       },
     });

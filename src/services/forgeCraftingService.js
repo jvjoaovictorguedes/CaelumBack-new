@@ -135,6 +135,17 @@ function propriedadesDoResultado(item) {
       bonus_velocidade: p.bonus_velocidade,
     };
   }
+  if (item.fishingRodProperties) {
+    const p = item.fishingRodProperties;
+    return {
+      tipo: "Ferramenta",
+      forca_linha: p.forca_linha,
+      controle: p.controle,
+      recolhimento: p.recolhimento,
+      precisao: p.precisao,
+      estabilidade: p.estabilidade,
+    };
+  }
   return null;
 }
 
@@ -166,7 +177,9 @@ async function listarResumoPorCategoria() {
 // /crafting/blueprints?categoria=...), então nunca repassar direto pro
 // WHERE sem validar: um valor fora do ENUM faria o Postgres estourar
 // erro 500 em vez de simplesmente "nenhum blueprint nessa categoria".
-const CATEGORIAS_BLUEPRINT_VALIDAS = new Set(["Arma", "Armadura", "Capacete", "Escudo", "Acessorio1", "Acessorio2"]);
+// "Ferramenta" (Vara de Pesca — spec Pesca §10.1) reusa exatamente o
+// mesmo pipeline; NUNCA vira Arma nem entra em Combat Power.
+const CATEGORIAS_BLUEPRINT_VALIDAS = new Set(["Arma", "Armadura", "Capacete", "Escudo", "Acessorio1", "Acessorio2", "Ferramenta"]);
 
 async function listarBlueprints(characterId, categoria = null) {
   if (categoria && !CATEGORIAS_BLUEPRINT_VALIDAS.has(categoria)) return [];
@@ -187,6 +200,7 @@ async function listarBlueprints(characterId, categoria = null) {
               include: [
                 { model: WeaponProperties, as: "weaponProperties" },
                 { model: ArmorProperties, as: "armorProperties" },
+                { model: require("../models/FishingRodProperties"), as: "fishingRodProperties" },
               ],
             },
           ],

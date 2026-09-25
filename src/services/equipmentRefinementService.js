@@ -65,9 +65,29 @@ function propriedadesEfetivasArmadura(armorProperties, refinamento) {
   };
 }
 
+// Vara de Pesca (Pesca §10.2) — reutiliza a MESMA curva de escala
+// positiva (fatorRefinamento/escalar) que arma/armadura já usam, só
+// aplicada aos 5 atributos de FishingRodProperties. NUNCA soma esses
+// valores a atributos de personagem/Combat Power — só usada dentro do
+// domínio de Pesca (fishingRodService.js).
+function propriedadesEfetivasVara(fishingRodProperties, refinamento) {
+  if (!fishingRodProperties) return null;
+  const base = fishingRodProperties.toJSON ? fishingRodProperties.toJSON() : fishingRodProperties;
+  const fator = fatorRefinamento(refinamento);
+  return {
+    ...base,
+    forca_linha: escalar(base.forca_linha, fator, refinamento),
+    controle: escalar(base.controle, fator, refinamento),
+    recolhimento: escalar(base.recolhimento, fator, refinamento),
+    precisao: escalar(base.precisao, fator, refinamento),
+    estabilidade: escalar(base.estabilidade, fator, refinamento),
+  };
+}
+
 module.exports = {
   fatorRefinamento,
   propriedadesEfetivasArma,
   propriedadesEfetivasArmadura,
+  propriedadesEfetivasVara,
   BONUS_ATRIBUTO_REFINAMENTO_PCT,
 };

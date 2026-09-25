@@ -141,6 +141,10 @@ const MATERIAIS_BASE_REFINAMENTO_POR_CATEGORIA = {
   Acessorio1: { barras: 1, troncos: 0 },
   Acessorio2: { barras: 1, troncos: 0 },
   Capacete: { barras: 1, troncos: 0 },
+  // Vara de Pesca (Pesca §10.2) — mistura de troncos + barras pra dar
+  // identidade de craft, reutilizando a MESMA curva/fila/pergaminho do
+  // resto da Forja (nunca uma segunda fila/segunda moeda pra varas).
+  Ferramenta: { barras: 1, troncos: 1 },
 };
 
 const OURO_BASE_REFINAMENTO_POR_QUALIDADE = {
