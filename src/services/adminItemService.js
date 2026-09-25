@@ -8,11 +8,13 @@ const Item = require("../models/Item");
 const WeaponProperties = require("../models/WeaponProperties");
 const ArmorProperties = require("../models/ArmorProperties");
 const ConsumableProperties = require("../models/ConsumableProperties");
+const FishingRodProperties = require("../models/FishingRodProperties");
 const { registrarAcao } = require("./adminAuditService");
 
 const TIPOS_ARMA = ["Arma"];
 const TIPOS_ARMADURA = ["Armadura", "Capacete", "Escudo", "Acessorio1", "Acessorio2"];
 const TIPOS_CONSUMIVEL = ["Consumivel"];
+const TIPOS_FERRAMENTA = ["Ferramenta"];
 
 const ENUM_TIPO_ITEM = Item.rawAttributes.tipo_item.values;
 const ENUM_RARIDADE = Item.rawAttributes.raridade.values;
@@ -41,6 +43,7 @@ const CAMPOS_ARMOR = [
   "bonus_velocidade",
 ];
 const CAMPOS_CONSUMABLE = ["efeito_vida", "efeito_mana", "efeito_atributo", "valor_atributo", "duracao_efeito"];
+const CAMPOS_FISHING_ROD = ["forca_linha", "controle", "recolhimento", "precisao", "estabilidade", "nivel_pesca_minimo"];
 
 // Poção de cura e bônus de atributo nunca podem coexistir no mesmo item
 // (bug real: "Poção de Vida Pequena dando +2 Vitalidade") — quem
@@ -120,6 +123,11 @@ async function criarPropriedadesDoTipo(item, payload, transaction) {
       { id_item: item.id, ...limparAtributoDePocaoDeCura(somenteCampos(payload.consumable, CAMPOS_CONSUMABLE)) },
       { transaction },
     );
+  } else if (TIPOS_FERRAMENTA.includes(item.tipo_item)) {
+    await FishingRodProperties.create(
+      { id_item: item.id, ...somenteCampos(payload.fishingRod, CAMPOS_FISHING_ROD) },
+      { transaction },
+    );
   }
 }
 
@@ -131,6 +139,7 @@ async function createAdminItem(payload, { idAdmin, req } = {}) {
   if (TIPOS_ARMA.includes(dadosItem.tipo_item) && !payload.weapon) erros.push('Item do tipo "Arma" exige propriedades de arma.');
   if (TIPOS_ARMADURA.includes(dadosItem.tipo_item) && !payload.armor) erros.push(`Item do tipo "${dadosItem.tipo_item}" exige propriedades de armadura.`);
   if (TIPOS_CONSUMIVEL.includes(dadosItem.tipo_item) && !payload.consumable) erros.push('Item do tipo "Consumivel" exige propriedades de efeito.');
+  if (TIPOS_FERRAMENTA.includes(dadosItem.tipo_item) && !payload.fishingRod) erros.push('Item do tipo "Ferramenta" exige propriedades de vara de pesca.');
 
   if (erros.length > 0) throw erroDeValidacao(erros);
 
@@ -188,6 +197,7 @@ async function updateAdminItem(idItem, payload, { idAdmin, req } = {}) {
         { model: WeaponProperties, as: "weaponProperties" },
         { model: ArmorProperties, as: "armorProperties" },
         { model: ConsumableProperties, as: "consumableProperties" },
+        { model: FishingRodProperties, as: "fishingRodProperties" },
       ],
     });
 
@@ -209,6 +219,10 @@ async function updateAdminItem(idItem, payload, { idAdmin, req } = {}) {
       );
       if (item.consumableProperties) await item.consumableProperties.update(camposConsumable, { transaction });
       else await ConsumableProperties.create({ id_item: item.id, ...camposConsumable }, { transaction });
+    } else if (TIPOS_FERRAMENTA.includes(item.tipo_item) && payload.fishingRod) {
+      const camposFishingRod = somenteCampos(payload.fishingRod, CAMPOS_FISHING_ROD);
+      if (item.fishingRodProperties) await item.fishingRodProperties.update(camposFishingRod, { transaction });
+      else await FishingRodProperties.create({ id_item: item.id, ...camposFishingRod }, { transaction });
     }
 
     // As três ramificações acima criam a propriedade direto pelo Model
@@ -222,6 +236,7 @@ async function updateAdminItem(idItem, payload, { idAdmin, req } = {}) {
         { model: WeaponProperties, as: "weaponProperties" },
         { model: ArmorProperties, as: "armorProperties" },
         { model: ConsumableProperties, as: "consumableProperties" },
+        { model: FishingRodProperties, as: "fishingRodProperties" },
       ],
     });
 
@@ -313,6 +328,7 @@ async function duplicateAdminItem(idItem, { idAdmin, req } = {}) {
         { model: WeaponProperties, as: "weaponProperties" },
         { model: ArmorProperties, as: "armorProperties" },
         { model: ConsumableProperties, as: "consumableProperties" },
+        { model: FishingRodProperties, as: "fishingRodProperties" },
       ],
     });
     if (!original) {
@@ -333,6 +349,7 @@ async function duplicateAdminItem(idItem, { idAdmin, req } = {}) {
       weapon: original.weaponProperties ? { ...original.weaponProperties.toJSON() } : undefined,
       armor: original.armorProperties ? { ...original.armorProperties.toJSON() } : undefined,
       consumable: original.consumableProperties ? { ...original.consumableProperties.toJSON() } : undefined,
+      fishingRod: original.fishingRodProperties ? { ...original.fishingRodProperties.toJSON() } : undefined,
     };
     await criarPropriedadesDoTipo(copia, payload, transaction);
 
@@ -368,6 +385,7 @@ async function listAdminItems({ pagina = 1, porPagina = 20, tipo_item, raridade,
       { model: WeaponProperties, as: "weaponProperties" },
       { model: ArmorProperties, as: "armorProperties" },
       { model: ConsumableProperties, as: "consumableProperties" },
+      { model: FishingRodProperties, as: "fishingRodProperties" },
     ],
     order: [["id", "DESC"]],
     limit: limite,

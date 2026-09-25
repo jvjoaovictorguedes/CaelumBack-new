@@ -29,9 +29,9 @@ exports.listar = async (req, res) => {
 
 exports.criar = async (req, res) => {
   try {
-    const { item, weapon, armor, consumable } = req.body ?? {};
+    const { item, weapon, armor, consumable, fishingRod } = req.body ?? {};
     const criado = await adminItemService.createAdminItem(
-      { ...item, weapon, armor, consumable },
+      { ...item, weapon, armor, consumable, fishingRod },
       { idAdmin: req.user.id, req },
     );
     res.status(201).json({ status: "success", data: { item: criado } });
@@ -42,10 +42,10 @@ exports.criar = async (req, res) => {
 
 exports.atualizar = async (req, res) => {
   try {
-    const { item, weapon, armor, consumable } = req.body ?? {};
+    const { item, weapon, armor, consumable, fishingRod } = req.body ?? {};
     const atualizado = await adminItemService.updateAdminItem(
       req.params.id,
-      { ...item, weapon, armor, consumable },
+      { ...item, weapon, armor, consumable, fishingRod },
       { idAdmin: req.user.id, req },
     );
     res.status(200).json({ status: "success", data: { item: atualizado } });
