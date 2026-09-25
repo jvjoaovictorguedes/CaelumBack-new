@@ -78,6 +78,7 @@ const adminGameSettingRoutes = require("./routes/adminGameSettingRoutes");
 const adminAdventureRoutes = require("./routes/adminAdventureRoutes");
 const adminEquipmentSetRoutes = require("./routes/adminEquipmentSetRoutes");
 const { powersRouter: adminPowersRouter, statusEffectsRouter: adminStatusEffectsRouter, weaponStatusEffectsRouter: adminWeaponStatusEffectsRouter } = require("./routes/adminPowerRoutes");
+const { adminMediaRouter, mediaServingRouter } = require("./routes/adminMediaRoutes");
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -230,6 +231,11 @@ app.use("/api/admin/equipment-sets", adminEquipmentSetRoutes);
 app.use("/api/admin/powers", adminPowersRouter);
 app.use("/api/admin/status-effects", adminStatusEffectsRouter);
 app.use("/api/admin/items/:idItem/weapon-status-effects", adminWeaponStatusEffectsRouter);
+app.use("/api/admin/media", adminMediaRouter);
+// Pública de propósito (sem authMiddleware) — imagem_url de Item/Power/
+// etc pode apontar pra cá, e telas de jogador comuns carregam isso num
+// <img src> sem token de admin.
+app.use("/api/media", mediaServingRouter);
 
 // Nenhuma rota acima bateu — sem isso, o Express respondia com a página
 // de erro padrão dele (texto puro tipo "Cannot GET /api/xyz"), que o
