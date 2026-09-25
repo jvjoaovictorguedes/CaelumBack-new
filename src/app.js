@@ -74,6 +74,7 @@ const adminTournamentRoutes = require("./routes/adminTournamentRoutes");
 const adminItemRoutes = require("./routes/adminItemRoutes");
 const adminAuditRoutes = require("./routes/adminAuditRoutes");
 const adminRoleRoutes = require("./routes/adminRoleRoutes");
+const adminUserRoutes = require("./routes/adminUserRoutes");
 const adminPatchNoteRoutes = require("./routes/adminPatchNoteRoutes");
 const adminGameSettingRoutes = require("./routes/adminGameSettingRoutes");
 const adminAdventureRoutes = require("./routes/adminAdventureRoutes");
@@ -86,6 +87,7 @@ const adminHuntConfigRoutes = require("./routes/adminHuntConfigRoutes");
 const adminGrantRoutes = require("./routes/adminGrantRoutes");
 const adminGlobalBuffRoutes = require("./routes/adminGlobalBuffRoutes");
 const adminTavernRoutes = require("./routes/adminTavernRoutes");
+const adminForgeRoutes = require("./routes/adminForgeRoutes");
 const adminWorldBossRoutes = require("./routes/adminWorldBossRoutes");
 const alchemyRoutes = require("./routes/alchemyRoutes");
 const fishingRoutes = require("./routes/fishingRoutes");
@@ -96,6 +98,8 @@ const guildJournalRoutes = require("./routes/guildJournalRoutes");
 const adminFishingRoutes = require("./routes/adminFishingRoutes");
 const adminPlayerRoutes = require("./routes/adminPlayerRoutes");
 const adminInventoryRoutes = require("./routes/adminInventoryRoutes");
+const adminMusicRoutes = require("./routes/adminMusicRoutes");
+const musicRoutes = require("./routes/musicRoutes");
 const adminMarketRoutes = require("./routes/adminMarketRoutes");
 
 const app = express();
@@ -116,6 +120,11 @@ app.disable("x-powered-by");
 // do Node desde a v15) mesmo depois do servidor já estar no ar.
 connectDB()
   .then(() => require("./services/gameSettingCache").iniciarAtualizacaoPeriodica())
+  .then(() =>
+    require("./services/forgeSettingsService")
+      .aplicarPersistidosNoBoot()
+      .catch((error) => console.error("[forgeSettingsService] falha ao aplicar overrides persistidos no boot:", error)),
+  )
   .catch((error) => {
     console.error(
       "Erro fatal e inesperado ao conectar ao banco de dados:",
@@ -249,6 +258,7 @@ app.use("/api/admin/pvp/tournaments", adminTournamentRoutes);
 app.use("/api/admin/items", adminItemRoutes);
 app.use("/api/admin/audit", adminAuditRoutes);
 app.use("/api/admin/admins", adminRoleRoutes);
+app.use("/api/admin/users", adminUserRoutes);
 app.use("/api/admin/patch-notes", adminPatchNoteRoutes);
 app.use("/api/admin/settings", adminGameSettingRoutes);
 app.use("/api/admin/adventure", adminAdventureRoutes);
@@ -267,12 +277,18 @@ app.use("/api/admin/hunts/config", adminHuntConfigRoutes);
 app.use("/api/admin/grants", adminGrantRoutes);
 app.use("/api/admin/global-buffs", adminGlobalBuffRoutes);
 app.use("/api/admin/tavern", adminTavernRoutes);
+app.use("/api/admin/forge", adminForgeRoutes);
 app.use("/api/admin/world-boss", adminWorldBossRoutes);
 app.use("/api/admin/guild-journal", adminGuildJournalRoutes);
 app.use("/api/admin/fishing", adminFishingRoutes);
 app.use("/api/admin/players", adminPlayerRoutes);
 app.use("/api/admin/inventory", adminInventoryRoutes);
 app.use("/api/admin/market", adminMarketRoutes);
+app.use("/api/admin/music", adminMusicRoutes);
+// Pública de propósito (sem authMiddleware) — snapshot de config e
+// streaming de áudio de música precisam carregar em qualquer tela do
+// jogo, sem token de admin (§11.1).
+app.use("/api/music", musicRoutes);
 
 // Nenhuma rota acima bateu — sem isso, o Express respondia com a página
 // de erro padrão dele (texto puro tipo "Cannot GET /api/xyz"), que o

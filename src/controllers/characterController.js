@@ -206,9 +206,10 @@ exports.createCharacter = async (req, res) => {
 
     // Nível, dinheiro, atributos e vida/mana NUNCA vêm do corpo da
     // requisição: são sempre os valores iniciais fixos do jogo (nível 1,
-    // 15 de ouro) mais os bônus da raça escolhida — sem isso, um cliente
-    // podia criar um personagem já rico, de nível alto ou com atributos
-    // arbitrários só editando o payload.
+    // 500 de ouro, 15 pontos de atributo pra distribuir) mais os bônus
+    // da raça escolhida — sem isso, um cliente podia criar um
+    // personagem já rico, de nível alto ou com atributos arbitrários só
+    // editando o payload.
     const forca = raca.bonus_forca ?? 0;
     const vitalidade = raca.bonus_vitalidade ?? 0;
     const agilidade = raca.bonus_agilidade ?? 0;
@@ -238,8 +239,8 @@ exports.createCharacter = async (req, res) => {
       natureza_magica: sortearNaturezaMagica(),
       nivel: 1,
       experiencia: 0,
-      dinheiro: 15,
-      pontos_distribuir: 0,
+      dinheiro: 500,
+      pontos_distribuir: 15,
       forca,
       vitalidade,
       agilidade,

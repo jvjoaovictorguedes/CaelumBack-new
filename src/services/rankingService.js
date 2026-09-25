@@ -14,6 +14,12 @@ const { obterOuIniciarTemporadaAtiva } = require("./rankedSeasonService");
 const { LEADERBOARD_MINIMO_PARTIDAS } = require("../config/rankedConfig");
 const { TAMANHO_PAGINA_PADRAO } = require("../config/rankingConfig");
 
+// Contas administrativas não aparecem em nenhum ranking (pedido
+// explícito do usuário) — filtro por subquery em vez de JOIN em User
+// pra não precisar tocar em nenhum include existente além de adicionar
+// esta condição.
+const SQL_EXCLUIR_ADMINS = 'id_usuario NOT IN (SELECT id FROM users WHERE "isAdmin" = true)';
+
 function paginar(page) {
   const pagina = Math.max(1, Number.parseInt(page, 10) || 1);
   const offset = (pagina - 1) * TAMANHO_PAGINA_PADRAO;
@@ -32,6 +38,7 @@ async function rankingNivel(page) {
   const { pagina, offset, limite } = paginar(page);
   const { count, rows } = await Character.findAndCountAll({
     attributes: ["id", "nome", "nivel", "experiencia"],
+    where: sequelize.literal(SQL_EXCLUIR_ADMINS),
     order: [
       ["nivel", "DESC"],
       ["experiencia", "DESC"],
@@ -72,6 +79,7 @@ async function rankingGold(page) {
   const { pagina, offset, limite } = paginar(page);
   const { count, rows } = await Character.findAndCountAll({
     attributes: ["id", "nome", "dinheiro_total_ganho"],
+    where: sequelize.literal(SQL_EXCLUIR_ADMINS),
     order: [
       ["dinheiro_total_ganho", "DESC"],
       ["id", "ASC"],
@@ -217,7 +225,7 @@ async function rankingForja(page) {
   const { pagina, offset, limite } = paginar(page);
   const { count, rows } = await CharacterForgeProgress.findAndCountAll({
     attributes: ["id_personagem", "nivel", "experiencia"],
-    include: [{ model: Character, attributes: ["id", "nome"] }],
+    include: [{ model: Character, attributes: ["id", "nome"], where: sequelize.literal(SQL_EXCLUIR_ADMINS), required: true }],
     order: [
       ["experiencia", "DESC"],
       ["id_personagem", "ASC"],
@@ -265,7 +273,15 @@ async function rankingPvp(page) {
 
   const { count, rows } = await CharacterPvpSeason.findAndCountAll({
     where: { season_id: temporada.id, jogos: { [Op.gte]: LEADERBOARD_MINIMO_PARTIDAS } },
-    include: [{ model: Character, as: "personagem", attributes: ["id", "nome"] }],
+    include: [
+      {
+        model: Character,
+        as: "personagem",
+        attributes: ["id", "nome"],
+        where: sequelize.literal(SQL_EXCLUIR_ADMINS),
+        required: true,
+      },
+    ],
     order: [
       ["rating", "DESC"],
       ["vitorias", "DESC"],
@@ -374,7 +390,7 @@ async function rankingPvpCasual(page) {
 
   const { count, rows } = await PvpStatus.findAndCountAll({
     where: sequelize.literal('("PvpStatus".vitorias + "PvpStatus".derrotas) > 0'),
-    include: [{ model: Character, attributes: ["id", "nome"] }],
+    include: [{ model: Character, attributes: ["id", "nome"], where: sequelize.literal(SQL_EXCLUIR_ADMINS), required: true }],
     order: [
       [sequelize.literal(SQL_PONTUACAO_CASUAL), "DESC"],
       [sequelize.literal('("PvpStatus".vitorias - "PvpStatus".derrotas)'), "DESC"],
