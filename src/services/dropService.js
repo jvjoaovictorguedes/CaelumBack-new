@@ -9,7 +9,7 @@ const crypto = require("crypto");
 const Item = require("../models/Item");
 const { concederOuro } = require("./goldService");
 const { addStack } = require("./inventoryService");
-const { ehEquipavel, create: criarInstancia } = require("./equipmentInstanceService");
+const { ehInstanciavel, create: criarInstancia } = require("./equipmentInstanceService");
 
 const BASE_SORTEIO = 10000;
 const CHANCE_ITEM_BASE10000 = 2000; // 20%
@@ -66,7 +66,7 @@ async function sortearItemDrop() {
 // Consumível continua empilhado como sempre.
 async function concederItem(idPersonagem, idItem, quantidade, transaction) {
   const item = await Item.findByPk(idItem, { transaction });
-  if (item && ehEquipavel(item.tipo_item)) {
+  if (item && ehInstanciavel(item.tipo_item)) {
     const instancias = [];
     for (let i = 0; i < quantidade; i++) {
       instancias.push(await criarInstancia({ idPersonagem, idItem }, transaction));
