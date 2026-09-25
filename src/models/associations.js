@@ -551,4 +551,30 @@ Character.hasMany(UniqueFeatClaim, { foreignKey: "id_personagem", as: "proezasCo
 Power.hasOne(UniquePowerEffect, { foreignKey: "id_power", as: "efeitoUnico" });
 UniquePowerEffect.belongsTo(Power, { foreignKey: "id_power" });
 
+// Painel Administrativo de Músicas — ver spec "Painel Administrativo de
+// Músicas" §3. MusicAssignment/MusicPoolTrackAssignment pertencem a uma
+// MusicConfigVersion (draft/publicada/arquivada); tracks/pools são
+// catálogo à parte.
+const MusicTrack = require("./MusicTrack");
+const MusicTrackFileVersion = require("./MusicTrackFileVersion");
+const MusicPool = require("./MusicPool");
+const MusicConfigVersion = require("./MusicConfigVersion");
+const MusicAssignment = require("./MusicAssignment");
+const MusicPoolTrackAssignment = require("./MusicPoolTrackAssignment");
+
+MusicTrack.hasMany(MusicTrackFileVersion, { foreignKey: "id_track", as: "versoesArquivo" });
+MusicTrackFileVersion.belongsTo(MusicTrack, { foreignKey: "id_track", as: "track" });
+
+MusicConfigVersion.hasMany(MusicAssignment, { foreignKey: "id_config_version", as: "assignments" });
+MusicAssignment.belongsTo(MusicConfigVersion, { foreignKey: "id_config_version", as: "configVersion" });
+MusicAssignment.belongsTo(MusicTrack, { foreignKey: "id_track", as: "track" });
+MusicAssignment.belongsTo(MusicPool, { foreignKey: "id_pool", as: "pool" });
+
+MusicConfigVersion.hasMany(MusicPoolTrackAssignment, { foreignKey: "id_config_version", as: "poolMemberships" });
+MusicPoolTrackAssignment.belongsTo(MusicConfigVersion, { foreignKey: "id_config_version", as: "configVersion" });
+MusicPoolTrackAssignment.belongsTo(MusicPool, { foreignKey: "id_pool", as: "pool" });
+MusicPoolTrackAssignment.belongsTo(MusicTrack, { foreignKey: "id_track", as: "track" });
+MusicPool.hasMany(MusicPoolTrackAssignment, { foreignKey: "id_pool", as: "memberships" });
+MusicTrack.hasMany(MusicPoolTrackAssignment, { foreignKey: "id_track", as: "poolMemberships" });
+
 module.exports = {};
