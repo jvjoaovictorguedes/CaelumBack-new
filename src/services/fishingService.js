@@ -76,7 +76,7 @@ function estadoPublico(session) {
 }
 
 async function buscarRodEfetivo(characterId, idInstanciaVara, transaction) {
-  if (!idInstanciaVara) return null;
+  if (!idInstanciaVara) throw erro("Você precisa de uma vara de pesca no inventário para pescar.", 400);
   const instancia = await CharacterEquipmentInstance.findOne({
     where: { id: idInstanciaVara, id_personagem: characterId },
     include: [{ model: Item, as: "item", include: [{ model: FishingRodProperties, as: "fishingRodProperties" }] }],
@@ -123,7 +123,7 @@ async function iniciarSessao(characterId, { zoneId, rodInstanceId, baitItemId })
     }
 
     const rod = await buscarRodEfetivo(characterId, rodInstanceId, transaction);
-    if (rod && rod.efetivo.nivel_pesca_minimo > progresso.nivel) {
+    if (rod.efetivo.nivel_pesca_minimo > progresso.nivel) {
       throw erro("Nível de Pesca insuficiente para essa vara.", 400);
     }
 

@@ -262,6 +262,18 @@ testeComBanco("calcularPesosDoPool aplica afinidade de isca sobre o encounter_we
   assert.ok(pesoBComIsca > pesoBSemIsca, "afinidade deveria aumentar o peso da espécie B");
 });
 
+testeComBanco("Pescar sem vara de pesca no inventário é rejeitado (exige rodInstanceId)", async () => {
+  const { personagem } = await criarPersonagem();
+  const { especie } = await criarEspecie();
+  const zona = await criarZonaComEspecie(especie);
+  await posicionarPersonagemNaZona(personagem.id, zona.id);
+
+  await assert.rejects(
+    () => fishingService.iniciarSessao(personagem.id, { zoneId: zona.id, rodInstanceId: null, baitItemId: null }),
+    /vara de pesca/i,
+  );
+});
+
 testeComBanco("Vara (Ferramenta) nunca pode ser equipada em slot de combate (spec §9.2/§35.2)", async () => {
   const { personagem } = await criarPersonagem();
   const { instancia } = await criarVaraMaximaParaPersonagem(personagem.id);
@@ -343,13 +355,14 @@ testeComBanco("Isca é consumida no lançamento e abandonar depois não devolve 
   const { especie } = await criarEspecie();
   const zona = await criarZonaComEspecie(especie);
   await posicionarPersonagemNaZona(personagem.id, zona.id);
+  const { instancia } = await criarVaraMaximaParaPersonagem(personagem.id);
 
   const baitItem = await criarItemMaterial("Isca Consumo Teste");
   baitsCriados.push(baitItem.id);
   await FishingBait.create({ id_item: baitItem.id, key: `isca_consumo_${sufixo()}` });
   await CharacterInventory.create({ id_personagem: personagem.id, id_item: baitItem.id, quantidade: 1 });
 
-  const sessao = await fishingService.iniciarSessao(personagem.id, { zoneId: zona.id, rodInstanceId: null, baitItemId: baitItem.id });
+  const sessao = await fishingService.iniciarSessao(personagem.id, { zoneId: zona.id, rodInstanceId: instancia.id, baitItemId: baitItem.id });
   let entrada = await CharacterInventory.findOne({ where: { id_personagem: personagem.id, id_item: baitItem.id } });
   assert.equal(entrada.quantidade, 1, "isca só é consumida no marco de lançamento, não no start");
 
