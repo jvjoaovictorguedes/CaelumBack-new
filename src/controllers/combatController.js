@@ -49,6 +49,7 @@ const { registrarProgressoMissaoGuilda } = require("../services/guildMissionServ
 const { bonusesAtivosPara } = require("../services/guildBuffService");
 const { bonusesAtivosAgora: bonusesGlobaisAtivosAgora } = require("../services/globalBuffService");
 const { bonusesAtivosPara: bonusesTavernaAtivosPara } = require("../services/tavernBuffService");
+const worldBossDiscoveryService = require("../services/worldBossDiscoveryService");
 const achievementService = require("../services/achievementService");
 const statusEffectService = require("../services/statusEffectService");
 const cooldownService = require("../services/cooldownService");
@@ -1128,6 +1129,18 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
         );
       }
 
+      // Boss Global (Caelum_Boss_Global.docx §5.1) — MESMO ponto que já
+      // confirma uma vitória PvE legítima; nunca um endpoint separado
+      // que o client pudesse acionar sozinho sem realmente vencer.
+      const worldBoss = await worldBossDiscoveryService.registrarEncontroElegivel(
+        character,
+        inimigoAtual,
+        transaction,
+      );
+      if (worldBoss?.descoberto) {
+        log.push(`Uma Ameaça Mundial foi descoberta: ${worldBoss.nome}!`);
+      }
+
       await character.save({ transaction });
 
       return res.status(200).json({
@@ -1170,6 +1183,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
           statusEffects,
           bestiarioCompletoAgora,
           huntUpdate,
+          worldBoss,
         },
       });
     }
