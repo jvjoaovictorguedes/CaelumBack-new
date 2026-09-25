@@ -15,10 +15,29 @@ const ESTADOS = { INVENTARIO: "Inventario", EQUIPADA: "Equipada", MERCADO: "Merc
 // Tipos de Item que passam a viver só como instância (spec §4) — o
 // resto (Material/Consumivel/Espolio/QuestItem/Currencia) continua
 // empilhável via inventoryService.js.
-const TIPOS_EQUIPAVEIS = ["Arma", "Armadura", "Capacete", "Escudo", "Acessorio1", "Acessorio2"];
+//
+// Pesca (pesca_spec.txt §9.2) exige separar "instanciável" de
+// "equipável em combate": Ferramenta (Vara de Pesca) É instanciável
+// (precisa de refinamento individual +0..+10) mas NUNCA entra em
+// CharacterEquipment/BonecoDePapel/Combat Power. TIPOS_EQUIPAVEIS
+// continua exportado por compatibilidade com código existente — sempre
+// igual a TIPOS_EQUIPAVEIS_COMBATE.
+const TIPOS_EQUIPAVEIS_COMBATE = ["Arma", "Armadura", "Capacete", "Escudo", "Acessorio1", "Acessorio2"];
+const TIPOS_INSTANCIAVEIS = [...TIPOS_EQUIPAVEIS_COMBATE, "Ferramenta"];
+const TIPOS_EQUIPAVEIS = TIPOS_EQUIPAVEIS_COMBATE;
 
+function ehEquipavelCombate(tipoItem) {
+  return TIPOS_EQUIPAVEIS_COMBATE.includes(tipoItem);
+}
+
+function ehInstanciavel(tipoItem) {
+  return TIPOS_INSTANCIAVEIS.includes(tipoItem);
+}
+
+// Alias histórico — sempre "equipável em combate" (nunca confundir com
+// "instanciável", que agora inclui Ferramenta).
 function ehEquipavel(tipoItem) {
-  return TIPOS_EQUIPAVEIS.includes(tipoItem);
+  return ehEquipavelCombate(tipoItem);
 }
 
 function erro(mensagem, statusCode = 400) {
@@ -84,6 +103,11 @@ async function equip(idPersonagem, idInstancia, transaction) {
 
   const item = await Item.findByPk(instancia.id_item, { transaction });
   if (!item) throw erro("Item não encontrado.", 404);
+  // Ferramenta (Vara de Pesca) nunca equipa em slot de combate (spec
+  // Pesca §9.2) — rejeitada ANTES de tentar resolver qualquer slot.
+  if (item.tipo_item === "Ferramenta") {
+    throw erro("Ferramentas (varas de pesca) não podem ser equipadas em combate.", 400);
+  }
   const slot = await resolverSlot(item, transaction);
 
   const ocupante = await CharacterEquipment.findOne({
@@ -144,6 +168,17 @@ async function reserveForMarket(idPersonagem, idInstancia, transaction) {
   }
   if (instancia.estado !== ESTADOS.INVENTARIO) {
     throw erro("Esse equipamento precisa estar no inventário (não equipado, não já anunciado) pra anunciar no Mercado Negro.", 400);
+  }
+  // Vara de Pesca ativa no CharacterFishingLoadout não pode ir ao
+  // Mercado sem sair do loadout primeiro (spec Pesca §9.2).
+  const CharacterFishingLoadout = require("../models/CharacterFishingLoadout");
+  const loadout = await CharacterFishingLoadout.findOne({
+    where: { id_personagem: idPersonagem, id_instancia_vara: idInstancia },
+    transaction,
+    lock: transaction.LOCK.UPDATE,
+  });
+  if (loadout) {
+    throw erro("Desequipe a vara de pesca (Loadout de Pesca) antes de anunciar no Mercado.", 400);
   }
   instancia.estado = ESTADOS.MERCADO;
   await instancia.save({ transaction });
@@ -251,7 +286,11 @@ function formatarEquipado(equipamento) {
 module.exports = {
   ESTADOS,
   TIPOS_EQUIPAVEIS,
+  TIPOS_EQUIPAVEIS_COMBATE,
+  TIPOS_INSTANCIAVEIS,
   ehEquipavel,
+  ehEquipavelCombate,
+  ehInstanciavel,
   resolverSlot,
   create,
   equip,

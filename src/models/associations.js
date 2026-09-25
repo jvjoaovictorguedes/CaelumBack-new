@@ -413,4 +413,54 @@ ConsumableEffect.belongsTo(Item, { foreignKey: "id_item" });
 AlchemyRecipe.hasMany(CharacterAlchemyRecipeUnlock, { foreignKey: "id_recipe" });
 CharacterAlchemyRecipeUnlock.belongsTo(AlchemyRecipe, { foreignKey: "id_recipe" });
 
+// ---------------------------------------------------------------------
+// Pesca & Navegação (ver spec completa em pesca_spec.txt) — domínio
+// próprio; reaproveita Item/CharacterEquipmentInstance/WorldMapNode/
+// WorldMapConnection como INFRAESTRUTURA, nunca duplicando tabelas.
+// ---------------------------------------------------------------------
+const FishingSpecies = require("./FishingSpecies");
+const FishingZone = require("./FishingZone");
+const FishingZoneSpecies = require("./FishingZoneSpecies");
+const FishingBait = require("./FishingBait");
+const FishingBaitAffinity = require("./FishingBaitAffinity");
+const FishingRodProperties = require("./FishingRodProperties");
+const CharacterFishingProgress = require("./CharacterFishingProgress");
+const CharacterFishingLoadout = require("./CharacterFishingLoadout");
+const FishingSession = require("./FishingSession");
+const FishingCatchRecord = require("./FishingCatchRecord");
+const CharacterFishingSpeciesDiscovery = require("./CharacterFishingSpeciesDiscovery");
+const Vessel = require("./Vessel");
+const CharacterVessel = require("./CharacterVessel");
+const FishingPort = require("./FishingPort");
+const MarineRoute = require("./MarineRoute");
+const CharacterNavigationState = require("./CharacterNavigationState");
+
+Item.hasOne(FishingRodProperties, { foreignKey: "id_item", as: "fishingRodProperties" });
+FishingRodProperties.belongsTo(Item, { foreignKey: "id_item" });
+
+FishingSpecies.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+
+FishingZone.hasMany(FishingZoneSpecies, { foreignKey: "id_zone", as: "pool" });
+FishingZoneSpecies.belongsTo(FishingZone, { foreignKey: "id_zone" });
+FishingZoneSpecies.belongsTo(FishingSpecies, { foreignKey: "id_species", as: "species" });
+FishingSpecies.hasMany(FishingZoneSpecies, { foreignKey: "id_species" });
+
+FishingBait.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+FishingBait.hasMany(FishingBaitAffinity, { foreignKey: "id_bait_item", as: "afinidades" });
+FishingBaitAffinity.belongsTo(FishingBait, { foreignKey: "id_bait_item" });
+FishingBaitAffinity.belongsTo(FishingSpecies, { foreignKey: "id_species", as: "species" });
+
+FishingSession.belongsTo(FishingZone, { foreignKey: "id_zone" });
+FishingSession.belongsTo(FishingSpecies, { foreignKey: "id_species" });
+FishingCatchRecord.belongsTo(FishingSpecies, { foreignKey: "id_species", as: "species" });
+FishingCatchRecord.belongsTo(FishingZone, { foreignKey: "id_zone" });
+
+Vessel.hasMany(CharacterVessel, { foreignKey: "id_vessel" });
+CharacterVessel.belongsTo(Vessel, { foreignKey: "id_vessel", as: "vessel" });
+
+FishingPort.belongsTo(WorldMapNode, { foreignKey: "id_world_node" });
+MarineRoute.belongsTo(WorldMapConnection, { foreignKey: "id_world_connection" });
+MarineRoute.belongsTo(FishingPort, { foreignKey: "id_port_origem", as: "portoOrigem" });
+MarineRoute.belongsTo(FishingZone, { foreignKey: "id_zone_destino", as: "zonaDestino" });
+
 module.exports = {};
