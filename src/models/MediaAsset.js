@@ -13,9 +13,18 @@ const MediaAsset = sequelize.define(
     grupo: { type: DataTypes.STRING(150), allowNull: false },
     versao: { type: DataTypes.INTEGER, allowNull: false },
     categoria: {
-      type: DataTypes.ENUM("Item", "Power", "Monster", "EquipmentSet", "Outro"),
+      type: DataTypes.ENUM("Item", "Power", "Monster", "EquipmentSet", "Musica", "Outro"),
       allowNull: false,
       defaultValue: "Outro",
+    },
+    // "imagem" (padrão, compatível com todas as linhas antigas) ou
+    // "audio" — controla qual validação roda no service (sharp/dimensão
+    // vs magic bytes de áudio) e se largura_px/altura_px fazem sentido
+    // (sempre null pra áudio).
+    tipo: {
+      type: DataTypes.ENUM("imagem", "audio"),
+      allowNull: false,
+      defaultValue: "imagem",
     },
     nome_arquivo_original: { type: DataTypes.STRING(255), allowNull: true },
     mime: { type: DataTypes.STRING(100), allowNull: false },

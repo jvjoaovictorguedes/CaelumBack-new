@@ -13,7 +13,10 @@ const {
   DIMENSAO_MAXIMA_PX,
   TAMANHO_MAXIMO_BYTES,
   TIPOS_ACEITOS,
+  TAMANHO_MAXIMO_BYTES_AUDIO,
+  TIPOS_ACEITOS_AUDIO,
   CATEGORIAS_VALIDAS,
+  TIPOS_VALIDOS,
   REGEX_GRUPO_VALIDO,
 } = require("../config/mediaAssetConfig");
 const { registrarAcao } = require("./adminAuditService");
@@ -73,13 +76,92 @@ async function validarEReencodarImagem(bufferOriginal) {
     throw erro(`A imagem pode ter no máximo ${DIMENSAO_MAXIMA_PX}x${DIMENSAO_MAXIMA_PX} pixels.`);
   }
 
-  const bufferLimpo = await sharp(bufferOriginal)[formato]().toBuffer();
+  // Reencode com compressão real (antes era só sharp(buf)[formato]().toBuffer(),
+  // que reencoda nas configurações padrão do sharp — remove metadata mas
+  // comprime pouco). Qualidade 82 com mozjpeg em JPEG/WEBP é o ponto onde
+  // a perda visual é imperceptível pra arte de jogo (ícones/sprites/banners)
+  // mas o arquivo cai bastante de tamanho; testado manualmente reencodando
+  // imagens de exemplo (redução de ~35-55% vs o upload original em
+  // qualidade alta, ver relatório da tarefa). PNG usa compressionLevel:9
+  // (sem perda — só melhora a compressão zlib, sem "palette" pra não
+  // arriscar banding em arte com gradiente).
+  let bufferLimpo;
+  if (formato === "gif") {
+    // GIF animado: sharp só enxerga todos os frames empilhados se lido
+    // com {animated:true}, e reencodar de volta pra .gif() nessas
+    // condições é instável/arriscado (pode achatar pro primeiro frame
+    // ou perder qualidade de paleta). Pra nunca quebrar animação, GIF
+    // não é recomprimido aqui — passa os bytes originais direto (já
+    // validados acima). Metadata de GIF raramente carrega EXIF pesado,
+    // então não reencodar não é uma perda relevante de privacidade.
+    bufferLimpo = bufferOriginal;
+  } else if (formato === "png") {
+    bufferLimpo = await sharp(bufferOriginal).png({ compressionLevel: 9 }).toBuffer();
+  } else if (formato === "webp") {
+    bufferLimpo = await sharp(bufferOriginal).webp({ quality: 82 }).toBuffer();
+  } else {
+    bufferLimpo = await sharp(bufferOriginal).jpeg({ quality: 82, mozjpeg: true }).toBuffer();
+  }
+
   return { buffer: bufferLimpo, mime: mimeReal, largura: width, altura: height };
 }
 
-async function listMediaGroups({ categoria, nome, pagina = 1, porPagina = 24 } = {}) {
+// Assinaturas de byte (magic numbers) dos formatos de áudio aceitos —
+// sharp não lê áudio, então aqui não dá pra "reencodar" como imagem;
+// só confirma que os bytes batem com o que o mimetype alega antes de
+// gravar (mesmo espírito de nunca confiar cegamente no multipart).
+function assinaturaBate(buffer, mimeReal) {
+  if (buffer.length < 12) return false;
+  if (mimeReal === "audio/mpeg") {
+    // MP3: ID3v2 ("ID3") ou frame sync direto (0xFFEx/0xFFFx).
+    if (buffer[0] === 0x49 && buffer[1] === 0x44 && buffer[2] === 0x33) return true;
+    return buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0;
+  }
+  if (mimeReal === "audio/ogg") {
+    return buffer.slice(0, 4).toString("ascii") === "OggS";
+  }
+  if (mimeReal === "audio/wav") {
+    return buffer.slice(0, 4).toString("ascii") === "RIFF" && buffer.slice(8, 12).toString("ascii") === "WAVE";
+  }
+  return false;
+}
+
+const MIME_AUDIO_NORMALIZADO = {
+  "audio/mpeg": "audio/mpeg",
+  "audio/mp3": "audio/mpeg",
+  "audio/ogg": "audio/ogg",
+  "audio/wav": "audio/wav",
+  "audio/x-wav": "audio/wav",
+  "audio/wave": "audio/wav",
+};
+
+// Áudio não passa pelo sharp (é uma lib de imagem) — valida tamanho e
+// confere a assinatura de bytes contra o mimetype declarado pelo
+// multipart (não dá pra "reencodar" áudio sem uma lib de codec própria,
+// então os bytes originais são gravados como estão).
+async function validarAudio(bufferOriginal, mimeDeclarado) {
+  if (!bufferOriginal || bufferOriginal.length === 0) {
+    throw erro("Nenhum arquivo enviado.");
+  }
+  if (bufferOriginal.length > TAMANHO_MAXIMO_BYTES_AUDIO) {
+    throw erro(`O arquivo de áudio pode ter no máximo ${Math.round(TAMANHO_MAXIMO_BYTES_AUDIO / 1024 / 1024)}MB.`);
+  }
+
+  const mimeNormalizado = MIME_AUDIO_NORMALIZADO[(mimeDeclarado || "").toLowerCase()];
+  if (!mimeNormalizado || !TIPOS_ACEITOS_AUDIO.includes(mimeDeclarado?.toLowerCase())) {
+    throw erro(`Formato de áudio não aceito. Envie um dos seguintes: ${TIPOS_ACEITOS_AUDIO.join(", ")}.`);
+  }
+  if (!assinaturaBate(bufferOriginal, mimeNormalizado)) {
+    throw erro("Arquivo de áudio inválido ou corrompido (os bytes não batem com o formato informado).");
+  }
+
+  return { buffer: bufferOriginal, mime: mimeNormalizado, largura: null, altura: null };
+}
+
+async function listMediaGroups({ categoria, tipo, nome, pagina = 1, porPagina = 24 } = {}) {
   const where = { ativo: true };
   if (categoria) where.categoria = categoria;
+  if (tipo && TIPOS_VALIDOS.includes(tipo)) where.tipo = tipo;
   if (nome) where.grupo = { [Op.iLike]: `%${nome}%` };
 
   const offset = (Math.max(1, pagina) - 1) * porPagina;
@@ -98,12 +180,20 @@ async function listGroupVersions(grupo) {
 }
 
 async function uploadMediaAsset(payload, { idAdmin, req }) {
-  const { grupo, categoria, descricao, buffer, nomeArquivoOriginal } = payload;
+  const { grupo, categoria, descricao, buffer, nomeArquivoOriginal, mimeDeclarado } = payload;
+  const tipo = payload.tipo && TIPOS_VALIDOS.includes(payload.tipo) ? payload.tipo : "imagem";
   validarGrupo(grupo);
   if (!categoria || !CATEGORIAS_VALIDAS.includes(categoria)) {
     throw erro(`categoria precisa ser uma de: ${CATEGORIAS_VALIDAS.join(", ")}.`);
   }
-  const { buffer: dados, mime, largura, altura } = await validarEReencodarImagem(buffer);
+  if (tipo === "audio" && categoria !== "Musica") {
+    throw erro('Áudio precisa usar a categoria "Musica".');
+  }
+  if (tipo === "imagem" && categoria === "Musica") {
+    throw erro('A categoria "Musica" é só pra arquivos de áudio.');
+  }
+  const { buffer: dados, mime, largura, altura } =
+    tipo === "audio" ? await validarAudio(buffer, mimeDeclarado) : await validarEReencodarImagem(buffer);
 
   return sequelize.transaction(async (transaction) => {
     const atual = await MediaAsset.findOne({
@@ -127,6 +217,7 @@ async function uploadMediaAsset(payload, { idAdmin, req }) {
         grupo,
         versao: novaVersao,
         categoria,
+        tipo,
         nome_arquivo_original: nomeArquivoOriginal ?? null,
         mime,
         tamanho_bytes: dados.length,
@@ -179,6 +270,7 @@ async function revertToVersion(grupo, versaoAlvo, { idAdmin, req }) {
         grupo,
         versao: novaVersao,
         categoria: alvo.categoria,
+        tipo: alvo.tipo,
         nome_arquivo_original: alvo.nome_arquivo_original,
         mime: alvo.mime,
         tamanho_bytes: alvo.tamanho_bytes,
