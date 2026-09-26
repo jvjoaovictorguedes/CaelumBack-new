@@ -10,6 +10,7 @@ const router = express.Router();
 router.use(authMiddleware, adminMiddleware, requireAdminPermission("items.manage"));
 
 router.get("/", adminItemController.listar);
+router.get("/select", adminItemController.listarParaSelecao);
 router.post("/", adminItemController.criar);
 router.patch("/:id", adminItemController.atualizar);
 router.post("/:id/deactivate", adminItemController.desativar);

@@ -151,16 +151,15 @@ function statsDeReferenciaPorNivel(nivel) {
 }
 
 // Núcleo puro e determinístico da geração de stats finais de UM monstro
-// solo — extraído de gerarInimigo (antes inline) pro Editor de
-// Balanceamento de Monstros (Admin Aventura, §9.2 "extrair/reutilizar
-// uma versão determinística da mesma base usada por gerarInimigo; não
-// copiar fórmulas manualmente no Admin") poder calcular preview sem
-// duplicar a fórmula. `variacao` é injetado pelo caller: gerarInimigo
-// abaixo passa a MESMA variação aleatória ±10% de sempre, na MESMA
-// ordem de chamadas (vida, dano, agilidade, velocidade) — comportamento
-// do jogo 100% preservado. monsterBalancePreviewService.js passa uma
-// variação fixa (1 = média determinística; 0.9/1.1 = aproximação dos
-// extremos sem depender de RNG).
+// solo — extraído de gerarInimigo (antes inline). LEGADO (Reformulação
+// V2 dos Monstros): o runtime de verdade (combatController.
+// gerarInimigoParaPersonagem, Party, Caçadas) usa os stats FIXOS de
+// AdventureMonster; esta função e gerarInimigo/gerarInimigoDeGrupo
+// abaixo só sobrevivem como base de nível/atributo de referência
+// (statsDeReferenciaPorNivel) e não são mais chamadas em nenhum
+// caminho de produção — mantidas só pelos testes de regressão
+// histórica em combatDificuldadePorNivel.test.js até serem removidas
+// no Contract.
 function statsFinaisDoMonstroPorNivel(nivel, multiplicadores = {}, variacao = () => 1) {
   const mult = {
     vida: multiplicadores?.vida ?? 1,

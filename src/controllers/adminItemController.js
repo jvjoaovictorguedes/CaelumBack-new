@@ -28,6 +28,24 @@ exports.listar = async (req, res) => {
   }
 };
 
+// Endpoint dedicado a pickers de item (ItemSelect no frontend) — nunca
+// usado pela tabela paginada do CRUD de Itens. Ver comentário de
+// listAllItemsForSelection: devolve o catálogo INTEIRO (até um teto de
+// segurança bem acima de qualquer conteúdo real), leve, sem os JOINs de
+// propriedades.
+exports.listarParaSelecao = async (req, res) => {
+  try {
+    const { apenasAtivos, tipo_item } = req.query;
+    const resultado = await adminItemService.listAllItemsForSelection({
+      apenasAtivos: apenasAtivos === undefined ? undefined : apenasAtivos === "true",
+      tipo_item,
+    });
+    res.status(200).json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao listar itens para seleção.");
+  }
+};
+
 exports.criar = async (req, res) => {
   try {
     const { item, weapon, armor, consumable, fishingRod } = req.body ?? {};

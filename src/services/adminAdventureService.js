@@ -12,9 +12,6 @@ const AdventureZoneMonster = require("../models/AdventureZoneMonster");
 const AdventureMonsterLoot = require("../models/AdventureMonsterLoot");
 const Item = require("../models/Item");
 const { registrarAcao } = require("./adminAuditService");
-const monsterBalancePreviewService = require("./monsterBalancePreviewService");
-const monsterBalanceSimulationService = require("./monsterBalanceSimulationService");
-const { PRESETS_MONSTRO, SIMULACAO_MAX_ITERACOES } = require("../config/monsterBalanceConfig");
 
 function erro(mensagem, statusCode = 400) {
   const e = new Error(mensagem);
@@ -232,58 +229,6 @@ async function updateAdminMonster(id, payload, { idAdmin, req }) {
     });
     return monstro;
   });
-}
-
-// ------------------------------------- BALANCEAMENTO (preview/simulação)
-// Editor de Balanceamento de Monstros por Resultado (§9/§10). Nunca
-// persiste nada — só traduz/simula em cima dos multiplicadores reais.
-
-async function previewMonsterBalance(id, payload) {
-  const monstro = await AdventureMonster.findByPk(id);
-  if (!monstro) throw erro("Monstro não encontrado.", 404);
-
-  return monsterBalancePreviewService.gerarPreview({
-    idMonstro: monstro.id,
-    referenceLevel: payload?.referenceLevel,
-    mode: payload?.mode,
-    desired: payload?.desired,
-    multiplicadores: payload?.multiplicadores ?? {
-      vida: monstro.multiplicador_vida,
-      dano: monstro.multiplicador_dano,
-      agilidade: monstro.multiplicador_agilidade,
-      velocidade: monstro.multiplicador_velocidade,
-    },
-    zoneId: payload?.zoneId,
-  });
-}
-
-async function simulateMonsterBalance(id, payload) {
-  const monstro = await AdventureMonster.findByPk(id);
-  if (!monstro) throw erro("Monstro não encontrado.", 404);
-
-  const nivel = Math.max(1, Math.round(Number(payload?.referenceLevel) || 1));
-  const multiplicadores = payload?.multiplicadores ?? {
-    vida: monstro.multiplicador_vida,
-    dano: monstro.multiplicador_dano,
-    agilidade: monstro.multiplicador_agilidade,
-    velocidade: monstro.multiplicador_velocidade,
-  };
-  const iteracoes = Math.min(SIMULACAO_MAX_ITERACOES, Math.max(1, Math.round(Number(payload?.iterations) || 1000)));
-
-  return monsterBalanceSimulationService.simularCombates({
-    nivel,
-    multiplicadores,
-    perfilChave: payload?.profile ?? "MEDIO",
-    iteracoes,
-  });
-}
-
-function listarPresetsDeBalanceamento() {
-  return Object.entries(PRESETS_MONSTRO).map(([chave, preset]) => ({ chave, ...preset }));
-}
-
-function listarPerfisSinteticos() {
-  return monsterBalancePreviewService.perfisDisponiveis();
 }
 
 async function duplicateAdminMonster(id, { idAdmin, req }) {
@@ -539,8 +484,4 @@ module.exports = {
   listAdminMonsterLoot,
   createAdminMonsterLoot,
   updateAdminMonsterLoot,
-  previewMonsterBalance,
-  simulateMonsterBalance,
-  listarPresetsDeBalanceamento,
-  listarPerfisSinteticos,
 };
