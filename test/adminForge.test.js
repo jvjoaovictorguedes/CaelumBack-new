@@ -206,7 +206,7 @@ testeComBanco("criarBlueprintAdmin: novo blueprint nasce SEMPRE inativo, mesmo s
 
 testeComBanco("Ferramenta (Vara de Pesca): blueprint válido não é tratado como Arma", async () => {
   const admin = await criarUsuarioAdmin();
-  const { recurso, itensPorQualidade } = await montarRecursoBarraCompleto();
+  const { recurso } = await montarRecursoBarraCompleto();
 
   const blueprint = await adminForgeService.criarBlueprintAdmin(
     {
@@ -221,24 +221,22 @@ testeComBanco("Ferramenta (Vara de Pesca): blueprint válido não é tratado com
   );
   blueprintsCriados.push(blueprint.id);
 
-  // Resultado usando um item de Arma (errado) deve falhar a validação —
-  // categoria Ferramenta NUNCA aceita WeaponProperties.
+  // Item resultado de Arma (errado) deve falhar a validação — categoria
+  // Ferramenta NUNCA aceita WeaponProperties (Reformulação V2 — Item
+  // Único: um blueprint aponta pra UM Item canônico só, não mais 6).
   const itemArmaErrada = await criarItemArma("Comum", 5);
-  await adminForgeService.atualizarBlueprintAdmin(blueprint.id, { resultados: { Comum: itemArmaErrada.id } }, { idAdmin: admin.id });
+  await adminForgeService.atualizarBlueprintAdmin(blueprint.id, { id_item_resultado: itemArmaErrada.id }, { idAdmin: admin.id });
   let relatorio = await adminForgeService.validarBlueprintAdmin(blueprint.id);
   assert.ok(
     relatorio.resultadosValidacao.alertas.some((a) => a.nivel === "ERRO" && /WeaponProperties|FishingRodProperties/.test(a.mensagem)),
     "resultado com WeaponProperties pra categoria Ferramenta precisa ser rejeitado",
   );
 
-  // Corrige com uma Vara de verdade — agora todas as 6 devem bater.
-  const itensVara = {};
-  for (const qualidade of forgeConfig.ORDEM_QUALIDADE) {
-    itensVara[qualidade] = (await criarItemVaraFerramenta(qualidade, 5)).id;
-  }
-  await adminForgeService.atualizarBlueprintAdmin(blueprint.id, { resultados: itensVara }, { idAdmin: admin.id });
+  // Corrige com uma Vara de verdade.
+  const itemVara = await criarItemVaraFerramenta("Comum", 5);
+  await adminForgeService.atualizarBlueprintAdmin(blueprint.id, { id_item_resultado: itemVara.id }, { idAdmin: admin.id });
   relatorio = await adminForgeService.validarBlueprintAdmin(blueprint.id);
-  assert.equal(relatorio.resultadosValidacao.completo, true, "6 Varas válidas devem fechar 6/6");
+  assert.equal(relatorio.resultadosValidacao.completo, true, "Vara válida deve fechar a validação");
   assert.equal(relatorio.podeAtivar, true);
 
   const ativado = await adminForgeService.setAtivoBlueprintAdmin(blueprint.id, true, { idAdmin: admin.id });
@@ -246,7 +244,7 @@ testeComBanco("Ferramenta (Vara de Pesca): blueprint válido não é tratado com
   assert.equal(ativado.categoria_equipamento, "Ferramenta");
 });
 
-testeComBanco("Resultados: ativar exige 6/6, bloqueia com resultado incompleto/raridade divergente/Tier divergente", async () => {
+testeComBanco("Item resultado: ativar exige Item configurado, bloqueia com categoria/Tier divergente", async () => {
   const admin = await criarUsuarioAdmin();
   const { recurso } = await montarRecursoBarraCompleto();
   const blueprint = await adminForgeService.criarBlueprintAdmin(
@@ -262,28 +260,31 @@ testeComBanco("Resultados: ativar exige 6/6, bloqueia com resultado incompleto/r
   );
   blueprintsCriados.push(blueprint.id);
 
-  // Só 1 de 6 — não pode ativar.
-  const itemComum = await criarItemArma("Comum", 2);
-  await adminForgeService.atualizarBlueprintAdmin(blueprint.id, { resultados: { Comum: itemComum.id } }, { idAdmin: admin.id });
+  // Sem id_item_resultado nenhum — não pode ativar.
   await assert.rejects(() => adminForgeService.setAtivoBlueprintAdmin(blueprint.id, true, { idAdmin: admin.id }), /Não é possível ativar/);
 
-  // 6/6, mas um com raridade errada (Incomum apontando pra item Raro).
-  const itens = {};
-  for (const qualidade of forgeConfig.ORDEM_QUALIDADE) itens[qualidade] = (await criarItemArma(qualidade, 2)).id;
-  const idIncomumCorreto = itens.Incomum;
-  const itemRaridadeErrada = await criarItemArma("Raro", 2);
-  await adminForgeService.atualizarBlueprintAdmin(blueprint.id, { resultados: { ...itens, Incomum: itemRaridadeErrada.id } }, { idAdmin: admin.id });
+  // Item de categoria errada (Armadura em vez de Arma).
+  const Item2 = require("../src/models/Item");
+  const ArmorProperties2 = require("../src/models/ArmorProperties");
+  const itemCategoriaErrada = await Item2.create({
+    nome: `Peitoral Errado ${sufixo()}`, descricao: "teste", tipo_item: "Armadura", raridade: "Comum", tier_equipamento: 2,
+    valor_compra: 0, valor_venda: 0, peso: 1, disponivel_loja: false,
+  });
+  await ArmorProperties2.create({ id_item: itemCategoriaErrada.id, slot_equipamento: "Torso", defesa: 1 });
+  await adminForgeService.atualizarBlueprintAdmin(blueprint.id, { id_item_resultado: itemCategoriaErrada.id }, { idAdmin: admin.id });
   await assert.rejects(() => adminForgeService.setAtivoBlueprintAdmin(blueprint.id, true, { idAdmin: admin.id }), /Não é possível ativar/);
 
-  // Corrige raridade mas erra o Tier (blueprint é Tier 2, item Tier 5).
-  const itemTierErrado = await criarItemArma("Incomum", 5);
-  await adminForgeService.atualizarBlueprintAdmin(blueprint.id, { resultados: { Incomum: itemTierErrado.id } }, { idAdmin: admin.id });
+  // Item de categoria certa mas Tier errado (blueprint é Tier 2, item Tier 5).
+  const itemTierErrado = await criarItemArma("Comum", 5);
+  await adminForgeService.atualizarBlueprintAdmin(blueprint.id, { id_item_resultado: itemTierErrado.id }, { idAdmin: admin.id });
   await assert.rejects(() => adminForgeService.setAtivoBlueprintAdmin(blueprint.id, true, { idAdmin: admin.id }), /Não é possível ativar/);
 
   // Corrige tudo — agora ativa.
-  await adminForgeService.atualizarBlueprintAdmin(blueprint.id, { resultados: { Incomum: idIncomumCorreto } }, { idAdmin: admin.id });
+  const itemCerto = await criarItemArma("Comum", 2);
+  await adminForgeService.atualizarBlueprintAdmin(blueprint.id, { id_item_resultado: itemCerto.id }, { idAdmin: admin.id });
   const ativado = await adminForgeService.setAtivoBlueprintAdmin(blueprint.id, true, { idAdmin: admin.id });
   assert.equal(ativado.ativo, true);
+  assert.equal(ativado.id_item_resultado, itemCerto.id, "qualquer raridade produzida por esse blueprint usa sempre o MESMO Item canônico");
 });
 
 testeComBanco("Ingredientes: matriz de resolução cobre as 6 qualidades (Barra)", async () => {
@@ -362,17 +363,13 @@ testeComBanco("desativar/reativar preserva histórico (nunca deleta fisicamente)
     { idAdmin: admin.id },
   );
   blueprintsCriados.push(blueprint.id);
-  const itens = {};
-  for (const qualidade of forgeConfig.ORDEM_QUALIDADE) {
-    const item = await Item.create({
-      nome: `Capacete Teste ${sufixo()} ${qualidade}`, descricao: "teste", tipo_item: "Capacete", raridade: qualidade, tier_equipamento: 1,
-      valor_compra: 0, valor_venda: 0, peso: 1, disponivel_loja: false,
-    });
-    const ArmorProperties = require("../src/models/ArmorProperties");
-    await ArmorProperties.create({ id_item: item.id, slot_equipamento: "Cabeca", defesa: 1 });
-    itens[qualidade] = item.id;
-  }
-  await adminForgeService.atualizarBlueprintAdmin(blueprint.id, { resultados: itens }, { idAdmin: admin.id });
+  const ArmorProperties = require("../src/models/ArmorProperties");
+  const itemResultado = await Item.create({
+    nome: `Capacete Teste ${sufixo()}`, descricao: "teste", tipo_item: "Capacete", raridade: "Comum", tier_equipamento: 1,
+    valor_compra: 0, valor_venda: 0, peso: 1, disponivel_loja: false,
+  });
+  await ArmorProperties.create({ id_item: itemResultado.id, slot_equipamento: "Cabeca", defesa: 1 });
+  await adminForgeService.atualizarBlueprintAdmin(blueprint.id, { id_item_resultado: itemResultado.id }, { idAdmin: admin.id });
   await adminForgeService.setAtivoBlueprintAdmin(blueprint.id, true, { idAdmin: admin.id });
 
   const desativado = await adminForgeService.setAtivoBlueprintAdmin(blueprint.id, false, { idAdmin: admin.id, motivo: "teste" });
@@ -423,17 +420,13 @@ testeComBanco("excluirBlueprintAdmin: também exclui um blueprint ATIVO (nunca e
     { nome: `Blueprint Ativo Excluir ${sufixo()}`, categoria_equipamento: "Capacete", tier_equipamento: 2, multiplicador_tempo: 1, nivel_forja_minimo: 1, ingredientes: [{ tipo_insumo: "Barra", id_recurso: recurso.id, quantidade_base: 1 }] },
     { idAdmin: admin.id },
   );
-  const itens = {};
   const ArmorProperties = require("../src/models/ArmorProperties");
-  for (const qualidade of forgeConfig.ORDEM_QUALIDADE) {
-    const item = await Item.create({
-      nome: `Capacete Excluir ${sufixo()} ${qualidade}`, descricao: "teste", tipo_item: "Capacete", raridade: qualidade, tier_equipamento: 2,
-      valor_compra: 0, valor_venda: 0, peso: 1, disponivel_loja: false,
-    });
-    await ArmorProperties.create({ id_item: item.id, slot_equipamento: "Cabeca", defesa: 1 });
-    itens[qualidade] = item.id;
-  }
-  await adminForgeService.atualizarBlueprintAdmin(blueprint.id, { resultados: itens }, { idAdmin: admin.id });
+  const itemResultado = await Item.create({
+    nome: `Capacete Excluir ${sufixo()}`, descricao: "teste", tipo_item: "Capacete", raridade: "Comum", tier_equipamento: 2,
+    valor_compra: 0, valor_venda: 0, peso: 1, disponivel_loja: false,
+  });
+  await ArmorProperties.create({ id_item: itemResultado.id, slot_equipamento: "Cabeca", defesa: 1 });
+  await adminForgeService.atualizarBlueprintAdmin(blueprint.id, { id_item_resultado: itemResultado.id }, { idAdmin: admin.id });
   await adminForgeService.setAtivoBlueprintAdmin(blueprint.id, true, { idAdmin: admin.id });
 
   await adminForgeService.excluirBlueprintAdmin(blueprint.id, { idAdmin: admin.id });
@@ -459,17 +452,13 @@ testeComBanco("excluirTodosBlueprintsAdmin: remove TODOS, ativos e inativos, com
     { nome: `Blueprint Massa Ativo ${sufixo()}`, categoria_equipamento: "Acessorio1", tier_equipamento: 4, multiplicador_tempo: 1, nivel_forja_minimo: 1, ingredientes: [{ tipo_insumo: "Barra", id_recurso: recurso.id, quantidade_base: 1 }] },
     { idAdmin: admin.id },
   );
-  const itens = {};
   const ArmorPropertiesMassa = require("../src/models/ArmorProperties");
-  for (const qualidade of forgeConfig.ORDEM_QUALIDADE) {
-    const item = await Item.create({
-      nome: `Acessorio Massa ${sufixo()} ${qualidade}`, descricao: "teste", tipo_item: "Acessorio1", raridade: qualidade, tier_equipamento: 4,
-      valor_compra: 0, valor_venda: 0, peso: 0.1, disponivel_loja: false,
-    });
-    await ArmorPropertiesMassa.create({ id_item: item.id, slot_equipamento: "Acessorio1", defesa: 1 });
-    itens[qualidade] = item.id;
-  }
-  await adminForgeService.atualizarBlueprintAdmin(paraAtivar.id, { resultados: itens }, { idAdmin: admin.id });
+  const itemResultadoMassa = await Item.create({
+    nome: `Acessorio Massa ${sufixo()}`, descricao: "teste", tipo_item: "Acessorio1", raridade: "Comum", tier_equipamento: 4,
+    valor_compra: 0, valor_venda: 0, peso: 0.1, disponivel_loja: false,
+  });
+  await ArmorPropertiesMassa.create({ id_item: itemResultadoMassa.id, slot_equipamento: "Acessorio1", defesa: 1 });
+  await adminForgeService.atualizarBlueprintAdmin(paraAtivar.id, { id_item_resultado: itemResultadoMassa.id }, { idAdmin: admin.id });
   const ativo = await adminForgeService.setAtivoBlueprintAdmin(paraAtivar.id, true, { idAdmin: admin.id });
   assert.equal(ativo.ativo, true);
 
@@ -488,7 +477,7 @@ testeComBanco("excluirTodosBlueprintsAdmin: remove TODOS, ativos e inativos, com
   assert.ok(logAtivo, "o blueprint ATIVO também precisa ter sido excluído e auditado, não só os inativos");
 });
 
-testeComBanco("Transaction: falha ao atualizar resultados com qualidade inválida não persiste nada parcial", async () => {
+testeComBanco("Transaction: falha ao atualizar com id_item_resultado inválido não persiste nada parcial", async () => {
   const admin = await criarUsuarioAdmin();
   const { recurso } = await montarRecursoBarraCompleto();
   const blueprint = await adminForgeService.criarBlueprintAdmin(
@@ -498,12 +487,31 @@ testeComBanco("Transaction: falha ao atualizar resultados com qualidade inválid
   blueprintsCriados.push(blueprint.id);
 
   await assert.rejects(
-    () => adminForgeService.atualizarBlueprintAdmin(blueprint.id, { multiplicador_tempo: 99, resultados: { QualidadeInvalida: 1 } }, { idAdmin: admin.id }),
-    /Qualidade de resultado inválida/,
+    () => adminForgeService.atualizarBlueprintAdmin(blueprint.id, { multiplicador_tempo: 99, id_item_resultado: "abc" }, { idAdmin: admin.id }),
+    /id_item_resultado precisa ser um inteiro positivo/,
   );
 
   const recarregado = await ForgeBlueprint.findByPk(blueprint.id);
   assert.equal(recarregado.multiplicador_tempo, 2, "multiplicador_tempo não pode ter sido salvo — validação falhou ANTES da transaction abrir");
+});
+
+testeComBanco("atualizarBlueprintAdmin: id_item_resultado apontando pra Item inexistente é rejeitado", async () => {
+  const admin = await criarUsuarioAdmin();
+  const { recurso } = await montarRecursoBarraCompleto();
+  const blueprint = await adminForgeService.criarBlueprintAdmin(
+    { nome: `Blueprint Item Inexistente ${sufixo()}`, categoria_equipamento: "Arma", tier_equipamento: 3, multiplicador_tempo: 1, nivel_forja_minimo: 1, ingredientes: [{ tipo_insumo: "Barra", id_recurso: recurso.id, quantidade_base: 1 }] },
+    { idAdmin: admin.id },
+  );
+  blueprintsCriados.push(blueprint.id);
+
+  await assert.rejects(
+    () => adminForgeService.atualizarBlueprintAdmin(blueprint.id, { id_item_resultado: 999999999 }, { idAdmin: admin.id }),
+    (erro) => {
+      assert.match(erro.message, /não encontrado/i);
+      assert.equal(erro.statusCode, 404);
+      return true;
+    },
+  );
 });
 
 // -----------------------------------------------------------------

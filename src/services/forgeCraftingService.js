@@ -10,7 +10,6 @@ const CharacterForgeQueue = require("../models/CharacterForgeQueue");
 const CharacterInventory = require("../models/CharacterInventory");
 const ForgeBlueprint = require("../models/ForgeBlueprint");
 const ForgeBlueprintIngredient = require("../models/ForgeBlueprintIngredient");
-const ForgeBlueprintResult = require("../models/ForgeBlueprintResult");
 const Item = require("../models/Item");
 const WeaponProperties = require("../models/WeaponProperties");
 const ArmorProperties = require("../models/ArmorProperties");
@@ -30,6 +29,7 @@ const {
 } = require("../config/forgeConfig");
 const { FORGE_XP_TIER_MULTIPLIER } = require("../config/equipmentTierConfig");
 const { resolverIdItemDoInsumo } = require("./forgeMaterialsService");
+const { aplicarRaridadeArma, aplicarRaridadeArmadura, aplicarRaridadeVara } = require("./equipmentRarityService");
 const { rolarDegrausQualidadeSuperior, qualidadeComDegraus } = require("./forgeRollService");
 const { bonusesAtivosPara } = require("./guildBuffService");
 const { nivelPorXpTotal } = require("./forgeProgressionService");
@@ -110,10 +110,15 @@ function resolverIngredientesResolvidosEmLote(blueprint, qualidade, resolvedor, 
 // de Fabricação (pedido do jogador: "colocar os atributos dos itens
 // que estão na forja pro player entender qual fazer") — nunca usado
 // pra decidir nada no servidor, só exibição.
-function propriedadesDoResultado(item) {
+// Reformulação V2 (§6.1): `item` é sempre o Item CANÔNICO do blueprint
+// (blueprint.itemResultado) — a raridade não escolhe outro Item, só
+// escala as propriedades-base dele (equipmentRarityService), pra
+// mostrar no tooltip exatamente o que a instância teria naquela
+// qualidade se fosse coletada agora.
+function propriedadesDoResultado(item, raridade) {
   if (!item) return null;
   if (item.weaponProperties) {
-    const p = item.weaponProperties;
+    const p = aplicarRaridadeArma(item.weaponProperties, raridade);
     return {
       tipo: "Arma",
       dano_min: p.dano_min,
@@ -124,7 +129,7 @@ function propriedadesDoResultado(item) {
     };
   }
   if (item.armorProperties) {
-    const p = item.armorProperties;
+    const p = aplicarRaridadeArmadura(item.armorProperties, raridade);
     return {
       tipo: "Armadura",
       defesa: p.defesa,
@@ -136,7 +141,7 @@ function propriedadesDoResultado(item) {
     };
   }
   if (item.fishingRodProperties) {
-    const p = item.fishingRodProperties;
+    const p = aplicarRaridadeVara(item.fishingRodProperties, raridade);
     return {
       tipo: "Ferramenta",
       forca_linha: p.forca_linha,
@@ -191,18 +196,12 @@ async function listarBlueprints(characterId, categoria = null) {
       include: [
         { model: ForgeBlueprintIngredient, as: "ingredientes", include: [{ model: require("../models/ExpeditionResource"), as: "recurso" }] },
         {
-          model: ForgeBlueprintResult,
-          as: "resultados",
+          model: Item,
+          as: "itemResultado",
           include: [
-            {
-              model: Item,
-              as: "item",
-              include: [
-                { model: WeaponProperties, as: "weaponProperties" },
-                { model: ArmorProperties, as: "armorProperties" },
-                { model: require("../models/FishingRodProperties"), as: "fishingRodProperties" },
-              ],
-            },
+            { model: WeaponProperties, as: "weaponProperties" },
+            { model: ArmorProperties, as: "armorProperties" },
+            { model: require("../models/FishingRodProperties"), as: "fishingRodProperties" },
           ],
         },
       ],
@@ -237,7 +236,7 @@ async function listarBlueprints(characterId, categoria = null) {
 
   const dados = [];
   for (const blueprint of blueprints) {
-    const resultadoPorQualidade = new Map(blueprint.resultados.map((r) => [r.qualidade, r.item]));
+    const itemCanonico = blueprint.itemResultado;
     const variantes = [];
     for (const qualidade of ORDEM_QUALIDADE) {
       const ingredientesResolvidos = resolverIngredientesResolvidosEmLote(blueprint, qualidade, resolvedor, itensPorId);
@@ -271,7 +270,7 @@ async function listarBlueprints(characterId, categoria = null) {
         chances_percentual: chancesExibicao,
         // Atributos do item nesta qualidade (resultado garantido se não
         // rolar degrau de qualidade superior) — pro tooltip do frontend.
-        propriedades: propriedadesDoResultado(resultadoPorQualidade.get(qualidade)),
+        propriedades: propriedadesDoResultado(itemCanonico, qualidade),
         tempo_segundos: Math.round(
           (TEMPO_BASE_FABRICACAO_MS_POR_QUALIDADE[qualidade] *
             blueprint.multiplicador_tempo *
@@ -281,7 +280,6 @@ async function listarBlueprints(characterId, categoria = null) {
       });
     }
 
-    const itemComum = resultadoPorQualidade.get("Comum");
     dados.push({
       id: blueprint.id,
       nome: blueprint.nome,
@@ -293,9 +291,9 @@ async function listarBlueprints(characterId, categoria = null) {
       // Só existe pra categoria "Arma" — usado pra montar a subseção por
       // tipo de arma (Espada/Cajado/etc.) na tela de Fabricação, já que
       // um blueprint não guarda isso direto (vem do item resultado).
-      tipo_arma: itemComum?.weaponProperties?.tipo_arma ?? null,
+      tipo_arma: itemCanonico?.weaponProperties?.tipo_arma ?? null,
       nivel_forja_minimo: blueprint.nivel_forja_minimo,
-      imagem_url: itemComum?.imagem_url ?? null,
+      imagem_url: itemCanonico?.imagem_url ?? null,
       variantes,
     });
   }
@@ -386,14 +384,16 @@ async function iniciarFabricacao(characterId, { id_blueprint, qualidade }) {
     const { forjaPontosPercentuais } = await bonusesAtivosPara(characterId, transaction);
     const degraus = rolarDegrausQualidadeSuperior(nivelForja, forjaPontosPercentuais);
     const qualidadeFinal = qualidadeComDegraus(qualidade, degraus);
-    const resultado = await ForgeBlueprintResult.findOne({
-      where: { id_blueprint: blueprint.id, qualidade: qualidadeFinal },
-      transaction,
-    });
-    if (!resultado) {
-      throw Object.assign(new Error(`Blueprint sem resultado configurado pra qualidade ${qualidadeFinal}.`), {
-        statusCode: 500,
-      });
+    // Reformulação V2 (§6.1): o blueprint produz sempre o MESMO Item
+    // canônico (id_item_resultado) — a qualidade sorteada vira a
+    // raridade da instância no momento da coleta (forgeService.coletar),
+    // nunca escolhe outro Item (ForgeBlueprintResult, legado, só existe
+    // até o Contract).
+    if (!blueprint.id_item_resultado) {
+      throw Object.assign(
+        new Error(`Blueprint "${blueprint.nome}" ainda não tem um Item resultado configurado — configure no Painel Administrativo antes de fabricar.`),
+        { statusCode: 500 },
+      );
     }
 
     // Multiplicador moderado por Tier (spec de Tier §32) — receitas mais
@@ -421,7 +421,7 @@ async function iniciarFabricacao(characterId, { id_blueprint, qualidade }) {
         slot: SLOTS_FORJA.FORJA,
         tipo_acao: TIPOS_ACAO_FORJA.FABRICACAO,
         referencia: { id_blueprint: blueprint.id, nome_blueprint: blueprint.nome, qualidade_material: qualidade },
-        payload_resultado: { id_item: resultado.id_item, qualidade_final: qualidadeFinal, xp: xpGanho },
+        payload_resultado: { id_item: blueprint.id_item_resultado, qualidade_final: qualidadeFinal, xp: xpGanho },
         iniciado_em: iniciadoEm,
         pronto_em: prontoEm,
       },

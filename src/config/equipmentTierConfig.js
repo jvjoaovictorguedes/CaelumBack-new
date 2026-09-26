@@ -50,6 +50,22 @@ const TIER_ECONOMIC_MULTIPLIER = {
   1: 16,
 };
 
+// Valor-base de venda por Raridade especificamente pra EQUIPAMENTO
+// instanciável (Arma/Armadura/Capacete/Escudo/Acessório/Ferramenta) —
+// mesma tabela já repetida em várias migrations de catálogo de Forja
+// (20261026700000/20261030120000/20261026760000/20261026120000).
+// Reformulação V2 (Item Único por Equipamento, Raridade por Instância,
+// §13) centraliza aqui pra equipmentRarityService.calcularValorVendaInstancia
+// nunca duplicar essa curva de novo.
+const VALOR_VENDA_EQUIPAMENTO_POR_RARIDADE = {
+  Comum: 15,
+  Incomum: 45,
+  Raro: 130,
+  Epico: 400,
+  Lendario: 1200,
+  Mitico: 3500,
+};
+
 // §32 — multiplicador moderado de XP de Fabricação por Tier (receitas
 // avançadas recompensam mais XP de Forja).
 const FORGE_XP_TIER_MULTIPLIER = {
@@ -91,6 +107,7 @@ module.exports = {
   TIER_POWER_MULTIPLIER,
   RARITY_POWER_MULTIPLIER,
   TIER_ECONOMIC_MULTIPLIER,
+  VALOR_VENDA_EQUIPAMENTO_POR_RARIDADE,
   FORGE_XP_TIER_MULTIPLIER,
   REFINEMENT_COST_TIER_MULTIPLIER,
   TIER_ROMANO,

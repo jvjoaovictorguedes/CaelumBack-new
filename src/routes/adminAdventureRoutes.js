@@ -1,25 +1,21 @@
 // Painel Administrativo Fase 8 (§19) — montada sob /api/admin/adventure.
+//
+// Reformulação V2 dos Monstros — o antigo Editor de Balanceamento por
+// Resultado (preview/simulate/presets, baseado em multiplicador_*) foi
+// REMOVIDO daqui: monstro agora tem stats fixos e autorais
+// (nivel/vida_maxima/dano_min/dano_max/agilidade/velocidade/
+// xp_recompensa/ouro_recompensa), editados direto pelos campos abaixo.
+// O Simulador de Balanceamento V2 (3 cenários A/B/C) é uma fase futura
+// separada, ainda não construída.
 const express = require("express");
 const adminAdventureController = require("../controllers/adminAdventureController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const adminMiddleware = require("../middlewares/adminMiddleware");
 const requireAdminPermission = require("../middlewares/requireAdminPermission");
-const { criarLimitador } = require("../middlewares/rateLimitMiddleware");
-const { SIMULACAO_RATE_LIMIT_JANELA_MS, SIMULACAO_RATE_LIMIT_MAX_TENTATIVAS } = require("../config/monsterBalanceConfig");
 
 const router = express.Router();
 
 router.use(authMiddleware, adminMiddleware, requireAdminPermission("adventure.manage"));
-
-// Editor de Balanceamento de Monstros por Resultado §13 — rate limit
-// por CONTA de admin (nunca por IP: dois admins atrás do mesmo
-// escritório não devem dividir o mesmo limite). Só a simulação (custo
-// de CPU real, até 1.000 combates) precisa disso; preview é barato.
-const limitadorSimulacaoBalanceamento = criarLimitador({
-  janelaMs: SIMULACAO_RATE_LIMIT_JANELA_MS,
-  maxTentativas: SIMULACAO_RATE_LIMIT_MAX_TENTATIVAS,
-  obterChave: (req) => `balance-simulate:${req.user.id}`,
-});
 
 router.get("/zones", adminAdventureController.listarZonas);
 router.post("/zones", adminAdventureController.criarZona);
@@ -29,9 +25,6 @@ router.get("/monsters", adminAdventureController.listarMonstros);
 router.post("/monsters", adminAdventureController.criarMonstro);
 router.patch("/monsters/:id", adminAdventureController.atualizarMonstro);
 router.post("/monsters/:id/duplicate", adminAdventureController.duplicarMonstro);
-router.get("/monsters/balance-presets", adminAdventureController.listarPresetsBalanceamento);
-router.post("/monsters/:id/balance-preview", adminAdventureController.previewBalanceamento);
-router.post("/monsters/:id/balance-simulate", limitadorSimulacaoBalanceamento, adminAdventureController.simularBalanceamento);
 
 router.get("/zone-monsters", adminAdventureController.listarAparicoes);
 router.post("/zone-monsters", adminAdventureController.criarAparicao);

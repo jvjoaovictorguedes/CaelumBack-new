@@ -164,7 +164,7 @@ testeComBanco("mercado admin: cancelAdminMarketListing (equipamento) libera a in
   const { personagem: vendedor } = await novoPersonagem();
   const itemArma = await criarItemEquipavel();
   const instancia = await sequelize.transaction((t) =>
-    equipmentInstanceService.create({ idPersonagem: vendedor.id, idItem: itemArma.id }, t),
+    equipmentInstanceService.create({ idPersonagem: vendedor.id, idItem: itemArma.id, raridade: "Comum" }, t),
   );
   instancia.estado = "Mercado";
   await instancia.save();

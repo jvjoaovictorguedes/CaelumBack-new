@@ -50,22 +50,21 @@ async function obterPoolDeAlvos(transaction) {
     transaction,
   });
 
-  return vinculos.map((v) => {
-    const nivelMin = v.nivel_min_override ?? v.AdventureZone.nivel_monstro_min;
-    const nivelMax = v.nivel_max_override ?? v.AdventureZone.nivel_monstro_max;
-    return {
-      idMonstro: v.id_monstro,
-      nomeMonstro: v.monstro.nome,
-      multiplicadores: {
-        vida: v.monstro.multiplicador_vida,
-        dano: v.monstro.multiplicador_dano,
-      },
-      idZona: v.AdventureZone.id,
-      nomeZona: v.AdventureZone.nome,
-      tipoAparicao: v.tipo_aparicao,
-      nivelReferencia: Math.round((nivelMin + nivelMax) / 2),
-    };
-  });
+  // Reformulação V2 dos Monstros (§7/§9.3) — nível/vida/dano vêm dos
+  // stats FIXOS e autorais do próprio AdventureMonster, nunca mais da
+  // faixa da zona (nivel_min_override/nivel_max_override removidos
+  // deste caminho).
+  return vinculos.map((v) => ({
+    idMonstro: v.id_monstro,
+    nomeMonstro: v.monstro.nome,
+    vidaMaxima: v.monstro.vida_maxima,
+    danoMin: v.monstro.dano_min,
+    danoMax: v.monstro.dano_max,
+    ouroRecompensa: v.monstro.ouro_recompensa,
+    idZona: v.AdventureZone.id,
+    nomeZona: v.AdventureZone.nome,
+    tipoAparicao: v.tipo_aparicao,
+  }));
 }
 
 async function obterOuCriarProgresso(idPersonagem, transaction) {
@@ -110,15 +109,15 @@ async function montarDadosDeOferta(idPersonagem, transaction) {
 
   const randomFactor = sortearFatorAleatorio();
   const goldReward = calcularRecompensaOuro({
-    nivelReferencia: alvo.nivelReferencia,
-    tipoAparicao: alvo.tipoAparicao,
+    ouroRecompensa: alvo.ouroRecompensa,
     quantidade,
     difficulty,
     randomFactor,
   });
   const recommendedPower = calcularPoderRecomendado({
-    nivelReferencia: alvo.nivelReferencia,
-    multiplicadoresMonstro: alvo.multiplicadores,
+    vidaMaxima: alvo.vidaMaxima,
+    danoMin: alvo.danoMin,
+    danoMax: alvo.danoMax,
     difficulty,
   });
 

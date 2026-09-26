@@ -13,11 +13,16 @@ const AdventureZoneMonster = sequelize.define(
     id_monstro: { type: DataTypes.INTEGER, allowNull: false },
     peso_aparicao: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 100 },
     tipo_aparicao: { type: DataTypes.ENUM("Comum", "Raro"), allowNull: false, defaultValue: "Comum" },
-    // Override opcional (§8) — quando NULL, usa a faixa da própria
-    // AdventureZone; o Raro normalmente usa isso pra ficar mais perto
-    // do topo da faixa da região.
+    // LEGADO (Reformulação V2) — nivel_min_override/nivel_max_override
+    // só existem enquanto o sorteio antigo (adventureRollService.
+    // sortearNivelMonstro) não for removido no Contract. AdventureMonster.
+    // nivel é a ÚNICA fonte de verdade do nível-base a partir do Switch.
     nivel_min_override: { type: DataTypes.INTEGER, allowNull: true },
     nivel_max_override: { type: DataTypes.INTEGER, allowNull: true },
+    // V2 (§4.3) — controla só ELEGIBILIDADE de aparição: jogador abaixo
+    // disso não vê esse vínculo no pool ponderado. Nunca altera
+    // AdventureMonster.nivel/stats.
+    nivel_jogador_minimo: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
     ativo: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
   },
   {

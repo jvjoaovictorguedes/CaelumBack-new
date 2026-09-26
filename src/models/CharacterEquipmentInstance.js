@@ -29,6 +29,16 @@ const CharacterEquipmentInstance = sequelize.define(
       allowNull: false,
       defaultValue: "Inventario",
     },
+    // Reformulação "Item Único por Equipamento, Raridade por Instância"
+    // (fase Expand, migration 20261207010000): a raridade da CÓPIA, não
+    // mais do Item — o Item agora é só a identidade lógica do
+    // equipamento (um só por modelo, independente de raridade).
+    // Nullable só até o Backfill preencher; equipmentRarityService é a
+    // autoridade pra validar/aplicar esse valor — nunca inferir do Item.
+    raridade: {
+      type: DataTypes.ENUM("Comum", "Incomum", "Raro", "Epico", "Lendario", "Mitico"),
+      allowNull: true,
+    },
   },
   { tableName: "character_equipment_instances" },
 );

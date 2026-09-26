@@ -27,9 +27,8 @@ const { aplicarAcao } = require("../services/duelEngine");
 const { adicionarExperiencia } = require("../services/experienceService");
 const { concederOuro } = require("../services/goldService");
 const { rolarDropDeVitoria } = require("../services/dropService");
-const { sortearMonstroDaZona, sortearNivelMonstro } = require("../services/adventureRollService");
+const { sortearMonstroDaZona } = require("../services/adventureRollService");
 const { persistirEstadoFinalDoMembro } = require("../services/partyBattleService");
-const { gerarInimigoDeGrupo } = require("../controllers/combatController");
 const { custoManaEfetivo } = require("../services/combatFormulas");
 const {
   online,
@@ -430,43 +429,66 @@ module.exports = function registerPartyHandlers(io) {
           });
         }
 
-        const nivelMedio = Math.round(membros.reduce((s, m) => s + (m.estado.nivel || 1), 0) / membros.length);
-        const agilidadeMedia = membros.reduce((s, m) => s + (m.estado.agilidade || 1), 0) / membros.length;
-        const velocidadeMedia = membros.reduce((s, m) => s + (m.estado.velocidade || 1), 0) / membros.length;
+        // Reformulação V2 dos Monstros (§4.3) — nivel_jogador_minimo só
+        // decide ELEGIBILIDADE de aparição; usa o nível do membro MAIS
+        // BAIXO do grupo, então um vínculo só entra no pool se TODO
+        // mundo já pode enfrentá-lo, não só a média.
+        const menorNivelDoGrupo = Math.min(...membros.map((m) => m.estado.nivel || 1));
+        const monstrosElegiveis = monstrosDaZona.filter(
+          (zm) => menorNivelDoGrupo >= (zm.nivel_jogador_minimo ?? 1),
+        );
+        if (monstrosElegiveis.length === 0) {
+          return socket.emit("party:erro", {
+            mensagem: "Nenhuma criatura dessa Área de Caça está disponível pro nível do grupo ainda.",
+          });
+        }
 
-        const escolhido = sortearMonstroDaZona(monstrosDaZona);
-        const nivelSorteado = sortearNivelMonstro(escolhido, zona);
+        const escolhido = sortearMonstroDaZona(monstrosElegiveis);
+        const monstro = escolhido.monstro;
 
-        // gerarInimigoDeGrupo já multiplica a vida base (fixa por nível)
-        // pelo TAMANHO do grupo (N aliados batem nele por rodada, então
-        // precisa aguentar os N golpes) — esse bônus extra, por cabeça
-        // além do mínimo de TAMANHO_MINIMO_GRUPO, empilha em cima disso
-        // um pouco mais de vida e dano (moderado — o resto do design já
-        // favorece ir em grupo: XP/ouro cheios pra todo mundo, não
-        // divididos).
+        // Reformulação V2 dos Monstros (§9) — Party usa os MESMOS stats
+        // fixos do monstro, sem sorteio de nível nem RNG de variação.
+        // O único modificador CONTEXTUAL (nunca persistido em
+        // AdventureMonster) é a escala pelo TAMANHO do grupo: N aliados
+        // batem nele por rodada, então precisa aguentar os N golpes —
+        // esse bônus extra, por cabeça além do mínimo de
+        // TAMANHO_MINIMO_GRUPO, empilha em cima disso um pouco mais de
+        // vida e dano (moderado — o resto do design já favorece ir em
+        // grupo: XP/ouro cheios pra todo mundo, não divididos).
+        const tamanhoGrupo = Math.max(1, membros.length);
         const aventureirosExtras = Math.max(0, grupo.ordem.length - TAMANHO_MINIMO_GRUPO);
         const fatorDificuldadeGrupo = {
           vida: 1 + aventureirosExtras * 0.12,
           dano: 1 + aventureirosExtras * 0.08,
         };
-        const multiplicadores = {
-          vida: escolhido.monstro.multiplicador_vida * fatorDificuldadeGrupo.vida,
-          dano: escolhido.monstro.multiplicador_dano * fatorDificuldadeGrupo.dano,
-          agilidade: escolhido.monstro.multiplicador_agilidade,
-          velocidade: escolhido.monstro.multiplicador_velocidade,
-        };
 
-        const inimigo = gerarInimigoDeGrupo(
-          { tamanhoGrupo: membros.length, nivelMedio, agilidadeMedia, velocidadeMedia },
-          escolhido.monstro.nome,
-          { nivelForcado: nivelSorteado, multiplicadores },
+        const vidaMaxima = Math.max(
+          20,
+          Math.round(monstro.vida_maxima * tamanhoGrupo * fatorDificuldadeGrupo.vida),
         );
+        const danoMin = Math.max(0, Math.round(monstro.dano_min * fatorDificuldadeGrupo.dano));
+        const danoMax = Math.max(danoMin, Math.round(monstro.dano_max * fatorDificuldadeGrupo.dano));
+
+        const inimigo = {
+          nome: monstro.nome,
+          nivel: monstro.nivel,
+          forca: Math.max(1, Math.round((danoMin + danoMax) / 2)),
+          vitalidade: Math.max(1, Math.round(vidaMaxima / 5)),
+          agilidade: monstro.agilidade,
+          velocidade: monstro.velocidade,
+          vida_maxima: vidaMaxima,
+          vida_atual: vidaMaxima,
+          dano_min: danoMin,
+          dano_max: danoMax,
+          xp_recompensa: monstro.xp_recompensa,
+          ouro_recompensa: monstro.ouro_recompensa,
+        };
         // Expansão Aventura Beta §29/§39 — Party usa o mesmo sprite_key
         // do catálogo, nunca uma resolução própria por nome. imagem_url
         // serve de sprite de combate quando ainda não existe sprite_key
         // dedicado (monstro sem arte animada ainda).
-        inimigo.sprite_key = escolhido.monstro.sprite_key ?? null;
-        inimigo.imagem_url = escolhido.monstro.imagem_url ?? null;
+        inimigo.sprite_key = monstro.sprite_key ?? null;
+        inimigo.imagem_url = monstro.imagem_url ?? null;
 
         const battleId = proximaBatalhaId++;
         const sala = `party-batalha:${battleId}`;
@@ -821,10 +843,15 @@ async function finalizarBatalha(io, battleId, vitoria, motivo = vitoria ? "comba
         persistirEstadoFinalDoMembro(character, membro);
 
         if (vitoria) {
-          const xpConcedida = Math.max(10, Math.round(batalha.inimigo.nivel * 8));
+          // Reformulação V2 dos Monstros (§9.3) — bug corrigido: a Party
+          // tinha sua PRÓPRIA fórmula de XP/ouro por nível
+          // (max(10,nivel*8)/10+nivel*2), divergente da recompensa fixa
+          // e autoral da Aventura solo (xp_recompensa/ouro_recompensa).
+          // Agora usa a MESMA base fixa do monstro, cheia por membro.
+          const xpConcedida = batalha.inimigo.xp_recompensa ?? 0;
           const resultadoXp = await adicionarExperiencia(id, xpConcedida, { transaction, personagem: character });
 
-          const ouro = 10 + batalha.inimigo.nivel * 2;
+          const ouro = batalha.inimigo.ouro_recompensa ?? 0;
           concederOuro(character, ouro);
 
           const drop = await rolarDropDeVitoria(character, batalha.inimigo, transaction);

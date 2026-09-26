@@ -9,6 +9,7 @@ const Item = require("../models/Item");
 const ArmorProperties = require("../models/ArmorProperties");
 const WeaponProperties = require("../models/WeaponProperties");
 const { propriedadesEfetivasArma, propriedadesEfetivasArmadura } = require("./equipmentRefinementService");
+const { validarRaridade, aplicarRaridadeArma, aplicarRaridadeArmadura } = require("./equipmentRarityService");
 
 const ESTADOS = { INVENTARIO: "Inventario", EQUIPADA: "Equipada", MERCADO: "Mercado" };
 
@@ -74,9 +75,18 @@ async function resolverSlot(item, transaction) {
 // Nova cópia física de um equipamento pertencente a um personagem —
 // TODA fonte (Loja/Drop/Forja/Mercado/Admin) chama isto em vez de
 // tocar CharacterEquipmentInstance direto (spec §11).
-async function create({ idPersonagem, idItem, refinamento = 0 }, transaction) {
+//
+// Reformulação V2 (Item Único por Equipamento, Raridade por Instância,
+// §7.1): `raridade` é OBRIGATÓRIA e explícita — nunca inferida do Item
+// (que deixou de ser a fonte de raridade de uma cópia) nem escolhida
+// automaticamente aqui pra "mascarar" um call site não migrado (§18.2
+// "sem default"). Cada chamador decide a raridade real daquela cópia
+// (qualidade sorteada na Forja, raridade vendida na Loja, raridade
+// determinada no Drop, raridade exigida no payload do Admin).
+async function create({ idPersonagem, idItem, raridade, refinamento = 0 }, transaction) {
+  validarRaridade(raridade);
   return CharacterEquipmentInstance.create(
-    { id_personagem: idPersonagem, id_item: idItem, refinamento, estado: ESTADOS.INVENTARIO, equipada: false },
+    { id_personagem: idPersonagem, id_item: idItem, raridade, refinamento, estado: ESTADOS.INVENTARIO, equipada: false },
     { transaction },
   );
 }
@@ -242,14 +252,21 @@ async function listarInstancias(idPersonagem, transaction) {
 // raridade, imagem, refinamento, propriedades efetivas e estado atual").
 function formatarInstancia(instancia) {
   const item = instancia.item;
-  const weaponEfetivo = propriedadesEfetivasArma(item?.weaponProperties, instancia.refinamento);
-  const armorEfetivo = propriedadesEfetivasArmadura(item?.armorProperties, instancia.refinamento);
+  // Ordem obrigatória (§5.2): base do Item canônico -> raridade da
+  // INSTÂNCIA (nunca do Item) -> refinamento. `instancia.raridade` é
+  // NULL só durante a transição pra quem ainda não passou pelo
+  // Backfill — nesse caso mantém a base crua (equivalente a Comum, sem
+  // mascarar um bug de criação já corrigido em equipmentInstanceService.create).
+  const weaponComRaridade = instancia.raridade ? aplicarRaridadeArma(item?.weaponProperties, instancia.raridade) : item?.weaponProperties;
+  const armorComRaridade = instancia.raridade ? aplicarRaridadeArmadura(item?.armorProperties, instancia.raridade) : item?.armorProperties;
+  const weaponEfetivo = propriedadesEfetivasArma(weaponComRaridade, instancia.refinamento);
+  const armorEfetivo = propriedadesEfetivasArmadura(armorComRaridade, instancia.refinamento);
   return {
     id: instancia.id,
     id_item: instancia.id_item,
     nome: item?.nome,
     tipo_item: item?.tipo_item,
-    raridade: item?.raridade,
+    raridade: instancia.raridade,
     tier_equipamento: item?.tier_equipamento ?? null,
     imagem_url: item?.imagem_url,
     refinamento: instancia.refinamento,
@@ -266,15 +283,18 @@ function formatarInstancia(instancia) {
 function formatarEquipado(equipamento) {
   const item = equipamento.item;
   const refinamento = equipamento.instancia?.refinamento ?? 0;
-  const weaponEfetivo = propriedadesEfetivasArma(item?.weaponProperties, refinamento);
-  const armorEfetivo = propriedadesEfetivasArmadura(item?.armorProperties, refinamento);
+  const raridade = equipamento.instancia?.raridade ?? null;
+  const weaponComRaridade = raridade ? aplicarRaridadeArma(item?.weaponProperties, raridade) : item?.weaponProperties;
+  const armorComRaridade = raridade ? aplicarRaridadeArmadura(item?.armorProperties, raridade) : item?.armorProperties;
+  const weaponEfetivo = propriedadesEfetivasArma(weaponComRaridade, refinamento);
+  const armorEfetivo = propriedadesEfetivasArmadura(armorComRaridade, refinamento);
   return {
     slot: equipamento.slot,
     id_instancia: equipamento.id_instancia,
     id_item: item?.id,
     nome: item?.nome,
     tipo_item: item?.tipo_item,
-    raridade: item?.raridade,
+    raridade,
     tier_equipamento: item?.tier_equipamento ?? null,
     imagem_url: item?.imagem_url,
     refinamento,

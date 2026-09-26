@@ -66,6 +66,14 @@ async function recursoTroncoRefinamento(transaction) {
 async function calcularMateriaisNecessarios(instancia, transaction) {
   const item = await Item.findByPk(instancia.id_item, { transaction });
   if (!item) return null;
+  // Reformulação V2 (§8): custo/material de refino usa a raridade da
+  // INSTÂNCIA (a cópia sendo refinada), nunca mais item.raridade — o
+  // Item passou a ser só a identidade canônica do equipamento, igual em
+  // toda raridade. Fallback pro item só enquanto o Backfill (migration
+  // 20261207020000) não roda em produção — instância pré-existente
+  // ainda sem raridade preenchida; nunca usado pra instância NOVA
+  // (equipmentInstanceService.create já exige raridade explícita).
+  const raridadeInstancia = instancia.raridade ?? item.raridade;
 
   const alvo = instancia.refinamento + 1;
   const unidades = UNIDADES_MATERIAL_REFINAMENTO_POR_ALVO[alvo] ?? 1;
@@ -78,7 +86,7 @@ async function calcularMateriaisNecessarios(instancia, transaction) {
   if (base.barras > 0) {
     const recursoBarra = await recursoBarraRefinamento(transaction);
     const idItemBarra = recursoBarra
-      ? await resolverIdItemDoInsumo({ tipo_insumo: "Barra", id_recurso: recursoBarra.id, qualidade: item.raridade }, transaction)
+      ? await resolverIdItemDoInsumo({ tipo_insumo: "Barra", id_recurso: recursoBarra.id, qualidade: raridadeInstancia }, transaction)
       : null;
     if (idItemBarra) {
       const itemBarra = await Item.findByPk(idItemBarra, { attributes: ["nome", "imagem_url"], transaction });
@@ -94,7 +102,7 @@ async function calcularMateriaisNecessarios(instancia, transaction) {
   if (base.troncos > 0) {
     const recursoTronco = await recursoTroncoRefinamento(transaction);
     const idItemTronco = recursoTronco
-      ? await resolverIdItemDoInsumo({ tipo_insumo: "RecursoExpedicao", id_recurso: recursoTronco.id, qualidade: item.raridade }, transaction)
+      ? await resolverIdItemDoInsumo({ tipo_insumo: "RecursoExpedicao", id_recurso: recursoTronco.id, qualidade: raridadeInstancia }, transaction)
       : null;
     if (idItemTronco) {
       const itemTronco = await Item.findByPk(idItemTronco, { attributes: ["nome", "imagem_url"], transaction });
@@ -114,8 +122,8 @@ async function calcularMateriaisNecessarios(instancia, transaction) {
   // itens sem Tier (não deveria acontecer com equipável, mas cai em 1x
   // por segurança em vez de quebrar a prévia).
   const multiplicadorTier = REFINEMENT_COST_TIER_MULTIPLIER[item.tier_equipamento] ?? 1;
-  const ouro = Math.round((OURO_BASE_REFINAMENTO_POR_QUALIDADE[item.raridade] ?? 0) * unidades * multiplicadorTier);
-  return { alvo, unidades, materiais, ouro, item };
+  const ouro = Math.round((OURO_BASE_REFINAMENTO_POR_QUALIDADE[raridadeInstancia] ?? 0) * unidades * multiplicadorTier);
+  return { alvo, unidades, materiais, ouro, item, raridade: raridadeInstancia };
 }
 
 // Confere um id_item_pergaminho contra ForgeScroll + inventário + nível
@@ -382,7 +390,7 @@ async function iniciarRefinamento(characterId, { id_instancia, id_item_pergaminh
           // nunca lido de volta pra decidir nada no gameplay.
           ouro_custo: info.ouro,
           categoria_equipamento: info.item.tipo_item,
-          qualidade_item: info.item.raridade,
+          qualidade_item: info.raridade,
         },
         payload_resultado: { sucesso, xp: xpGanho },
         iniciado_em: iniciadoEm,

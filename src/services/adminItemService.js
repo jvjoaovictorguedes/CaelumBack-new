@@ -428,6 +428,37 @@ async function listAdminItems({ pagina = 1, porPagina = 20, tipo_item, raridade,
   return { total: count, pagina, porPagina: limite, itens: rows };
 }
 
+// Bug reportado (repetidas vezes): pickers de item no Admin (Premiações,
+// Drops, Loot de Caçada/Aventura, Kits de World Boss, Conjuntos de
+// Equipamento etc.) usavam listAdminItems com um porPagina "grande"
+// (1000+) esperando o catálogo INTEIRO de uma vez — mas listAdminItems
+// sempre limita a 100 (o teto certo pra tabela paginada do CRUD de
+// Itens) e ordena por id DESC, então qualquer catálogo com mais de 100
+// itens ativos escondia os mais ANTIGOS de todo picker do sistema, sem
+// nenhum aviso. Esta função é dedicada a alimentar picker (nunca a
+// tabela paginada): sem os JOINs pesados de propriedades (o picker só
+// precisa de nome/id/tipo/raridade), ordenada por nome (não por id) e
+// com um teto bem mais alto — 5000, uma margem generosa acima de
+// qualquer catálogo real do jogo, só como guarda contra um blow-up
+// patológico, nunca um limite que o conteúdo real do jogo algum dia
+// encoste.
+const LIMITE_SELECAO_ITENS = 5000;
+
+async function listAllItemsForSelection({ apenasAtivos = true, tipo_item } = {}) {
+  const where = {};
+  if (apenasAtivos !== undefined) where.ativo = apenasAtivos;
+  if (tipo_item) where.tipo_item = tipo_item;
+
+  const itens = await Item.findAll({
+    where,
+    attributes: ["id", "nome", "tipo_item", "raridade", "imagem_url", "ativo"],
+    order: [["nome", "ASC"]],
+    limit: LIMITE_SELECAO_ITENS,
+  });
+
+  return { itens };
+}
+
 module.exports = {
   createAdminItem,
   updateAdminItem,
@@ -435,6 +466,7 @@ module.exports = {
   reactivateAdminItem,
   duplicateAdminItem,
   listAdminItems,
+  listAllItemsForSelection,
   ENUM_TIPO_ITEM,
   ENUM_RARIDADE,
 };

@@ -113,8 +113,7 @@ async function obterRegiao(idPersonagem, idZona) {
         raridade: "???",
         descricao: "???",
         imagem_url: null,
-        nivel_min: null,
-        nivel_max: null,
+        nivel: null,
         abates: 0,
         requisito_proximo_nivel: null,
         drops: [],
@@ -125,17 +124,21 @@ async function obterRegiao(idPersonagem, idZona) {
       descoberto: true,
       nome: v.monstro.nome,
       // AdventureMonster não tem campo de "tipo"/habilidades/resistências
-      // separado (combate é resolvido por multiplicador em cima dos
-      // atributos do jogador, não por ficha de skills por monstro) — a
-      // ficha usa o que REALMENTE existe (§7: nunca duplicar/inventar
-      // atributo que não é real), daí "raridade" aqui é o tipo de
-      // aparição da zona (Comum/Raro).
+      // separado (combate é resolvido pelos stats fixos do próprio
+      // monstro, não por ficha de skills) — a ficha usa o que REALMENTE
+      // existe (§7: nunca duplicar/inventar atributo que não é real),
+      // daí "raridade" aqui é o tipo de aparição da zona (Comum/Raro).
+      //
+      // Reformulação V2 dos Monstros (§4.3/§9.3) — nível é o ÚNICO,
+      // FIXO, de AdventureMonster.nivel; não existe mais faixa
+      // min/max por zona pro monstro em si (nivel_jogador_minimo do
+      // vínculo só decide elegibilidade de aparição, nunca aparece
+      // aqui como "nível do monstro").
       raridade: v.tipo_aparicao,
       descricao: v.monstro.descricao,
       imagem_url: v.monstro.imagem_url,
       sprite_key: v.monstro.sprite_key,
-      nivel_min: v.nivel_min_override ?? zona.nivel_monstro_min,
-      nivel_max: v.nivel_max_override ?? zona.nivel_monstro_max,
+      nivel: v.monstro.nivel,
       abates: kill.quantidade,
       requisito_proximo_nivel: proximoNivel ? REQUISITOS_ABATES_POR_NIVEL[proximoNivel][v.tipo_aparicao] : null,
       drops: lootsPorMonstro.get(v.monstro.id) ?? [],

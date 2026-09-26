@@ -72,9 +72,13 @@ exports.purchaseItem = async (req, res) => {
       // Inventário v2 (§4/§11) — equipamento vira instância individual
       // (uma por unidade comprada, refinamento 0), nunca mais um stack.
       if (ehInstanciavel(item.tipo_item)) {
+        // Reformulação V2 (§11): a Loja passa explicitamente a raridade
+        // vendida — item.raridade continua sendo a fonte correta durante
+        // a transição (cada Item ainda é uma variante de raridade até o
+        // Backfill colapsar o catálogo pro canônico).
         const instancias = [];
         for (let i = 0; i < quantidade; i++) {
-          instancias.push(await criarInstancia({ idPersonagem: id_personagem, idItem: id_item }, transaction));
+          instancias.push(await criarInstancia({ idPersonagem: id_personagem, idItem: id_item, raridade: item.raridade }, transaction));
         }
         return { character, instancias, item };
       }

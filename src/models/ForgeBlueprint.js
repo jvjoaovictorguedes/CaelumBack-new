@@ -19,6 +19,14 @@ const ForgeBlueprint = sequelize.define(
     // Nullable só até a migration de backfill rodar; daqui pra frente
     // todo blueprint novo precisa vir com Tier.
     tier_equipamento: { type: DataTypes.INTEGER, allowNull: true, validate: { min: 1, max: 5 } },
+    // Reformulação V2 (migration 20261207010000-item-unico-raridade-por-
+    // instancia-expand): o Item canônico que este blueprint produz —
+    // qualidade deixa de escolher outro Item (ForgeBlueprintResult) e
+    // passa a virar CharacterEquipmentInstance.raridade da cópia
+    // coletada. Nullable só até o Backfill decidir o canônico de cada
+    // blueprint (a variante Comum). ForgeBlueprintResult é removido no
+    // Contract, depois que Forja/Refino/Sets tiverem migrado.
+    id_item_resultado: { type: DataTypes.INTEGER, allowNull: true },
   },
   { tableName: "forge_blueprints" },
 );

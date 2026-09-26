@@ -181,7 +181,7 @@ testeComBanco("inventário: getCharacterInventory lista stacks e equipamentos co
     idAdmin: 1,
     motivo: "setup",
   });
-  await sequelize.transaction((t) => equipmentInstanceService.create({ idPersonagem: personagem.id, idItem: itemArma.id }, t));
+  await sequelize.transaction((t) => equipmentInstanceService.create({ idPersonagem: personagem.id, idItem: itemArma.id, raridade: "Comum" }, t));
 
   const inventario = await adminInventoryService.getCharacterInventory(personagem.id);
   assert.equal(inventario.personagem.id, personagem.id);
@@ -195,7 +195,7 @@ testeComBanco("inventário: removeEquipmentInstance exige motivo e só remove in
   const { personagem } = await novoPersonagem();
   const itemArma = await criarItemEquipavel();
   const instancia = await sequelize.transaction((t) =>
-    equipmentInstanceService.create({ idPersonagem: personagem.id, idItem: itemArma.id }, t),
+    equipmentInstanceService.create({ idPersonagem: personagem.id, idItem: itemArma.id, raridade: "Comum" }, t),
   );
 
   await assert.rejects(
@@ -224,7 +224,7 @@ testeComBanco("inventário: removeEquipmentInstance rejeita instância Equipada 
   const { personagem } = await novoPersonagem();
   const itemArma = await criarItemEquipavel();
   const instancia = await sequelize.transaction((t) =>
-    equipmentInstanceService.create({ idPersonagem: personagem.id, idItem: itemArma.id }, t),
+    equipmentInstanceService.create({ idPersonagem: personagem.id, idItem: itemArma.id, raridade: "Comum" }, t),
   );
   instancia.estado = "Equipada";
   instancia.equipada = true;

@@ -17,6 +17,7 @@ require("../src/models/associations");
 const Item = require("../src/models/Item");
 const EquipmentSet = require("../src/models/EquipmentSet");
 const EquipmentSetPiece = require("../src/models/EquipmentSetPiece");
+const ForgeBlueprint = require("../src/models/ForgeBlueprint");
 const User = require("../src/models/User");
 const AdminActionLog = require("../src/models/AdminActionLog");
 const adminEquipmentSetService = require("../src/services/adminEquipmentSetService");
@@ -220,6 +221,96 @@ testeComBanco("audit log registra a criação da peça com o item_id correto", a
   });
   assert.ok(log, "devia existir um audit log da criação da peça");
   assert.equal(log.dados_depois.item_id, item.id);
+});
+
+async function criarBlueprint({ ativo = true } = {}) {
+  return ForgeBlueprint.create({
+    nome: `Blueprint Teste ${sufixo()}`,
+    categoria_equipamento: "Acessorio1",
+    tier_equipamento: 3,
+    ativo,
+  });
+}
+
+testeComBanco("adicionar peça com id_blueprint válido: salva com id_blueprint e item_id nulo", async () => {
+  const admin = await criarAdmin();
+  const set = await criarSet();
+  const blueprint = await criarBlueprint();
+
+  const peca = await adminEquipmentSetService.addAdminEquipmentSetPiece(
+    set.id,
+    { id_blueprint: blueprint.id, piece_key: "anel" },
+    { idAdmin: admin.id, req: ADMIN_FAKE_REQ },
+  );
+
+  assert.equal(peca.id_blueprint, blueprint.id);
+  assert.equal(peca.item_id, null, "peça por blueprint não pode ter item_id fixo (senão presa a uma raridade)");
+
+  const persistida = await EquipmentSetPiece.findByPk(peca.id);
+  assert.equal(persistida.id_blueprint, blueprint.id);
+  assert.equal(persistida.item_id, null);
+});
+
+testeComBanco("adicionar peça com id_blueprint inexistente é rejeitado com 404", async () => {
+  const admin = await criarAdmin();
+  const set = await criarSet();
+
+  await assert.rejects(
+    () =>
+      adminEquipmentSetService.addAdminEquipmentSetPiece(
+        set.id,
+        { id_blueprint: 999999999, piece_key: "anel" },
+        { idAdmin: admin.id, req: ADMIN_FAKE_REQ },
+      ),
+    (erro) => {
+      assert.match(erro.message, /Blueprint não encontrado/i);
+      assert.equal(erro.statusCode, 404);
+      return true;
+    },
+  );
+});
+
+testeComBanco("adicionar peça com blueprint desativado é rejeitado", async () => {
+  const admin = await criarAdmin();
+  const set = await criarSet();
+  const blueprintInativo = await criarBlueprint({ ativo: false });
+
+  await assert.rejects(
+    () =>
+      adminEquipmentSetService.addAdminEquipmentSetPiece(
+        set.id,
+        { id_blueprint: blueprintInativo.id, piece_key: "anel" },
+        { idAdmin: admin.id, req: ADMIN_FAKE_REQ },
+      ),
+    /Blueprint desativado/i,
+  );
+});
+
+testeComBanco("informar item_id e id_blueprint juntos é rejeitado (XOR)", async () => {
+  const admin = await criarAdmin();
+  const set = await criarSet();
+  const item = await criarItem();
+  const blueprint = await criarBlueprint();
+
+  await assert.rejects(
+    () =>
+      adminEquipmentSetService.addAdminEquipmentSetPiece(
+        set.id,
+        { item_id: item.id, id_blueprint: blueprint.id, piece_key: "anel" },
+        { idAdmin: admin.id, req: ADMIN_FAKE_REQ },
+      ),
+    /item_id OU id_blueprint/i,
+  );
+});
+
+testeComBanco("nem item_id nem id_blueprint informados é rejeitado", async () => {
+  const admin = await criarAdmin();
+  const set = await criarSet();
+
+  await assert.rejects(
+    () => adminEquipmentSetService.addAdminEquipmentSetPiece(set.id, { piece_key: "anel" }, { idAdmin: admin.id, req: ADMIN_FAKE_REQ }),
+    /Informe item_id ou id_blueprint/i,
+  );
 });
 
 // ----------------------------------------------------- INTEGRAÇÃO COM O SET

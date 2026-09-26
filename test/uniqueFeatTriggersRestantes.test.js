@@ -250,8 +250,13 @@ testeComBanco("FORGE_CRAFT_COMPLETED: coleta real de fabricação concede a Proe
   const item = await criarItemEquipavel("Espada de Teste");
   const blueprintId = -(1000 + Math.floor(Math.random() * 100000)); // id fictício, só precisa ser estável
 
-  const { feat } = await criarProeza("FORGE_CRAFT_COMPLETED", { blueprintId, raridade: item.raridade });
-  await enfileirarFabricacao(personagem.id, { blueprintId, itemId: item.id, raridade: item.raridade, qualidadeFinal: "Perfeito" });
+  // raridade do trigger passa a ser a qualidade REAL sorteada da cópia
+  // (qualidade_final), não mais item.raridade — Reformulação V2 (ver
+  // forgeService.js/equipmentRarityService.js): item.raridade agora é
+  // só a identidade canônica "Comum" do equipamento, igual em toda
+  // fabricação.
+  const { feat } = await criarProeza("FORGE_CRAFT_COMPLETED", { blueprintId, raridade: "Mitico" });
+  await enfileirarFabricacao(personagem.id, { blueprintId, itemId: item.id, raridade: item.raridade, qualidadeFinal: "Mitico" });
 
   const resultado = await forgeService.coletar(personagem.id, SLOTS_FORJA.FORJA);
   assert.equal(resultado.tipo, "fabricacao");
@@ -266,7 +271,7 @@ testeComBanco("FORGE_CRAFT_COMPLETED: fabricação com blueprintId diferente nã
   const blueprintId = -(1000 + Math.floor(Math.random() * 100000));
 
   const { feat } = await criarProeza("FORGE_CRAFT_COMPLETED", { blueprintId: blueprintId - 1 });
-  await enfileirarFabricacao(personagem.id, { blueprintId, itemId: item.id, raridade: item.raridade, qualidadeFinal: "Perfeito" });
+  await enfileirarFabricacao(personagem.id, { blueprintId, itemId: item.id, raridade: item.raridade, qualidadeFinal: "Mitico" });
 
   await forgeService.coletar(personagem.id, SLOTS_FORJA.FORJA);
   await assertNaoClaimado(feat);
@@ -454,7 +459,7 @@ testeComBanco("FISH_CAUGHT: captura real (fase CAUGHT) concede a Proeza", async 
   const { personagem } = await criarPersonagem();
   const { especie, zona, itemVara } = await criarCenarioDePesca();
   await CharacterNavigationState.upsert({ id_personagem: personagem.id, id_zone_atual: zona.id, id_port_atual: null });
-  const instancia = await equipmentInstanceService.create({ idPersonagem: personagem.id, idItem: itemVara.id }, null);
+  const instancia = await equipmentInstanceService.create({ idPersonagem: personagem.id, idItem: itemVara.id, raridade: "Comum" }, null);
 
   // condicaoId NUNCA sai do contexto real (sempre null — não existe
   // essa dimensão de dado neste sistema) — por isso fica OMITIDO do

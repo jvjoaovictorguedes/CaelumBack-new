@@ -60,46 +60,13 @@ exports.criarMonstro = async (req, res) => {
 
 exports.atualizarMonstro = async (req, res) => {
   try {
-    const { balanceContext, ...payload } = req.body ?? {};
-    const monstro = await adminAdventureService.updateAdminMonster(req.params.id, payload, {
+    const monstro = await adminAdventureService.updateAdminMonster(req.params.id, req.body ?? {}, {
       idAdmin: req.user.id,
       req,
-      balanceContext: balanceContext ?? null,
     });
     res.status(200).json({ status: "success", data: { monstro } });
   } catch (error) {
     tratarErro(res, error, "Erro interno do servidor ao atualizar monstro.");
-  }
-};
-
-// Editor de Balanceamento de Monstros por Resultado (§9/§10) — preview
-// e simulação NUNCA alteram o AdventureMonster; só a rota de update
-// acima (reaproveitada) persiste.
-exports.previewBalanceamento = async (req, res) => {
-  try {
-    const preview = await adminAdventureService.previewMonsterBalance(req.params.id, req.body ?? {});
-    res.status(200).json({ status: "success", data: preview });
-  } catch (error) {
-    tratarErro(res, error, "Erro interno do servidor ao calcular preview de balanceamento.");
-  }
-};
-
-exports.simularBalanceamento = async (req, res) => {
-  try {
-    const simulacao = await adminAdventureService.simulateMonsterBalance(req.params.id, req.body ?? {});
-    res.status(200).json({ status: "success", data: simulacao });
-  } catch (error) {
-    tratarErro(res, error, "Erro interno do servidor ao simular combates.");
-  }
-};
-
-exports.listarPresetsBalanceamento = async (req, res) => {
-  try {
-    const presets = adminAdventureService.listarPresetsDeBalanceamento();
-    const perfis = adminAdventureService.listarPerfisSinteticos();
-    res.status(200).json({ status: "success", data: { presets, perfis } });
-  } catch (error) {
-    tratarErro(res, error, "Erro interno do servidor ao listar presets.");
   }
 };
 

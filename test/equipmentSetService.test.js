@@ -12,6 +12,8 @@ const CharacterEquipment = require("../src/models/CharacterEquipment");
 const EquipmentSet = require("../src/models/EquipmentSet");
 const EquipmentSetPiece = require("../src/models/EquipmentSetPiece");
 const EquipmentSetBonus = require("../src/models/EquipmentSetBonus");
+const ForgeBlueprint = require("../src/models/ForgeBlueprint");
+const ForgeBlueprintResult = require("../src/models/ForgeBlueprintResult");
 const { resolverConjuntosEquipados } = require("../src/services/equipmentSetService");
 const { buscarBonusDeAtributos } = require("../src/services/equipmentBonusService");
 const inventoryV2Controller = require("../src/controllers/inventoryV2Controller");
@@ -271,6 +273,46 @@ testeComBanco("GET /inventory/v2 devolve equipmentSets já resolvido (backend au
   assert.equal(corpo.data.equipmentSets.length, 1);
   assert.equal(corpo.data.equipmentSets[0].equippedPieces, 2);
   assert.equal(corpo.data.equipmentSets[0].bonuses[0].active, true);
+});
+
+testeComBanco("peça por blueprint: qualquer raridade produzida pelo blueprint satisfaz a peça (não fica presa a uma raridade)", async () => {
+  const { personagem } = await criarPersonagem();
+  const set = await EquipmentSet.create({ key: `set_blueprint_${sufixo()}`, nome: "Conjunto de Ferro", ativo: true });
+  const blueprint = await ForgeBlueprint.create({
+    nome: `Anel Forjado de Ferro ${sufixo()}`,
+    categoria_equipamento: "Acessorio1",
+    tier_equipamento: 3,
+  });
+  const itemRaro = await criarItemEquipavel("Acessorio1");
+  const itemEpico = await criarItemEquipavel("Acessorio1");
+  await ForgeBlueprintResult.create({ id_blueprint: blueprint.id, qualidade: "Raro", id_item: itemRaro.id });
+  await ForgeBlueprintResult.create({ id_blueprint: blueprint.id, qualidade: "Epico", id_item: itemEpico.id });
+
+  await EquipmentSetPiece.create({
+    equipment_set_id: set.id,
+    id_blueprint: blueprint.id,
+    piece_key: `peca_ferro_${sufixo()}`,
+    ordem: 0,
+  });
+  await EquipmentSetBonus.create({ equipment_set_id: set.id, pieces_required: 1, stats: { vitalidade: 10 } });
+
+  // Equipar a variante Épica (não a Rara cadastrada "primeiro") ainda
+  // precisa satisfazer a peça — é exatamente o requisito de negócio: o
+  // conjunto não depende de qual raridade do item está equipada.
+  await equipar(personagem.id, "Acessorio1", itemEpico.id);
+  let resultado = await resolverConjuntosEquipados(personagem.id);
+  assert.equal(resultado.sets.length, 1);
+  assert.equal(resultado.sets[0].equippedPieces, 1);
+  assert.equal(resultado.statBonus.vitalidade, 10);
+  assert.equal(resultado.sets[0].pieces[0].nome, blueprint.nome);
+
+  // Trocar pra variante Rara do MESMO blueprint continua satisfazendo a
+  // mesma peça lógica (piece_key), sem precisar de peça nova no conjunto.
+  const linha = await CharacterEquipment.findOne({ where: { id_personagem: personagem.id, slot: "Acessorio1" } });
+  await linha.update({ id_item: itemRaro.id });
+  resultado = await resolverConjuntosEquipados(personagem.id);
+  assert.equal(resultado.sets[0].equippedPieces, 1);
+  assert.equal(resultado.statBonus.vitalidade, 10);
 });
 
 testeComBanco("desequipar uma peça remove imediatamente o threshold que deixa de ser atendido", async () => {
