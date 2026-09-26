@@ -112,11 +112,12 @@ async function excluirUmUsuario(idUser, { idAdmin, req }) {
 
     for (const personagem of personagens) {
       // Mesma trava de characterController.deleteCharacter: nunca
-      // excluir personagem líder/fundador de guilda ainda Ativa (FK
-      // sem onDelete em Guild.id_fundador/id_lider).
+      // excluir personagem líder/fundador de guilda, qualquer que seja
+      // o status (Guild.id_fundador/id_lider não tem onDelete — a FK
+      // não distingue guilda Ativa de Inativa/Dissolvida, então checar
+      // só "Ativa" deixava passar exclusões que ainda estourariam).
       const guildComoLiderOuFundador = await Guild.findOne({
         where: {
-          status: "Ativa",
           [Op.or]: [{ id_fundador: personagem.id }, { id_lider: personagem.id }],
         },
         transaction,
@@ -126,7 +127,7 @@ async function excluirUmUsuario(idUser, { idAdmin, req }) {
           id: idUser,
           username: usuario.username,
           excluido: false,
-          motivo: `Personagem "${personagem.nome}" lidera/fundou a guilda "${guildComoLiderOuFundador.nome}" (Ativa) — transfira a liderança ou dissolva a guilda antes.`,
+          motivo: `Personagem "${personagem.nome}" lidera/fundou a guilda "${guildComoLiderOuFundador.nome}" — transfira a liderança ou dissolva a guilda antes.`,
         };
       }
     }

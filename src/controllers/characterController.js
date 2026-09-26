@@ -1360,13 +1360,12 @@ exports.deleteCharacter = async (req, res) => {
 
       // Guild.id_fundador/id_lider referenciam Characters sem
       // onDelete configurado (NO ACTION) — excluir o líder/fundador de
-      // uma guilda ainda ativa deixava a regra da guilda inconsistente
-      // (quem lidera uma guilda sem dono?) e, sem essa checagem, só
-      // estourava como erro 500 genérico de violação de chave
-      // estrangeira na hora do DELETE.
+      // qualquer guilda (não só Ativa; a FK não distingue status)
+      // deixava a regra da guilda inconsistente (quem lidera uma
+      // guilda sem dono?) e, sem essa checagem, só estourava como erro
+      // 500 genérico de violação de chave estrangeira na hora do DELETE.
       const guildComoLiderOuFundador = await Guild.findOne({
         where: {
-          status: "Ativa",
           [Op.or]: [{ id_fundador: character.id }, { id_lider: character.id }],
         },
         transaction,
