@@ -415,6 +415,12 @@ AdminRole.belongsToMany(User, {
   as: "usuarios",
 });
 
+// Sistema de Referral — self-referencing em User. "indicadoPor" é a
+// conta de quem indicou (null = registro sem indicação); "indicados" é
+// a lista de contas que essa conta indicou.
+User.belongsTo(User, { foreignKey: "id_indicado_por", as: "indicadoPor" });
+User.hasMany(User, { foreignKey: "id_indicado_por", as: "indicados" });
+
 // Alquimia / Caldeirão (spec §6.6) — domínio próprio, NUNCA reaproveita
 // as associações de ForgeBlueprint acima. Resultado e ingrediente
 // apontam pra Item por id_item_resultado/id_item (FK simples, sem
