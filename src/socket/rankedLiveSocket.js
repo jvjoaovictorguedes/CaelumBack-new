@@ -496,13 +496,44 @@ async function iniciarPartidaAssincrona(io, { idDesafiante }) {
   }
 }
 
-// Partidas que ficaram "EmAndamento" após um restart do servidor: o
-// estado do duelo vive em memória, então elas nunca terminariam
-// sozinhas. Marca como falha de servidor e devolve a tentativa (§11).
+// Partidas "EmAndamento" que ninguém mais vai terminar: ou o processo
+// reiniciou (o estado do duelo vivia só em memória) ou
+// finalizarDueloRanked tentou persistir e a transaction falhou — nos
+// dois casos o duelo já não existe mais em pvpLiveSocket.duelos (essa é
+// EXATAMENTE a garantia que este filtro usa pra nunca varrer uma
+// partida que ainda está sendo jogada de verdade neste mesmo processo).
+// Marca como falha de servidor e devolve a tentativa (§11) — nunca
+// inventa um resultado que não temos mais como confirmar.
+//
+// `idadeMinimaMs` é uma segunda rede de segurança, redundante com a
+// checagem acima, só pra nunca varrer uma partida iniciada há poucos
+// segundos por alguma janela de corrida entre o INSERT e o registro em
+// `duelos` (MAX_ACOES=80 × PRAZO_TURNO_MS=5s ≈ 6,7min no pior caso
+// realista — 10min dá margem confortável sem herdar aquele número
+// mágico de outro módulo).
+const IDADE_MINIMA_VARREDURA_MS = 10 * 60 * 1000;
+
+function rankedMatchIdsAindaEmMemoria() {
+  const ids = new Set();
+  for (const duelo of pvpLiveSocket.duelos.values()) {
+    if (duelo.ranked && duelo.rankedMatchId) ids.add(duelo.rankedMatchId);
+  }
+  return ids;
+}
+
 async function encerrarPartidasOrfas() {
-  const orfas = await RankedMatch.findAll({
-    where: { status: "EmAndamento", defensor_controlado_por_ia: true, id: { [Op.gt]: 0 } },
+  const emMemoria = rankedMatchIdsAindaEmMemoria();
+  const limiteIdade = new Date(Date.now() - IDADE_MINIMA_VARREDURA_MS);
+
+  const candidatas = await RankedMatch.findAll({
+    where: {
+      status: "EmAndamento",
+      defensor_controlado_por_ia: true,
+      id: { [Op.gt]: 0 },
+      iniciada_em: { [Op.lte]: limiteIdade },
+    },
   });
+  const orfas = candidatas.filter((partida) => !emMemoria.has(partida.id));
   for (const partida of orfas) {
     await sequelize
       .transaction(async (transaction) => {
@@ -519,6 +550,31 @@ async function encerrarPartidasOrfas() {
   }
   if (orfas.length > 0) log("partidas-orfas:encerradas", { total: orfas.length });
   return orfas.length;
+}
+
+// Bug reportado ("ranking ranqueado não contabiliza"): antes disto
+// encerrarPartidasOrfas só rodava UMA VEZ, no boot do processo (ver
+// app.js) — pensada só pro caso de restart. Mas uma partida também
+// fica travada em "EmAndamento" pra sempre quando finalizarDueloRanked
+// tenta persistir o resultado e a transaction falha por qualquer
+// motivo transitório (o duelo já saiu da memória antes dessa tentativa,
+// então não há segunda chance no mesmo processo — ver o comentário em
+// pvpLiveSocket.executarTurno). Sem um processo novo, essa partida (e o
+// jogador que a jogou) ficava sem contabilizar até o próximo deploy —
+// podia ser horas ou dias. Rodar a cada poucos minutos encurta essa
+// janela pra "no máximo alguns minutos" em vez de "até o próximo
+// restart". `.unref()` — nunca impede o processo de encerrar sozinho
+// (mesmo padrão de worldBossScheduler.js).
+const INTERVALO_VARREDURA_ORFAS_MS = 3 * 60 * 1000;
+let intervaloVarreduraOrfas = null;
+
+function iniciarVarredorDePartidasOrfas() {
+  if (intervaloVarreduraOrfas) return;
+  encerrarPartidasOrfas().catch((error) => console.error("[ranked] falha na varredura inicial de partidas órfãs:", error));
+  intervaloVarreduraOrfas = setInterval(() => {
+    encerrarPartidasOrfas().catch((error) => console.error("[ranked] falha na varredura periódica de partidas órfãs:", error));
+  }, INTERVALO_VARREDURA_ORFAS_MS);
+  intervaloVarreduraOrfas.unref?.();
 }
 
 module.exports = function registerRankedLiveHandlers(io) {
@@ -545,5 +601,6 @@ module.exports = function registerRankedLiveHandlers(io) {
 module.exports.finalizarDueloRanked = finalizarDueloRanked;
 module.exports.iniciarPartidaAssincrona = iniciarPartidaAssincrona;
 module.exports.encerrarPartidasOrfas = encerrarPartidasOrfas;
+module.exports.iniciarVarredorDePartidasOrfas = iniciarVarredorDePartidasOrfas;
 module.exports.RankedMatchError = RankedMatchError;
 module.exports.montarPayloadInicio = montarPayloadInicio;

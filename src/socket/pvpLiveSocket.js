@@ -660,8 +660,20 @@ async function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
     // Duelos ranked setam `duelo.finalizar` (rankedLiveSocket.js) pra
     // persistir rating em vez de PvpStatus/PvpMatches — casual continua
     // usando finalizarDuelo direto, sem essa propriedade.
+    //
+    // AWAIT de propósito (bug reportado: "ranking ranqueado não
+    // contabiliza") — antes disto era fire-and-forget: o duelo já saía
+    // do mapa em memória (finalizarDueloRanked apaga isso antes até de
+    // tentar persistir) enquanto a transaction que grava rating/V-D
+    // ainda rodava em paralelo, sem ninguém aguardando o resultado. Uma
+    // falha transitória na transaction só aparecia num console.error,
+    // sem chance nenhuma de retry — e como o duelo já tinha sido
+    // removido da memória, aquela partida ficava "EmAndamento" pra
+    // sempre no banco (só o boot do servidor limpava isso, ver
+    // encerrarPartidasOrfas/iniciarVarredorDePartidasOrfas), sem NUNCA
+    // creditar a vitória real que o jogador tinha acabado de conquistar.
     const finalizar = duelo.finalizar || finalizarDuelo;
-    finalizar(io, duelId, vencedorChave, "combate");
+    await finalizar(io, duelId, vencedorChave, "combate");
     return;
   }
 

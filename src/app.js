@@ -328,10 +328,14 @@ registerPvpLiveHandlers(io);
 registerRankedLiveHandlers(io);
 // PvP v2 §11/§12 — partidas ranqueadas assíncronas vivem em memória:
 // um restart deixaria linhas "EmAndamento" órfãs (e a tentativa diária
-// gasta). Encerra como falha de servidor e estorna a tentativa no boot.
-require("./socket/rankedLiveSocket")
-  .encerrarPartidasOrfas()
-  .catch((error) => console.error("Falha ao encerrar partidas ranqueadas órfãs:", error));
+// gasta). Bug reportado ("ranking ranqueado não contabiliza"): rodar
+// isso só uma vez no boot só cobria o caso de restart — uma falha
+// transitória na transaction de finalizarDueloRanked, com o processo
+// vivo, deixava a partida travada até o PRÓXIMO deploy. Agora roda de
+// novo periodicamente (rankedLiveSocket.iniciarVarredorDePartidasOrfas),
+// nunca varrendo partida que ainda está sendo jogada de verdade neste
+// mesmo processo.
+require("./socket/rankedLiveSocket").iniciarVarredorDePartidasOrfas();
 registerTournamentHandlers(io);
 registerGuildHandlers(io);
 registerMessagesHandlers(io);
