@@ -134,6 +134,17 @@ async function duplicateAdminEquipmentSet(id, { idAdmin, req }) {
 async function addAdminEquipmentSetPiece(idSet, payload, { idAdmin, req }) {
   const { item_id, piece_key, ordem } = payload ?? {};
   if (!item_id || !piece_key) throw erro("item_id e piece_key são obrigatórios.");
+  // Bug reportado no painel ("não consigo colocar o ID do item que eu
+  // quero") era o seletor de item do frontend (ItemPicker.tsx), não isso
+  // — mas o service aceitava qualquer valor "truthy" (string, float,
+  // negativo) como item_id sem checar o tipo antes de bater no banco,
+  // então um payload malformado (ex.: um bug futuro no frontend, ou uma
+  // chamada direta à API) só ia falhar depois, com Item.findByPk
+  // devolvendo null pra um id inválido e um erro genérico "Item não
+  // encontrado" em vez de deixar claro que o item_id em si é inválido.
+  if (!Number.isInteger(item_id) || item_id <= 0) {
+    throw erro("item_id precisa ser um número inteiro positivo.");
+  }
 
   return sequelize.transaction(async (transaction) => {
     const set = await EquipmentSet.findByPk(idSet, { transaction });
