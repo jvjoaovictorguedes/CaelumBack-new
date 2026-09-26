@@ -14,9 +14,7 @@ const CharacterAbilities = require("../models/CharacterAbilities");
 const Power = require("../models/Power");
 const PvpStatus = require("../models/PvpStatus");
 const PvpMatches = require("../models/PvpMatches");
-const { adicionarExperiencia } = require("../services/experienceService");
 const { registrarProgresso } = require("../services/missionService");
-const { concederOuro } = require("../services/goldService");
 const { registrarProgressoContrato } = require("../services/adventureGuildObjectiveService");
 const { registrarProgressoMissaoGuilda } = require("../services/guildMissionService");
 const {
@@ -219,12 +217,18 @@ async function garantirStatus(idPersonagem, transaction) {
 // das recompensas se perdia — e um crash no meio do caminho podia
 // deixar o dinheiro creditado sem o PvpMatches correspondente.
 async function aplicarResultadoDuelo({ vencedor, perdedor, rodadas }) {
-  const recompensa = {
-    dinheiro: 5 + perdedor.nivel * 2,
-    experiencia: 10 + perdedor.nivel * 5,
-  };
+  // PvP Casual NUNCA concede XP nem ouro (pedido explícito: "pra não
+  // estragar o jogo no xp") — era uma fonte de progressão sem risco
+  // real (nível baixo escolhendo alvo fraco, sem passar pelo Modo
+  // Aventura/Caçadas/Bestiário) que inflava XP/economia à parte de
+  // qualquer conteúdo de verdade. Ranqueado/Torneio continuam com suas
+  // próprias recompensas (pontuação/temporada), nunca passam por aqui —
+  // ver aplicarResultadoDuelo só é chamado pelo duelo assíncrono
+  // (challenge) e pelo duelo ao vivo (pvpLiveSocket), nunca por
+  // rankedLiveSocket/tournamentSocket.
+  const recompensa = { dinheiro: 0, experiencia: 0 };
 
-  const resultadoXP = await sequelize.transaction(async (transaction) => {
+  const nivelVencedor = await sequelize.transaction(async (transaction) => {
     const vencedorTravado = await Character.findByPk(vencedor.id, {
       transaction,
       lock: transaction.LOCK.UPDATE,
@@ -232,24 +236,15 @@ async function aplicarResultadoDuelo({ vencedor, perdedor, rodadas }) {
     if (!vencedorTravado) {
       throw new Error("Personagem vencedor não encontrado.");
     }
-    concederOuro(vencedorTravado, recompensa.dinheiro);
-
-    const resultado = await adicionarExperiencia(vencedor.id, recompensa.experiencia, {
-      transaction,
-      personagem: vencedorTravado,
-    });
 
     await registrarProgresso(vencedorTravado, "VencerDuelos", 1, transaction);
-    await registrarProgresso(vencedorTravado, "GanharOuro", recompensa.dinheiro, transaction);
     // Guilda dos Aventureiros (§44) — só combate PvP oficialmente
     // concluído chega aqui (aplicarResultadoDuelo é o único lugar que
     // credita vitória, tanto no duelo assíncrono quanto no ao vivo —
     // ver comentário no topo deste arquivo), reaproveitando as mesmas
     // proteções anti-farm de sempre.
     await registrarProgressoContrato(vencedorTravado, "VencerDuelos", 1, {}, transaction);
-    await registrarProgressoContrato(vencedorTravado, "GanharOuro", recompensa.dinheiro, {}, transaction);
     await registrarProgressoMissaoGuilda(vencedorTravado, "VencerDuelos", 1, transaction);
-    await registrarProgressoMissaoGuilda(vencedorTravado, "GanharOuro", recompensa.dinheiro, transaction);
 
     const [statusVencedor, statusPerdedor] = await Promise.all([
       garantirStatus(vencedor.id, transaction),
@@ -294,10 +289,10 @@ async function aplicarResultadoDuelo({ vencedor, perdedor, rodadas }) {
       { transaction },
     );
 
-    return resultado;
+    return vencedorTravado.nivel;
   });
 
-  return { recompensa, nivelAposVitoria: resultadoXP.nivel };
+  return { recompensa, nivelAposVitoria: nivelVencedor };
 }
 
 // GET /api/pvp/opponents/:characterId
