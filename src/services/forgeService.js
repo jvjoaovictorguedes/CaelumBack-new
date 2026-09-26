@@ -87,14 +87,18 @@ async function coletar(characterId, slot) {
 
     if (entrada.tipo_acao === TIPOS_ACAO_FORJA.FABRICACAO) {
       const { id_item, qualidade_final } = entrada.payload_resultado;
+      // Reformulação V2 (§6.3): a raridade da cópia é a qualidade JÁ
+      // sorteada no início (payload_resultado.qualidade_final) — nunca
+      // lida do Item, que agora é só a identidade canônica do
+      // equipamento, igual em toda raridade.
       const instancia = await equipmentInstanceService.create(
-        { idPersonagem: characterId, idItem: id_item },
+        { idPersonagem: characterId, idItem: id_item, raridade: qualidade_final },
         transaction,
       );
       const item = await Item.findByPk(id_item, { transaction });
       resultado = {
         tipo: "fabricacao",
-        instancia: { id: instancia.id, id_item, nome: item.nome, raridade: item.raridade, refinamento: 0 },
+        instancia: { id: instancia.id, id_item, nome: item.nome, raridade: qualidade_final, refinamento: 0 },
       };
     } else if (entrada.tipo_acao === TIPOS_ACAO_FORJA.REFINAMENTO) {
       const { id_instancia } = entrada.referencia;
@@ -204,7 +208,7 @@ async function listarInstancias(characterId) {
     id: instancia.id,
     id_item: instancia.id_item,
     nome: instancia.item.nome,
-    raridade: instancia.item.raridade,
+    raridade: instancia.raridade,
     tipo_item: instancia.item.tipo_item,
     imagem_url: instancia.item.imagem_url,
     refinamento: instancia.refinamento,

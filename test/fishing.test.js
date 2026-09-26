@@ -154,7 +154,7 @@ async function criarVaraMaximaParaPersonagem(characterId) {
     estabilidade: 1000,
     nivel_pesca_minimo: 1,
   });
-  const instancia = await equipmentInstanceService.create({ idPersonagem: characterId, idItem: item.id }, null);
+  const instancia = await equipmentInstanceService.create({ idPersonagem: characterId, idItem: item.id, raridade: "Comum" }, null);
   return { item, instancia };
 }
 
@@ -386,7 +386,7 @@ testeComBanco("Falha (linha arrebentada) não concede Item nem XP (spec §35.2)"
   await FishingRodProperties.create({
     id_item: item.id, forca_linha: 0, controle: 0, recolhimento: 1000, precisao: 0, estabilidade: 0, nivel_pesca_minimo: 1,
   });
-  const instancia = await equipmentInstanceService.create({ idPersonagem: personagem.id, idItem: item.id }, null);
+  const instancia = await equipmentInstanceService.create({ idPersonagem: personagem.id, idItem: item.id, raridade: "Comum" }, null);
 
   const sessao = await fishingService.iniciarSessao(personagem.id, { zoneId: zona.id, rodInstanceId: instancia.id, baitItemId: null });
   await fishingService.lancar(personagem.id, sessao.id);

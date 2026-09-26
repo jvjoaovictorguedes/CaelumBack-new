@@ -111,46 +111,40 @@ function categoriaCompativelComItem(categoria, item) {
   return Boolean(item.armorProperties);
 }
 
-// Valida os 6 resultados (§5) e devolve { completo, alertas } —
-// alertas classificados em ERRO (bloqueia ativação)/AVISO/INFORMACAO
-// (§12). `resultadosPorQualidade` é um Map<qualidade, Item completo
-// (com weaponProperties/armorProperties/fishingRodProperties)>.
-function validarResultados(categoria, tier, resultadosPorQualidade) {
+// Reformulação V2 (Item Único por Equipamento, Raridade por Instância,
+// §6.1/§9.2) — o blueprint produz UM Item canônico só; qualidade não
+// escolhe mais outro Item, ela vira a raridade da instância no
+// momento da coleta. Valida esse Item único e devolve { completo,
+// alertas } — alertas classificados em ERRO (bloqueia ativação)/AVISO/
+// INFORMACAO (§12). `item` é o Item completo (com weaponProperties/
+// armorProperties/fishingRodProperties) resolvido de
+// blueprint.id_item_resultado, ou null se ainda não configurado.
+function validarResultados(categoria, tier, item) {
   const alertas = [];
-  for (const qualidade of ORDEM_QUALIDADE) {
-    const item = resultadosPorQualidade.get(qualidade);
-    if (!item) {
-      alertas.push({ nivel: "ERRO", qualidade, mensagem: `Sem resultado configurado pra qualidade ${qualidade}.` });
-      continue;
-    }
-    if (item.raridade !== qualidade) {
-      alertas.push({ nivel: "ERRO", qualidade, mensagem: `Item "${item.nome}" tem raridade ${item.raridade}, esperado ${qualidade}.` });
-    }
-    if (tier != null && item.tier_equipamento !== tier) {
-      alertas.push({ nivel: "ERRO", qualidade, mensagem: `Item "${item.nome}" tem Tier ${item.tier_equipamento ?? "—"}, esperado Tier ${tier} (o mesmo do blueprint).` });
-    }
-    if (!categoriaCompativelComItem(categoria, item)) {
-      const propriedadeEsperada = categoria === "Arma" ? "WeaponProperties" : categoria === "Ferramenta" ? "FishingRodProperties" : "ArmorProperties";
-      alertas.push({ nivel: "ERRO", qualidade, mensagem: `Item "${item.nome}" não tem ${propriedadeEsperada} válidas pra categoria ${categoria}.` });
-    }
-    // Arbitragem econômica (§12, AVISO) — GAP preenchido: custo estimado
-    // não é calculado aqui (dependeria de resolver os ingredientes em
-    // Gold, fora do escopo desta função síncrona); fica só o alerta de
-    // tempo/XP desproporcional, cobertos no service que monta o preview.
+  if (!item) {
+    alertas.push({ nivel: "ERRO", mensagem: "Sem Item resultado configurado pra esse blueprint." });
+    return { completo: false, alertas };
   }
-  const completo = resultadosPorQualidade.size === ORDEM_QUALIDADE.length && !alertas.some((a) => a.nivel === "ERRO");
+  if (tier != null && item.tier_equipamento !== tier) {
+    alertas.push({ nivel: "ERRO", mensagem: `Item "${item.nome}" tem Tier ${item.tier_equipamento ?? "—"}, esperado Tier ${tier} (o mesmo do blueprint).` });
+  }
+  if (!categoriaCompativelComItem(categoria, item)) {
+    const propriedadeEsperada = categoria === "Arma" ? "WeaponProperties" : categoria === "Ferramenta" ? "FishingRodProperties" : "ArmorProperties";
+    alertas.push({ nivel: "ERRO", mensagem: `Item "${item.nome}" não tem ${propriedadeEsperada} válidas pra categoria ${categoria}.` });
+  }
+  const completo = !alertas.some((a) => a.nivel === "ERRO");
   return { completo, alertas };
 }
 
 // Decide se um blueprint pode ser ATIVADO (§4.2/§6/§21.6) — precisa de
-// ingredientes resolvíveis nas 6 qualidades E 6/6 resultados válidos.
+// ingredientes resolvíveis nas 6 qualidades E do Item resultado válido.
 function podeAtivar({ matrizIngredientes, resultadosValidacao }) {
   const erros = [];
   if (!todosIngredientesResolviveis(matrizIngredientes)) {
     erros.push("Há ingrediente sem Item resolvido em alguma qualidade (ver matriz de ingredientes).");
   }
   if (!resultadosValidacao.completo) {
-    erros.push("Resultados incompletos ou incompatíveis (precisa de 6/6 válidos).");
+    erros.push("Item resultado ausente ou incompatível com a categoria/Tier do blueprint.");
   }
   return { podeAtivar: erros.length === 0, motivos: erros };
 }

@@ -16,6 +16,7 @@ const { concederOuro } = require("./goldService");
 const { adicionarExperiencia } = require("./experienceService");
 const { addStack } = require("./inventoryService");
 const { ehInstanciavel, create: criarInstanciaEquipamento } = require("./equipmentInstanceService");
+const { validarRaridade } = require("./equipmentRarityService");
 const { registrarAcao } = require("./adminAuditService");
 
 function erro(mensagem, statusCode = 400) {
@@ -78,6 +79,14 @@ async function grantToCharacter(idPersonagem, payload, { idAdmin, req }) {
     if (!linha.id_item || !Number.isInteger(linha.quantidade) || linha.quantidade <= 0) {
       throw erro("Cada item precisa de id_item e quantidade (inteiro positivo).");
     }
+    // Reformulação V2 (§11) — "Admin give/grant exige raridade para
+    // equipamento": se o admin passar `raridade` explicitamente, ela é
+    // validada e usada (é o caminho que sobrevive ao colapso de Item
+    // único, quando a raridade deixa de estar implícita no id_item
+    // escolhido). Sem ela, cai pro item.raridade (linha abaixo, dentro
+    // da transação) — comportamento de transição enquanto o catálogo
+    // ainda não foi colapsado.
+    if (linha.raridade !== undefined) validarRaridade(linha.raridade);
     itensValidados.push(linha);
   }
 
@@ -96,10 +105,11 @@ async function grantToCharacter(idPersonagem, payload, { idAdmin, req }) {
       const item = await Item.findByPk(linha.id_item, { transaction });
       if (!item) throw erro(`Item #${linha.id_item} não encontrado.`);
       if (ehInstanciavel(item.tipo_item)) {
+        const raridade = linha.raridade ?? item.raridade;
         for (let i = 0; i < linha.quantidade; i++) {
-          await criarInstanciaEquipamento({ idPersonagem, idItem: item.id, refinamento: linha.refinamento ?? 0 }, transaction);
+          await criarInstanciaEquipamento({ idPersonagem, idItem: item.id, raridade, refinamento: linha.refinamento ?? 0 }, transaction);
         }
-        concedido.equipamentos.push({ id_item: item.id, nome: item.nome, quantidade: linha.quantidade });
+        concedido.equipamentos.push({ id_item: item.id, nome: item.nome, raridade, quantidade: linha.quantidade });
       } else {
         await addStack(idPersonagem, item.id, linha.quantidade, transaction);
         concedido.itens.push({ id_item: item.id, nome: item.nome, quantidade: linha.quantidade });

@@ -7,7 +7,6 @@ const { Op } = require("sequelize");
 const { sequelize } = require("../config/database");
 const ForgeBlueprint = require("../models/ForgeBlueprint");
 const ForgeBlueprintIngredient = require("../models/ForgeBlueprintIngredient");
-const ForgeBlueprintResult = require("../models/ForgeBlueprintResult");
 const ForgeBarItem = require("../models/ForgeBarItem");
 const ForgeScroll = require("../models/ForgeScroll");
 const ForgeScrollIngredient = require("../models/ForgeScrollIngredient");
@@ -31,23 +30,25 @@ function erro(mensagem, statusCode = 400) {
   return e;
 }
 
+// Reformulação V2 (Item Único por Equipamento, Raridade por Instância,
+// §6.1) — o blueprint aponta pra UM Item canônico (id_item_resultado),
+// não mais pra 6 linhas de ForgeBlueprintResult. `resultados`
+// (ForgeBlueprintResult) continua incluído só até o Contract, pra dar
+// suporte à migração/telemetria histórica — nenhum fluxo de admin
+// ESCREVE nele a partir daqui.
 const INCLUDE_RESULTADO_COMPLETO = [
   {
-    model: ForgeBlueprintResult,
-    as: "resultados",
+    model: Item,
+    as: "itemResultado",
     include: [
-      {
-        model: Item,
-        as: "item",
-        include: [
-          { model: WeaponProperties, as: "weaponProperties" },
-          { model: ArmorProperties, as: "armorProperties" },
-          { model: FishingRodProperties, as: "fishingRodProperties" },
-        ],
-      },
+      { model: WeaponProperties, as: "weaponProperties" },
+      { model: ArmorProperties, as: "armorProperties" },
+      { model: FishingRodProperties, as: "fishingRodProperties" },
     ],
   },
 ];
+
+const { aplicarRaridadeArma, aplicarRaridadeArmadura, aplicarRaridadeVara } = require("./equipmentRarityService");
 
 // -----------------------------------------------------------------
 // BLUEPRINTS (§4/§5/§6/§15)
@@ -69,14 +70,9 @@ async function montarRelatorioValidacao(blueprint, transaction) {
     blueprint.ingredientes.map((i) => ({ tipo_insumo: i.tipo_insumo, id_recurso: i.id_recurso, quantidade_base: i.quantidade_base })),
     transaction,
   );
-  const resultadosPorQualidade = new Map(blueprint.resultados.map((r) => [r.qualidade, r.item]));
-  const resultadosValidacao = validation.validarResultados(blueprint.categoria_equipamento, blueprint.tier_equipamento, resultadosPorQualidade);
+  const resultadosValidacao = validation.validarResultados(blueprint.categoria_equipamento, blueprint.tier_equipamento, blueprint.itemResultado);
   const { podeAtivar, motivos } = validation.podeAtivar({ matrizIngredientes, resultadosValidacao });
   return { matrizIngredientes, resultadosValidacao, podeAtivar, motivos };
-}
-
-function contagemResultados(blueprint) {
-  return blueprint.resultados?.length ?? 0;
 }
 
 async function listarBlueprintsAdmin({
@@ -108,7 +104,6 @@ async function listarBlueprintsAdmin({
 
   let linhas = await Promise.all(
     blueprints.map(async (bp) => {
-      const resultadosCompletos = contagemResultados(bp) === forgeConfig.ORDEM_QUALIDADE.length;
       let ingredientesOk = true;
       if (bp.ingredientes.length > 0) {
         const matriz = await validation.resolverMatrizIngredientes(
@@ -126,8 +121,8 @@ async function listarBlueprintsAdmin({
         nivel_forja_minimo: bp.nivel_forja_minimo,
         multiplicador_tempo: bp.multiplicador_tempo,
         ativo: bp.ativo,
-        resultados_count: contagemResultados(bp),
-        resultados_completos: resultadosCompletos,
+        item_resultado: bp.itemResultado ? { id: bp.itemResultado.id, nome: bp.itemResultado.nome, imagem_url: bp.itemResultado.imagem_url } : null,
+        resultados_completos: Boolean(bp.itemResultado),
         ingredientes_ok: ingredientesOk,
       };
     }),
@@ -152,14 +147,24 @@ async function criarBlueprintAdmin(payload, { idAdmin, req }) {
   validation.validarCamposBasicos(payload);
   const ingredientes = payload.ingredientes ?? [];
   if (ingredientes.length > 0) validation.validarIngredientesPayload(ingredientes);
-  const resultados = payload.resultados ?? {};
-  for (const qualidade of Object.keys(resultados)) {
-    if (!forgeConfig.ORDEM_QUALIDADE.includes(qualidade)) throw erro(`Qualidade de resultado inválida: ${qualidade}.`);
+  // Reformulação V2 (§6.1/§9.2) — o admin escolhe UM Item resultado, não
+  // mais seis. Aceita id_item_resultado desde a criação (opcional aqui:
+  // o blueprint pode nascer sem ele e o admin completar depois, mas
+  // nunca ativa sem — ver validarResultados/podeAtivar).
+  if (payload.id_item_resultado !== undefined && payload.id_item_resultado !== null) {
+    if (!Number.isInteger(payload.id_item_resultado) || payload.id_item_resultado <= 0) {
+      throw erro("id_item_resultado precisa ser um inteiro positivo.");
+    }
   }
 
   return sequelize.transaction(async (transaction) => {
     const existente = await ForgeBlueprint.findOne({ where: { nome: payload.nome }, transaction });
     if (existente) throw erro(`Já existe um blueprint com o nome "${payload.nome}".`);
+
+    if (payload.id_item_resultado) {
+      const item = await Item.findByPk(payload.id_item_resultado, { transaction });
+      if (!item) throw erro(`Item #${payload.id_item_resultado} não encontrado.`, 404);
+    }
 
     // §4.2/§21.5 — todo blueprint novo nasce INATIVO, sempre, mesmo que
     // o payload tente mandar ativo:true.
@@ -170,6 +175,7 @@ async function criarBlueprintAdmin(payload, { idAdmin, req }) {
         tier_equipamento: payload.tier_equipamento,
         multiplicador_tempo: payload.multiplicador_tempo,
         nivel_forja_minimo: payload.nivel_forja_minimo,
+        id_item_resultado: payload.id_item_resultado ?? null,
         ativo: false,
       },
       { transaction },
@@ -178,13 +184,6 @@ async function criarBlueprintAdmin(payload, { idAdmin, req }) {
     if (ingredientes.length > 0) {
       await ForgeBlueprintIngredient.bulkCreate(
         ingredientes.map((i) => ({ id_blueprint: blueprint.id, tipo_insumo: i.tipo_insumo, id_recurso: i.id_recurso, quantidade_base: i.quantidade_base })),
-        { transaction },
-      );
-    }
-    const entradasResultado = Object.entries(resultados);
-    if (entradasResultado.length > 0) {
-      await ForgeBlueprintResult.bulkCreate(
-        entradasResultado.map(([qualidade, idItem]) => ({ id_blueprint: blueprint.id, qualidade, id_item: idItem })),
         { transaction },
       );
     }
@@ -208,9 +207,9 @@ async function atualizarBlueprintAdmin(id, payload, { idAdmin, req }) {
     validation.validarCamposBasicos(payload, { parcial: true });
   }
   if (payload.ingredientes !== undefined) validation.validarIngredientesPayload(payload.ingredientes);
-  if (payload.resultados !== undefined) {
-    for (const qualidade of Object.keys(payload.resultados)) {
-      if (!forgeConfig.ORDEM_QUALIDADE.includes(qualidade)) throw erro(`Qualidade de resultado inválida: ${qualidade}.`);
+  if (payload.id_item_resultado !== undefined && payload.id_item_resultado !== null) {
+    if (!Number.isInteger(payload.id_item_resultado) || payload.id_item_resultado <= 0) {
+      throw erro("id_item_resultado precisa ser um inteiro positivo.");
     }
   }
 
@@ -226,9 +225,15 @@ async function atualizarBlueprintAdmin(id, payload, { idAdmin, req }) {
       if (conflito) throw erro(`Já existe um blueprint com o nome "${payload.nome}".`);
     }
 
+    if (payload.id_item_resultado) {
+      const item = await Item.findByPk(payload.id_item_resultado, { transaction });
+      if (!item) throw erro(`Item #${payload.id_item_resultado} não encontrado.`, 404);
+    }
+
     const camposBasicos = ["nome", "categoria_equipamento", "tier_equipamento", "multiplicador_tempo", "nivel_forja_minimo"];
     const patch = {};
     for (const campo of camposBasicos) if (payload[campo] !== undefined) patch[campo] = payload[campo];
+    if (payload.id_item_resultado !== undefined) patch.id_item_resultado = payload.id_item_resultado;
     // `ativo` NUNCA muda por aqui — ativação/desativação é uma ação
     // explícita separada (setAtivoBlueprintAdmin), que revalida tudo
     // antes de ligar (§6/§21.6).
@@ -241,12 +246,6 @@ async function atualizarBlueprintAdmin(id, payload, { idAdmin, req }) {
           payload.ingredientes.map((i) => ({ id_blueprint: id, tipo_insumo: i.tipo_insumo, id_recurso: i.id_recurso, quantidade_base: i.quantidade_base })),
           { transaction },
         );
-      }
-    }
-
-    if (payload.resultados !== undefined) {
-      for (const [qualidade, idItem] of Object.entries(payload.resultados)) {
-        await ForgeBlueprintResult.upsert({ id_blueprint: id, qualidade, id_item: idItem }, { transaction });
       }
     }
 
@@ -285,6 +284,7 @@ async function duplicarBlueprintAdmin(id, { idAdmin, req }) {
         tier_equipamento: original.tier_equipamento,
         multiplicador_tempo: original.multiplicador_tempo,
         nivel_forja_minimo: original.nivel_forja_minimo,
+        id_item_resultado: original.id_item_resultado,
         ativo: false,
       },
       { transaction },
@@ -293,12 +293,6 @@ async function duplicarBlueprintAdmin(id, { idAdmin, req }) {
     if (original.ingredientes.length > 0) {
       await ForgeBlueprintIngredient.bulkCreate(
         original.ingredientes.map((i) => ({ id_blueprint: copia.id, tipo_insumo: i.tipo_insumo, id_recurso: i.id_recurso, quantidade_base: i.quantidade_base })),
-        { transaction },
-      );
-    }
-    if (original.resultados.length > 0) {
-      await ForgeBlueprintResult.bulkCreate(
-        original.resultados.map((r) => ({ id_blueprint: copia.id, qualidade: r.qualidade, id_item: r.id_item })),
         { transaction },
       );
     }
@@ -466,7 +460,14 @@ async function previewBlueprintAdmin(id, { nivelForja = 1, qualidadeBase = "Comu
 
   const tempoMs = forgeConfig.TEMPO_BASE_FABRICACAO_MS_POR_QUALIDADE[qualidadeBase] * blueprint.multiplicador_tempo * (1 - forgeConfig.reducaoTempoPorNivelForja(nivel));
 
-  const resultadoQualidadeBase = blueprint.resultados.find((r) => r.qualidade === qualidadeBase)?.item ?? null;
+  // Reformulação V2 (§6.1) — sempre o MESMO Item canônico; a qualidade
+  // simulada só escala as propriedades-base dele pra mostrar o que essa
+  // fabricação renderia naquela raridade específica.
+  const itemCanonico = blueprint.itemResultado;
+  let propriedadesNaQualidade = null;
+  if (itemCanonico?.weaponProperties) propriedadesNaQualidade = aplicarRaridadeArma(itemCanonico.weaponProperties, qualidadeBase);
+  else if (itemCanonico?.armorProperties) propriedadesNaQualidade = aplicarRaridadeArmadura(itemCanonico.armorProperties, qualidadeBase);
+  else if (itemCanonico?.fishingRodProperties) propriedadesNaQualidade = aplicarRaridadeVara(itemCanonico.fishingRodProperties, qualidadeBase);
 
   return {
     blueprint: { id: blueprint.id, nome: blueprint.nome, categoria_equipamento: blueprint.categoria_equipamento, tier_equipamento: blueprint.tier_equipamento },
@@ -475,8 +476,8 @@ async function previewBlueprintAdmin(id, { nivelForja = 1, qualidadeBase = "Comu
     ingredientes: ingredientesResolvidos,
     chances_percentual_por_qualidade_final: chancesPorQualidadeFinal,
     tempo_segundos: Math.round(tempoMs / 1000),
-    item_resultado_qualidade_base: resultadoQualidadeBase
-      ? { id: resultadoQualidadeBase.id, nome: resultadoQualidadeBase.nome, imagem_url: resultadoQualidadeBase.imagem_url, raridade: resultadoQualidadeBase.raridade }
+    item_resultado_qualidade_base: itemCanonico
+      ? { id: itemCanonico.id, nome: itemCanonico.nome, imagem_url: itemCanonico.imagem_url, raridade: qualidadeBase, propriedades: propriedadesNaQualidade }
       : null,
   };
 }

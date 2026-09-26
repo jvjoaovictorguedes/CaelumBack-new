@@ -178,7 +178,7 @@ testeComBanco("Pesca normal: FISHING_CONTROL_PCT da Taverna aumenta o `controle`
       estabilidade: 500,
       nivel_pesca_minimo: 1,
     });
-    const instancia = await equipmentInstanceService.create({ idPersonagem: personagem.id, idItem: varaItem.id }, null);
+    const instancia = await equipmentInstanceService.create({ idPersonagem: personagem.id, idItem: varaItem.id, raridade: "Comum" }, null);
     await CharacterNavigationState.upsert({ id_personagem: personagem.id, id_zone_atual: zona.id, id_port_atual: null });
     await CharacterFishingProgress.upsert({ id_personagem: personagem.id, experiencia: 0 });
 

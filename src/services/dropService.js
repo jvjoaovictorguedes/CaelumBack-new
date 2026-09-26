@@ -67,9 +67,12 @@ async function sortearItemDrop() {
 async function concederItem(idPersonagem, idItem, quantidade, transaction) {
   const item = await Item.findByPk(idItem, { transaction });
   if (item && ehInstanciavel(item.tipo_item)) {
+    // Reformulação V2 (§11): Drop determina a raridade antes de criar a
+    // instância — item.raridade continua a fonte correta durante a
+    // transição (mesmo raciocínio de shopController.purchaseItem).
     const instancias = [];
     for (let i = 0; i < quantidade; i++) {
-      instancias.push(await criarInstancia({ idPersonagem, idItem }, transaction));
+      instancias.push(await criarInstancia({ idPersonagem, idItem, raridade: item.raridade }, transaction));
     }
     return instancias;
   }
