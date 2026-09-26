@@ -15,6 +15,7 @@ const Item = require("../models/Item");
 const WeaponProperties = require("../models/WeaponProperties");
 const ArmorProperties = require("../models/ArmorProperties");
 const FishingRodProperties = require("../models/FishingRodProperties");
+const ItemRarityAttributeOverride = require("../models/ItemRarityAttributeOverride");
 require("../models/associations");
 
 const forgeConfig = require("../config/forgeConfig");
@@ -44,11 +45,33 @@ const INCLUDE_RESULTADO_COMPLETO = [
       { model: WeaponProperties, as: "weaponProperties" },
       { model: ArmorProperties, as: "armorProperties" },
       { model: FishingRodProperties, as: "fishingRodProperties" },
+      { model: ItemRarityAttributeOverride, as: "raridadeOverrides" },
     ],
   },
 ];
 
-const { aplicarRaridadeArma, aplicarRaridadeArmadura, aplicarRaridadeVara } = require("./equipmentRarityService");
+const {
+  aplicarRaridadeArma,
+  aplicarRaridadeArmadura,
+  aplicarRaridadeVara,
+  CHAVES_OVERRIDE_ARMA,
+  CHAVES_OVERRIDE_ARMADURA,
+  CHAVES_OVERRIDE_VARA,
+} = require("./equipmentRarityService");
+
+// categoria_equipamento do blueprint -> quais chaves de atributo um
+// override de raridade pode mexer nesse item (mesma separação que
+// equipmentRarityService usa pra aplicar Arma/Armadura/Vara). Acessorio1/
+// Acessorio2/Capacete/Escudo usam ArmorProperties que ambos os slots.
+const CHAVES_OVERRIDE_POR_CATEGORIA = {
+  Arma: CHAVES_OVERRIDE_ARMA,
+  Armadura: CHAVES_OVERRIDE_ARMADURA,
+  Capacete: CHAVES_OVERRIDE_ARMADURA,
+  Escudo: CHAVES_OVERRIDE_ARMADURA,
+  Acessorio1: CHAVES_OVERRIDE_ARMADURA,
+  Acessorio2: CHAVES_OVERRIDE_ARMADURA,
+  Ferramenta: CHAVES_OVERRIDE_VARA,
+};
 
 // -----------------------------------------------------------------
 // BLUEPRINTS (§4/§5/§6/§15)
@@ -264,6 +287,88 @@ async function atualizarBlueprintAdmin(id, payload, { idAdmin, req }) {
   });
 }
 
+// Override admin de atributos por Raridade (ver equipmentRarityService.js
+// e migration 20261213010000) — o admin pensa "editar o blueprint X",
+// mas a chave real é o Item que ele produz (id_item_resultado):
+// equipmentRarityService só enxerga Item+Raridade em runtime, nunca sabe
+// qual blueprint originou a cópia. Ver comentário na migration pro
+// racional completo.
+async function salvarOverrideRaridadeAdmin(idBlueprint, qualidade, atributos, { idAdmin, req }) {
+  if (!forgeConfig.ORDEM_QUALIDADE.includes(qualidade)) {
+    throw erro(`Qualidade inválida: ${qualidade}. Use: ${forgeConfig.ORDEM_QUALIDADE.join(", ")}.`);
+  }
+  if (!atributos || typeof atributos !== "object" || Array.isArray(atributos)) {
+    throw erro("atributos precisa ser um objeto { chave: valor }.");
+  }
+
+  return sequelize.transaction(async (transaction) => {
+    const blueprint = await ForgeBlueprint.findByPk(idBlueprint, { transaction });
+    if (!blueprint) throw erro("Blueprint não encontrado.", 404);
+    if (!blueprint.id_item_resultado) {
+      throw erro("Este blueprint ainda não tem um Item resultado vinculado — defina um antes de configurar overrides de raridade.");
+    }
+
+    const chavesPermitidas = CHAVES_OVERRIDE_POR_CATEGORIA[blueprint.categoria_equipamento];
+    if (!chavesPermitidas) throw erro(`Categoria "${blueprint.categoria_equipamento}" não tem atributos de raridade editáveis.`);
+
+    const chavesInvalidas = Object.keys(atributos).filter((chave) => !chavesPermitidas.includes(chave));
+    if (chavesInvalidas.length > 0) {
+      throw erro(`Atributo(s) inválido(s) pra ${blueprint.categoria_equipamento}: ${chavesInvalidas.join(", ")}. Use: ${chavesPermitidas.join(", ")}.`);
+    }
+
+    const atributosLimpos = {};
+    for (const [chave, valor] of Object.entries(atributos)) {
+      if (valor === null || valor === undefined || valor === "") continue; // omitido = volta a usar o multiplicador global
+      const numero = Number(valor);
+      if (!Number.isFinite(numero)) throw erro(`Valor inválido pra "${chave}": ${valor}.`);
+      atributosLimpos[chave] = numero;
+    }
+
+    const [override] = await ItemRarityAttributeOverride.upsert(
+      { id_item: blueprint.id_item_resultado, qualidade, atributos: atributosLimpos },
+      { transaction, returning: true },
+    );
+
+    await registrarAcao({
+      idAdmin,
+      acao: "SET_RARITY_OVERRIDE",
+      entidade: "ItemRarityAttributeOverride",
+      idEntidade: blueprint.id_item_resultado,
+      dadosDepois: { id_item: blueprint.id_item_resultado, qualidade, atributos: atributosLimpos },
+      req,
+      transaction,
+    });
+
+    return override;
+  });
+}
+
+async function removerOverrideRaridadeAdmin(idBlueprint, qualidade, { idAdmin, req }) {
+  return sequelize.transaction(async (transaction) => {
+    const blueprint = await ForgeBlueprint.findByPk(idBlueprint, { transaction });
+    if (!blueprint) throw erro("Blueprint não encontrado.", 404);
+    if (!blueprint.id_item_resultado) throw erro("Este blueprint não tem Item resultado vinculado.", 404);
+
+    const removido = await ItemRarityAttributeOverride.destroy({
+      where: { id_item: blueprint.id_item_resultado, qualidade },
+      transaction,
+    });
+
+    if (removido > 0) {
+      await registrarAcao({
+        idAdmin,
+        acao: "REMOVE_RARITY_OVERRIDE",
+        entidade: "ItemRarityAttributeOverride",
+        idEntidade: blueprint.id_item_resultado,
+        dadosAntes: { id_item: blueprint.id_item_resultado, qualidade },
+        req,
+        transaction,
+      });
+    }
+    return { removido: removido > 0 };
+  });
+}
+
 async function duplicarBlueprintAdmin(id, { idAdmin, req }) {
   return sequelize.transaction(async (transaction) => {
     const original = await carregarBlueprintCompleto(id, transaction);
@@ -465,9 +570,9 @@ async function previewBlueprintAdmin(id, { nivelForja = 1, qualidadeBase = "Comu
   // fabricação renderia naquela raridade específica.
   const itemCanonico = blueprint.itemResultado;
   let propriedadesNaQualidade = null;
-  if (itemCanonico?.weaponProperties) propriedadesNaQualidade = aplicarRaridadeArma(itemCanonico.weaponProperties, qualidadeBase);
-  else if (itemCanonico?.armorProperties) propriedadesNaQualidade = aplicarRaridadeArmadura(itemCanonico.armorProperties, qualidadeBase);
-  else if (itemCanonico?.fishingRodProperties) propriedadesNaQualidade = aplicarRaridadeVara(itemCanonico.fishingRodProperties, qualidadeBase);
+  if (itemCanonico?.weaponProperties) propriedadesNaQualidade = aplicarRaridadeArma(itemCanonico.weaponProperties, qualidadeBase, itemCanonico.raridadeOverrides);
+  else if (itemCanonico?.armorProperties) propriedadesNaQualidade = aplicarRaridadeArmadura(itemCanonico.armorProperties, qualidadeBase, itemCanonico.raridadeOverrides);
+  else if (itemCanonico?.fishingRodProperties) propriedadesNaQualidade = aplicarRaridadeVara(itemCanonico.fishingRodProperties, qualidadeBase, itemCanonico.raridadeOverrides);
 
   return {
     blueprint: { id: blueprint.id, nome: blueprint.nome, categoria_equipamento: blueprint.categoria_equipamento, tier_equipamento: blueprint.tier_equipamento },
@@ -845,6 +950,8 @@ module.exports = {
   obterBlueprintAdmin,
   criarBlueprintAdmin,
   atualizarBlueprintAdmin,
+  salvarOverrideRaridadeAdmin,
+  removerOverrideRaridadeAdmin,
   duplicarBlueprintAdmin,
   excluirBlueprintAdmin,
   excluirTodosBlueprintsAdmin,

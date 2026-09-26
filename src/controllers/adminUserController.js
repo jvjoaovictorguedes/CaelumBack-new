@@ -34,7 +34,16 @@ exports.excluirEmLote = async (req, res) => {
     const resultado = await adminUserService.bulkDeleteUsers(ids, { idAdmin: req.user.id, req });
     res.status(200).json({ status: "success", data: resultado });
   } catch (error) {
+    // bulkDeleteUsers já isola erro por conta (uma FK inesperada numa
+    // conta não derruba as outras) — chegar aqui é algo fora desse
+    // isolamento (ex: erro antes do loop, banco fora do ar). Inclui o
+    // detalhe real na resposta (rota só de admin com "users.delete") em
+    // vez de só "Erro interno do servidor", que não dava pista nenhuma
+    // de qual era o problema de verdade.
     console.error("Erro ao excluir usuários em lote (admin):", error);
-    res.status(500).json({ message: "Erro interno do servidor ao excluir usuários." });
+    res.status(500).json({
+      message: "Erro interno do servidor ao excluir usuários.",
+      detalhe: error?.message ?? String(error),
+    });
   }
 };

@@ -12,6 +12,7 @@ const Character = require("../models/Character");
 const Guild = require("../models/Guild");
 const GuildMember = require("../models/GuildMember");
 const AdminRole = require("../models/AdminRole");
+const MarketListing = require("../models/MarketListing");
 const { registrarAcao } = require("./adminAuditService");
 
 const PAGINA_TAMANHO_PADRAO = 50;
@@ -134,6 +135,17 @@ async function excluirUmUsuario(idUser, { idAdmin, req }) {
 
     for (const personagem of personagens) {
       await GuildMember.destroy({ where: { id_personagem: personagem.id }, transaction });
+      // market_listings.id_instancia é RESTRICT de propósito (protege
+      // contra apagar um item ainda anunciado sem cancelar antes, em
+      // qualquer fluxo normal do jogo) — mas aqui a conta inteira está
+      // sendo excluída, então qualquer anúncio ainda ativo do
+      // personagem precisa sumir junto, não bloquear a exclusão da
+      // instância que ele referencia. id_personagem_vendedor já é
+      // CASCADE (a linha some de qualquer forma quando o personagem é
+      // destruído), mas apagar aqui, antes, evita depender da ordem
+      // exata em que o Postgres resolve os dois caminhos de cascata no
+      // mesmo DELETE.
+      await MarketListing.destroy({ where: { id_personagem_vendedor: personagem.id }, transaction });
       await personagem.destroy({ transaction });
     }
 
@@ -158,6 +170,20 @@ async function excluirUmUsuario(idUser, { idAdmin, req }) {
   });
 }
 
+// Traduz um erro inesperado (ex: SequelizeForeignKeyConstraintError de
+// alguma tabela nova que ainda não ganhou ON DELETE CASCADE/SET NULL
+// pra Characters) num motivo legível, incluindo tabela/constraint reais
+// do Postgres — sem isso, o erro virava só "Erro interno do servidor",
+// sem pista nenhuma de qual tabela travou.
+function formatarErroInesperado(error) {
+  const tabela = error?.table ?? error?.parent?.table ?? error?.original?.table;
+  const constraint = error?.parent?.constraint ?? error?.original?.constraint;
+  if (tabela || constraint) {
+    return `Falha inesperada — restrição de chave estrangeira na tabela "${tabela ?? "?"}" (constraint "${constraint ?? "?"}") ainda bloqueia a exclusão. Avise o time técnico.`;
+  }
+  return `Falha inesperada ao excluir: ${error?.message ?? "erro desconhecido"}.`;
+}
+
 async function bulkDeleteUsers(userIds, { idAdmin, req }) {
   const idsUnicos = [...new Set((userIds ?? []).map(Number).filter(Number.isInteger))];
   const resultados = [];
@@ -165,7 +191,20 @@ async function bulkDeleteUsers(userIds, { idAdmin, req }) {
     // Sequencial (não Promise.all) — cada exclusão já abre sua própria
     // transaction/lock; rodar em paralelo só aumentaria contenção sem
     // nenhum ganho real numa operação administrativa pontual.
-    resultados.push(await excluirUmUsuario(idUser, { idAdmin, req }));
+    //
+    // Try/catch aqui (e não só dentro de excluirUmUsuario) é essencial:
+    // qualquer exceção não prevista (ex: uma FK nova que ainda não
+    // ganhou CASCADE) antes derrubava o LOTE INTEIRO com 500 genérico —
+    // inclusive contas já excluídas com sucesso antes dela na mesma
+    // chamada sumiam da resposta, embora já commitadas no banco. Agora
+    // vira um resultado "não excluído" só daquela conta, com o motivo
+    // real, e o lote continua pras próximas.
+    try {
+      resultados.push(await excluirUmUsuario(idUser, { idAdmin, req }));
+    } catch (error) {
+      console.error(`Falha inesperada ao excluir usuário ${idUser}:`, error);
+      resultados.push({ id: idUser, excluido: false, motivo: formatarErroInesperado(error) });
+    }
   }
   return {
     total: idsUnicos.length,

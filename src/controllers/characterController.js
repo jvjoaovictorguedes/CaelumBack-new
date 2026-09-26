@@ -4,6 +4,7 @@ const { sequelize } = require("../config/database");
 const Character = require("../models/Character");
 const Guild = require("../models/Guild");
 const GuildMember = require("../models/GuildMember");
+const MarketListing = require("../models/MarketListing");
 const User = require("../models/User");
 const Race = require("../models/Race");
 const Class = require("../models/Class");
@@ -1407,6 +1408,13 @@ exports.deleteCharacter = async (req, res) => {
       // de excluir, em vez de deixar qualquer membro de guilda nem
       // conseguir excluir o próprio personagem.
       await GuildMember.destroy({ where: { id_personagem: character.id }, transaction });
+
+      // Mesmo racional de adminUserService.excluirUmUsuario:
+      // market_listings.id_instancia é RESTRICT de propósito (protege
+      // contra apagar sem querer um item ainda anunciado), mas aqui o
+      // personagem inteiro está sendo excluído — qualquer anúncio dele
+      // precisa sumir junto, não bloquear a exclusão da instância.
+      await MarketListing.destroy({ where: { id_personagem_vendedor: character.id }, transaction });
 
       await character.destroy({ transaction });
     });
