@@ -145,6 +145,29 @@ function agendarTurnoIA(io, duelId, turnoDe) {
   }, IA_DELAY_TURNO_MS);
 }
 
+// Retry da transação de persistência (ver finalizarDueloRanked abaixo).
+// O duelo já saiu de pvpLiveSocket.duelos ANTES desta função rodar —
+// de propósito: uma vez que o combate acabou, nada mais pode agir sobre
+// aquele duelId (sem isso, uma ação de turno atrasada ou um segundo
+// gatilho de finalização — abandono batendo quase junto com o combate —
+// podia tentar operar num duelo "morto"). Isso significa que, se a
+// transação falhar, NÃO há como reconstruir o resultado a partir do
+// banco — só o processo que já está rodando esta função ainda tem o
+// resultado real (`vencedorChave`) em memória. Por isso o retry
+// acontece AQUI, dentro da mesma chamada, com o resultado calculado já
+// em mãos — nunca reprocessando a partir de fora depois que esta função
+// retornar. `encerrarPartidasOrfas`/`iniciarVarredorDePartidasOrfas`
+// continuam existindo como a rede de segurança final (para falhas que
+// sobrevivem a todas as tentativas, ou pra um crash do processo no meio
+// do caminho) — não precisam de uma segunda infraestrutura, só de mais
+// algumas chances antes de desistir e cair nela.
+const FINALIZACAO_MAX_TENTATIVAS = 3;
+const FINALIZACAO_RETRY_BASE_MS = 200;
+
+function aguardarMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // §12 — finalização ATÔMICA e IDEMPOTENTE.
 //
 // Tudo numa transação só: rating do desafiante, V/D sazonal, linha de
@@ -155,6 +178,10 @@ function agendarTurnoIA(io, duelId, turnoDe) {
 //
 // `motivo`: "combate" | "abandono" | "falha-servidor". Falha comprovada
 // do servidor não altera rating E devolve a tentativa diária (§11).
+// Isso é DIFERENTE de uma falha ao PERSISTIR o resultado (a transação
+// abaixo lançando erro) — a primeira é sobre COMO o combate terminou, a
+// segunda é sobre o banco não conseguir gravar o que já foi decidido;
+// nunca confundir as duas.
 async function finalizarDueloRanked(io, duelId, vencedorChave, motivo = "combate") {
   const duelo = pvpLiveSocket.duelos.get(duelId);
   if (!duelo) return;
@@ -176,53 +203,100 @@ async function finalizarDueloRanked(io, duelId, vencedorChave, motivo = "combate
   let motivoFinal = motivo === "abandono" ? "Abandono" : "Vitoria";
   if (motivo === "falha-servidor") motivoFinal = "FalhaServidor";
 
-  try {
-    await sequelize.transaction(async (transaction) => {
-      const [linhas] = await sequelize.query(
-        `SELECT id, status FROM ranked_matches WHERE id = :id FOR UPDATE;`,
-        { replacements: { id: duelo.rankedMatchId }, transaction },
-      );
-      const partida = linhas[0];
-      if (!partida) throw new Error(`RankedMatch ${duelo.rankedMatchId} não encontrada.`);
-      if (partida.status === "Finalizada") {
-        log("finalizacao:ignorada-idempotente", { duelId, rankedMatchId: duelo.rankedMatchId });
-        return;
-      }
+  log("partida:finalizando", {
+    duelId,
+    rankedMatchId: duelo.rankedMatchId,
+    desafiante: idDesafiante,
+    defensor: duelo.defensorId,
+    motivo: motivoFinal,
+    humanoVenceu,
+  });
 
-      if (motivoFinal !== "FalhaServidor") {
-        resultado = await rankedRatingService.aplicarResultadoDesafiante({
-          idDesafiante,
-          seasonId: duelo.seasonId,
-          ratingOponente: duelo.ratingAntes[duelo.ia],
-          venceu: humanoVenceu,
-          transaction,
-        });
-      } else {
-        // §11 — falha comprovada do servidor devolve a tentativa. Dentro
-        // da MESMA transação, pra nunca estornar sem registrar o motivo.
-        await rankedDailyLimitService.devolverTentativa(idDesafiante, {
-          transaction,
-          dateKey: duelo.dateKey,
-        });
-      }
+  let persistiu = false;
+  let ultimoErro = null;
+  for (let tentativa = 1; tentativa <= FINALIZACAO_MAX_TENTATIVAS && !persistiu; tentativa++) {
+    resultado = null;
+    try {
+      await sequelize.transaction(async (transaction) => {
+        const [linhas] = await sequelize.query(
+          `SELECT id, status FROM ranked_matches WHERE id = :id FOR UPDATE;`,
+          { replacements: { id: duelo.rankedMatchId }, transaction },
+        );
+        const partida = linhas[0];
+        if (!partida) throw new Error(`RankedMatch ${duelo.rankedMatchId} não encontrada.`);
+        if (partida.status === "Finalizada") {
+          log("finalizacao:ignorada-idempotente", { duelId, rankedMatchId: duelo.rankedMatchId });
+          return;
+        }
 
-      await RankedMatch.update(
-        {
-          id_vencedor: resultado ? (humanoVenceu ? idDesafiante : duelo.defensorId) : null,
-          rating_jogador1_depois: resultado ? resultado.ratingDepois : null,
-          // §8 — o defensor controlado por IA NUNCA tem rating alterado:
-          // a coluna "depois" dele fica NULL de propósito.
-          rating_jogador2_depois: null,
-          delta_desafiante: resultado ? resultado.delta : null,
-          motivo_encerramento: motivoFinal,
-          status: "Finalizada",
-          encerrada_em: new Date(),
-        },
-        { where: { id: duelo.rankedMatchId }, transaction },
+        if (motivoFinal !== "FalhaServidor") {
+          resultado = await rankedRatingService.aplicarResultadoDesafiante({
+            idDesafiante,
+            seasonId: duelo.seasonId,
+            ratingOponente: duelo.ratingAntes[duelo.ia],
+            venceu: humanoVenceu,
+            transaction,
+          });
+        } else {
+          // §11 — falha comprovada do servidor devolve a tentativa. Dentro
+          // da MESMA transação, pra nunca estornar sem registrar o motivo.
+          await rankedDailyLimitService.devolverTentativa(idDesafiante, {
+            transaction,
+            dateKey: duelo.dateKey,
+          });
+        }
+
+        await RankedMatch.update(
+          {
+            id_vencedor: resultado ? (humanoVenceu ? idDesafiante : duelo.defensorId) : null,
+            rating_jogador1_depois: resultado ? resultado.ratingDepois : null,
+            // §8 — o defensor controlado por IA NUNCA tem rating alterado:
+            // a coluna "depois" dele fica NULL de propósito.
+            rating_jogador2_depois: null,
+            delta_desafiante: resultado ? resultado.delta : null,
+            motivo_encerramento: motivoFinal,
+            status: "Finalizada",
+            encerrada_em: new Date(),
+          },
+          { where: { id: duelo.rankedMatchId }, transaction },
+        );
+
+        log("finalizacao:persistido", {
+          duelId,
+          rankedMatchId: duelo.rankedMatchId,
+          tentativa,
+          ratingAntes: resultado?.ratingAntes ?? null,
+          ratingDepois: resultado?.ratingDepois ?? null,
+          delta: resultado?.delta ?? null,
+        });
+      });
+      persistiu = true;
+    } catch (error) {
+      ultimoErro = error;
+      console.error(
+        `[ranked] Falha ao persistir finalização (tentativa ${tentativa}/${FINALIZACAO_MAX_TENTATIVAS}) da partida ${duelo.rankedMatchId}:`,
+        error,
       );
-    });
-  } catch (error) {
-    console.error("[ranked] Falha ao finalizar partida ranqueada:", error);
+      if (tentativa < FINALIZACAO_MAX_TENTATIVAS) {
+        log("finalizacao:retry", { duelId, rankedMatchId: duelo.rankedMatchId, tentativa, erro: error.message });
+        await aguardarMs(FINALIZACAO_RETRY_BASE_MS * tentativa);
+      }
+    }
+  }
+
+  if (!persistiu) {
+    // Todas as tentativas falharam de verdade — a partida fica
+    // "EmAndamento" no banco (a transação sempre dá ROLLBACK sozinha em
+    // caso de erro, nunca deixa RankedMatch=Finalizada com
+    // CharacterPvpSeason não tocado, ou vice-versa). O varredor de
+    // partidas órfãs (iniciarVarredorDePartidasOrfas, a cada poucos
+    // minutos) é quem fecha isso depois, devolvendo a tentativa diária —
+    // única saída honesta quando o resultado real não pôde ser
+    // confirmado no banco de jeito nenhum.
+    console.error(
+      `[ranked] Falha ao finalizar partida ranqueada ${duelo.rankedMatchId} após ${FINALIZACAO_MAX_TENTATIVAS} tentativas:`,
+      ultimoErro,
+    );
     io.to(duelo.sala).emit("pvp:erro", { mensagem: "Erro ao finalizar a partida ranqueada." });
     return;
   }
