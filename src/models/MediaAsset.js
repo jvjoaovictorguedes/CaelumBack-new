@@ -13,7 +13,7 @@ const MediaAsset = sequelize.define(
     grupo: { type: DataTypes.STRING(150), allowNull: false },
     versao: { type: DataTypes.INTEGER, allowNull: false },
     categoria: {
-      type: DataTypes.ENUM("Item", "Power", "Monster", "EquipmentSet", "Musica", "Outro"),
+      type: DataTypes.ENUM("Item", "Power", "Monster", "EquipmentSet", "Musica", "Outro", "Avatar"),
       allowNull: false,
       defaultValue: "Outro",
     },
@@ -35,6 +35,11 @@ const MediaAsset = sequelize.define(
     descricao: { type: DataTypes.TEXT, allowNull: true },
     ativo: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     id_admin_criador: { type: DataTypes.INTEGER, allowNull: true },
+    // Só relevante pra categoria "Avatar" — null (padrão) = liberado
+    // pra qualquer personagem; preenchido = só quem É daquela raça/
+    // classe pode escolher esse avatar (ver avatarService.js).
+    restrito_raca_id: { type: DataTypes.INTEGER, allowNull: true },
+    restrito_classe_id: { type: DataTypes.INTEGER, allowNull: true },
   },
   {
     tableName: "media_assets",

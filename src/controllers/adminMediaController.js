@@ -80,6 +80,8 @@ exports.upload = async (req, res) => {
         buffer: req.file.buffer,
         nomeArquivoOriginal: req.file.originalname,
         mimeDeclarado: req.file.mimetype,
+        restritoRacaId: req.body.restrito_raca_id ? Number(req.body.restrito_raca_id) : null,
+        restritoClasseId: req.body.restrito_classe_id ? Number(req.body.restrito_classe_id) : null,
       },
       { idAdmin: req.user.id, req },
     );

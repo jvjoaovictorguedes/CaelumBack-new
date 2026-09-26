@@ -179,8 +179,24 @@ async function listGroupVersions(grupo) {
   return MediaAsset.findAll({ where: { grupo }, order: [["versao", "DESC"]] });
 }
 
+// Só grava se vier preenchido e a categoria for "Avatar" — restrição só
+// faz sentido nesse caso; um valor deixado em qualquer outra categoria
+// (ex.: reenviado sem querer de um formulário genérico) seria uma
+// restrição fantasma, nunca lida por ninguém, mas confusa de auditar.
+async function normalizarRestricaoAvatar(categoria, restritoRacaId, restritoClasseId) {
+  if (categoria !== "Avatar") return { restrito_raca_id: null, restrito_classe_id: null };
+  const [Race, Class] = [require("../models/Race"), require("../models/Class")];
+  if (restritoRacaId != null && !(await Race.findByPk(restritoRacaId))) {
+    throw erro("restrito_raca_id não corresponde a nenhuma raça.");
+  }
+  if (restritoClasseId != null && !(await Class.findByPk(restritoClasseId))) {
+    throw erro("restrito_classe_id não corresponde a nenhuma classe.");
+  }
+  return { restrito_raca_id: restritoRacaId ?? null, restrito_classe_id: restritoClasseId ?? null };
+}
+
 async function uploadMediaAsset(payload, { idAdmin, req }) {
-  const { grupo, categoria, descricao, buffer, nomeArquivoOriginal, mimeDeclarado } = payload;
+  const { grupo, categoria, descricao, buffer, nomeArquivoOriginal, mimeDeclarado, restritoRacaId, restritoClasseId } = payload;
   const tipo = payload.tipo && TIPOS_VALIDOS.includes(payload.tipo) ? payload.tipo : "imagem";
   validarGrupo(grupo);
   if (!categoria || !CATEGORIAS_VALIDAS.includes(categoria)) {
@@ -192,6 +208,7 @@ async function uploadMediaAsset(payload, { idAdmin, req }) {
   if (tipo === "imagem" && categoria === "Musica") {
     throw erro('A categoria "Musica" é só pra arquivos de áudio.');
   }
+  const { restrito_raca_id, restrito_classe_id } = await normalizarRestricaoAvatar(categoria, restritoRacaId, restritoClasseId);
   const { buffer: dados, mime, largura, altura } =
     tipo === "audio" ? await validarAudio(buffer, mimeDeclarado) : await validarEReencodarImagem(buffer);
 
@@ -227,6 +244,8 @@ async function uploadMediaAsset(payload, { idAdmin, req }) {
         descricao: descricao ?? null,
         ativo: true,
         id_admin_criador: idAdmin,
+        restrito_raca_id,
+        restrito_classe_id,
       },
       { transaction },
     );
@@ -280,6 +299,8 @@ async function revertToVersion(grupo, versaoAlvo, { idAdmin, req }) {
         descricao: alvo.descricao,
         ativo: true,
         id_admin_criador: idAdmin,
+        restrito_raca_id: alvo.restrito_raca_id,
+        restrito_classe_id: alvo.restrito_classe_id,
       },
       { transaction },
     );
