@@ -298,8 +298,13 @@ async function aplicarResultadoDuelo({ vencedor, perdedor, rodadas }) {
 // GET /api/pvp/opponents/:characterId
 exports.getOpponents = async (req, res) => {
   try {
+    // require() tardio pelo mesmo motivo do estaOnline logo abaixo:
+    // rankingService importa pvpLiveSocket, que importa este arquivo no
+    // topo (buscarPoderesDoPersonagem/aplicarResultadoDuelo) — um
+    // require no topo daqui criaria um ciclo.
+    const { SQL_EXCLUIR_ADMINS } = require("../services/rankingService");
     const oponentes = await Character.findAll({
-      where: { id: { [Op.ne]: req.params.characterId } },
+      where: sequelize.and({ id: { [Op.ne]: req.params.characterId } }, sequelize.literal(SQL_EXCLUIR_ADMINS)),
       attributes: ["id", "nome", "nivel", "genero"],
       include: [{ model: Race, attributes: ["nome_masculino", "nome_feminino"] }, { model: Class, attributes: ["nome"] }],
       limit: 100,
@@ -385,11 +390,14 @@ exports.getStatus = async (req, res) => {
 // GET /api/pvp/ranking
 exports.getRanking = async (req, res) => {
   try {
+    const { SQL_EXCLUIR_ADMINS } = require("../services/rankingService");
     const ranking = await PvpStatus.findAll({
       include: [
         {
           model: Character,
           attributes: ["id", "nome", "nivel", "genero"],
+          where: sequelize.literal(SQL_EXCLUIR_ADMINS),
+          required: true,
           include: [
             { model: Race, attributes: ["nome_masculino", "nome_feminino"] },
             { model: Class, attributes: ["nome"] },

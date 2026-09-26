@@ -14,6 +14,8 @@ const rankedDailyLimitService = require("../services/rankedDailyLimitService");
 const pvpLiveSocket = require("../socket/pvpLiveSocket");
 const rankedLiveSocket = require("../socket/rankedLiveSocket");
 const { LEADERBOARD_MINIMO_PARTIDAS, LEADERBOARD_TAMANHO_PAGINA } = require("../config/rankedConfig");
+const { SQL_EXCLUIR_ADMINS } = require("../services/rankingService");
+const { sequelize } = require("../config/database");
 
 function participacaoPublica(participacao) {
   return {
@@ -143,7 +145,15 @@ async function leaderboard(req, res) {
 
     const { count, rows } = await CharacterPvpSeason.findAndCountAll({
       where: { season_id: temporada.id, jogos: { [Op.gte]: LEADERBOARD_MINIMO_PARTIDAS } },
-      include: [{ model: Character, as: "personagem", attributes: ["id", "nome"] }],
+      include: [
+        {
+          model: Character,
+          as: "personagem",
+          attributes: ["id", "nome"],
+          where: sequelize.literal(SQL_EXCLUIR_ADMINS),
+          required: true,
+        },
+      ],
       order: [
         ["rating", "DESC"],
         ["vitorias", "DESC"],
