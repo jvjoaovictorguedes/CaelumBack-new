@@ -12,6 +12,7 @@ const Character = require("../models/Character");
 const Guild = require("../models/Guild");
 const GuildMember = require("../models/GuildMember");
 const AdminRole = require("../models/AdminRole");
+const MarketListing = require("../models/MarketListing");
 const { registrarAcao } = require("./adminAuditService");
 
 const PAGINA_TAMANHO_PADRAO = 50;
@@ -134,6 +135,17 @@ async function excluirUmUsuario(idUser, { idAdmin, req }) {
 
     for (const personagem of personagens) {
       await GuildMember.destroy({ where: { id_personagem: personagem.id }, transaction });
+      // market_listings.id_instancia é RESTRICT de propósito (protege
+      // contra apagar um item ainda anunciado sem cancelar antes, em
+      // qualquer fluxo normal do jogo) — mas aqui a conta inteira está
+      // sendo excluída, então qualquer anúncio ainda ativo do
+      // personagem precisa sumir junto, não bloquear a exclusão da
+      // instância que ele referencia. id_personagem_vendedor já é
+      // CASCADE (a linha some de qualquer forma quando o personagem é
+      // destruído), mas apagar aqui, antes, evita depender da ordem
+      // exata em que o Postgres resolve os dois caminhos de cascata no
+      // mesmo DELETE.
+      await MarketListing.destroy({ where: { id_personagem_vendedor: personagem.id }, transaction });
       await personagem.destroy({ transaction });
     }
 
