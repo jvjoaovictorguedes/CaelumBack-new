@@ -12,6 +12,8 @@ const WorldMapConnection = require("../models/WorldMapConnection");
 const CharacterNavigationState = require("../models/CharacterNavigationState");
 const Character = require("../models/Character");
 const { garantirProgresso } = require("./fishingProgressionService");
+const uniqueFeatService = require("./uniqueFeatService");
+const uniqueFeatPublicService = require("./uniqueFeatPublicService");
 
 function erro(mensagem, statusCode = 400) {
   return Object.assign(new Error(mensagem), { statusCode });
@@ -73,7 +75,7 @@ async function adquirirEmbarcacao(characterId, vesselId) {
 // + rota ativa (spec §18.3) e troca CharacterNavigationState. V1: viagem
 // instantânea, sem tempo/combustível.
 async function viajar(characterId, routeId) {
-  return sequelize.transaction(async (transaction) => {
+  const resultadoViagem = await sequelize.transaction(async (transaction) => {
     const rota = await MarineRoute.findOne({
       where: { id: routeId, ativo: true },
       transaction,
@@ -90,8 +92,8 @@ async function viajar(characterId, routeId) {
       include: [{ model: Vessel, as: "vessel" }],
       transaction,
     });
-    const temBarcoApto = embarcacoes.some((e) => (e.vessel?.tier ?? 0) >= rota.min_vessel_tier);
-    if (!temBarcoApto) {
+    const embarcacaoApta = embarcacoes.find((e) => (e.vessel?.tier ?? 0) >= rota.min_vessel_tier);
+    if (!embarcacaoApta) {
       throw erro(`Você precisa de uma embarcação tier ${rota.min_vessel_tier} ou superior para essa rota.`, 400);
     }
 
@@ -102,8 +104,33 @@ async function viajar(characterId, routeId) {
       { id_personagem: characterId, id_port_atual: rota.id_port_origem, id_zone_atual: zona.id },
       { transaction },
     );
-    return { id_zone_atual: zona.id, id_port_atual: rota.id_port_origem };
+
+    // Sistema de Proezas Únicas §16 — só quando uma descoberta/rota é
+    // registrada de verdade no backend (o upsert acima), nunca em mera
+    // navegação de tela. Não existe hoje um dado modelado de "condição
+    // marítima" neste sistema (condicaoId fica null: nunca casa até
+    // esse dado existir, nunca falha aberto por omissão).
+    const proezasConquistadas = await uniqueFeatService.check(
+      "NAVIGATION_DISCOVERY",
+      {
+        rotaId: rota.id,
+        zoneId: zona.id,
+        condicaoId: null,
+        embarcacaoId: embarcacaoApta.id_vessel,
+      },
+      { transaction, characterId, sourceEventId: `navigation:${characterId}:${rota.id}:${Date.now()}` },
+    );
+
+    return {
+      id_zone_atual: zona.id,
+      id_port_atual: rota.id_port_origem,
+      proezas_conquistadas: proezasConquistadas.map((p) => ({ key: p.feat.key, nome: p.feat.nome })),
+    };
   });
+
+  // Sistema de Proezas Únicas §12.1 — SÓ depois do commit acima.
+  await uniqueFeatPublicService.anunciarConquistas(resultadoViagem.proezas_conquistadas);
+  return resultadoViagem;
 }
 
 async function obterEstado(characterId) {

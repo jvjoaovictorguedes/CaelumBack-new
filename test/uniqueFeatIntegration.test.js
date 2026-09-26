@@ -8,6 +8,7 @@ const assert = require("node:assert/strict");
 
 const { bancoDisponivel, criarPersonagem, sufixo, sequelize } = require("./helpers/db");
 const combatController = require("../src/controllers/combatController");
+const characterController = require("../src/controllers/characterController");
 const adventureService = require("../src/services/adventureService");
 const AdventureZone = require("../src/models/AdventureZone");
 const Character = require("../src/models/Character");
@@ -141,6 +142,37 @@ testeComBanco("vitória real em zona SEM Proeza configurada não conquista nada"
   );
   const claim = await UniqueFeatClaim.findOne({ where: { id_unique_feat: feat.id } });
   assert.equal(claim, null, "Proeza configurada pra outra zona não devia ter sido conquistada");
+});
+
+testeComBanco("Legado conquistado aparece em GET /characters/:id/powers (origem=legado), nunca fica invisível", async () => {
+  // Bug real encontrado durante a Fase 5 (UX pública): o Legado é
+  // concedido via CharacterAbilities DIRETO (uniqueFeatService.
+  // tryClaimAtomic), nunca por ClassAbilities/RaceAbilities — sem o
+  // terceiro ramo em characterController.getPoderesDisponiveis, o
+  // jogador nunca veria o próprio Legado pra sequer poder ativá-lo.
+  const zona = await AdventureZone.findOne({ where: { nome: "Campos dos Viajantes" } });
+  assert.ok(zona);
+  const feat = await criarProezaParaZona(zona.id);
+  const { personagem } = await criarPersonagem({ nivel: 5 });
+
+  await vencerUmCombateReal(personagem.id, zona.id);
+  const claim = await UniqueFeatClaim.findOne({ where: { id_unique_feat: feat.id } });
+  assert.ok(claim, "pré-condição: a Proeza precisa ter sido conquistada");
+
+  const chamada = reqRes(personagem.id, {});
+  chamada.req.params = { id: personagem.id };
+  await characterController.getPoderesDisponiveis(chamada.req, chamada.res);
+  const { statusCode, corpo } = chamada.resultado();
+  assert.equal(statusCode, 200);
+
+  const power = await Power.findByPk(feat.id_power_reward);
+  const entradaLegado = corpo.data.poderes.find((p) => p.id_power === power.id);
+  assert.ok(entradaLegado, "Legado devia aparecer na lista de poderes do personagem");
+  assert.equal(entradaLegado.origem, "legado");
+  assert.equal(entradaLegado.acquisition_scope, "UNIQUE_FEAT");
+  assert.equal(entradaLegado.aprendido, true);
+  assert.equal(entradaLegado.ativo, false, "concedido inativo — o jogador ativa como qualquer outro poder");
+  assert.equal(entradaLegado.nivel_habilidade, 1);
 });
 
 test.after(async () => {

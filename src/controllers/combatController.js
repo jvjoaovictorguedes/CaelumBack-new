@@ -62,6 +62,7 @@ const { BONUS_POR_NIVEL } = require("../config/bestiaryConfig");
 const WeaponStatusEffect = require("../models/WeaponStatusEffect");
 const { resolverModificadorParaEncontro, registrarMorteDaCacada } = require("../services/adventureHuntCombatService");
 const uniqueFeatService = require("../services/uniqueFeatService");
+const uniqueFeatPublicService = require("../services/uniqueFeatPublicService");
 
 // Motor de Status/Cooldown (Especificação Consolidada Poder/Status/
 // Cooldown/Balanceamento, §37) — devolve o estado de combate já
@@ -497,13 +498,19 @@ exports.executarTurno = async (req, res) => {
       });
     }
 
+    // Sistema de Proezas Únicas §12.1 — array mutado por referência
+    // dentro de processarTurno (mesma transaction), lido só DEPOIS que
+    // o sequelize.transaction abaixo resolver de verdade (ou seja,
+    // depois do COMMIT).
+    const proezasParaAnunciar = [];
+
     // Uma única transação com o personagem travado (LOCK.UPDATE) cobre
     // o turno inteiro, do início ao fim: serializa qualquer segunda
     // requisição concorrente pra esse mesmo personagem (duplo clique,
     // duas abas) — ela só é atendida depois que esta transação
     // commitar, e nesse ponto já enxerga o encontro_pve atualizado (ou
     // ausente, se o combate já tiver terminado nesta primeira).
-    return await sequelize.transaction(async (transaction) => {
+    const resposta = await sequelize.transaction(async (transaction) => {
       // Não precisa mais incluir Class aqui: os multiplicadores de
       // classe já vêm congelados em inimigoAtual.statsPersonagem (ver
       // processarTurno) — evita o join e a pegadinha de "FOR UPDATE"
@@ -528,8 +535,15 @@ exports.executarTurno = async (req, res) => {
         });
       }
 
-      return await processarTurno({ req, res, character, inimigoAtual, transaction });
+      return await processarTurno({ req, res, character, inimigoAtual, transaction, proezasParaAnunciar });
     });
+
+    // SÓ depois do commit acima (o await do sequelize.transaction já
+    // esperou o COMMIT de verdade, mesmo que o res.json() dentro de
+    // processarTurno já tenha sido enviado antes disso — padrão
+    // pré-existente deste controller pro resto da resposta).
+    await uniqueFeatPublicService.anunciarConquistas(proezasParaAnunciar);
+    return resposta;
   } catch (error) {
     console.error(
       "Erro ao processar turno de combate:",
@@ -543,7 +557,7 @@ exports.executarTurno = async (req, res) => {
   }
 };
 
-async function processarTurno({ req, res, character, inimigoAtual, transaction }) {
+async function processarTurno({ req, res, character, inimigoAtual, transaction, proezasParaAnunciar }) {
   const { action } = req.body;
   const characterId = character.id;
 
@@ -1141,6 +1155,32 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       await achievementService.checkMonsterKillAchievements(character.id, transaction);
       await achievementService.checkBestiaryAchievements(character.id, transaction);
 
+      // Sistema de Proezas Únicas §16 — na origem do abate (mesmo evento
+      // que já confirma achievements de Bestiário acima), nunca ao só
+      // abrir a página. Só existe pra encontro de zona (ehEncontroDeZona)
+      // — um encontro legado não tem id_monstro/id_area pra reportar.
+      // maestriaNivel é calculado SEMPRE aqui (não só quando o Bestiário
+      // acaba de fechar, como o bloco logo abaixo faz) pra Proezas que
+      // dependem de um nível de maestria intermediário, não só da
+      // conclusão total.
+      if (ehEncontroDeZona && inimigoAtual.id_monstro && inimigoAtual.id_area) {
+        const maestriaAtual = await calcularMaestriaDaRegiao(character.id, inimigoAtual.id_area, transaction);
+        const proezasBestiario = await uniqueFeatService.check(
+          "BESTIARY_EVENT",
+          {
+            monstroId: inimigoAtual.id_monstro,
+            regiaoId: inimigoAtual.id_area,
+            maestriaNivel: maestriaAtual.nivel,
+            contador: resultadoMorte.quantidade,
+          },
+          { transaction, characterId: character.id, sourceEventId: `bestiary:${character.id}:${inimigoAtual.id_monstro}:${Date.now()}` },
+        );
+        for (const { feat } of proezasBestiario) {
+          log.push(`✦ Você escreveu uma nova página na história de Caelum: "${feat.nome}"!`);
+          proezasParaAnunciar.push({ key: feat.key });
+        }
+      }
+
       // Bestiário — "mostrar benefícios da conclusão": só quando ESTE
       // abate foi a primeira derrota do monstro (resultadoMorte.descobertoAgora)
       // é sequer possível a zona ter acabado de fechar o Bestiário agora
@@ -1222,11 +1262,12 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
       );
       for (const { feat } of proezasConquistadas) {
         // §12 — o texto de revelação completo (nome/lore/Legado) é
-        // responsabilidade do modal/anúncio global (UX pública, fase
-        // futura); aqui só confirma no log que ALGO histórico aconteceu,
-        // sem vazar a condição secreta nem depender do frontend saber
-        // renderizar a Proeza ainda.
+        // responsabilidade do modal/anúncio global (uniqueFeat:claimed,
+        // disparado depois do commit — ver proezasParaAnunciar mais
+        // abaixo); aqui só confirma no log privado desta resposta que
+        // ALGO histórico aconteceu, sem vazar a condição secreta.
         log.push(`✦ Você escreveu uma nova página na história de Caelum: "${feat.nome}"!`);
+        proezasParaAnunciar.push({ key: feat.key });
       }
 
       await character.save({ transaction });

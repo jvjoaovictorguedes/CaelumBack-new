@@ -34,6 +34,7 @@ const rankedRatingService = require("./rankedRatingService");
 const rankedTierService = require("./rankedTierService");
 const { formatarResumoReputacao } = require("./spoilReputationService");
 const { formatarResumoReputacao: formatarResumoReputacaoCacador } = require("./hunterReputationService");
+const uniqueFeatPublicService = require("./uniqueFeatPublicService");
 
 class ProfileError extends Error {
   constructor(mensagem, status = 400) {
@@ -306,7 +307,7 @@ async function obterPerfilPublico(idPersonagem, viewerUserId) {
   // nunca sai do servidor.
   const equipamentoOcultoParaViewer = ocultarEquipamentos && !ehProprio;
 
-  const [guild, equipment, progression, pvp, bestiary, destaques, conquistas, combatPower] = await Promise.all([
+  const [guild, equipment, progression, pvp, bestiary, destaques, conquistas, combatPower, uniqueFeats] = await Promise.all([
     montarGuilda(idPersonagem),
     equipamentoOcultoParaViewer ? [] : montarEquipamentosPublicos(idPersonagem),
     montarProgressao(idPersonagem, character),
@@ -315,6 +316,9 @@ async function obterPerfilPublico(idPersonagem, viewerUserId) {
     montarDestaques(idPersonagem),
     montarConquistasResumo(idPersonagem),
     montarPoder(idPersonagem),
+    // Sistema de Proezas Únicas §14 — card distinto das Achievements
+    // comuns, sempre completo (é o próprio dono do feito).
+    uniqueFeatPublicService.obterProezasDoPersonagem(idPersonagem),
   ]);
 
   return {
@@ -331,6 +335,7 @@ async function obterPerfilPublico(idPersonagem, viewerUserId) {
     pvp,
     bestiary,
     achievements: conquistas,
+    uniqueFeats,
     highlights: destaques,
     permissions: {
       eh_proprio: ehProprio,

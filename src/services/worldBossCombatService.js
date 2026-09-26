@@ -50,6 +50,8 @@ const worldBossStatusService = require("./worldBossStatusService");
 const worldBossRewardService = require("./worldBossRewardService");
 const { emitGlobal } = require("../socket/worldBossSocket");
 const { EVENT_STATUS, COMBAT_SESSION_STATUS } = require("../config/worldBossConfig");
+const uniqueFeatService = require("./uniqueFeatService");
+const uniqueFeatPublicService = require("./uniqueFeatPublicService");
 
 function erro(mensagem, statusCode = 400) {
   return Object.assign(new Error(mensagem), { statusCode });
@@ -258,9 +260,26 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
     contribuicao.last_action_at = new Date();
     await contribuicao.save({ transaction });
 
+    let proezasConquistadas = [];
     if (golpeFinal) {
       sessao.status = COMBAT_SESSION_STATUS.ENCERRADA;
       await sessao.save({ transaction });
+
+      // Sistema de Proezas Únicas §16 — MESMO ponto que confirma o
+      // Golpe Final de verdade (evento já marcado DEFEATED acima,
+      // dentro desta MESMA transaction), nunca um evento derivado ou
+      // fire-and-forget (processarRecompensas, logo abaixo, roda fora
+      // desta transaction de propósito e não pode ser o gatilho).
+      proezasConquistadas = await uniqueFeatService.check(
+        "WORLD_BOSS_FINAL_BLOW",
+        {
+          bossConfigId: evento.id_world_boss_config,
+          eventId: String(evento.id),
+          finalBlow: true,
+          contribution: Number(contribuicao.damage_total),
+        },
+        { transaction, characterId, sourceEventId: `worldboss:${evento.id}:${characterId}` },
+      );
     }
 
     return {
@@ -270,6 +289,7 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
       cura: resultado.cura,
       manaCurada: resultado.manaCurada,
       golpeFinal,
+      proezasConquistadas: proezasConquistadas.map((p) => ({ key: p.feat.key, nome: p.feat.nome })),
       lutador: {
         vida_atual: personagem.vida_atual,
         mana_atual: personagem.mana_atual,
@@ -291,6 +311,11 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
   });
 
   if (erroPendente) throw erroPendente;
+
+  // Sistema de Proezas Únicas §12.1 — SÓ depois do commit acima (nunca
+  // de dentro da transaction), mesmo princípio do "worldboss:derrotado"
+  // logo abaixo.
+  await uniqueFeatPublicService.anunciarConquistas(contexto.proezasConquistadas);
 
   if (contexto.golpeFinal) {
     const status = await worldBossStatusService.obterStatusPublico();

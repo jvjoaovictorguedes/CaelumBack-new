@@ -15,6 +15,8 @@ const { QUANTIDADE_MAXIMA_POR_BREW } = require("../config/alchemyConfig");
 // Alquimia (nunca na chance/quantidade produzida), mesmo padrão de
 // FORGE_XP_PCT em forgeService.js.
 const { bonusesAtivosPara: bonusesTavernaAtivosPara } = require("./tavernBuffService");
+const uniqueFeatService = require("./uniqueFeatService");
+const uniqueFeatPublicService = require("./uniqueFeatPublicService");
 
 async function obterOuCriarProgresso(characterId, transaction) {
   const [progresso] = await CharacterAlchemyProgress.findOrCreate({
@@ -65,7 +67,7 @@ async function prepararLote(characterId, recipeId, { quantity, idempotencyKey } 
     );
   }
 
-  return sequelize.transaction(async (transaction) => {
+  const resultadoLote = await sequelize.transaction(async (transaction) => {
     // Idempotência: se essa (personagem, key) já foi processada, devolve
     // o resultado gravado sem repetir NENHUM side effect (spec §15/§28).
     if (idempotencyKey) {
@@ -151,6 +153,22 @@ async function prepararLote(characterId, recipeId, { quantity, idempotencyKey } 
     const quantidadeProduzida = recipe.quantidade_resultado * quantidade;
     await inventoryService.addStack(characterId, recipe.id_item_resultado, quantidadeProduzida, transaction);
 
+    // Sistema de Proezas Únicas §16 — depois de consumo dos ingredientes
+    // E criação do resultado confirmados (ambos acima), dentro desta
+    // MESMA transaction. loteId usa idempotencyKey quando o cliente
+    // mandar (mesmo identificador que já garante idempotência aqui);
+    // sem ela, gera um id só pra rastreio/auditoria do evento.
+    const proezasConquistadas = await uniqueFeatService.check(
+      "ALCHEMY_CRAFT_COMPLETED",
+      {
+        recipeId: recipe.id,
+        resultado: recipe.key,
+        ingredientIds: recipe.ingredientes.map((ingrediente) => ingrediente.id_item),
+        loteId: idempotencyKey ?? `alchemy:${characterId}:${Date.now()}`,
+      },
+      { transaction, characterId, sourceEventId: idempotencyKey ?? `alchemy:${characterId}:${Date.now()}` },
+    );
+
     const bonusTaverna = await bonusesTavernaAtivosPara(characterId, "Alquimia", transaction);
     const xpBase = recipe.xp_alquimia * quantidade;
     const xpGanho = bonusTaverna.ALCHEMY_XP_PCT
@@ -181,6 +199,7 @@ async function prepararLote(characterId, recipeId, { quantity, idempotencyKey } 
       experiencia_total: ganho.xpTotal,
       xp_para_proximo_nivel: ganho.xpParaProximoNivel,
       total_produzido: progressoAtualizado?.total_produzido ?? (progressoAtual.total_produzido ?? 0) + quantidadeProduzida,
+      proezas_conquistadas: proezasConquistadas.map((p) => ({ key: p.feat.key, nome: p.feat.nome })),
     };
 
     if (idempotencyKey) {
@@ -197,6 +216,14 @@ async function prepararLote(characterId, recipeId, { quantity, idempotencyKey } 
 
     return { ...resultado, idempotent_replay: false };
   });
+
+  // Sistema de Proezas Únicas §12.1 — SÓ depois do commit acima, e SÓ
+  // na execução real (nunca num replay idempotente — isso já foi
+  // anunciado da primeira vez que aconteceu de verdade).
+  if (!resultadoLote.idempotent_replay) {
+    await uniqueFeatPublicService.anunciarConquistas(resultadoLote.proezas_conquistadas);
+  }
+  return resultadoLote;
 }
 
 module.exports = { obterProgresso, listarReceitas, detalharReceita, prepararLote };

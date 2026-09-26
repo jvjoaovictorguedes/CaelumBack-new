@@ -35,6 +35,8 @@ const { aplicarGanhoDeXp, garantirProgresso } = require("./fishingProgressionSer
 // não importa isso e não deve). Soma por cima do `controle` efetivo da
 // vara, igual ao que MAX_HP_PCT faz sobre vidaMaximaDe em combatController.
 const { bonusesAtivosPara: bonusesTavernaAtivosPara } = require("./tavernBuffService");
+const uniqueFeatService = require("./uniqueFeatService");
+const uniqueFeatPublicService = require("./uniqueFeatPublicService");
 const {
   sortearPesoGramas,
   qualidadeEspecime,
@@ -330,6 +332,24 @@ async function finalizarCaptura(characterId, session, transaction) {
   if (session.weight_g > discovery.maior_peso_g) discovery.maior_peso_g = session.weight_g;
   await discovery.save({ transaction });
 
+  // Sistema de Proezas Únicas §16 — depois da captura VALIDADA pelo
+  // servidor (Item/XP/CatchRecord/descoberta já persistidos acima),
+  // nunca baseado só no minigame do cliente. condicaoId fica null: não
+  // existe "condição marítima" como dado modelado hoje neste sistema.
+  const proezasConquistadas = await uniqueFeatService.check(
+    "FISH_CAUGHT",
+    {
+      speciesId: especie.id,
+      peso: session.weight_g,
+      zoneId: session.id_zone,
+      condicaoId: null,
+      iscaId: session.id_bait_item,
+      varaInstanceId: session.id_instancia_vara,
+      varaRefinamento: refinamentoSnapshot,
+    },
+    { transaction, characterId, sourceEventId: `fish-caught:${catchRecord.id}` },
+  );
+
   const resultado = {
     resultado: "CAUGHT",
     id_species: especie.id,
@@ -339,6 +359,7 @@ async function finalizarCaptura(characterId, session, transaction) {
     xp: xpGanho,
     id_catch_record: catchRecord.id,
     primeira_descoberta: criado,
+    proezas_conquistadas: proezasConquistadas.map((p) => ({ key: p.feat.key, nome: p.feat.nome })),
   };
 
   session.finalized_at = new Date();
@@ -348,7 +369,7 @@ async function finalizarCaptura(characterId, session, transaction) {
 
 // POST /api/fishing/sessions/:id/reel — body: { active: boolean }
 async function recolher(characterId, sessionId, active) {
-  return sequelize.transaction(async (transaction) => {
+  const estado = await sequelize.transaction(async (transaction) => {
     const session = await carregarSessaoAtivaTravada(characterId, sessionId, transaction);
     const agora = new Date();
     if (ehTerminal(session.fase)) return estadoPublico(session); // idempotente — nunca reprocessa
@@ -397,6 +418,10 @@ async function recolher(characterId, sessionId, active) {
     await session.save({ transaction });
     return estadoPublico(session);
   });
+
+  // Sistema de Proezas Únicas §12.1 — SÓ depois do commit acima.
+  await uniqueFeatPublicService.anunciarConquistas(estado.resultado?.proezas_conquistadas);
+  return estado;
 }
 
 // POST /api/fishing/sessions/:id/abandon

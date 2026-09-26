@@ -13,6 +13,7 @@ const registerMessagesHandlers = require("./socket/messagesSocket");
 const registerPartyHandlers = require("./socket/partySocket");
 const registerGuildBossHandlers = require("./socket/guildBossSocket");
 const registerWorldBossHandlers = require("./socket/worldBossSocket");
+const registerUniqueFeatHandlers = require("./socket/uniqueFeatSocket");
 
 // Importa TODOS os modelos primeiro.
 // A ordem de importação dos modelos aqui geralmente não importa,
@@ -66,6 +67,7 @@ const marketRoutes = require("./routes/marketRoutes");
 const adventureRoutes = require("./routes/adventureRoutes");
 const bestiaryRoutes = require("./routes/bestiaryRoutes");
 const rankingRoutes = require("./routes/rankingRoutes");
+const uniqueFeatRoutes = require("./routes/uniqueFeatRoutes");
 const worldRoutes = require("./routes/worldRoutes");
 const adventureGuildRoutes = require("./routes/adventureGuildRoutes");
 const equipmentInstanceRoutes = require("./routes/equipmentInstanceRoutes");
@@ -88,6 +90,7 @@ const adminGrantRoutes = require("./routes/adminGrantRoutes");
 const adminGlobalBuffRoutes = require("./routes/adminGlobalBuffRoutes");
 const adminTavernRoutes = require("./routes/adminTavernRoutes");
 const adminForgeRoutes = require("./routes/adminForgeRoutes");
+const adminUniqueFeatRoutes = require("./routes/adminUniqueFeatRoutes");
 const adminWorldBossRoutes = require("./routes/adminWorldBossRoutes");
 const alchemyRoutes = require("./routes/alchemyRoutes");
 const fishingRoutes = require("./routes/fishingRoutes");
@@ -249,6 +252,7 @@ app.use("/api/market", marketRoutes);
 app.use("/api/adventure", adventureRoutes);
 app.use("/api/bestiary", bestiaryRoutes);
 app.use("/api/ranking", rankingRoutes);
+app.use("/api/unique-feats", uniqueFeatRoutes);
 app.use("/api/world", worldRoutes);
 app.use("/api/adventure-guild", adventureGuildRoutes);
 app.use("/api/onboarding", onboardingRoutes);
@@ -278,6 +282,7 @@ app.use("/api/admin/grants", adminGrantRoutes);
 app.use("/api/admin/global-buffs", adminGlobalBuffRoutes);
 app.use("/api/admin/tavern", adminTavernRoutes);
 app.use("/api/admin/forge", adminForgeRoutes);
+app.use("/api/admin/unique-feats", adminUniqueFeatRoutes);
 app.use("/api/admin/world-boss", adminWorldBossRoutes);
 app.use("/api/admin/guild-journal", adminGuildJournalRoutes);
 app.use("/api/admin/fishing", adminFishingRoutes);
@@ -342,6 +347,7 @@ registerMessagesHandlers(io);
 registerPartyHandlers(io);
 registerGuildBossHandlers(io);
 registerWorldBossHandlers(io);
+registerUniqueFeatHandlers(io);
 require("./services/worldBossScheduler").iniciar();
 // rankedController usa isso pra criar a partida ranqueada assíncrona a
 // partir de uma rota REST (POST /ranked/match/start) e emitir os

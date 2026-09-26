@@ -35,6 +35,8 @@ const { comMultiplicadoresDeClasse } = require("./combatFormulas");
 const { sincronizarRegeneracaoDeVidaEMana } = require("./regenService");
 const { encontroValido } = require("./pveEncounterService");
 const { gerarInimigo } = require("../controllers/combatController");
+const uniqueFeatService = require("./uniqueFeatService");
+const uniqueFeatPublicService = require("./uniqueFeatPublicService");
 
 const PROFISSOES = ["Mineracao", "Silvicultura", "Exploracao"];
 
@@ -142,7 +144,7 @@ async function listarRegioes(id_personagem, profissaoFiltro) {
 // (ver seção 15/17 da especificação — "o cliente não pode enviar
 // resultado, item, quantidade ou xp").
 async function coletar(id_personagem, id_regiao) {
-  return sequelize.transaction(async (transaction) => {
+  const resultadoColeta = await sequelize.transaction(async (transaction) => {
     const regiao = await ExpeditionRegion.findByPk(id_regiao, { transaction });
     if (!regiao || !regiao.ativo) {
       throw Object.assign(new Error("Região de expedição não encontrada."), { statusCode: 404 });
@@ -289,9 +291,11 @@ async function coletar(id_personagem, id_regiao) {
     let resultado = "Nada";
     let itemGanho = null;
     let quantidadeGanha = 0;
+    let recursoEscolhidoId = null;
 
     if (qualidadeSorteada) {
       const recursoEscolhido = sortearRecurso(recursosDaRegiao);
+      recursoEscolhidoId = recursoEscolhido.id_recurso;
       const quantidade = sortearQuantidade(nivelAtual, qualidadeSorteada);
 
       const vinculo = await ExpeditionResourceItem.findOne({
@@ -356,6 +360,23 @@ async function coletar(id_personagem, id_regiao) {
     await registrarProgressoContrato(character, "CompletarExpedicoes", 1, {}, transaction);
     await registrarProgressoMissaoGuilda(character, "CompletarExpedicoes", 1, transaction);
 
+    // Sistema de Proezas Únicas §16 — só na coleta NÃO interrompida (a
+    // interrupção de monstro retorna mais acima, antes daqui, e nunca
+    // chega neste ponto). Dispara mesmo em resultado "Nada" — a
+    // expedição em si terminou de verdade, o segredo é quem decide se
+    // isso importa. recursoId fica null quando não houve sorteio de
+    // recurso nenhum (resultado "Nada").
+    const proezasConquistadas = await uniqueFeatService.check(
+      "EXPEDITION_COMPLETED",
+      {
+        regiaoId: regiao.id,
+        recursoId: recursoEscolhidoId,
+        qualidade: resultado,
+        resultado: itemGanho ? itemGanho.nome : "Nada",
+      },
+      { transaction, characterId: id_personagem, sourceEventId: `expedition:${id_personagem}:${regiao.id}:${Date.now()}` },
+    );
+
     return {
       interrompida: false,
       resultado,
@@ -367,8 +388,13 @@ async function coletar(id_personagem, id_regiao) {
       experiencia: progresso.xpTotal,
       xp_proximo_nivel: progresso.xpParaProximoNivel,
       proxima_coleta_em: profissao.proxima_coleta_em,
+      proezas_conquistadas: proezasConquistadas.map((p) => ({ key: p.feat.key, nome: p.feat.nome })),
     };
   });
+
+  // Sistema de Proezas Únicas §12.1 — SÓ depois do commit acima.
+  await uniqueFeatPublicService.anunciarConquistas(resultadoColeta.proezas_conquistadas);
+  return resultadoColeta;
 }
 
 module.exports = { listarProfissoes, listarRegioes, coletar, formatarProfissao };

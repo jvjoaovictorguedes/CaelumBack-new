@@ -17,6 +17,8 @@ const { registrarProgressoMissaoGuilda } = require("./guildMissionService");
 const achievementService = require("./achievementService");
 const { bonusesAtivosPara: bonusesTavernaAtivosPara } = require("./tavernBuffService");
 const forgeTelemetryService = require("./forgeTelemetryService");
+const uniqueFeatService = require("./uniqueFeatService");
+const uniqueFeatPublicService = require("./uniqueFeatPublicService");
 
 async function garantirProgresso(characterId, transaction) {
   const [progresso] = await CharacterForgeProgress.findOrCreate({
@@ -66,7 +68,7 @@ async function listarFila(characterId) {
 // CharacterEquipmentInstance; Refinamento aplica (ou não, em caso de
 // falha) o refinamento já sorteado na instância existente.
 async function coletar(characterId, slot) {
-  return sequelize.transaction(async (transaction) => {
+  const resultadoColeta = await sequelize.transaction(async (transaction) => {
     const entrada = await CharacterForgeQueue.findOne({
       where: { id_personagem: characterId, slot },
       transaction,
@@ -96,6 +98,21 @@ async function coletar(characterId, slot) {
         tipo: "fabricacao",
         instancia: { id: instancia.id, id_item, nome: item.nome, raridade: item.raridade, refinamento: 0 },
       };
+
+      // Sistema de Proezas Únicas §16 — na coleta REAL da fabricação
+      // (nunca na prévia/enfileiramento), dentro desta MESMA transaction.
+      resultado.proezasConquistadas = (
+        await uniqueFeatService.check(
+          "FORGE_CRAFT_COMPLETED",
+          {
+            blueprintId: entrada.referencia.id_blueprint,
+            itemId: id_item,
+            raridade: item.raridade,
+            resultado: qualidade_final,
+          },
+          { transaction, characterId, sourceEventId: `forge-craft:${entrada.id}` },
+        )
+      ).map((p) => ({ key: p.feat.key, nome: p.feat.nome }));
     } else if (entrada.tipo_acao === TIPOS_ACAO_FORJA.REFINAMENTO) {
       const { id_instancia } = entrada.referencia;
       const { sucesso } = entrada.payload_resultado;
@@ -104,6 +121,7 @@ async function coletar(characterId, slot) {
         transaction,
         lock: transaction.LOCK.UPDATE,
       });
+      const nivelAlvo = (instancia?.refinamento ?? 0) + 1;
       if (instancia && sucesso) {
         instancia.refinamento += 1;
         await instancia.save({ transaction });
@@ -113,6 +131,22 @@ async function coletar(characterId, slot) {
         sucesso,
         refinamento_atual: instancia?.refinamento ?? null,
       };
+
+      // Sistema de Proezas Únicas §16 — na conclusão REAL do refino
+      // (sucesso ou falha; a condição secreta decide o que importa),
+      // dentro desta MESMA transaction.
+      resultado.proezasConquistadas = (
+        await uniqueFeatService.check(
+          "FORGE_REFINEMENT_COMPLETED",
+          {
+            instanceId: id_instancia,
+            targetLevel: nivelAlvo,
+            sucesso,
+            scrollKey: String(entrada.referencia.id_item_pergaminho ?? ""),
+          },
+          { transaction, characterId, sourceEventId: `forge-refinement:${entrada.id}` },
+        )
+      ).map((p) => ({ key: p.feat.key, nome: p.feat.nome }));
     } else {
       resultado = { tipo: entrada.tipo_acao };
     }
@@ -188,6 +222,11 @@ async function coletar(characterId, slot) {
     await entrada.destroy({ transaction });
     return resultado;
   });
+
+  // Sistema de Proezas Únicas §12.1 — SÓ depois do commit acima (nunca
+  // de dentro da transaction).
+  await uniqueFeatPublicService.anunciarConquistas(resultadoColeta.proezasConquistadas);
+  return resultadoColeta;
 }
 
 // Equipamentos forjados/refinados do personagem (spec §26 — instâncias

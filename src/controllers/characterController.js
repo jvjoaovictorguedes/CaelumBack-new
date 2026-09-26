@@ -820,6 +820,9 @@ exports.getPoderesDisponiveis = async (req, res) => {
         escala_atributo: poder.escala_atributo,
         valor_escala: poder.valor_escala,
         imagem_url: poder.imagem_url,
+        // Sistema de Proezas Únicas §9/§18 — badge "Legado Único" no
+        // frontend depende disso pra saber quais Powers são exclusivos.
+        acquisition_scope: poder.acquisition_scope,
         origem,
         nivel_necessario: nivelNecessario,
         aprendido: Boolean(linhaAprendida),
@@ -839,6 +842,23 @@ exports.getPoderesDisponiveis = async (req, res) => {
       };
     }
 
+    // Sistema de Proezas Únicas §9 — um Legado é concedido via
+    // CharacterAbilities DIRETO (uniqueFeatService.tryClaimAtomic),
+    // nunca por ClassAbilities/RaceAbilities — sem isso, o Legado
+    // conquistado nunca apareceria aqui pro jogador ativar (existiria
+    // só no banco, invisível na própria tela de Habilidades).
+    const idsJaListados = new Set([
+      ...poderesClasse.map((linha) => linha.id_poder),
+      ...poderesRaca.map((linha) => linha.id_power),
+    ]);
+    const idsAprendidos = aprendidos.map((linha) => linha.id_power);
+    const poderesLegado =
+      idsAprendidos.length > 0
+        ? await Power.findAll({
+            where: { id: idsAprendidos, acquisition_scope: "UNIQUE_FEAT" },
+          })
+        : [];
+
     const poderes = [
       ...poderesClasse.map((linha) =>
         montarEntrada(linha.Power, linha.nivel_aprendizagem, "classe", linha.custo_ouro),
@@ -846,6 +866,9 @@ exports.getPoderesDisponiveis = async (req, res) => {
       ...poderesRaca.map((linha) =>
         montarEntrada(linha.Power, linha.nivel_aprendizado, "raca", linha.custo_ouro),
       ),
+      ...poderesLegado
+        .filter((poder) => !idsJaListados.has(poder.id))
+        .map((poder) => montarEntrada(poder, null, "legado", null)),
     ];
 
     res.status(200).json({
