@@ -138,6 +138,8 @@ async function entrar(characterId) {
         custo_mana: custoManaEfetivo(p, p.nivel_habilidade ?? 1),
         dano_base: p.dano_base,
         nivel_habilidade: p.nivel_habilidade ?? 1,
+        escala_atributo: p.escala_atributo,
+        valor_escala: p.valor_escala,
       })),
       status: await worldBossStatusService.obterStatusPublico(),
     };
