@@ -3,6 +3,7 @@ const Item = require("../models/Item");
 const WeaponProperties = require("../models/WeaponProperties");
 const ArmorProperties = require("../models/ArmorProperties");
 const ConsumableProperties = require("../models/ConsumableProperties");
+const FishingRodProperties = require("../models/FishingRodProperties");
 // Fonte única das associações Item<->propriedades (com alias explícito)
 // — ver models/associations.js. Só o require garante que já rodaram.
 require("../models/associations");
@@ -11,6 +12,10 @@ const INCLUDE_PROPRIEDADES = [
   { model: WeaponProperties, as: "weaponProperties" },
   { model: ArmorProperties, as: "armorProperties" },
   { model: ConsumableProperties, as: "consumableProperties" },
+  // Item.tipo_item = "Ferramenta" (vara de pesca) — faltava aqui, então
+  // /api/items (usado pela Loja) nunca devolvia força_linha/controle/etc.
+  // pra nenhuma vara, mesmo já disponível na Forja.
+  { model: FishingRodProperties, as: "fishingRodProperties" },
 ];
 
 // Criar um novo item
