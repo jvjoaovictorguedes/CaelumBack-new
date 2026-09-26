@@ -14,13 +14,7 @@ const Item = require("../models/Item");
 const { registrarAcao } = require("./adminAuditService");
 const monsterBalancePreviewService = require("./monsterBalancePreviewService");
 const monsterBalanceSimulationService = require("./monsterBalanceSimulationService");
-const {
-  PRESETS_MONSTRO,
-  SIMULACAO_MAX_ITERACOES,
-  MULTIPLICADOR_MINIMO,
-  MULTIPLICADOR_MAXIMO,
-  multiplicadorValido,
-} = require("../config/monsterBalanceConfig");
+const { PRESETS_MONSTRO, SIMULACAO_MAX_ITERACOES } = require("../config/monsterBalanceConfig");
 
 function erro(mensagem, statusCode = 400) {
   const e = new Error(mensagem);
@@ -127,40 +121,62 @@ async function updateAdminZone(id, payload, { idAdmin, req }) {
 }
 
 // ------------------------------------------------------------- MONSTROS
+// Reformulação V2 (Stats Fixos) — o Admin edita direto o que o monstro
+// FAZ no combate (nível, vida, dano min/max, agilidade, velocidade,
+// XP/Gold), nunca mais multiplicador em cima de um personagem de
+// referência. multiplicador_vida/dano/agilidade/velocidade continuam
+// existindo na tabela (legado, lidos só por Party/Caçadas/Editor de
+// Balanceamento antigo até esses fluxos migrarem) mas NÃO fazem mais
+// parte do payload editável daqui — congelados no valor que o Backfill
+// deixou.
 const CAMPOS_MONSTRO = [
   "nome",
   "descricao",
   "imagem_url",
-  "multiplicador_vida",
-  "multiplicador_dano",
-  "multiplicador_agilidade",
-  "multiplicador_velocidade",
+  "sprite_key",
+  "nivel",
+  "vida_maxima",
+  "dano_min",
+  "dano_max",
+  "agilidade",
+  "velocidade",
+  "xp_recompensa",
+  "ouro_recompensa",
   "ativo",
 ];
 
-const CAMPOS_MULTIPLICADOR_MONSTRO = [
-  "multiplicador_vida",
-  "multiplicador_dano",
-  "multiplicador_agilidade",
-  "multiplicador_velocidade",
-];
-
-// Reaproveita a MESMA regra técnica que já protege o Editor de
-// Balanceamento (monsterBalancePreviewService.js) — nunca uma segunda
-// faixa paralela. Esses multiplicadores alimentam diretamente
-// combatController.statsFinaisDoMonstroPorNivel no combate real: um
-// valor NaN/Infinity/negativo vira vida_maxima/dano_base NaN ou
-// Infinity ali (Math.max(20, NaN) === NaN; Math.max(20, Infinity) ===
-// Infinity), quebrando o combate desse monstro pra sempre.
-function validarMultiplicadoresMonstro(dados) {
-  for (const campo of CAMPOS_MULTIPLICADOR_MONSTRO) {
-    if (!foiEnviado(dados, campo)) continue;
-    const valor = dados[campo];
-    if (!multiplicadorValido(valor)) {
-      throw erro(
-        `${campo} precisa ser um número válido entre ${MULTIPLICADOR_MINIMO} e ${MULTIPLICADOR_MAXIMO} (recebido: ${valor}).`,
-      );
+// CHECK constraints do banco (migration 20261208010000) já bloqueiam
+// dados inválidos na gravação, mas validar aqui ANTES de abrir a
+// transaction dá uma mensagem de erro legível pro admin em vez de um
+// erro cru do Postgres.
+function validarStatsFixosMonstro(dados) {
+  const camposInteirosNaoNegativos = ["vida_maxima", "dano_min", "dano_max", "agilidade", "velocidade", "xp_recompensa", "ouro_recompensa"];
+  for (const campo of camposInteirosNaoNegativos) {
+    if (!foiEnviado(dados, campo) || dados[campo] == null) continue;
+    if (!Number.isInteger(dados[campo]) || dados[campo] < 0) {
+      throw erro(`${campo} precisa ser um número inteiro >= 0 (recebido: ${dados[campo]}).`);
     }
+  }
+  if (foiEnviado(dados, "nivel") && dados.nivel != null) {
+    if (!Number.isInteger(dados.nivel) || dados.nivel < 1) {
+      throw erro(`nivel precisa ser um número inteiro >= 1 (recebido: ${dados.nivel}).`);
+    }
+  }
+  if (foiEnviado(dados, "vida_maxima") && dados.vida_maxima != null && dados.vida_maxima < 1) {
+    throw erro("vida_maxima precisa ser um número inteiro >= 1.");
+  }
+}
+
+// Confere dano_max >= dano_min depois de mesclar payload + valor já
+// salvo (mesmo raciocínio de validarFaixaNivelZona — nunca validar só
+// o campo enviado isoladamente num PATCH parcial).
+function validarFaixaDanoMonstro(danoMinFinal, danoMaxFinal) {
+  if (danoMinFinal == null || danoMaxFinal == null) return;
+  if (!Number.isInteger(danoMinFinal) || !Number.isInteger(danoMaxFinal)) {
+    throw erro("dano_min e dano_max precisam ser números inteiros.");
+  }
+  if (danoMaxFinal < danoMinFinal) {
+    throw erro("dano_max não pode ser menor que dano_min.");
   }
 }
 
@@ -171,7 +187,8 @@ async function listAdminMonsters() {
 async function createAdminMonster(payload, { idAdmin, req }) {
   const dados = somenteCampos(payload, CAMPOS_MONSTRO);
   if (!dados.nome) throw erro("nome é obrigatório.");
-  validarMultiplicadoresMonstro(dados);
+  validarStatsFixosMonstro(dados);
+  validarFaixaDanoMonstro(dados.dano_min, dados.dano_max);
 
   return sequelize.transaction(async (transaction) => {
     const monstro = await AdventureMonster.create(dados, { transaction });
@@ -188,19 +205,18 @@ async function createAdminMonster(payload, { idAdmin, req }) {
   });
 }
 
-// `balanceContext` (opcional) vem do Editor de Balanceamento por
-// Resultado (Admin Aventura §12) quando o salvamento vier do Modo
-// Simples/Avançado: nível de referência usado e os valores desejados
-// que o admin viu na tela — nunca persistido no AdventureMonster (§9.3
-// "nenhuma migração obrigatória"), só anexado ao audit log pra dar
-// rastreabilidade de POR QUE os multiplicadores viraram esses números.
-async function updateAdminMonster(id, payload, { idAdmin, req, balanceContext = null }) {
+async function updateAdminMonster(id, payload, { idAdmin, req }) {
   const dados = somenteCampos(payload, CAMPOS_MONSTRO);
-  validarMultiplicadoresMonstro(dados);
+  validarStatsFixosMonstro(dados);
 
   return sequelize.transaction(async (transaction) => {
     const monstro = await AdventureMonster.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
     if (!monstro) throw erro("Monstro não encontrado.", 404);
+
+    const danoMinFinal = valorFinal(dados, monstro, "dano_min");
+    const danoMaxFinal = valorFinal(dados, monstro, "dano_max");
+    validarFaixaDanoMonstro(danoMinFinal, danoMaxFinal);
+
     const antes = monstro.toJSON();
     await monstro.update(dados, { transaction });
     const depois = monstro.toJSON();
@@ -210,7 +226,7 @@ async function updateAdminMonster(id, payload, { idAdmin, req, balanceContext = 
       entidade: "AdventureMonster",
       idEntidade: monstro.id,
       dadosAntes: antes,
-      dadosDepois: balanceContext ? { ...depois, balanceContext } : depois,
+      dadosDepois: depois,
       req,
       transaction,
     });
@@ -295,7 +311,12 @@ async function duplicateAdminMonster(id, { idAdmin, req }) {
 }
 
 // ------------------------------------------------------------ APARIÇÕES
-const CAMPOS_APARICAO = ["id_area", "id_monstro", "peso_aparicao", "tipo_aparicao", "nivel_min_override", "nivel_max_override", "ativo"];
+// Reformulação V2 (§4/§9.4) — o vínculo diz só ONDE o monstro aparece
+// e com que frequência/tipo; nivel_min_override/nivel_max_override
+// saíram do payload editável (o nível é sempre AdventureMonster.nivel,
+// nunca escolhido pela aparição). nivel_jogador_minimo é o único campo
+// de nível aqui, e controla só ELEGIBILIDADE — nunca o nível do monstro.
+const CAMPOS_APARICAO = ["id_area", "id_monstro", "peso_aparicao", "tipo_aparicao", "nivel_jogador_minimo", "ativo"];
 
 // adventureRollService.sortearMonstroDaZona soma peso_aparicao de todas
 // as aparições ativas da zona e sorteia proporcionalmente — um peso
@@ -310,29 +331,14 @@ function validarPesoAparicao(peso) {
   }
 }
 
-// adventureRollService.sortearNivelMonstro usa nivel_min_override ??
-// zona.nivel_monstro_min (idem pro max) SEM nenhum clamp — um override
-// fora da faixa da zona vaza direto pro nível do monstro sorteado em
-// combate. A zona é quem controla o intervalo geral (§3 do model); o
-// override só especializa esse intervalo, nunca o ultrapassa.
-function validarOverrideNivel(minOverride, maxOverride, zona) {
-  if (minOverride != null && !Number.isInteger(minOverride)) {
-    throw erro("O nível mínimo do override precisa ser um número inteiro.");
-  }
-  if (maxOverride != null && !Number.isInteger(maxOverride)) {
-    throw erro("O nível máximo do override precisa ser um número inteiro.");
-  }
-  if (minOverride == null && maxOverride == null) return;
-
-  const efetivoMin = minOverride ?? zona.nivel_monstro_min;
-  const efetivoMax = maxOverride ?? zona.nivel_monstro_max;
-  if (efetivoMin > efetivoMax) {
-    throw erro("O nível mínimo do override não pode ser maior que o máximo.");
-  }
-  if (efetivoMin < zona.nivel_monstro_min || efetivoMax > zona.nivel_monstro_max) {
-    throw erro(
-      `O override de nível precisa ficar dentro do intervalo da zona (${zona.nivel_monstro_min}–${zona.nivel_monstro_max}).`,
-    );
+// V2 (§4.3) — nivel_jogador_minimo só decide se a aparição entra no
+// pool ponderado pra aquele jogador; nunca altera nível/stats do
+// monstro. Sem teto (jogador de nível alto pode continuar encontrando
+// monstros fracos, de propósito — §4.3 "sentir sua progressão").
+function validarNivelJogadorMinimo(valor) {
+  if (valor == null) return;
+  if (!Number.isInteger(valor) || valor < 1) {
+    throw erro("nivel_jogador_minimo precisa ser um número inteiro >= 1.");
   }
 }
 
@@ -357,13 +363,13 @@ async function createAdminZoneMonster(payload, { idAdmin, req }) {
   const dados = somenteCampos(payload, CAMPOS_APARICAO);
   if (!dados.id_area || !dados.id_monstro) throw erro("id_area e id_monstro são obrigatórios.");
   if (foiEnviado(dados, "peso_aparicao")) validarPesoAparicao(dados.peso_aparicao);
+  if (foiEnviado(dados, "nivel_jogador_minimo")) validarNivelJogadorMinimo(dados.nivel_jogador_minimo);
 
   return sequelize.transaction(async (transaction) => {
     const zona = await AdventureZone.findByPk(dados.id_area, { transaction });
     if (!zona) throw erro("Zona não encontrada.", 404);
     const monstro = await AdventureMonster.findByPk(dados.id_monstro, { transaction });
     if (!monstro) throw erro("Monstro não encontrado.", 404);
-    validarOverrideNivel(dados.nivel_min_override ?? null, dados.nivel_max_override ?? null, zona);
 
     const existente = await AdventureZoneMonster.findOne({
       where: { id_area: dados.id_area, id_monstro: dados.id_monstro },
@@ -386,21 +392,13 @@ async function createAdminZoneMonster(payload, { idAdmin, req }) {
 }
 
 async function updateAdminZoneMonster(id, payload, { idAdmin, req }) {
-  const dados = somenteCampos(payload, ["peso_aparicao", "tipo_aparicao", "nivel_min_override", "nivel_max_override", "ativo"]);
+  const dados = somenteCampos(payload, ["peso_aparicao", "tipo_aparicao", "nivel_jogador_minimo", "ativo"]);
   if (foiEnviado(dados, "peso_aparicao")) validarPesoAparicao(dados.peso_aparicao);
+  if (foiEnviado(dados, "nivel_jogador_minimo")) validarNivelJogadorMinimo(dados.nivel_jogador_minimo);
 
   return sequelize.transaction(async (transaction) => {
     const vinculo = await AdventureZoneMonster.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
     if (!vinculo) throw erro("Vínculo não encontrado.", 404);
-
-    // id_area nunca muda num PATCH de aparição (não está em
-    // CAMPOS_APARICAO da lista permitida aqui) — a zona do vínculo é
-    // sempre a mesma que validou o override no create.
-    const zona = await AdventureZone.findByPk(vinculo.id_area, { transaction });
-    if (!zona) throw erro("Zona do vínculo não encontrada.", 404);
-    const minOverrideFinal = valorFinal(dados, vinculo, "nivel_min_override");
-    const maxOverrideFinal = valorFinal(dados, vinculo, "nivel_max_override");
-    validarOverrideNivel(minOverrideFinal, maxOverrideFinal, zona);
 
     const antes = vinculo.toJSON();
     await vinculo.update(dados, { transaction });

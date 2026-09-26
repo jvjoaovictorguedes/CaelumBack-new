@@ -1,11 +1,13 @@
 // Admin Aventura — validações de configuração (correção pontual, ver
-// commit desta mudança). Cobre os 5 pontos endurecidos no
+// commit desta mudança). Cobre os pontos endurecidos no
 // adminAdventureService.js: faixa de nível da zona (com mescla de
-// PATCH parcial), peso_aparicao, overrides de nível do
-// AdventureZoneMonster (dentro do intervalo da zona), quantidade de
-// loot e multiplicadores do monstro. Precisa de Postgres migrado
-// (TEST_DATABASE_URL/DATABASE_URL) — sem banco, pulado por completo,
-// mesmo padrão do resto da suíte (ver adminAdventureBalance.test.js).
+// PATCH parcial), peso_aparicao, nivel_jogador_minimo do
+// AdventureZoneMonster (Reformulação V2 — só elegibilidade, não mais
+// override de faixa de nível), quantidade de loot e stats fixos do
+// monstro (Reformulação V2 — substituem os antigos multiplicadores).
+// Precisa de Postgres migrado (TEST_DATABASE_URL/DATABASE_URL) — sem
+// banco, pulado por completo, mesmo padrão do resto da suíte (ver
+// adminAdventureBalance.test.js).
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
@@ -17,7 +19,6 @@ const AdventureZone = require("../src/models/AdventureZone");
 const AdventureZoneMonster = require("../src/models/AdventureZoneMonster");
 const AdventureMonsterLoot = require("../src/models/AdventureMonsterLoot");
 const Item = require("../src/models/Item");
-const { MULTIPLICADOR_MINIMO, MULTIPLICADOR_MAXIMO } = require("../src/config/monsterBalanceConfig");
 
 const adminAdventureService = require("../src/services/adminAdventureService");
 
@@ -256,82 +257,67 @@ testeComBanco("aparição: PATCH de peso_aparicao pra valor inválido é rejeita
   assert.equal(depois.peso_aparicao, 100);
 });
 
-// ---------------------------------------------------------------- OVERRIDE
+// ------------------------------------------------- NIVEL_JOGADOR_MINIMO
 
-testeComBanco("override: dentro do intervalo da zona é aceito", async () => {
+testeComBanco("nivel_jogador_minimo: valor >= 1 é aceito", async () => {
   const zona = await criarZonaDeTeste({ min: 10, max: 20 });
   const monstro = await criarMonstroDeTeste();
   const aparicao = await adminAdventureService.createAdminZoneMonster(
-    { id_area: zona.id, id_monstro: monstro.id, nivel_min_override: 15, nivel_max_override: 18 },
+    { id_area: zona.id, id_monstro: monstro.id, nivel_jogador_minimo: 15 },
     ADMIN_FAKE,
   );
-  assert.equal(aparicao.nivel_min_override, 15);
-  assert.equal(aparicao.nivel_max_override, 18);
+  assert.equal(aparicao.nivel_jogador_minimo, 15);
 });
 
-testeComBanco("override: min > max é rejeitado", async () => {
-  const zona = await criarZonaDeTeste({ min: 10, max: 20 });
-  const monstro = await criarMonstroDeTeste();
-  await assert.rejects(
-    () =>
-      adminAdventureService.createAdminZoneMonster(
-        { id_area: zona.id, id_monstro: monstro.id, nivel_min_override: 18, nivel_max_override: 15 },
-        ADMIN_FAKE,
-      ),
-    /override.*não pode ser maior/i,
-  );
-});
-
-testeComBanco("override: fora do intervalo permitido da zona é rejeitado (acima do máximo)", async () => {
-  const zona = await criarZonaDeTeste({ min: 10, max: 20 });
-  const monstro = await criarMonstroDeTeste();
-  await assert.rejects(
-    () =>
-      adminAdventureService.createAdminZoneMonster(
-        { id_area: zona.id, id_monstro: monstro.id, nivel_min_override: 25, nivel_max_override: 30 },
-        ADMIN_FAKE,
-      ),
-    /dentro do intervalo da zona/i,
-  );
-});
-
-testeComBanco("override: fora do intervalo permitido da zona é rejeitado (abaixo do mínimo)", async () => {
-  const zona = await criarZonaDeTeste({ min: 10, max: 20 });
-  const monstro = await criarMonstroDeTeste();
-  await assert.rejects(
-    () =>
-      adminAdventureService.createAdminZoneMonster(
-        { id_area: zona.id, id_monstro: monstro.id, nivel_min_override: 1, nivel_max_override: 5 },
-        ADMIN_FAKE,
-      ),
-    /dentro do intervalo da zona/i,
-  );
-});
-
-testeComBanco("override: PATCH que amplia o override pra fora da zona é rejeitado", async () => {
-  const zona = await criarZonaDeTeste({ min: 10, max: 20 });
-  const monstro = await criarMonstroDeTeste();
-  const aparicao = await adminAdventureService.createAdminZoneMonster(
-    { id_area: zona.id, id_monstro: monstro.id, nivel_min_override: 15, nivel_max_override: 18 },
-    ADMIN_FAKE,
-  );
-  await assert.rejects(
-    () => adminAdventureService.updateAdminZoneMonster(aparicao.id, { nivel_max_override: 25 }, ADMIN_FAKE),
-    /dentro do intervalo da zona/i,
-  );
-  const depois = await AdventureZoneMonster.findByPk(aparicao.id);
-  assert.equal(depois.nivel_max_override, 18, "não podia ter persistido o override inválido");
-});
-
-testeComBanco("override: sem override nenhum (null/null) continua válido — cai pra faixa da zona", async () => {
+testeComBanco("nivel_jogador_minimo: create sem informar usa o default (1)", async () => {
   const zona = await criarZonaDeTeste({ min: 10, max: 20 });
   const monstro = await criarMonstroDeTeste();
   const aparicao = await adminAdventureService.createAdminZoneMonster(
     { id_area: zona.id, id_monstro: monstro.id },
     ADMIN_FAKE,
   );
-  assert.equal(aparicao.nivel_min_override, null);
-  assert.equal(aparicao.nivel_max_override, null);
+  assert.equal(aparicao.nivel_jogador_minimo, 1);
+});
+
+testeComBanco("nivel_jogador_minimo: 0 é rejeitado", async () => {
+  const zona = await criarZonaDeTeste({ min: 10, max: 20 });
+  const monstro = await criarMonstroDeTeste();
+  await assert.rejects(
+    () =>
+      adminAdventureService.createAdminZoneMonster(
+        { id_area: zona.id, id_monstro: monstro.id, nivel_jogador_minimo: 0 },
+        ADMIN_FAKE,
+      ),
+    /nivel_jogador_minimo.*inteiro/i,
+  );
+});
+
+testeComBanco("nivel_jogador_minimo: valor fracionário é rejeitado", async () => {
+  const zona = await criarZonaDeTeste({ min: 10, max: 20 });
+  const monstro = await criarMonstroDeTeste();
+  await assert.rejects(
+    () =>
+      adminAdventureService.createAdminZoneMonster(
+        { id_area: zona.id, id_monstro: monstro.id, nivel_jogador_minimo: 2.5 },
+        ADMIN_FAKE,
+      ),
+    /nivel_jogador_minimo.*inteiro/i,
+  );
+});
+
+testeComBanco("nivel_jogador_minimo: PATCH com valor inválido é rejeitado sem persistir", async () => {
+  const zona = await criarZonaDeTeste({ min: 10, max: 20 });
+  const monstro = await criarMonstroDeTeste();
+  const aparicao = await adminAdventureService.createAdminZoneMonster(
+    { id_area: zona.id, id_monstro: monstro.id, nivel_jogador_minimo: 5 },
+    ADMIN_FAKE,
+  );
+  await assert.rejects(
+    () => adminAdventureService.updateAdminZoneMonster(aparicao.id, { nivel_jogador_minimo: -1 }, ADMIN_FAKE),
+    /nivel_jogador_minimo.*inteiro/i,
+  );
+  const depois = await AdventureZoneMonster.findByPk(aparicao.id);
+  assert.equal(depois.nivel_jogador_minimo, 5, "não podia ter persistido o valor inválido");
 });
 
 // -------------------------------------------------------------------- LOOT
@@ -452,100 +438,110 @@ testeComBanco(
   },
 );
 
-// ------------------------------------------------------ MULTIPLICADORES
+// ---------------------------------------------------- STATS FIXOS (V2)
 
-testeComBanco("multiplicadores: valores válidos são aceitos", async () => {
+testeComBanco("stats fixos: valores válidos são aceitos", async () => {
   const monstro = await adminAdventureService.createAdminMonster(
     {
       nome: `Monstro Teste ${sufixo()}`,
-      multiplicador_vida: 1.5,
-      multiplicador_dano: 1.2,
-      multiplicador_agilidade: 0.9,
-      multiplicador_velocidade: 1.1,
+      nivel: 5,
+      vida_maxima: 100,
+      dano_min: 5,
+      dano_max: 10,
+      agilidade: 4,
+      velocidade: 4,
+      xp_recompensa: 50,
+      ouro_recompensa: 20,
     },
     ADMIN_FAKE,
   );
   monstrosCriados.push(monstro.id);
-  assert.equal(monstro.multiplicador_vida, 1.5);
+  assert.equal(monstro.vida_maxima, 100);
+  assert.equal(monstro.dano_min, 5);
+  assert.equal(monstro.dano_max, 10);
 });
 
-testeComBanco("multiplicadores: valor negativo é rejeitado", async () => {
+testeComBanco("stats fixos: nivel < 1 é rejeitado", async () => {
   await assert.rejects(
     () =>
       adminAdventureService.createAdminMonster(
-        { nome: `Monstro Teste ${sufixo()}`, multiplicador_vida: -1 },
+        { nome: `Monstro Teste ${sufixo()}`, nivel: 0 },
         ADMIN_FAKE,
       ),
-    /multiplicador_vida.*válido/i,
+    /nivel.*inteiro/i,
   );
 });
 
-testeComBanco("multiplicadores: NaN é rejeitado", async () => {
+testeComBanco("stats fixos: vida_maxima negativa é rejeitada", async () => {
   await assert.rejects(
     () =>
       adminAdventureService.createAdminMonster(
-        { nome: `Monstro Teste ${sufixo()}`, multiplicador_dano: NaN },
+        { nome: `Monstro Teste ${sufixo()}`, vida_maxima: -1 },
         ADMIN_FAKE,
       ),
-    /multiplicador_dano.*válido/i,
+    /vida_maxima.*inteiro/i,
   );
 });
 
-testeComBanco("multiplicadores: Infinity é rejeitado", async () => {
+testeComBanco("stats fixos: valor fracionário (agilidade) é rejeitado", async () => {
   await assert.rejects(
     () =>
       adminAdventureService.createAdminMonster(
-        { nome: `Monstro Teste ${sufixo()}`, multiplicador_agilidade: Infinity },
+        { nome: `Monstro Teste ${sufixo()}`, agilidade: 2.5 },
         ADMIN_FAKE,
       ),
-    /multiplicador_agilidade.*válido/i,
+    /agilidade.*inteiro/i,
   );
 });
 
-testeComBanco("multiplicadores: valor não numérico (string) é rejeitado", async () => {
+testeComBanco("stats fixos: valor não numérico (string) é rejeitado", async () => {
   await assert.rejects(
     () =>
       adminAdventureService.createAdminMonster(
-        { nome: `Monstro Teste ${sufixo()}`, multiplicador_velocidade: "abc" },
+        { nome: `Monstro Teste ${sufixo()}`, velocidade: "abc" },
         ADMIN_FAKE,
       ),
-    /multiplicador_velocidade.*válido/i,
+    /velocidade.*inteiro/i,
   );
 });
 
-testeComBanco("multiplicadores: fora do limite técnico superior é rejeitado", async () => {
+testeComBanco("stats fixos: dano_max menor que dano_min é rejeitado", async () => {
   await assert.rejects(
     () =>
       adminAdventureService.createAdminMonster(
-        { nome: `Monstro Teste ${sufixo()}`, multiplicador_vida: MULTIPLICADOR_MAXIMO + 1000 },
+        { nome: `Monstro Teste ${sufixo()}`, dano_min: 10, dano_max: 5 },
         ADMIN_FAKE,
       ),
-    /multiplicador_vida.*válido/i,
+    /dano_max.*dano_min/i,
   );
 });
 
-testeComBanco("multiplicadores: PATCH com valor inválido é rejeitado sem persistir", async () => {
+testeComBanco("stats fixos: PATCH com valor inválido é rejeitado sem persistir", async () => {
   const monstro = await criarMonstroDeTeste();
   await assert.rejects(
-    () => adminAdventureService.updateAdminMonster(monstro.id, { multiplicador_dano: -5 }, ADMIN_FAKE),
-    /multiplicador_dano.*válido/i,
+    () => adminAdventureService.updateAdminMonster(monstro.id, { ouro_recompensa: -5 }, ADMIN_FAKE),
+    /ouro_recompensa.*inteiro/i,
   );
   const depois = await AdventureMonster.findByPk(monstro.id);
-  assert.equal(depois.multiplicador_dano, 1);
+  assert.equal(depois.ouro_recompensa, null);
 });
 
-testeComBanco("multiplicadores: PATCH tocando só outro campo não exige revalidar os que não vieram", async () => {
-  const monstro = await criarMonstroDeTeste();
-  const atualizado = await adminAdventureService.updateAdminMonster(monstro.id, { ativo: false }, ADMIN_FAKE);
-  assert.equal(atualizado.ativo, false);
-  assert.equal(atualizado.multiplicador_vida, 1);
-});
-
-testeComBanco("multiplicadores: limite mínimo técnico (MULTIPLICADOR_MINIMO) ainda é aceito", async () => {
+testeComBanco("stats fixos: PATCH parcial só com dano_max menor que dano_min ATUAL é rejeitado", async () => {
   const monstro = await adminAdventureService.createAdminMonster(
-    { nome: `Monstro Teste ${sufixo()}`, multiplicador_vida: MULTIPLICADOR_MINIMO },
+    { nome: `Monstro Teste ${sufixo()}`, dano_min: 10, dano_max: 20 },
     ADMIN_FAKE,
   );
   monstrosCriados.push(monstro.id);
-  assert.equal(monstro.multiplicador_vida, MULTIPLICADOR_MINIMO);
+  await assert.rejects(
+    () => adminAdventureService.updateAdminMonster(monstro.id, { dano_max: 5 }, ADMIN_FAKE),
+    /dano_max.*dano_min/i,
+  );
+  const depois = await AdventureMonster.findByPk(monstro.id);
+  assert.equal(depois.dano_max, 20, "não podia ter persistido o PATCH inválido");
+});
+
+testeComBanco("stats fixos: PATCH tocando só outro campo não exige revalidar os que não vieram", async () => {
+  const monstro = await criarMonstroDeTeste();
+  const atualizado = await adminAdventureService.updateAdminMonster(monstro.id, { ativo: false }, ADMIN_FAKE);
+  assert.equal(atualizado.ativo, false);
 });

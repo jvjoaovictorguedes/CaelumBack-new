@@ -147,17 +147,16 @@ testeComBanco("simulação não altera o AdventureMonster nem cria nenhum regist
 });
 
 // -------------------------------------------------------------- §14.2.2
-testeComBanco("update do monstro registra audit log com before/after e o balanceContext apresentado", async () => {
+testeComBanco("update do monstro registra audit log com before/after (stats fixos V2)", async () => {
   const admin = await criarUsuarioAdmin();
   const monstro = await criarMonstroDeTeste();
 
-  const antesMult = monstro.multiplicador_vida;
-  const balanceContext = { referenceLevel: 20, desired: { hpMean: 500 } };
+  const antesVida = monstro.vida_maxima;
 
   await adminAdventureService.updateAdminMonster(
     monstro.id,
-    { multiplicador_vida: 1.75 },
-    { idAdmin: admin.id, req: reqRes({ userId: admin.id }).req, balanceContext },
+    { vida_maxima: 175 },
+    { idAdmin: admin.id, req: reqRes({ userId: admin.id }).req },
   );
 
   const log = await AdminActionLog.findOne({
@@ -165,9 +164,8 @@ testeComBanco("update do monstro registra audit log com before/after e o balance
     order: [["id", "DESC"]],
   });
   assert.ok(log, "devia existir um audit log da alteração");
-  assert.equal(log.dados_antes.multiplicador_vida, antesMult);
-  assert.equal(log.dados_depois.multiplicador_vida, 1.75);
-  assert.deepEqual(log.dados_depois.balanceContext, balanceContext);
+  assert.equal(log.dados_antes.vida_maxima, antesVida);
+  assert.equal(log.dados_depois.vida_maxima, 175);
 });
 
 // -------------------------------------------------------------- §5.1
