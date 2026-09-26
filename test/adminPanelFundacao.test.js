@@ -80,6 +80,7 @@ testeComBanco("createAdminItem cria Item + WeaponProperties na mesma transação
       valor_compra: 100,
       valor_venda: 50,
       peso: 1,
+      tier_equipamento: 3,
       weapon: { dano_min: 5, dano_max: 10, tipo_dano: "Fisico", tipo_arma: "Espada", bonus_atributo: "Forca", valor_bonus_atributo: 1 },
     },
     { idAdmin: admin.id },
@@ -108,6 +109,7 @@ testeComBanco("createAdminItem falhando na criação das propriedades não deixa
         descricao: "teste",
         tipo_item: "Arma",
         raridade: "Comum",
+        tier_equipamento: 3,
         // tipo_dano inválido força o INSERT de WeaponProperties a falhar
         // (ENUM não aceita) — o Item não pode sobreviver a isso.
         weapon: { dano_min: 1, dano_max: 2, tipo_dano: "NaoExiste", tipo_arma: "Espada", bonus_atributo: "Forca", valor_bonus_atributo: 0 },

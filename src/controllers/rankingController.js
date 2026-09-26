@@ -6,10 +6,11 @@ const rankingService = require("../services/rankingService");
 const Character = require("../models/Character");
 const GuildMember = require("../models/GuildMember");
 
-// PvP v2 §3 — "pvp" continua sendo a Arena RANQUEADA (sempre foi, nunca
-// misturou casual); "pvp_casual" é a categoria nova, pontuada só por
+// PvP v2 §3 — "pvp_ranked" é a Arena RANQUEADA (nome alinhado com o
+// frontend, que usa esse valor na aba "PvP Ranqueado" desde a separação
+// casual/ranqueado); "pvp_casual" é a categoria nova, pontuada só por
 // PvpStatus. As duas nunca se misturam.
-const TIPOS_VALIDOS = ["level", "gold", "guild", "pvp", "pvp_casual", "forge", "boss"];
+const TIPOS_VALIDOS = ["level", "gold", "guild", "pvp_ranked", "pvp_casual", "forge", "boss"];
 
 // GET /api/ranking?type=level|gold|guild|pvp|pvp_casual|forge|boss&page=1
 exports.obterRanking = async (req, res) => {
@@ -58,7 +59,7 @@ exports.obterRanking = async (req, res) => {
         }
         break;
 
-      case "pvp":
+      case "pvp_ranked":
         dados = await rankingService.rankingPvp(page);
         if (idPersonagem) {
           dados.minhaPosicao = await rankingService.posicaoPvp(idPersonagem);
