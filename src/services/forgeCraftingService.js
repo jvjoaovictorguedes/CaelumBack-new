@@ -28,7 +28,7 @@ const {
   TIPOS_ACAO_FORJA,
 } = require("../config/forgeConfig");
 const { FORGE_XP_TIER_MULTIPLIER } = require("../config/equipmentTierConfig");
-const { resolverIdItemDoInsumo } = require("./forgeMaterialsService");
+const { resolverIdItemDoInsumo, resolverNomeRecursoDoInsumo } = require("./forgeMaterialsService");
 const { aplicarRaridadeArma, aplicarRaridadeArmadura, aplicarRaridadeVara } = require("./equipmentRarityService");
 const { rolarDegrausQualidadeSuperior, qualidadeComDegraus } = require("./forgeRollService");
 const { bonusesAtivosPara } = require("./guildBuffService");
@@ -48,11 +48,21 @@ async function resolverIngredientesResolvidos(blueprint, qualidade, transaction)
     // qualidade selecionada, sem deixar claro qual das 6 versões o
     // jogador precisa ter.
     const item = await Item.findByPk(idItem, { attributes: ["nome", "imagem_url"], transaction });
+    // nome_recurso NUNCA lê ingrediente.recurso?.nome direto — desde
+    // ProdutoAlquimia (Forja-Materiais), id_recurso é polimórfico e
+    // essa associação sempre tenta casar com ExpeditionResource, o que
+    // mostraria um nome de recurso ERRADO (ou nenhum) pra um
+    // ingrediente de Alquimia. resolverNomeRecursoDoInsumo é a única
+    // fonte correta (ver forgeMaterialsService.js).
+    const nomeRecurso = await resolverNomeRecursoDoInsumo(
+      { tipo_insumo: ingrediente.tipo_insumo, id_recurso: ingrediente.id_recurso },
+      transaction,
+    );
     resolvidos.push({
       id_item: idItem,
       quantidade_necessaria: ingrediente.quantidade_base,
-      nome_recurso: ingrediente.recurso?.nome,
-      nome_item: item?.nome ?? ingrediente.recurso?.nome,
+      nome_recurso: nomeRecurso,
+      nome_item: item?.nome ?? nomeRecurso,
       imagem_url: item?.imagem_url ?? null,
       tipo_insumo: ingrediente.tipo_insumo,
     });
@@ -74,16 +84,44 @@ async function resolverIngredientesResolvidos(blueprint, qualidade, transaction)
 // envolvidos com mais 1 query — todo o resto vira leitura de Map, sem
 // tocar o banco de novo.
 async function carregarResolvedorEmLote() {
-  const [ForgeBarItem, ExpeditionResourceItem] = [require("../models/ForgeBarItem"), require("../models/ExpeditionResourceItem")];
-  const [barras, recursos] = await Promise.all([ForgeBarItem.findAll(), ExpeditionResourceItem.findAll()]);
+  const [ForgeBarItem, ExpeditionResourceItem, ExpeditionResource, AlchemyRecipe] = [
+    require("../models/ForgeBarItem"),
+    require("../models/ExpeditionResourceItem"),
+    require("../models/ExpeditionResource"),
+    require("../models/AlchemyRecipe"),
+  ];
+  const [barras, recursos, expedicaoRecursos, receitas] = await Promise.all([
+    ForgeBarItem.findAll(),
+    ExpeditionResourceItem.findAll(),
+    ExpeditionResource.findAll({ attributes: ["id", "nome"] }),
+    AlchemyRecipe.findAll({ attributes: ["id", "nome", "id_item_resultado"] }),
+  ]);
 
   const porChave = new Map();
   for (const linha of barras) porChave.set(`Barra:${linha.id_recurso}:${linha.qualidade}`, linha.id_item);
   for (const linha of recursos) porChave.set(`RecursoExpedicao:${linha.id_recurso}:${linha.qualidade}`, linha.id_item);
+  // ProdutoAlquimia não tem variante de qualidade — o mesmo id_item_resultado
+  // vale nas 6 qualidades (mesmo racional de resolverIdItemDoInsumo).
+  for (const receita of receitas) {
+    for (const qualidade of ORDEM_QUALIDADE) porChave.set(`ProdutoAlquimia:${receita.id}:${qualidade}`, receita.id_item_resultado);
+  }
+
+  // Nome lógico do insumo (ver resolverNomeRecursoDoInsumo — nunca ler
+  // ingrediente.recurso?.nome direto, id_recurso é polimórfico desde
+  // ProdutoAlquimia).
+  const nomesPorChave = new Map();
+  for (const recurso of expedicaoRecursos) {
+    nomesPorChave.set(`Barra:${recurso.id}`, recurso.nome);
+    nomesPorChave.set(`RecursoExpedicao:${recurso.id}`, recurso.nome);
+  }
+  for (const receita of receitas) nomesPorChave.set(`ProdutoAlquimia:${receita.id}`, receita.nome);
 
   return {
     idItemDoInsumo(tipoInsumo, idRecurso, qualidade) {
       return porChave.get(`${tipoInsumo}:${idRecurso}:${qualidade}`) ?? null;
+    },
+    nomeRecursoDoInsumo(tipoInsumo, idRecurso) {
+      return nomesPorChave.get(`${tipoInsumo}:${idRecurso}`) ?? null;
     },
   };
 }
@@ -94,11 +132,12 @@ function resolverIngredientesResolvidosEmLote(blueprint, qualidade, resolvedor, 
     const idItem = resolvedor.idItemDoInsumo(ingrediente.tipo_insumo, ingrediente.id_recurso, qualidade);
     if (!idItem) return null;
     const item = itensPorId.get(idItem);
+    const nomeRecurso = resolvedor.nomeRecursoDoInsumo(ingrediente.tipo_insumo, ingrediente.id_recurso);
     resolvidos.push({
       id_item: idItem,
       quantidade_necessaria: ingrediente.quantidade_base,
-      nome_recurso: ingrediente.recurso?.nome,
-      nome_item: item?.nome ?? ingrediente.recurso?.nome,
+      nome_recurso: nomeRecurso,
+      nome_item: item?.nome ?? nomeRecurso,
       imagem_url: item?.imagem_url ?? null,
       tipo_insumo: ingrediente.tipo_insumo,
     });
@@ -194,7 +233,11 @@ async function listarBlueprints(characterId, categoria = null) {
     ForgeBlueprint.findAll({
       where: categoria ? { ativo: true, categoria_equipamento: categoria } : { ativo: true },
       include: [
-        { model: ForgeBlueprintIngredient, as: "ingredientes", include: [{ model: require("../models/ExpeditionResource"), as: "recurso" }] },
+        // Sem include de "recurso" aqui de propósito: id_recurso é
+        // polimórfico desde ProdutoAlquimia (Forja-Materiais) — nome
+        // do insumo vem só de resolvedor.nomeRecursoDoInsumo, nunca da
+        // associação Sequelize (ver forgeMaterialsService.js).
+        { model: ForgeBlueprintIngredient, as: "ingredientes" },
         {
           model: Item,
           as: "itemResultado",

@@ -6,7 +6,7 @@ const ForgeBlueprintIngredient = sequelize.define(
   {
     id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
     id_blueprint: { type: DataTypes.INTEGER, allowNull: false },
-    tipo_insumo: { type: DataTypes.ENUM("Barra", "RecursoExpedicao"), allowNull: false },
+    tipo_insumo: { type: DataTypes.ENUM("Barra", "RecursoExpedicao", "ProdutoAlquimia"), allowNull: false },
     id_recurso: { type: DataTypes.INTEGER, allowNull: false },
     quantidade_base: { type: DataTypes.INTEGER, allowNull: false },
   },

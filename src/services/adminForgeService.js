@@ -19,7 +19,7 @@ const ItemRarityAttributeOverride = require("../models/ItemRarityAttributeOverri
 require("../models/associations");
 
 const forgeConfig = require("../config/forgeConfig");
-const { resolverIdItemDoInsumo } = require("./forgeMaterialsService");
+const { resolverIdItemDoInsumo, resolverNomeRecursoDoInsumo } = require("./forgeMaterialsService");
 const { chanceFinalRefinamentoPpm } = require("./forgeRollService");
 const validation = require("./forgeAdminValidationService");
 const { registrarAcao } = require("./adminAuditService");
@@ -79,10 +79,14 @@ const CHAVES_OVERRIDE_POR_CATEGORIA = {
 
 async function carregarBlueprintCompleto(id, transaction) {
   const blueprint = await ForgeBlueprint.findByPk(id, {
-    include: [
-      { model: ForgeBlueprintIngredient, as: "ingredientes", include: [{ model: ExpeditionResource, as: "recurso" }] },
-      ...INCLUDE_RESULTADO_COMPLETO,
-    ],
+    // Sem include de "recurso" aqui de propósito: id_recurso é
+    // polimórfico desde ProdutoAlquimia (Forja-Materiais) — a
+    // associação Sequelize sempre tenta casar com ExpeditionResource,
+    // o que mostraria um nome ERRADO (ou nenhum) pra um ingrediente de
+    // Alquimia. O nome de exibição correto vem da matriz de resolução
+    // (montarRelatorioValidacao -> validation.resolverMatrizIngredientes),
+    // nunca dessa associação.
+    include: [{ model: ForgeBlueprintIngredient, as: "ingredientes" }, ...INCLUDE_RESULTADO_COMPLETO],
     transaction,
   });
   return blueprint;
@@ -542,9 +546,10 @@ async function previewBlueprintAdmin(id, { nivelForja = 1, qualidadeBase = "Comu
   for (const ingrediente of blueprint.ingredientes) {
     const idItem = await resolverIdItemDoInsumo({ tipo_insumo: ingrediente.tipo_insumo, id_recurso: ingrediente.id_recurso, qualidade: qualidadeBase });
     const item = idItem ? await Item.findByPk(idItem, { attributes: ["id", "nome", "imagem_url"] }) : null;
+    const nomeRecurso = await resolverNomeRecursoDoInsumo({ tipo_insumo: ingrediente.tipo_insumo, id_recurso: ingrediente.id_recurso });
     ingredientesResolvidos.push({
       tipo_insumo: ingrediente.tipo_insumo,
-      nome_recurso: ingrediente.recurso?.nome,
+      nome_recurso: nomeRecurso,
       quantidade_necessaria: ingrediente.quantidade_base,
       id_item: idItem,
       nome_item: item?.nome ?? null,
@@ -807,6 +812,36 @@ async function listarRecursosAdmin({ profissao } = {}) {
   return ExpeditionResource.findAll({ where, order: [["profissao", "ASC"], ["nome", "ASC"]] });
 }
 
+// Produtos do Caldeirão elegíveis como ingrediente ProdutoAlquimia
+// (Forja-Materiais) — só receitas ATIVAS, pra nunca deixar o admin
+// escolher uma receita desativada/descontinuada como material novo.
+// Nunca reimplementa nada de Alquimia aqui: só lê AlchemyRecipe (dono
+// desse domínio, ver models/AlchemyRecipe.js). Sem include/associação
+// pro Item de resultado de propósito (mesma decisão documentada em
+// models/associations.js — Alquimia nunca ganha belongsTo com alias
+// pra Item, pra não confundir com equipamento); resolve em lote com uma
+// segunda query, mesma técnica de forgeCraftingService.carregarResolvedorEmLote.
+async function listarProdutosAlquimiaAdmin() {
+  const AlchemyRecipe = require("../models/AlchemyRecipe");
+  const receitas = await AlchemyRecipe.findAll({ where: { ativo: true }, order: [["categoria", "ASC"], ["nome", "ASC"]] });
+  const itens = await Item.findAll({
+    where: { id: receitas.map((r) => r.id_item_resultado) },
+    attributes: ["id", "nome", "imagem_url"],
+  });
+  const itensPorId = new Map(itens.map((i) => [i.id, i]));
+
+  return receitas.map((r) => {
+    const item = itensPorId.get(r.id_item_resultado);
+    return {
+      id: r.id,
+      key: r.key,
+      nome: r.nome,
+      categoria: r.categoria,
+      item_resultado: item ? { id: item.id, nome: item.nome, imagem_url: item.imagem_url } : null,
+    };
+  });
+}
+
 // -----------------------------------------------------------------
 // BALANCEAMENTO (§9/§10) — delega tudo pro forgeSettingsService.
 // -----------------------------------------------------------------
@@ -967,6 +1002,7 @@ module.exports = {
   duplicarScrollAdmin,
   setAtivoScrollAdmin,
   listarRecursosAdmin,
+  listarProdutosAlquimiaAdmin,
   getBalanceamentoAdmin,
   updateBalanceamentoAdmin,
   previewRefinamentoAdmin,

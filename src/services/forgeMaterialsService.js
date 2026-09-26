@@ -4,14 +4,43 @@
 // cliente (spec §54), sempre recalcular aqui a partir do recurso.
 const ForgeBarItem = require("../models/ForgeBarItem");
 const ExpeditionResourceItem = require("../models/ExpeditionResourceItem");
+const ExpeditionResource = require("../models/ExpeditionResource");
+const AlchemyRecipe = require("../models/AlchemyRecipe");
 
 async function resolverIdItemDoInsumo({ tipo_insumo, id_recurso, qualidade }, transaction) {
   if (tipo_insumo === "Barra") {
     const vinculo = await ForgeBarItem.findOne({ where: { id_recurso, qualidade }, transaction });
     return vinculo?.id_item ?? null;
   }
+  if (tipo_insumo === "ProdutoAlquimia") {
+    // Produto do Caldeirão (spec Alquimia §3/§6.1) nunca tem variante
+    // de qualidade como Barra/RecursoExpedicao — o mesmo Item de
+    // resultado da receita vale nas 6 qualidades da Forja (ignorado
+    // aqui de propósito, nunca lido).
+    const receita = await AlchemyRecipe.findByPk(id_recurso, { transaction });
+    return receita?.id_item_resultado ?? null;
+  }
   const vinculo = await ExpeditionResourceItem.findOne({ where: { id_recurso, qualidade }, transaction });
   return vinculo?.id_item ?? null;
 }
 
-module.exports = { resolverIdItemDoInsumo };
+// id_recurso é polimórfico desde que ProdutoAlquimia existe (ver
+// migration 20261216010000): pra Barra/RecursoExpedicao aponta pra
+// ExpeditionResource.id, pra ProdutoAlquimia aponta pra AlchemyRecipe.id
+// — NUNCA confiar na associação Sequelize "recurso" (ForgeBlueprintIngredient
+// .belongsTo(ExpeditionResource)) pra exibir o nome de um ingrediente
+// ProdutoAlquimia: sem FK de banco entre as duas tabelas, um id_recurso
+// de receita pode coincidir por acaso com o id de um ExpeditionResource
+// não relacionado e mostrar o nome errado. Esta função é a ÚNICA fonte
+// pra "nome lógico do insumo" — nunca ler ingrediente.recurso?.nome
+// direto em outro lugar.
+async function resolverNomeRecursoDoInsumo({ tipo_insumo, id_recurso }, transaction) {
+  if (tipo_insumo === "ProdutoAlquimia") {
+    const receita = await AlchemyRecipe.findByPk(id_recurso, { transaction });
+    return receita?.nome ?? null;
+  }
+  const recurso = await ExpeditionResource.findByPk(id_recurso, { transaction });
+  return recurso?.nome ?? null;
+}
+
+module.exports = { resolverIdItemDoInsumo, resolverNomeRecursoDoInsumo };

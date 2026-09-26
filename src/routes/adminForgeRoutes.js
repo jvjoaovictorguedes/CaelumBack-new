@@ -53,6 +53,9 @@ router.post("/scrolls/:itemId/reactivate", podeGerenciarConteudo, adminForgeCont
 // Recursos (seletor de ingrediente lógico) — qualquer uma das duas
 // permissões da Forja já basta pra só LER a lista de recursos.
 router.get("/resources", podeGerenciarConteudo, adminForgeController.listarRecursos);
+// Produtos do Caldeirão elegíveis como ingrediente ProdutoAlquimia
+// (Forja-Materiais) — mesmo critério de permissão do seletor acima.
+router.get("/alchemy-products", podeGerenciarConteudo, adminForgeController.listarProdutosAlquimia);
 
 // Balanceamento / métricas
 router.get("/balance", podeBalancear, adminForgeController.obterBalanceamento);
