@@ -96,6 +96,15 @@ WeaponProperties.belongsTo(Item, { foreignKey: "id_item" });
 Item.hasOne(ArmorProperties, { foreignKey: "id_item", as: "armorProperties" });
 ArmorProperties.belongsTo(Item, { foreignKey: "id_item" });
 
+// Override admin de atributos por Raridade (ver equipmentRarityService.js
+// e migration 20261213010000) — até 6 linhas por Item (uma por
+// qualidade), carregadas junto sempre que weaponProperties/
+// armorProperties/fishingRodProperties também forem, pra
+// aplicarRaridade* nunca precisar de uma query extra em runtime.
+const ItemRarityAttributeOverride = require("./ItemRarityAttributeOverride");
+Item.hasMany(ItemRarityAttributeOverride, { foreignKey: "id_item", as: "raridadeOverrides" });
+ItemRarityAttributeOverride.belongsTo(Item, { foreignKey: "id_item" });
+
 Item.hasOne(ConsumableProperties, { foreignKey: "id_item", as: "consumableProperties" });
 ConsumableProperties.belongsTo(Item, { foreignKey: "id_item" });
 

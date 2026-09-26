@@ -287,6 +287,104 @@ testeComBanco("Item resultado: ativar exige Item configurado, bloqueia com categ
   assert.equal(ativado.id_item_resultado, itemCerto.id, "qualquer raridade produzida por esse blueprint usa sempre o MESMO Item canônico");
 });
 
+testeComBanco("salvarOverrideRaridadeAdmin: exige Item resultado vinculado, valida categoria e persiste só chaves numéricas válidas", async () => {
+  const admin = await criarUsuarioAdmin();
+  const { recurso } = await montarRecursoBarraCompleto();
+  const blueprint = await adminForgeService.criarBlueprintAdmin(
+    {
+      nome: `Blueprint Override ${sufixo()}`,
+      categoria_equipamento: "Arma",
+      tier_equipamento: 2,
+      multiplicador_tempo: 1,
+      nivel_forja_minimo: 1,
+      ingredientes: [{ tipo_insumo: "Barra", id_recurso: recurso.id, quantidade_base: 1 }],
+    },
+    { idAdmin: admin.id },
+  );
+  blueprintsCriados.push(blueprint.id);
+
+  // Sem id_item_resultado ainda — rejeita.
+  await assert.rejects(
+    () => adminForgeService.salvarOverrideRaridadeAdmin(blueprint.id, "Lendario", { dano_min: 50 }, { idAdmin: admin.id }),
+    /Item resultado vinculado/,
+  );
+
+  const itemArma = await criarItemArma("Comum", 2);
+  await adminForgeService.atualizarBlueprintAdmin(blueprint.id, { id_item_resultado: itemArma.id }, { idAdmin: admin.id });
+
+  // Chave inválida pra categoria Arma (defesa é de Armadura).
+  await assert.rejects(
+    () => adminForgeService.salvarOverrideRaridadeAdmin(blueprint.id, "Lendario", { defesa: 100 }, { idAdmin: admin.id }),
+    /inválido\(s\) pra Arma/,
+  );
+
+  // Qualidade inválida.
+  await assert.rejects(
+    () => adminForgeService.salvarOverrideRaridadeAdmin(blueprint.id, "Lendaria", { dano_min: 50 }, { idAdmin: admin.id }),
+    /Qualidade inválida/,
+  );
+
+  // Chave desconhecida no payload é rejeitada (nunca ignorada em silêncio).
+  await assert.rejects(
+    () => adminForgeService.salvarOverrideRaridadeAdmin(blueprint.id, "Lendario", { dano_min: 50, chave_lixo: 1 }, { idAdmin: admin.id }),
+    /Atributo\(s\) inválido\(s\) pra Arma: chave_lixo/,
+  );
+
+  const override = await adminForgeService.salvarOverrideRaridadeAdmin(
+    blueprint.id,
+    "Lendario",
+    { dano_min: 50, dano_max: "80" },
+    { idAdmin: admin.id },
+  );
+  assert.equal(override.id_item, itemArma.id, "chave real é id_item_resultado, não o blueprint");
+  assert.equal(override.qualidade, "Lendario");
+  assert.deepEqual(override.atributos, { dano_min: 50, dano_max: 80 }, "string numérica converte");
+
+  // Recarregar o blueprint (mesmo caminho que o admin usa pra ver a tela) já traz o override junto.
+  const recarregado = await adminForgeService.obterBlueprintAdmin(blueprint.id);
+  assert.equal(recarregado.blueprint.itemResultado.raridadeOverrides.length, 1);
+  assert.deepEqual(recarregado.blueprint.itemResultado.raridadeOverrides[0].atributos, { dano_min: 50, dano_max: 80 });
+
+  // Upsert: salvar de novo na mesma qualidade substitui, não duplica.
+  await adminForgeService.salvarOverrideRaridadeAdmin(blueprint.id, "Lendario", { dano_min: 999 }, { idAdmin: admin.id });
+  const apos = await adminForgeService.obterBlueprintAdmin(blueprint.id);
+  assert.equal(apos.blueprint.itemResultado.raridadeOverrides.length, 1);
+  assert.deepEqual(apos.blueprint.itemResultado.raridadeOverrides[0].atributos, { dano_min: 999 }, "chave omitida da segunda chamada não sobrevive — cada save é o estado completo daquela raridade");
+
+  const removido = await adminForgeService.removerOverrideRaridadeAdmin(blueprint.id, "Lendario", { idAdmin: admin.id });
+  assert.equal(removido.removido, true);
+  const semOverride = await adminForgeService.obterBlueprintAdmin(blueprint.id);
+  assert.equal(semOverride.blueprint.itemResultado.raridadeOverrides.length, 0);
+});
+
+testeComBanco("previewBlueprintAdmin reflete o override de raridade cadastrado", async () => {
+  const admin = await criarUsuarioAdmin();
+  const { recurso } = await montarRecursoBarraCompleto();
+  const blueprint = await adminForgeService.criarBlueprintAdmin(
+    {
+      nome: `Blueprint Preview Override ${sufixo()}`,
+      categoria_equipamento: "Arma",
+      tier_equipamento: 2,
+      multiplicador_tempo: 1,
+      nivel_forja_minimo: 1,
+      ingredientes: [{ tipo_insumo: "Barra", id_recurso: recurso.id, quantidade_base: 1 }],
+    },
+    { idAdmin: admin.id },
+  );
+  blueprintsCriados.push(blueprint.id);
+  const itemArma = await criarItemArma("Comum", 2);
+  await WeaponProperties.update({ dano_min: 10, dano_max: 20 }, { where: { id_item: itemArma.id } });
+  await adminForgeService.atualizarBlueprintAdmin(blueprint.id, { id_item_resultado: itemArma.id }, { idAdmin: admin.id });
+
+  const antesDoOverride = await adminForgeService.previewBlueprintAdmin(blueprint.id, { qualidadeBase: "Mitico", nivelForja: 1 });
+  assert.equal(antesDoOverride.item_resultado_qualidade_base.propriedades.dano_max, 27, "10 * 1.35 arredondado, sem override ainda");
+
+  await adminForgeService.salvarOverrideRaridadeAdmin(blueprint.id, "Mitico", { dano_max: 777 }, { idAdmin: admin.id });
+  const depoisDoOverride = await adminForgeService.previewBlueprintAdmin(blueprint.id, { qualidadeBase: "Mitico", nivelForja: 1 });
+  assert.equal(depoisDoOverride.item_resultado_qualidade_base.propriedades.dano_max, 777);
+  assert.equal(depoisDoOverride.item_resultado_qualidade_base.propriedades.dano_min, 14, "chave sem override continua vindo do multiplicador: 10 * 1.35 = 13.5 -> Math.round arredonda pra 14");
+});
+
 testeComBanco("Ingredientes: matriz de resolução cobre as 6 qualidades (Barra)", async () => {
   const { recurso, itensPorQualidade } = await montarRecursoBarraCompleto();
   const matriz = await require("../src/services/forgeAdminValidationService").resolverMatrizIngredientes([

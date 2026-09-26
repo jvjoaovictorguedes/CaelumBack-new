@@ -9,6 +9,7 @@ const Item = require("../models/Item");
 const ArmorProperties = require("../models/ArmorProperties");
 const WeaponProperties = require("../models/WeaponProperties");
 const ConsumableProperties = require("../models/ConsumableProperties");
+const ItemRarityAttributeOverride = require("../models/ItemRarityAttributeOverride");
 const { listarInstancias, formatarInstancia, formatarEquipado, ESTADOS } = require("../services/equipmentInstanceService");
 const { resolverConjuntosEquipados } = require("../services/equipmentSetService");
 
@@ -46,6 +47,7 @@ exports.obterInventarioV2 = async (req, res) => {
             include: [
               { model: WeaponProperties, as: "weaponProperties" },
               { model: ArmorProperties, as: "armorProperties" },
+              { model: ItemRarityAttributeOverride, as: "raridadeOverrides" },
             ],
           },
           { model: CharacterEquipmentInstance, as: "instancia" },

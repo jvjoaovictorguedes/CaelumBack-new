@@ -56,6 +56,29 @@ exports.atualizarBlueprint = async (req, res) => {
   }
 };
 
+exports.salvarOverrideRaridade = async (req, res) => {
+  try {
+    const override = await adminForgeService.salvarOverrideRaridadeAdmin(
+      req.params.id,
+      req.params.qualidade,
+      req.body?.atributos ?? {},
+      { idAdmin: req.user.id, req },
+    );
+    res.status(200).json({ status: "success", data: { override } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao salvar o override de raridade.");
+  }
+};
+
+exports.removerOverrideRaridade = async (req, res) => {
+  try {
+    const resultado = await adminForgeService.removerOverrideRaridadeAdmin(req.params.id, req.params.qualidade, { idAdmin: req.user.id, req });
+    res.status(200).json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao remover o override de raridade.");
+  }
+};
+
 exports.duplicarBlueprint = async (req, res) => {
   try {
     const blueprint = await adminForgeService.duplicarBlueprintAdmin(req.params.id, { idAdmin: req.user.id, req });

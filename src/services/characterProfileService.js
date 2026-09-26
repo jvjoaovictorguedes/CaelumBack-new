@@ -10,6 +10,7 @@ const CharacterEquipment = require("../models/CharacterEquipment");
 const Item = require("../models/Item");
 const WeaponProperties = require("../models/WeaponProperties");
 const ArmorProperties = require("../models/ArmorProperties");
+const ItemRarityAttributeOverride = require("../models/ItemRarityAttributeOverride");
 const CharacterEquipmentInstance = require("../models/CharacterEquipmentInstance");
 const CharacterForgeProgress = require("../models/CharacterForgeProgress");
 const CharacterProfession = require("../models/CharacterProfession");
@@ -115,6 +116,7 @@ async function montarEquipamentosPublicos(idPersonagem) {
         include: [
           { model: WeaponProperties, as: "weaponProperties" },
           { model: ArmorProperties, as: "armorProperties" },
+          { model: ItemRarityAttributeOverride, as: "raridadeOverrides" },
         ],
       },
       { model: CharacterEquipmentInstance, as: "instancia" },

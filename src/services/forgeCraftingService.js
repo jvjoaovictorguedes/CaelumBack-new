@@ -118,7 +118,7 @@ function resolverIngredientesResolvidosEmLote(blueprint, qualidade, resolvedor, 
 function propriedadesDoResultado(item, raridade) {
   if (!item) return null;
   if (item.weaponProperties) {
-    const p = aplicarRaridadeArma(item.weaponProperties, raridade);
+    const p = aplicarRaridadeArma(item.weaponProperties, raridade, item.raridadeOverrides);
     return {
       tipo: "Arma",
       dano_min: p.dano_min,
@@ -129,7 +129,7 @@ function propriedadesDoResultado(item, raridade) {
     };
   }
   if (item.armorProperties) {
-    const p = aplicarRaridadeArmadura(item.armorProperties, raridade);
+    const p = aplicarRaridadeArmadura(item.armorProperties, raridade, item.raridadeOverrides);
     return {
       tipo: "Armadura",
       defesa: p.defesa,
@@ -141,7 +141,7 @@ function propriedadesDoResultado(item, raridade) {
     };
   }
   if (item.fishingRodProperties) {
-    const p = aplicarRaridadeVara(item.fishingRodProperties, raridade);
+    const p = aplicarRaridadeVara(item.fishingRodProperties, raridade, item.raridadeOverrides);
     return {
       tipo: "Ferramenta",
       forca_linha: p.forca_linha,
@@ -202,6 +202,7 @@ async function listarBlueprints(characterId, categoria = null) {
             { model: WeaponProperties, as: "weaponProperties" },
             { model: ArmorProperties, as: "armorProperties" },
             { model: require("../models/FishingRodProperties"), as: "fishingRodProperties" },
+            { model: require("../models/ItemRarityAttributeOverride"), as: "raridadeOverrides" },
           ],
         },
       ],

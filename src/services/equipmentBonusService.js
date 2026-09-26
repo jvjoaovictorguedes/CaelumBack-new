@@ -12,9 +12,11 @@ const WeaponProperties = require("../models/WeaponProperties");
 const ArmorProperties = require("../models/ArmorProperties");
 const CharacterAbilities = require("../models/CharacterAbilities");
 const Power = require("../models/Power");
+const ItemRarityAttributeOverride = require("../models/ItemRarityAttributeOverride");
 const { ATRIBUTO_PARA_CAMPO } = require("./combatFormulas");
 const { multiplicadorEfeito } = require("./abilityLevelService");
 const { propriedadesEfetivasArma, propriedadesEfetivasArmadura } = require("./equipmentRefinementService");
+const { aplicarRaridadeArma, aplicarRaridadeArmadura } = require("./equipmentRarityService");
 const { resolverConjuntosEquipados } = require("./equipmentSetService");
 // Só o require garante que a associação (com alias explícito) já foi
 // declarada — ver models/associations.js pra fonte única.
@@ -42,6 +44,7 @@ async function buscarBonusDeAtributos(idPersonagem, transaction) {
           include: [
             { model: WeaponProperties, as: "weaponProperties" },
             { model: ArmorProperties, as: "armorProperties" },
+            { model: ItemRarityAttributeOverride, as: "raridadeOverrides" },
           ],
         },
         // Inventário v2 (§6/§7) — id_instancia é null pra equipamento
@@ -88,14 +91,24 @@ async function buscarBonusDeAtributos(idPersonagem, transaction) {
     const item = equipamento.item;
     if (!item) continue;
 
-    // Inventário v2 §6/§7 — o bônus percentual de refinamento incide
-    // SÓ nas propriedades do próprio equipamento, nunca nos atributos-
-    // base do personagem. Instância null (equipamento legado, ainda
-    // sem migrar) equivale a refinamento 0 — propriedadesEfetivas*
-    // devolve os valores crus intactos nesse caso.
+    // Ordem obrigatória (§5.2 da spec V2, ver header de
+    // equipmentRarityService.js): base do Item -> raridade da INSTÂNCIA
+    // -> refinamento. Faltava o passo do meio aqui — bônus de combate
+    // real vinha só de base+refino, então equipar uma cópia Lendária ou
+    // Comum do mesmo item dava o MESMO poder de combate (só a tela de
+    // inventário, via formatarInstancia/formatarEquipado, refletia a
+    // raridade). Instância null (equipamento legado) ou sem raridade
+    // ainda setada equivale a Comum (sem multiplicador).
+    const raridade = equipamento.instancia?.raridade ?? null;
     const refinamento = equipamento.instancia?.refinamento ?? 0;
-    const armorEfetivo = propriedadesEfetivasArmadura(item.armorProperties, refinamento);
-    const weaponEfetivo = propriedadesEfetivasArma(item.weaponProperties, refinamento);
+    const armorComRaridade = raridade
+      ? aplicarRaridadeArmadura(item.armorProperties, raridade, item.raridadeOverrides)
+      : item.armorProperties;
+    const weaponComRaridade = raridade
+      ? aplicarRaridadeArma(item.weaponProperties, raridade, item.raridadeOverrides)
+      : item.weaponProperties;
+    const armorEfetivo = propriedadesEfetivasArmadura(armorComRaridade, refinamento);
+    const weaponEfetivo = propriedadesEfetivasArma(weaponComRaridade, refinamento);
 
     if (armorEfetivo) {
       bonus.forca += armorEfetivo.bonus_forca || 0;

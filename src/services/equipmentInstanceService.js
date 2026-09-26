@@ -8,6 +8,7 @@ const CharacterEquipment = require("../models/CharacterEquipment");
 const Item = require("../models/Item");
 const ArmorProperties = require("../models/ArmorProperties");
 const WeaponProperties = require("../models/WeaponProperties");
+const ItemRarityAttributeOverride = require("../models/ItemRarityAttributeOverride");
 const { propriedadesEfetivasArma, propriedadesEfetivasArmadura } = require("./equipmentRefinementService");
 const { validarRaridade, aplicarRaridadeArma, aplicarRaridadeArmadura } = require("./equipmentRarityService");
 
@@ -240,6 +241,7 @@ async function listarInstancias(idPersonagem, transaction) {
         include: [
           { model: WeaponProperties, as: "weaponProperties" },
           { model: ArmorProperties, as: "armorProperties" },
+          { model: ItemRarityAttributeOverride, as: "raridadeOverrides" },
         ],
       },
     ],
@@ -257,8 +259,12 @@ function formatarInstancia(instancia) {
   // NULL só durante a transição pra quem ainda não passou pelo
   // Backfill — nesse caso mantém a base crua (equivalente a Comum, sem
   // mascarar um bug de criação já corrigido em equipmentInstanceService.create).
-  const weaponComRaridade = instancia.raridade ? aplicarRaridadeArma(item?.weaponProperties, instancia.raridade) : item?.weaponProperties;
-  const armorComRaridade = instancia.raridade ? aplicarRaridadeArmadura(item?.armorProperties, instancia.raridade) : item?.armorProperties;
+  const weaponComRaridade = instancia.raridade
+    ? aplicarRaridadeArma(item?.weaponProperties, instancia.raridade, item?.raridadeOverrides)
+    : item?.weaponProperties;
+  const armorComRaridade = instancia.raridade
+    ? aplicarRaridadeArmadura(item?.armorProperties, instancia.raridade, item?.raridadeOverrides)
+    : item?.armorProperties;
   const weaponEfetivo = propriedadesEfetivasArma(weaponComRaridade, instancia.refinamento);
   const armorEfetivo = propriedadesEfetivasArmadura(armorComRaridade, instancia.refinamento);
   return {
@@ -284,8 +290,12 @@ function formatarEquipado(equipamento) {
   const item = equipamento.item;
   const refinamento = equipamento.instancia?.refinamento ?? 0;
   const raridade = equipamento.instancia?.raridade ?? null;
-  const weaponComRaridade = raridade ? aplicarRaridadeArma(item?.weaponProperties, raridade) : item?.weaponProperties;
-  const armorComRaridade = raridade ? aplicarRaridadeArmadura(item?.armorProperties, raridade) : item?.armorProperties;
+  const weaponComRaridade = raridade
+    ? aplicarRaridadeArma(item?.weaponProperties, raridade, item?.raridadeOverrides)
+    : item?.weaponProperties;
+  const armorComRaridade = raridade
+    ? aplicarRaridadeArmadura(item?.armorProperties, raridade, item?.raridadeOverrides)
+    : item?.armorProperties;
   const weaponEfetivo = propriedadesEfetivasArma(weaponComRaridade, refinamento);
   const armorEfetivo = propriedadesEfetivasArmadura(armorComRaridade, refinamento);
   return {

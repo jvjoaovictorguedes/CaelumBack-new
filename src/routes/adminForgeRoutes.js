@@ -29,6 +29,13 @@ router.post("/blueprints/:id/validate", podeGerenciarConteudo, adminForgeControl
 router.post("/blueprints/:id/activate", podeGerenciarConteudo, adminForgeController.ativarBlueprint);
 router.post("/blueprints/:id/deactivate", podeGerenciarConteudo, adminForgeController.desativarBlueprint);
 router.get("/blueprints/:id/preview", podeGerenciarConteudo, adminForgeController.previewBlueprint);
+// Override de atributos por Raridade do Item que o blueprint produz —
+// chave real é id_item_resultado (ver comentário na migration
+// 20261213010000), mas exposto por blueprint pra bater com como o admin
+// pensa a tela. Overrides existentes já vêm junto no GET /blueprints/:id
+// (blueprint.itemResultado.raridadeOverrides).
+router.put("/blueprints/:id/rarity-overrides/:qualidade", podeGerenciarConteudo, adminForgeController.salvarOverrideRaridade);
+router.delete("/blueprints/:id/rarity-overrides/:qualidade", podeGerenciarConteudo, adminForgeController.removerOverrideRaridade);
 
 // Barras
 router.get("/bars", podeGerenciarConteudo, adminForgeController.listarBarras);
