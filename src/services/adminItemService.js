@@ -15,6 +15,12 @@ const TIPOS_ARMA = ["Arma"];
 const TIPOS_ARMADURA = ["Armadura", "Capacete", "Escudo", "Acessorio1", "Acessorio2"];
 const TIPOS_CONSUMIVEL = ["Consumivel"];
 const TIPOS_FERRAMENTA = ["Ferramenta"];
+// EQUIPAMENTOS TIER — Melhoria: mesma regra que já valia pra Blueprint
+// da Forja (forgeAdminValidationService exige tier_equipamento pra
+// CRIAR um blueprint) agora vale também pro Item em si, direto no
+// Painel de Itens — o admin não descobre mais que esqueceu o Tier só
+// quando a validação do blueprint falhar depois, bem mais tarde.
+const TIPOS_EQUIPAMENTO = [...TIPOS_ARMA, ...TIPOS_ARMADURA, ...TIPOS_FERRAMENTA];
 
 const ENUM_TIPO_ITEM = Item.rawAttributes.tipo_item.values;
 const ENUM_RARIDADE = Item.rawAttributes.raridade.values;
@@ -89,6 +95,25 @@ function arredondarBonusDeArma(camposWeapon) {
   return camposWeapon;
 }
 
+// EQUIPAMENTOS TIER — Melhoria: "os equipamentos (armadura, capacete,
+// arma, etc.) agora terão os tiers criados juntos". `exigirPresenca`
+// (true só em createAdminItem) exige o campo desde a criação — em
+// updateAdminItem o item pode ser um equipamento legado que nasceu
+// antes desta regra e ainda não tem Tier; não vamos travar toda edição
+// dele por causa disso. O que update SEMPRE bloqueia, novo ou legado,
+// é a REGRESSÃO: mandar tier_equipamento explicitamente null pra um
+// equipamento que já tinha um Tier definido.
+function validarTierEquipamento(tipoItem, dadosItem, { exigirPresenca }) {
+  if (!TIPOS_EQUIPAMENTO.includes(tipoItem)) return [];
+  if (exigirPresenca && (dadosItem.tier_equipamento === undefined || dadosItem.tier_equipamento === null)) {
+    return [`tier_equipamento é obrigatório para equipamentos (${TIPOS_EQUIPAMENTO.join("/")}) — defina o Tier (1 a 5) já na criação.`];
+  }
+  if (!exigirPresenca && dadosItem.tier_equipamento === null) {
+    return ["tier_equipamento não pode ser removido de um equipamento — defina um novo Tier (1 a 5) em vez de deixar em branco."];
+  }
+  return [];
+}
+
 function validarCamposBase(dadosItem) {
   const erros = [];
   if (!dadosItem.nome || typeof dadosItem.nome !== "string" || !dadosItem.nome.trim()) {
@@ -140,6 +165,7 @@ async function createAdminItem(payload, { idAdmin, req } = {}) {
   if (TIPOS_ARMADURA.includes(dadosItem.tipo_item) && !payload.armor) erros.push(`Item do tipo "${dadosItem.tipo_item}" exige propriedades de armadura.`);
   if (TIPOS_CONSUMIVEL.includes(dadosItem.tipo_item) && !payload.consumable) erros.push('Item do tipo "Consumivel" exige propriedades de efeito.');
   if (TIPOS_FERRAMENTA.includes(dadosItem.tipo_item) && !payload.fishingRod) erros.push('Item do tipo "Ferramenta" exige propriedades de vara de pesca.');
+  erros.push(...validarTierEquipamento(dadosItem.tipo_item, dadosItem, { exigirPresenca: true }));
 
   if (erros.length > 0) throw erroDeValidacao(erros);
 
@@ -191,6 +217,9 @@ async function updateAdminItem(idItem, payload, { idAdmin, req } = {}) {
       erro.statusCode = 404;
       throw erro;
     }
+    const errosTier = validarTierEquipamento(item.tipo_item, dadosItem, { exigirPresenca: false });
+    if (errosTier.length > 0) throw erroDeValidacao(errosTier);
+
     await item.reload({
       transaction,
       include: [
