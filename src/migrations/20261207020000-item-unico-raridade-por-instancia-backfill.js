@@ -27,9 +27,12 @@
 module.exports = {
   async up(queryInterface) {
     await queryInterface.sequelize.transaction(async (transaction) => {
+      // Cast via texto: "Items".raridade e character_equipment_instances.
+      // raridade são dois ENUMs Postgres DISTINTOS (mesmos valores, tipos
+      // diferentes) — Postgres não converte implicitamente entre eles.
       await queryInterface.sequelize.query(
         `UPDATE character_equipment_instances cei
-         SET raridade = i.raridade
+         SET raridade = i.raridade::text::"enum_character_equipment_instances_raridade"
          FROM "Items" i
          WHERE cei.id_item = i.id AND cei.raridade IS NULL;`,
         { transaction },
