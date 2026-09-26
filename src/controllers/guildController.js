@@ -15,9 +15,9 @@ const { pontuarContribuicao, pontosPorDoacao } = require("../services/guildContr
 const { emitParaGuild, removerDaSalaDeGuild } = require("../socket/guildSocket");
 const achievementService = require("../services/achievementService");
 
-const CUSTO_CRIACAO = 500;
-const NIVEL_MINIMO_CRIACAO = 5;
-const CONVITE_VALIDADE_HORAS = 72;
+const CUSTO_CRIACAO = 5000;
+const NIVEL_MINIMO_CRIACAO = 10;
+const CONVITE_VALIDADE_HORAS = 48;
 
 Character.hasOne(GuildMember, { foreignKey: "id_personagem" });
 GuildMember.belongsTo(Character, { foreignKey: "id_personagem" });
