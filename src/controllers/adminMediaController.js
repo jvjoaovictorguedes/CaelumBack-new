@@ -1,5 +1,26 @@
 // Painel Administrativo Fase 3 — controller fino da Biblioteca de Mídia.
+const sharp = require("sharp");
 const mediaAssetService = require("../services/mediaAssetService");
+
+// Placeholder servido quando o grupo/versão não existe (imagem_url
+// referenciando uma mídia que nunca foi enviada, ou envio antigo já
+// desativado). Sem isso, o corpo era um JSON de erro com Content-Type
+// application/json — um <img src> cross-origin pedindo isso é
+// exatamente o cenário que o Chrome bloqueia como ORB
+// (net::ERR_BLOCKED_BY_ORB), aparecendo como ícone quebrado em vez de
+// qualquer coisa reconhecível. Gerado uma vez (bytes fixos, nunca
+// mudam) e cacheado em memória — nunca lido do disco nem do banco.
+let placeholderPromise = null;
+function obterPlaceholder() {
+  if (!placeholderPromise) {
+    placeholderPromise = sharp({
+      create: { width: 128, height: 128, channels: 4, background: { r: 58, g: 47, b: 36, alpha: 1 } },
+    })
+      .png()
+      .toBuffer();
+  }
+  return placeholderPromise;
+}
 
 function tratarErro(res, error, mensagemPadrao) {
   const statusCode = error.statusCode || 500;
@@ -20,6 +41,19 @@ exports.listar = async (req, res) => {
     res.status(200).json({ status: "success", data: resultado });
   } catch (error) {
     tratarErro(res, error, "Erro interno do servidor ao listar mídia.");
+  }
+};
+
+// Diagnóstico manual (nunca chamado pelo jogo em si) — lista Item/Power/
+// EquipmentSet/AdventureMonster cuja imagem_url aponta pra um grupo sem
+// versão ativa, pra achar de uma vez toda referência quebrada em vez de
+// checar imagem por imagem no DevTools.
+exports.referenciasQuebradas = async (req, res) => {
+  try {
+    const itens = await mediaAssetService.listarReferenciasQuebradas();
+    res.status(200).json({ status: "success", data: { total: itens.length, itens } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao verificar referências de mídia.");
   }
 };
 
@@ -85,7 +119,14 @@ exports.servir = async (req, res) => {
     const versaoQuery = req.query.v ? Number(req.query.v) : undefined;
     const asset = await mediaAssetService.getBytesForServing(req.params.grupo, versaoQuery);
     if (!asset) {
-      return res.status(404).json({ message: "Mídia não encontrada." });
+      res.set("Content-Type", "image/png");
+      // Nunca cacheia o placeholder — se a mídia de verdade for enviada
+      // depois (ou a referência corrigida), a PRÓXIMA requisição precisa
+      // pegar o real, nunca ficar presa no placeholder por causa de um
+      // cache antigo.
+      res.set("Cache-Control", "no-store");
+      const bytes = await obterPlaceholder();
+      return res.status(404).send(bytes);
     }
     res.set("Content-Type", asset.mime);
     // Só cacheia forte quando uma versão específica foi pedida (essa

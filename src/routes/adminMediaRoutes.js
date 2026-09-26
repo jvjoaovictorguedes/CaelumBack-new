@@ -40,6 +40,11 @@ const adminMediaRouter = express.Router();
 adminMediaRouter.use(authMiddleware, adminMiddleware, requireAdminPermission("media.manage"));
 adminMediaRouter.get("/", adminMediaController.listar);
 adminMediaRouter.post("/", tratarErroDeUpload, adminMediaController.upload);
+// Diagnóstico manual (bug relatado: imagem_url apontando pra grupo sem
+// versão ativa) — path fixo, precisa vir antes de /:grupo/versions só
+// por organização (não colide: nenhuma outra rota GET daqui é só
+// "/:grupo" sem sufixo).
+adminMediaRouter.get("/referencias-quebradas", adminMediaController.referenciasQuebradas);
 adminMediaRouter.get("/:grupo/versions", adminMediaController.listarVersoes);
 adminMediaRouter.post("/:grupo/revert/:versao", adminMediaController.reverter);
 adminMediaRouter.delete("/:grupo", adminMediaController.desativar);
