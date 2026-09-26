@@ -149,6 +149,34 @@ function statsDeReferenciaPorNivel(nivel) {
   };
 }
 
+// Núcleo puro e determinístico da geração de stats finais de UM monstro
+// solo — extraído de gerarInimigo (antes inline) pro Editor de
+// Balanceamento de Monstros (Admin Aventura, §9.2 "extrair/reutilizar
+// uma versão determinística da mesma base usada por gerarInimigo; não
+// copiar fórmulas manualmente no Admin") poder calcular preview sem
+// duplicar a fórmula. `variacao` é injetado pelo caller: gerarInimigo
+// abaixo passa a MESMA variação aleatória ±10% de sempre, na MESMA
+// ordem de chamadas (vida, dano, agilidade, velocidade) — comportamento
+// do jogo 100% preservado. monsterBalancePreviewService.js passa uma
+// variação fixa (1 = média determinística; 0.9/1.1 = aproximação dos
+// extremos sem depender de RNG).
+function statsFinaisDoMonstroPorNivel(nivel, multiplicadores = {}, variacao = () => 1) {
+  const mult = {
+    vida: multiplicadores?.vida ?? 1,
+    dano: multiplicadores?.dano ?? 1,
+    agilidade: multiplicadores?.agilidade ?? 1,
+    velocidade: multiplicadores?.velocidade ?? 1,
+  };
+  const referencia = statsDeReferenciaPorNivel(nivel);
+
+  const vidaMaxima = Math.max(20, Math.round(vidaMaximaDe(referencia) * variacao() * mult.vida));
+  const danoBase = Math.max(1, Math.round(danoBasicoEsperado(referencia) * variacao() * mult.dano));
+  const agilidade = Math.max(1, Math.round(referencia.agilidade * variacao() * mult.agilidade));
+  const velocidade = Math.max(1, Math.round(referencia.velocidade * variacao() * mult.velocidade));
+
+  return { nivel: referencia.nivel, vidaMaxima, danoBase, agilidade, velocidade };
+}
+
 // `nomeAlvo` é só o nome do monstro já sorteado (por
 // sortearMonstroDaZona, no controller) — nunca uma escolha do jogador
 // (removida a pedido dele: a Aventura agora é sempre 100% aleatória).
@@ -161,21 +189,14 @@ function statsDeReferenciaPorNivel(nivel) {
 // uma escala relativa a quem está caçando.
 function gerarInimigo(jogador, nomeAlvo, opcoes = {}) {
   const { nivelForcado, multiplicadores } = opcoes;
-  const mult = {
-    vida: multiplicadores?.vida ?? 1,
-    dano: multiplicadores?.dano ?? 1,
-    agilidade: multiplicadores?.agilidade ?? 1,
-    velocidade: multiplicadores?.velocidade ?? 1,
-  };
   const nivel = Math.max(1, nivelForcado ?? jogador?.nivel ?? 1);
-  const variacao = () => 0.9 + Math.random() * 0.2; // ±10%
+  const variacaoAleatoria = () => 0.9 + Math.random() * 0.2; // ±10%
 
-  const referencia = statsDeReferenciaPorNivel(nivel);
-
-  const vidaMaxima = Math.max(20, Math.round(vidaMaximaDe(referencia) * variacao() * mult.vida));
-  const danoBase = Math.max(1, Math.round(danoBasicoEsperado(referencia) * variacao() * mult.dano));
-  const agilidade = Math.max(1, Math.round(referencia.agilidade * variacao() * mult.agilidade));
-  const velocidade = Math.max(1, Math.round(referencia.velocidade * variacao() * mult.velocidade));
+  const { vidaMaxima, danoBase, agilidade, velocidade } = statsFinaisDoMonstroPorNivel(
+    nivel,
+    multiplicadores,
+    variacaoAleatoria,
+  );
 
   // forca/vitalidade do inimigo aqui são só pra manter o formato da
   // resposta (a API sempre devolveu esses campos) — quem decide o
@@ -250,6 +271,7 @@ function gerarInimigoDeGrupo(
 exports.gerarInimigo = gerarInimigo;
 exports.gerarInimigoDeGrupo = gerarInimigoDeGrupo;
 exports.statsDeReferenciaPorNivel = statsDeReferenciaPorNivel;
+exports.statsFinaisDoMonstroPorNivel = statsFinaisDoMonstroPorNivel;
 
 // GET /api/combat/enemy/:characterId
 // Gera um inimigo compatível com o nível do personagem.

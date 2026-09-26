@@ -195,11 +195,20 @@ function aplicarMitigacaoDeDefesa(dano, defensor) {
   return Math.max(1, Math.round(dano * (1 - reducao)));
 }
 
-function chanceDeEsquiva(defensor, atacante) {
+// Só a PROBABILIDADE (sem rolar dado) — extraída de chanceDeEsquiva pra
+// o Editor de Balanceamento de Monstros (Admin Aventura, §4.3/§9.2)
+// poder mostrar "esquiva estimada contra perfil X" sem depender de RNG.
+// Mesma fórmula, mesmo piso/teto reais (5%/35%) — nunca duplicar isso
+// em outro lugar (frontend inclusive).
+function probabilidadeDeEsquiva(defensor, atacante) {
   const diferenca = (defensor.agilidade || 0) - (atacante.agilidade || 0);
   const chanceBase = 0.05;
   const chance = chanceBase + Math.max(0, diferenca) * 0.01;
-  return Math.random() < Math.min(chance, 0.35);
+  return Math.min(chance, 0.35);
+}
+
+function chanceDeEsquiva(defensor, atacante) {
+  return Math.random() < probabilidadeDeEsquiva(defensor, atacante);
 }
 
 // Unifica Cegueira (BLIND) e esquiva num único resultado de acerto
@@ -267,6 +276,7 @@ module.exports = {
   custoManaEfetivo,
   aplicarMitigacaoDeDefesa,
   chanceDeEsquiva,
+  probabilidadeDeEsquiva,
   resolverResultadoDeAcerto,
   vidaMaximaDe,
   manaMaximaDe,
