@@ -250,6 +250,16 @@ exports.listarRecursos = async (req, res) => {
   }
 };
 
+// Produtos do Caldeirão (auxiliar de seleção — ingrediente ProdutoAlquimia)
+exports.listarProdutosAlquimia = async (req, res) => {
+  try {
+    const resultado = await adminForgeService.listarProdutosAlquimiaAdmin();
+    res.status(200).json({ status: "success", data: { produtos: resultado } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao listar produtos de Alquimia.");
+  }
+};
+
 // Balanceamento
 exports.obterBalanceamento = async (req, res) => {
   try {

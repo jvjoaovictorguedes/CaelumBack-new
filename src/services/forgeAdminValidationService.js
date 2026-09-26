@@ -8,7 +8,13 @@ const { resolverIdItemDoInsumo } = require("./forgeMaterialsService");
 const Item = require("../models/Item");
 
 const CATEGORIAS_BLUEPRINT_VALIDAS = ["Arma", "Armadura", "Capacete", "Escudo", "Acessorio1", "Acessorio2", "Ferramenta"];
-const TIPOS_INSUMO_VALIDOS = ["Barra", "RecursoExpedicao"];
+// ProdutoAlquimia (Forja-Materiais): a Forja passa a aceitar produtos
+// do Caldeirão como ingrediente. Silvicultura/Exploração já eram
+// suportadas por "RecursoExpedicao" (mesma ExpeditionResource de
+// Mineração, só profissão diferente) — nunca precisaram de um tipo
+// novo, só o painel admin não deixava escolher outra profissão (ver
+// adminForgeService.js/listarRecursosAdmin).
+const TIPOS_INSUMO_VALIDOS = ["Barra", "RecursoExpedicao", "ProdutoAlquimia"];
 
 function erro(mensagem, statusCode = 400) {
   const e = new Error(mensagem);
@@ -65,7 +71,9 @@ function validarIngredientesPayload(ingredientes) {
       throw erro(`tipo_insumo precisa ser um de: ${TIPOS_INSUMO_VALIDOS.join(", ")}.`);
     }
     if (!Number.isInteger(ingrediente.id_recurso)) {
-      throw erro("id_recurso precisa ser um inteiro (ExpeditionResource.id).");
+      throw erro(
+        "id_recurso precisa ser um inteiro (ExpeditionResource.id pra Barra/RecursoExpedicao, AlchemyRecipe.id pra ProdutoAlquimia).",
+      );
     }
     if (!Number.isInteger(ingrediente.quantidade_base) || ingrediente.quantidade_base < 1) {
       throw erro("quantidade_base precisa ser um inteiro >= 1.");
