@@ -88,6 +88,9 @@ const adminSpoilConfigRoutes = require("./routes/adminSpoilConfigRoutes");
 const adminHuntConfigRoutes = require("./routes/adminHuntConfigRoutes");
 const adminGrantRoutes = require("./routes/adminGrantRoutes");
 const adminUniqueFeatRoutes = require("./routes/adminUniqueFeatRoutes");
+const adminMaintenanceRoutes = require("./routes/adminMaintenanceRoutes");
+const maintenanceRoutes = require("./routes/maintenanceRoutes");
+const maintenanceMiddleware = require("./middlewares/maintenanceMiddleware");
 const adminGlobalBuffRoutes = require("./routes/adminGlobalBuffRoutes");
 const adminTavernRoutes = require("./routes/adminTavernRoutes");
 const adminForgeRoutes = require("./routes/adminForgeRoutes");
@@ -216,6 +219,12 @@ app.get("/", (req, res) => {
   res.send("Bem-vindo à API do meu RPG!");
 });
 
+// Modo Manutenção — precisa rodar ANTES de qualquer rota de /api (só
+// admin autenticado passa quando ligado); a rota pública de status
+// abaixo fica de fora do gate por definição (ela É a whitelist).
+app.use(maintenanceMiddleware);
+app.use("/api/maintenance", maintenanceRoutes);
+
 app.use("/api/shop", shopRoutes);
 app.use("/api/crafting", craftingRoutes);
 app.use("/api/alchemy", alchemyRoutes);
@@ -280,6 +289,7 @@ app.use("/api/admin/spoils/config", adminSpoilConfigRoutes);
 app.use("/api/admin/hunts/config", adminHuntConfigRoutes);
 app.use("/api/admin/grants", adminGrantRoutes);
 app.use("/api/admin/unique-feats", adminUniqueFeatRoutes);
+app.use("/api/admin/maintenance", adminMaintenanceRoutes);
 app.use("/api/admin/global-buffs", adminGlobalBuffRoutes);
 app.use("/api/admin/tavern", adminTavernRoutes);
 app.use("/api/admin/forge", adminForgeRoutes);
