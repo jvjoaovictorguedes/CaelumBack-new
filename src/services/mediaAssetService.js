@@ -333,24 +333,32 @@ async function getBytesForServing(grupo, versaoQuery) {
   return MediaAsset.scope("comDados").findOne({ where, order: [["versao", "DESC"]] });
 }
 
-// Extrai o "grupo" de uma imagem_url no formato /api/media/<grupo> ou
-// /api/media/<grupo>?v=<versao> (com ou sem host completo na frente —
-// resolveMediaUrl no frontend aceita path relativo ou URL absoluta).
-// Qualquer imagem_url que NÃO seja desse formato (ex.: arte estática em
-// /images/..., ou vazia) não é responsabilidade da Biblioteca de Mídia,
-// então nunca conta como "quebrada" aqui.
-const REGEX_GRUPO_NA_URL = /\/api\/media\/([^/?]+)/;
-function extrairGrupo(imagemUrl) {
+// Extrai grupo (+ versão fixada, se houver) de uma imagem_url no
+// formato /api/media/<grupo> ou /api/media/<grupo>?v=<versao> (com ou
+// sem host completo na frente — resolveMediaUrl no frontend aceita
+// path relativo ou URL absoluta). Qualquer imagem_url que NÃO seja
+// desse formato (ex.: arte estática em /images/..., ou vazia) não é
+// responsabilidade da Biblioteca de Mídia, então nunca conta como
+// "quebrada" aqui.
+const REGEX_GRUPO_NA_URL = /\/api\/media\/([^/?]+)(?:\?v=(\d+))?/;
+function extrairGrupoEVersao(imagemUrl) {
   const match = imagemUrl?.match(REGEX_GRUPO_NA_URL);
-  return match ? match[1] : null;
+  if (!match) return null;
+  return { grupo: match[1], versaoFixada: match[2] ? Number(match[2]) : null };
 }
 
-// Diagnóstico (§ bug relatado: item com imagem_url apontando pra um
-// grupo que nunca teve upload nenhum, ou cuja única versão foi
-// desativada — servidor sempre respondia 404 pro jogador, sem NENHUM
-// jeito de descobrir quais itens/poderes/monstros estavam nessa
-// situação sem checar um por um). Varre só as tabelas que guardam
-// imagem_url apontando pra cá; nunca modifica nada, só lê.
+// Diagnóstico (§ bug relatado: imagem que "funcionava antes" passou a
+// dar 404 — servidor sempre respondia isso pro jogador sem NENHUM jeito
+// de descobrir quais itens/poderes/monstros estavam nessa situação sem
+// checar um por um). Verifica a EXISTÊNCIA REAL da versão que a
+// imagem_url pede — nunca só "o grupo tem alguma versão ativa": uma
+// imagem_url presa (?v=N) precisa da linha (grupo, versao=N) existir,
+// não importa se é a versão ativa hoje (pinned ignora ativo, mesmo
+// critério de getBytesForServing); sem ?v=, precisa existir alguma
+// versão ATIVA pro grupo. Sempre devolve o que existe de verdade pra
+// aquele grupo (versões e qual está ativa agora), pra decidir se é
+// reapontar pra versão certa ou reenviar do zero. Nunca modifica nada,
+// só lê.
 async function listarReferenciasQuebradas() {
   const [Item, Power, EquipmentSet, AdventureMonster] = [
     require("../models/Item"),
@@ -366,9 +374,12 @@ async function listarReferenciasQuebradas() {
     { modelo: AdventureMonster, entidade: "AdventureMonster", campoNome: "nome" },
   ];
 
-  const gruposAtivos = new Set(
-    (await MediaAsset.findAll({ where: { ativo: true }, attributes: ["grupo"] })).map((a) => a.grupo),
-  );
+  const todasAsVersoes = await MediaAsset.findAll({ attributes: ["grupo", "versao", "ativo"] });
+  const versoesPorGrupo = new Map();
+  for (const linha of todasAsVersoes) {
+    if (!versoesPorGrupo.has(linha.grupo)) versoesPorGrupo.set(linha.grupo, []);
+    versoesPorGrupo.get(linha.grupo).push({ versao: linha.versao, ativo: linha.ativo });
+  }
 
   const quebrados = [];
   for (const { modelo, entidade, campoNome } of FONTES) {
@@ -377,10 +388,30 @@ async function listarReferenciasQuebradas() {
       attributes: ["id", campoNome, "imagem_url"],
     });
     for (const linha of linhas) {
-      const grupo = extrairGrupo(linha.imagem_url);
-      if (grupo && !gruposAtivos.has(grupo)) {
-        quebrados.push({ entidade, id: linha.id, nome: linha[campoNome], imagem_url: linha.imagem_url, grupo });
-      }
+      const referencia = extrairGrupoEVersao(linha.imagem_url);
+      if (!referencia) continue;
+      const { grupo, versaoFixada } = referencia;
+      const versoesDoGrupo = versoesPorGrupo.get(grupo) ?? [];
+
+      const existeAVersaoPedida = versaoFixada
+        ? versoesDoGrupo.some((v) => v.versao === versaoFixada)
+        : versoesDoGrupo.some((v) => v.ativo);
+      if (existeAVersaoPedida) continue;
+
+      const versaoAtivaAgora = versoesDoGrupo.find((v) => v.ativo)?.versao ?? null;
+      quebrados.push({
+        entidade,
+        id: linha.id,
+        nome: linha[campoNome],
+        imagem_url: linha.imagem_url,
+        grupo,
+        versao_pedida: versaoFixada,
+        // null = grupo nunca existiu (precisa reenviar do zero);
+        // número = existe outra versão ativa, só a referência ficou
+        // desatualizada (provável conserto: reapontar pra essa versão).
+        versao_ativa_agora: versaoAtivaAgora,
+        versoes_existentes: versoesDoGrupo.map((v) => v.versao).sort((a, b) => a - b),
+      });
     }
   }
   return quebrados;

@@ -143,3 +143,43 @@ testeComBanco("listarReferenciasQuebradas: ignora imagem_url que não é da Bibl
   const quebrados = await mediaAssetService.listarReferenciasQuebradas();
   assert.ok(!quebrados.some((q) => q.entidade === "Item" && q.id === item.id));
 });
+
+testeComBanco("listarReferenciasQuebradas: acha item preso (?v=1) numa versão que não existe mais, MESMO com outra versão ativa pro grupo — o bug real (imagem 'funcionava antes' e passou a dar 404)", async () => {
+  const grupo = `grupo-versao-presa-${Date.now()}`;
+  // Só a v2 existe (ex.: v1 foi apagada, ou o grupo nunca teve v1 —
+  // não importa o motivo, o que importa é que (grupo, versao=1) não
+  // existe). v2 está ativa — um diagnóstico ingênuo (só "o grupo tem
+  // alguma versão ativa?") diria "tudo bem", mas quem pediu ?v=1
+  // continua recebendo 404 mesmo assim.
+  await MediaAsset.create({
+    grupo,
+    versao: 2,
+    categoria: "Item",
+    tipo: "imagem",
+    mime: "image/png",
+    tamanho_bytes: 10,
+    dados: Buffer.from("fake-png-bytes-v2"),
+    ativo: true,
+  });
+  gruposCriados.push(grupo);
+
+  const item = await Item.create({
+    nome: `Item Versão Presa ${Date.now()}`,
+    descricao: "x",
+    tipo_item: "Material",
+    raridade: "Comum",
+    valor_compra: 0,
+    valor_venda: 0,
+    peso: 0,
+    disponivel_loja: false,
+    imagem_url: `/api/media/${grupo}?v=1`,
+  });
+  itensCriados.push(item.id);
+
+  const quebrados = await mediaAssetService.listarReferenciasQuebradas();
+  const encontrado = quebrados.find((q) => q.entidade === "Item" && q.id === item.id);
+  assert.ok(encontrado, "precisa achar mesmo o grupo tendo uma versão ativa (só não é a versão pedida)");
+  assert.equal(encontrado.versao_pedida, 1);
+  assert.equal(encontrado.versao_ativa_agora, 2, "precisa dizer qual versão está ativa AGORA, pra dar pra reapontar");
+  assert.deepEqual(encontrado.versoes_existentes, [2]);
+});
