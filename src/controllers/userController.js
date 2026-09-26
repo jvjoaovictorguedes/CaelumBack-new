@@ -62,10 +62,33 @@ exports.registerUser = async (req, res) => {
       });
     }
 
+    // Sistema de Referral — campo opcional no registro. Resolve pro id
+    // ANTES de criar a conta: rejeita explicitamente um nome que não
+    // bate com ninguém, em vez de silenciosamente criar a conta sem
+    // indicação (o jogador digitou errado e nunca ficaria sabendo).
+    // Nunca compara com o próprio username sendo criado agora — nem
+    // precisa: essa conta ainda não existe, não tem como um SELECT por
+    // username achá-la ainda.
+    let idIndicadoPor = null;
+    const nomeIndicador = req.body.indicado_por?.trim();
+    if (nomeIndicador) {
+      const indicador = await User.findOne({
+        where: { username: { [Op.iLike]: nomeIndicador } },
+        attributes: ["id"],
+      });
+      if (!indicador) {
+        return res.status(400).json({
+          message: `Usuário indicador "${nomeIndicador}" não encontrado. Confira o nome (ou deixe o campo em branco).`,
+        });
+      }
+      idIndicadoPor = indicador.id;
+    }
+
     const newUser = await User.create({
       username: username.trim(),
       email,
       passwordHash: password,
+      id_indicado_por: idIndicadoPor,
     });
 
     const token = signToken(newUser.id);
