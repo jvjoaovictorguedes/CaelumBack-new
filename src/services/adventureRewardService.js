@@ -16,12 +16,6 @@ const AdventureMonsterLoot = require("../models/AdventureMonsterLoot");
 const CharacterAdventureSession = require("../models/CharacterAdventureSession");
 const Item = require("../models/Item");
 const { concederItem } = require("./dropService");
-const {
-  MULTIPLICADOR_RARO_XP,
-  MULTIPLICADOR_RARO_OURO,
-  xpBaseDoNivel,
-  ouroBaseDoNivel,
-} = require("../config/adventureConfig");
 const { aplicarBonusDeMaestria } = require("./masteryBonusService");
 const { bonusesAtivosAgora } = require("./globalBuffService");
 
@@ -74,14 +68,13 @@ async function sortearEspoliosDoMonstro(idMonstro, transaction, dropPercentual =
 async function concederRecompensaDeZona(character, inimigoAtual, transaction) {
   const ehRaro = inimigoAtual.tipo_aparicao === "Raro";
 
-  // Reaproveita a MESMA fórmula base que a Aventura já usava (§8/§11),
-  // só multiplicada quando o encontro era o Raro da zona.
-  const xpBase = Math.round(
-    xpBaseDoNivel(inimigoAtual.nivel) * (ehRaro ? MULTIPLICADOR_RARO_XP : 1),
-  );
-  const dinheiroBase = Math.round(
-    ouroBaseDoNivel(inimigoAtual.nivel) * (ehRaro ? MULTIPLICADOR_RARO_OURO : 1),
-  );
+  // Reformulação V2 dos Monstros (§7) — xp_recompensa/ouro_recompensa
+  // são campos FIXOS e autorais do próprio monstro (snapshotados no
+  // encontro por combatController.gerarInimigoParaPersonagem), sem
+  // fórmula por nível nem multiplicador automático de Raro: se um Raro
+  // deve valer mais, o Admin cadastra XP/Gold maiores nele mesmo.
+  const xpBase = inimigoAtual.xp_recompensa ?? 0;
+  const dinheiroBase = inimigoAtual.ouro_recompensa ?? 0;
 
   // Buff Global "DropAventura" (Fase 15) — evento temporal server-wide,
   // some com o Bônus de Maestria Regional (aplicado depois, abaixo) em

@@ -7,6 +7,7 @@
 // A lógica de progressão de XP/level/pontos fica no
 // experienceService.js.
 
+const crypto = require("crypto");
 const { sequelize } = require("../config/database");
 const Character = require("../models/Character");
 const Class = require("../models/Class");
@@ -41,7 +42,7 @@ const { registrarMorte } = require("../services/monsterKillService");
 const AdventureZoneMonster = require("../models/AdventureZoneMonster");
 const AdventureMonster = require("../models/AdventureMonster");
 const { obterSessaoAtiva } = require("../services/adventureService");
-const { sortearMonstroDaZona, sortearNivelMonstro } = require("../services/adventureRollService");
+const { sortearMonstroDaZona } = require("../services/adventureRollService");
 const { concederRecompensaDeZona } = require("../services/adventureRewardService");
 const { concederOuro } = require("../services/goldService");
 const { registrarProgressoContrato } = require("../services/adventureGuildObjectiveService");
@@ -330,14 +331,24 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       }
 
       const zona = sessaoAtiva.area;
-      const monstrosDaZona = await AdventureZoneMonster.findAll({
+      const todosVinculosDaZona = await AdventureZoneMonster.findAll({
         where: { id_area: zona.id, ativo: true },
         include: [{ model: AdventureMonster, as: "monstro" }],
         transaction,
       });
-      if (monstrosDaZona.length === 0) {
+      if (todosVinculosDaZona.length === 0) {
         return res.status(500).json({
           message: "Área de Caça sem monstros configurados.",
+        });
+      }
+      // Reformulação V2 dos Monstros (§4.3) — nivel_jogador_minimo só
+      // decide ELEGIBILIDADE de aparição (jogador abaixo disso nem entra
+      // no pool ponderado); nunca altera o nível/stats do monstro
+      // sorteado, que continuam sempre os mesmos de AdventureMonster.
+      const monstrosDaZona = todosVinculosDaZona.filter((zm) => character.nivel >= (zm.nivel_jogador_minimo ?? 1));
+      if (monstrosDaZona.length === 0) {
+        return res.status(500).json({
+          message: "Nenhuma criatura dessa Área de Caça está disponível pro seu nível ainda.",
         });
       }
 
@@ -374,17 +385,36 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       // específico.
       const escolhido = sortearMonstroDaZona(monstrosDaZona);
 
-      const nivelSorteado = sortearNivelMonstro(escolhido, zona);
-      const multiplicadores = {
-        vida: escolhido.monstro.multiplicador_vida,
-        dano: escolhido.monstro.multiplicador_dano,
-        agilidade: escolhido.monstro.multiplicador_agilidade,
-        velocidade: escolhido.monstro.multiplicador_velocidade,
+      // Reformulação V2 dos Monstros (§3/§4.2/§5.1/§5.2) — o snapshot
+      // vem DIRETO do catálogo, sem sortear nível nem aplicar variação
+      // de ±10%: se o Admin salvou vida_maxima=55, o monstro nasce com
+      // exatamente 55. O mesmo id_monstro tem sempre o MESMO nível/
+      // stats em qualquer zona, Party, Caçada ou Bestiário —
+      // sortearNivelMonstro/gerarInimigo (baseados em personagem de
+      // referência) não são mais usados aqui; esses helpers continuam
+      // existindo só pelo Editor de Balanceamento/Simulador legado até
+      // o Contract.
+      const monstro = escolhido.monstro;
+      const inimigo = {
+        nome: monstro.nome,
+        nivel: monstro.nivel,
+        // forca/vitalidade sintéticos (§5.4) — só pra manter o formato
+        // de resposta que a API sempre devolveu; ninguém recalcula o
+        // monstro a partir deles.
+        forca: Math.max(1, Math.round((monstro.dano_min + monstro.dano_max) / 2)),
+        vitalidade: Math.max(1, Math.round(monstro.vida_maxima / 5)),
+        agilidade: monstro.agilidade,
+        velocidade: monstro.velocidade,
+        vida_maxima: monstro.vida_maxima,
+        vida_atual: monstro.vida_maxima,
+        dano_min: monstro.dano_min,
+        dano_max: monstro.dano_max,
+        // §7 — recompensa base é propriedade do monstro, fixa no
+        // cadastro; nunca mais calculada por fórmula de nível na hora
+        // da vitória (ver adventureRewardService.concederRecompensaDeZona).
+        xp_recompensa: monstro.xp_recompensa,
+        ouro_recompensa: monstro.ouro_recompensa,
       };
-      const inimigo = gerarInimigo(jogadorEfetivo, escolhido.monstro.nome, {
-        nivelForcado: nivelSorteado,
-        multiplicadores,
-      });
       // Expansão Aventura Beta §29 — frontend resolve sprite por essa
       // chave, nunca mais por nome (null até a arte ser enviada, cai
       // no EnemySprite genérico). Setado aqui (não só embaixo, em
@@ -395,8 +425,8 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       // imagem_url é a foto estática entregue pro monstro (Bestiário/
       // Mapa) — passa a servir também de sprite de combate quando ainda
       // não existe sprite_key dedicado (monstro sem arte animada).
-      inimigo.sprite_key = escolhido.monstro?.sprite_key ?? null;
-      inimigo.imagem_url = escolhido.monstro?.imagem_url ?? null;
+      inimigo.sprite_key = monstro?.sprite_key ?? null;
+      inimigo.imagem_url = monstro?.imagem_url ?? null;
 
       // Caçadas §6 — compõe um SEGUNDO multiplicador por cima do perfil
       // normal, só no snapshot deste encontro e só se o alvo sorteado
@@ -404,9 +434,13 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       // no AdventureMonster nem afeta outro jogador.
       const modificadorCacada = await resolverModificadorParaEncontro(character.id, escolhido.id_monstro, transaction);
       if (modificadorCacada) {
+        // §6.1 — a Caçada aplica sobre vida_maxima/dano_min/dano_max do
+        // SNAPSHOT deste encontro; nunca persiste de volta no
+        // AdventureMonster (identidade do monstro continua intacta).
         inimigo.vida_maxima = Math.round(inimigo.vida_maxima * (1 + modificadorCacada.hpMultiplier));
         inimigo.vida_atual = inimigo.vida_maxima;
-        inimigo.dano_base = Math.round(inimigo.dano_base * (1 + modificadorCacada.damageMultiplier));
+        inimigo.dano_min = Math.round(inimigo.dano_min * (1 + modificadorCacada.damageMultiplier));
+        inimigo.dano_max = Math.round(inimigo.dano_max * (1 + modificadorCacada.damageMultiplier));
         inimigo.huntTarget = true;
         inimigo.huntId = modificadorCacada.huntId;
         inimigo.huntDifficulty = modificadorCacada.difficulty;
@@ -1328,14 +1362,17 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction }
             : `Você esquivou do ataque de ${inimigoAtual.nome}!`,
         );
       } else {
+        // Reformulação V2 dos Monstros (§5.3) — o RNG de dano do monstro
+        // fica EXPLÍCITO só no intervalo dano_min..dano_max cadastrado;
+        // removida a segunda variação oculta de ±15% que existia em
+        // cima disso. dano_base (legado, monstro pré-V2) cai num
+        // intervalo degenerado [dano_base, dano_base] — sem RNG extra.
+        const danoBrutoInimigo =
+          Number.isInteger(inimigoAtual.dano_min) && Number.isInteger(inimigoAtual.dano_max)
+            ? crypto.randomInt(inimigoAtual.dano_min, inimigoAtual.dano_max + 1)
+            : inimigoAtual.dano_base;
         const danoRecebidoEnfraquecido = Math.round(
-          Math.max(
-            1,
-            Math.round(
-              inimigoAtual.dano_base *
-                (0.85 + Math.random() * 0.3)
-            )
-          ) * statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.enemy),
+          Math.max(1, danoBrutoInimigo) * statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.enemy),
         );
         // PVE_DEFENSE_PCT da Taverna (§13) é uma mitigação A MAIS, por
         // cima da mitigação de defesa "crua" do equipamento — nunca
