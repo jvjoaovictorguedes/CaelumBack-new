@@ -158,6 +158,20 @@ async function excluirUmUsuario(idUser, { idAdmin, req }) {
   });
 }
 
+// Traduz um erro inesperado (ex: SequelizeForeignKeyConstraintError de
+// alguma tabela nova que ainda não ganhou ON DELETE CASCADE/SET NULL
+// pra Characters) num motivo legível, incluindo tabela/constraint reais
+// do Postgres — sem isso, o erro virava só "Erro interno do servidor",
+// sem pista nenhuma de qual tabela travou.
+function formatarErroInesperado(error) {
+  const tabela = error?.table ?? error?.parent?.table ?? error?.original?.table;
+  const constraint = error?.parent?.constraint ?? error?.original?.constraint;
+  if (tabela || constraint) {
+    return `Falha inesperada — restrição de chave estrangeira na tabela "${tabela ?? "?"}" (constraint "${constraint ?? "?"}") ainda bloqueia a exclusão. Avise o time técnico.`;
+  }
+  return `Falha inesperada ao excluir: ${error?.message ?? "erro desconhecido"}.`;
+}
+
 async function bulkDeleteUsers(userIds, { idAdmin, req }) {
   const idsUnicos = [...new Set((userIds ?? []).map(Number).filter(Number.isInteger))];
   const resultados = [];
@@ -165,7 +179,20 @@ async function bulkDeleteUsers(userIds, { idAdmin, req }) {
     // Sequencial (não Promise.all) — cada exclusão já abre sua própria
     // transaction/lock; rodar em paralelo só aumentaria contenção sem
     // nenhum ganho real numa operação administrativa pontual.
-    resultados.push(await excluirUmUsuario(idUser, { idAdmin, req }));
+    //
+    // Try/catch aqui (e não só dentro de excluirUmUsuario) é essencial:
+    // qualquer exceção não prevista (ex: uma FK nova que ainda não
+    // ganhou CASCADE) antes derrubava o LOTE INTEIRO com 500 genérico —
+    // inclusive contas já excluídas com sucesso antes dela na mesma
+    // chamada sumiam da resposta, embora já commitadas no banco. Agora
+    // vira um resultado "não excluído" só daquela conta, com o motivo
+    // real, e o lote continua pras próximas.
+    try {
+      resultados.push(await excluirUmUsuario(idUser, { idAdmin, req }));
+    } catch (error) {
+      console.error(`Falha inesperada ao excluir usuário ${idUser}:`, error);
+      resultados.push({ id: idUser, excluido: false, motivo: formatarErroInesperado(error) });
+    }
   }
   return {
     total: idsUnicos.length,
