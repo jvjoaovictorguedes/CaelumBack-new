@@ -40,23 +40,57 @@ function compararRaridade(a, b) {
   return Math.sign(posA - posB);
 }
 
-function aplicarRaridadeArma(weaponProperties, raridade) {
+// Chaves de atributo que cada categoria aceita num override admin (ver
+// itemRarityOverrideService.js) — também usado aqui pra nunca deixar um
+// override aplicar um valor bruto (string, null, NaN) sobre o cálculo.
+const CHAVES_OVERRIDE_ARMA = ["dano_min", "dano_max", "valor_bonus_atributo"];
+const CHAVES_OVERRIDE_ARMADURA = ["defesa", "bonus_forca", "bonus_vitalidade", "bonus_inteligencia", "bonus_agilidade", "bonus_velocidade"];
+const CHAVES_OVERRIDE_VARA = ["forca_linha", "controle", "recolhimento", "precisao", "estabilidade"];
+
+// `overrides` é o array Item.raridadeOverrides (já carregado junto do
+// Item via include — ver associations.js — nunca uma query nova aqui,
+// isso roda em runtime de combate). Devolve o objeto "atributos" da
+// linha cuja qualidade bate com `raridade`, ou null se não houver
+// override cadastrado pra essa combinação Item+Raridade.
+function encontrarOverride(overrides, raridade) {
+  if (!Array.isArray(overrides) || overrides.length === 0) return null;
+  const linha = overrides.find((o) => o.qualidade === raridade);
+  return linha?.atributos ?? null;
+}
+
+// Aplica só as chaves permitidas e numéricas do override por cima do
+// valor já calculado pela curva global — chave ausente/inválida no
+// override mantém o valor calculado (override é sempre parcial).
+function comOverride(calculado, override, chavesPermitidas) {
+  if (!override) return calculado;
+  const resultado = { ...calculado };
+  for (const chave of chavesPermitidas) {
+    const valor = override[chave];
+    if (typeof valor === "number" && Number.isFinite(valor)) {
+      resultado[chave] = Math.round(valor);
+    }
+  }
+  return resultado;
+}
+
+function aplicarRaridadeArma(weaponProperties, raridade, overrides) {
   if (!weaponProperties) return null;
   const base = weaponProperties.toJSON ? weaponProperties.toJSON() : weaponProperties;
   const fator = multiplicadorRaridade(raridade);
-  return {
+  const calculado = {
     ...base,
     dano_min: Math.round(base.dano_min * fator),
     dano_max: Math.round(base.dano_max * fator),
     valor_bonus_atributo: Math.round(base.valor_bonus_atributo * fator),
   };
+  return comOverride(calculado, encontrarOverride(overrides, raridade), CHAVES_OVERRIDE_ARMA);
 }
 
-function aplicarRaridadeArmadura(armorProperties, raridade) {
+function aplicarRaridadeArmadura(armorProperties, raridade, overrides) {
   if (!armorProperties) return null;
   const base = armorProperties.toJSON ? armorProperties.toJSON() : armorProperties;
   const fator = multiplicadorRaridade(raridade);
-  return {
+  const calculado = {
     ...base,
     defesa: Math.round(base.defesa * fator),
     bonus_forca: Math.round(base.bonus_forca * fator),
@@ -65,13 +99,14 @@ function aplicarRaridadeArmadura(armorProperties, raridade) {
     bonus_agilidade: Math.round(base.bonus_agilidade * fator),
     bonus_velocidade: Math.round(base.bonus_velocidade * fator),
   };
+  return comOverride(calculado, encontrarOverride(overrides, raridade), CHAVES_OVERRIDE_ARMADURA);
 }
 
-function aplicarRaridadeVara(fishingRodProperties, raridade) {
+function aplicarRaridadeVara(fishingRodProperties, raridade, overrides) {
   if (!fishingRodProperties) return null;
   const base = fishingRodProperties.toJSON ? fishingRodProperties.toJSON() : fishingRodProperties;
   const fator = multiplicadorRaridade(raridade);
-  return {
+  const calculado = {
     ...base,
     forca_linha: Math.round(base.forca_linha * fator),
     controle: Math.round(base.controle * fator),
@@ -79,6 +114,7 @@ function aplicarRaridadeVara(fishingRodProperties, raridade) {
     precisao: Math.round(base.precisao * fator),
     estabilidade: Math.round(base.estabilidade * fator),
   };
+  return comOverride(calculado, encontrarOverride(overrides, raridade), CHAVES_OVERRIDE_VARA);
 }
 
 // §13 — Item canônico não guarda mais seis valores de venda (um por
@@ -101,4 +137,8 @@ module.exports = {
   aplicarRaridadeArmadura,
   aplicarRaridadeVara,
   calcularValorVendaInstancia,
+  encontrarOverride,
+  CHAVES_OVERRIDE_ARMA,
+  CHAVES_OVERRIDE_ARMADURA,
+  CHAVES_OVERRIDE_VARA,
 };
