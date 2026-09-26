@@ -388,6 +388,106 @@ testeComBanco("desativar/reativar preserva histórico (nunca deleta fisicamente)
   assert.equal(logDesativar.motivo, "teste");
 });
 
+// -----------------------------------------------------------------
+// Bug "FORJA - CORREÇÃO EXCLUA TODOS OS BLUEPRINTS EXISTENTES NA
+// FORJA, ATIVOS OU INATIVOS" — antes desta correção não existia
+// exclusão de verdade nenhuma (só ativar/desativar).
+// -----------------------------------------------------------------
+
+testeComBanco("excluirBlueprintAdmin: exclui de verdade (não é desativar) e limpa ingredientes/resultados em cascata", async () => {
+  const admin = await criarUsuarioAdmin();
+  const { recurso } = await montarRecursoBarraCompleto();
+  const blueprint = await adminForgeService.criarBlueprintAdmin(
+    { nome: `Blueprint Excluir ${sufixo()}`, categoria_equipamento: "Arma", tier_equipamento: 3, multiplicador_tempo: 1, nivel_forja_minimo: 1, ingredientes: [{ tipo_insumo: "Barra", id_recurso: recurso.id, quantidade_base: 1 }] },
+    { idAdmin: admin.id },
+  );
+
+  const resultado = await adminForgeService.excluirBlueprintAdmin(blueprint.id, { idAdmin: admin.id, motivo: "teste" });
+  assert.deepEqual(resultado, { id: blueprint.id, excluido: true });
+
+  assert.equal(await ForgeBlueprint.findByPk(blueprint.id), null, "excluir precisa remover de verdade, ao contrário de desativar");
+  const ingredientesRestantes = await ForgeBlueprintIngredient.count({ where: { id_blueprint: blueprint.id } });
+  assert.equal(ingredientesRestantes, 0, "ingredientes deviam ter sido removidos em cascata");
+
+  const log = await AdminActionLog.findOne({ where: { entidade: "ForgeBlueprint", id_entidade: blueprint.id, acao: "DELETE_BLUEPRINT" } });
+  assert.ok(log, "DELETE_BLUEPRINT precisa ser auditado");
+  assert.equal(log.dados_depois, null);
+  assert.equal(log.dados_antes.nome, blueprint.nome, "audit log precisa preservar o blueprint excluído (before)");
+  assert.equal(log.motivo, "teste");
+});
+
+testeComBanco("excluirBlueprintAdmin: também exclui um blueprint ATIVO (nunca exige desativar primeiro)", async () => {
+  const admin = await criarUsuarioAdmin();
+  const { recurso } = await montarRecursoBarraCompleto();
+  const blueprint = await adminForgeService.criarBlueprintAdmin(
+    { nome: `Blueprint Ativo Excluir ${sufixo()}`, categoria_equipamento: "Capacete", tier_equipamento: 2, multiplicador_tempo: 1, nivel_forja_minimo: 1, ingredientes: [{ tipo_insumo: "Barra", id_recurso: recurso.id, quantidade_base: 1 }] },
+    { idAdmin: admin.id },
+  );
+  const itens = {};
+  const ArmorProperties = require("../src/models/ArmorProperties");
+  for (const qualidade of forgeConfig.ORDEM_QUALIDADE) {
+    const item = await Item.create({
+      nome: `Capacete Excluir ${sufixo()} ${qualidade}`, descricao: "teste", tipo_item: "Capacete", raridade: qualidade, tier_equipamento: 2,
+      valor_compra: 0, valor_venda: 0, peso: 1, disponivel_loja: false,
+    });
+    await ArmorProperties.create({ id_item: item.id, slot_equipamento: "Cabeca", defesa: 1 });
+    itens[qualidade] = item.id;
+  }
+  await adminForgeService.atualizarBlueprintAdmin(blueprint.id, { resultados: itens }, { idAdmin: admin.id });
+  await adminForgeService.setAtivoBlueprintAdmin(blueprint.id, true, { idAdmin: admin.id });
+
+  await adminForgeService.excluirBlueprintAdmin(blueprint.id, { idAdmin: admin.id });
+  assert.equal(await ForgeBlueprint.findByPk(blueprint.id), null);
+});
+
+testeComBanco("excluirBlueprintAdmin: blueprint inexistente lança 404", async () => {
+  await assert.rejects(
+    () => adminForgeService.excluirBlueprintAdmin(999999999, { idAdmin: 1 }),
+    (erro) => erro.statusCode === 404,
+  );
+});
+
+testeComBanco("excluirTodosBlueprintsAdmin: remove TODOS, ativos e inativos, com um audit log por blueprint", async () => {
+  const admin = await criarUsuarioAdmin();
+  const { recurso } = await montarRecursoBarraCompleto();
+
+  const inativo = await adminForgeService.criarBlueprintAdmin(
+    { nome: `Blueprint Massa Inativo ${sufixo()}`, categoria_equipamento: "Arma", tier_equipamento: 3, multiplicador_tempo: 1, nivel_forja_minimo: 1, ingredientes: [{ tipo_insumo: "Barra", id_recurso: recurso.id, quantidade_base: 1 }] },
+    { idAdmin: admin.id },
+  );
+  const paraAtivar = await adminForgeService.criarBlueprintAdmin(
+    { nome: `Blueprint Massa Ativo ${sufixo()}`, categoria_equipamento: "Acessorio1", tier_equipamento: 4, multiplicador_tempo: 1, nivel_forja_minimo: 1, ingredientes: [{ tipo_insumo: "Barra", id_recurso: recurso.id, quantidade_base: 1 }] },
+    { idAdmin: admin.id },
+  );
+  const itens = {};
+  const ArmorPropertiesMassa = require("../src/models/ArmorProperties");
+  for (const qualidade of forgeConfig.ORDEM_QUALIDADE) {
+    const item = await Item.create({
+      nome: `Acessorio Massa ${sufixo()} ${qualidade}`, descricao: "teste", tipo_item: "Acessorio1", raridade: qualidade, tier_equipamento: 4,
+      valor_compra: 0, valor_venda: 0, peso: 0.1, disponivel_loja: false,
+    });
+    await ArmorPropertiesMassa.create({ id_item: item.id, slot_equipamento: "Acessorio1", defesa: 1 });
+    itens[qualidade] = item.id;
+  }
+  await adminForgeService.atualizarBlueprintAdmin(paraAtivar.id, { resultados: itens }, { idAdmin: admin.id });
+  const ativo = await adminForgeService.setAtivoBlueprintAdmin(paraAtivar.id, true, { idAdmin: admin.id });
+  assert.equal(ativo.ativo, true);
+
+  const antesTotal = await ForgeBlueprint.count();
+  assert.ok(antesTotal >= 2);
+
+  const resultado = await adminForgeService.excluirTodosBlueprintsAdmin({ idAdmin: admin.id });
+  assert.equal(resultado.total, antesTotal);
+  assert.equal(resultado.excluidos, antesTotal);
+
+  assert.equal(await ForgeBlueprint.count(), 0, "exclusão em massa precisa remover TODOS, sem sobrar nenhum ativo");
+
+  const logInativo = await AdminActionLog.findOne({ where: { entidade: "ForgeBlueprint", id_entidade: inativo.id, acao: "DELETE_BLUEPRINT" } });
+  const logAtivo = await AdminActionLog.findOne({ where: { entidade: "ForgeBlueprint", id_entidade: paraAtivar.id, acao: "DELETE_BLUEPRINT" } });
+  assert.ok(logInativo, "cada blueprint excluído em massa precisa do próprio audit log individual");
+  assert.ok(logAtivo, "o blueprint ATIVO também precisa ter sido excluído e auditado, não só os inativos");
+});
+
 testeComBanco("Transaction: falha ao atualizar resultados com qualidade inválida não persiste nada parcial", async () => {
   const admin = await criarUsuarioAdmin();
   const { recurso } = await montarRecursoBarraCompleto();

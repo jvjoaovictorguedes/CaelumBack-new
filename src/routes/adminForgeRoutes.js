@@ -19,6 +19,11 @@ router.get("/blueprints", podeGerenciarConteudo, adminForgeController.listarBlue
 router.post("/blueprints", podeGerenciarConteudo, adminForgeController.criarBlueprint);
 router.get("/blueprints/:id", podeGerenciarConteudo, adminForgeController.obterBlueprint);
 router.put("/blueprints/:id", podeGerenciarConteudo, adminForgeController.atualizarBlueprint);
+// Exclusão em massa (bug "exclua todos os blueprints, ativos ou
+// inativos") — path sem :id, nunca colide com a exclusão individual
+// abaixo.
+router.delete("/blueprints", podeGerenciarConteudo, adminForgeController.excluirTodosBlueprints);
+router.delete("/blueprints/:id", podeGerenciarConteudo, adminForgeController.excluirBlueprint);
 router.post("/blueprints/:id/duplicate", podeGerenciarConteudo, adminForgeController.duplicarBlueprint);
 router.post("/blueprints/:id/validate", podeGerenciarConteudo, adminForgeController.validarBlueprint);
 router.post("/blueprints/:id/activate", podeGerenciarConteudo, adminForgeController.ativarBlueprint);

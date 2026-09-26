@@ -356,6 +356,78 @@ async function setAtivoBlueprintAdmin(id, ativo, { idAdmin, req, motivo } = {}) 
   });
 }
 
+// Exclusão de verdade (não apenas desativar) — ForgeBlueprintIngredient
+// e ForgeBlueprintResult têm ON DELETE CASCADE em id_blueprint (ver
+// migrations de criação), então destruir o ForgeBlueprint já limpa os
+// dois sozinho, sem passo manual. Nenhuma outra tabela referencia
+// forge_blueprints por FK: filas de fabricação em andamento
+// (character_forge_queue) já guardam o resultado sorteado em
+// payload_resultado no momento de INICIAR o trabalho (§49) — nunca
+// releem o blueprint na hora de coletar — e ForgeOperationMetric.
+// id_blueprint é só um número solto pra telemetria histórica (sem FK),
+// então uma métrica antiga apontando pra um id já excluído não quebra
+// nada. Por isso é seguro excluir mesmo um blueprint ATIVO.
+async function excluirBlueprintAdmin(id, { idAdmin, req, motivo } = {}) {
+  return sequelize.transaction(async (transaction) => {
+    const blueprint = await carregarBlueprintCompleto(id, transaction);
+    if (!blueprint) throw erro("Blueprint não encontrado.", 404);
+    const dadosAntes = blueprint.toJSON();
+
+    await blueprint.destroy({ transaction });
+
+    await registrarAcao({
+      idAdmin,
+      acao: "DELETE_BLUEPRINT",
+      entidade: "ForgeBlueprint",
+      idEntidade: id,
+      dadosAntes,
+      dadosDepois: null,
+      motivo: motivo ?? null,
+      req,
+      transaction,
+    });
+    return { id, excluido: true };
+  });
+}
+
+// Bug reportado: "FORJA - CORREÇÃO EXCLUA TODOS OS BLUEPRINTS
+// EXISTENTES NA FORJA, ATIVOS OU INATIVOS" — sem filtro de `ativo`,
+// de propósito. Um audit log por blueprint (mesmo padrão de
+// adminUserService.bulkDeleteUsers) em vez de um blob só, pra manter
+// cada exclusão rastreável individualmente mesmo dentro de uma limpeza
+// em massa.
+async function excluirTodosBlueprintsAdmin({ idAdmin, req, motivo } = {}) {
+  return sequelize.transaction(async (transaction) => {
+    const blueprints = await ForgeBlueprint.findAll({
+      include: [
+        { model: ForgeBlueprintIngredient, as: "ingredientes" },
+        ...INCLUDE_RESULTADO_COMPLETO,
+      ],
+      transaction,
+    });
+
+    for (const blueprint of blueprints) {
+      const dadosAntes = blueprint.toJSON();
+      // eslint-disable-next-line no-await-in-loop -- mesma transaction, precisa ser sequencial
+      await blueprint.destroy({ transaction });
+      // eslint-disable-next-line no-await-in-loop -- idem
+      await registrarAcao({
+        idAdmin,
+        acao: "DELETE_BLUEPRINT",
+        entidade: "ForgeBlueprint",
+        idEntidade: blueprint.id,
+        dadosAntes,
+        dadosDepois: null,
+        motivo: motivo ?? "Exclusão em massa de todos os blueprints (ativos e inativos).",
+        req,
+        transaction,
+      });
+    }
+
+    return { total: blueprints.length, excluidos: blueprints.length };
+  });
+}
+
 // §5.1 — "como o jogador vê": mesmas tabelas/objetos do forgeConfig que
 // o gameplay real usa (CHANCE_QUALIDADE_SUPERIOR_FABRICACAO_PPM_POR_NIVEL,
 // reducaoTempoPorNivelForja), nunca uma fórmula reimplementada. Nunca
@@ -773,6 +845,8 @@ module.exports = {
   criarBlueprintAdmin,
   atualizarBlueprintAdmin,
   duplicarBlueprintAdmin,
+  excluirBlueprintAdmin,
+  excluirTodosBlueprintsAdmin,
   validarBlueprintAdmin,
   setAtivoBlueprintAdmin,
   previewBlueprintAdmin,

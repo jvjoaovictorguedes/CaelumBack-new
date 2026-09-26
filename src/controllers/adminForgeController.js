@@ -65,6 +65,26 @@ exports.duplicarBlueprint = async (req, res) => {
   }
 };
 
+exports.excluirBlueprint = async (req, res) => {
+  try {
+    const resultado = await adminForgeService.excluirBlueprintAdmin(req.params.id, { idAdmin: req.user.id, req, motivo: req.body?.motivo });
+    res.status(200).json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao excluir o blueprint.");
+  }
+};
+
+// Bug reportado: "FORJA - CORREÇÃO EXCLUA TODOS OS BLUEPRINTS
+// EXISTENTES NA FORJA, ATIVOS OU INATIVOS".
+exports.excluirTodosBlueprints = async (req, res) => {
+  try {
+    const resultado = await adminForgeService.excluirTodosBlueprintsAdmin({ idAdmin: req.user.id, req, motivo: req.body?.motivo });
+    res.status(200).json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao excluir todos os blueprints.");
+  }
+};
+
 exports.validarBlueprint = async (req, res) => {
   try {
     const resultado = await adminForgeService.validarBlueprintAdmin(req.params.id);
