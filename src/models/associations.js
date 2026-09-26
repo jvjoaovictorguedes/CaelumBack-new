@@ -161,6 +161,9 @@ ForgeBlueprintIngredient.belongsTo(ExpeditionResource, { foreignKey: "id_recurso
 ForgeBlueprint.hasMany(ForgeBlueprintResult, { foreignKey: "id_blueprint", as: "resultados" });
 ForgeBlueprintResult.belongsTo(ForgeBlueprint, { foreignKey: "id_blueprint" });
 ForgeBlueprintResult.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+// Reformulação V2 — o Item canônico do blueprint (ver comentário no
+// model ForgeBlueprint). Ainda não usado em runtime nesta fase Expand.
+ForgeBlueprint.belongsTo(Item, { foreignKey: "id_item_resultado", as: "itemResultado" });
 
 ForgeBarItem.belongsTo(ExpeditionResource, { foreignKey: "id_recurso", as: "recurso" });
 ForgeBarItem.belongsTo(Item, { foreignKey: "id_item", as: "item" });
