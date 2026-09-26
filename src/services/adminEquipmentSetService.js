@@ -9,6 +9,7 @@ const EquipmentSet = require("../models/EquipmentSet");
 const EquipmentSetPiece = require("../models/EquipmentSetPiece");
 const EquipmentSetBonus = require("../models/EquipmentSetBonus");
 const Item = require("../models/Item");
+const ForgeBlueprint = require("../models/ForgeBlueprint");
 const { SET_EFFECT_HANDLERS } = require("./equipmentSetEffectRegistry");
 const { registrarAcao } = require("./adminAuditService");
 
@@ -58,7 +59,14 @@ const CAMPOS_SET = ["key", "nome", "descricao", "imagem_url", "ativo"];
 async function listAdminEquipmentSets() {
   return EquipmentSet.findAll({
     include: [
-      { model: EquipmentSetPiece, as: "pecas", include: [{ model: Item, as: "item", attributes: ["id", "nome", "imagem_url", "tipo_item"] }] },
+      {
+        model: EquipmentSetPiece,
+        as: "pecas",
+        include: [
+          { model: Item, as: "item", attributes: ["id", "nome", "imagem_url", "tipo_item"] },
+          { model: ForgeBlueprint, as: "blueprint", attributes: ["id", "nome", "categoria_equipamento", "tier_equipamento"] },
+        ],
+      },
       { model: EquipmentSetBonus, as: "bonuses" },
     ],
     order: [["nome", "ASC"]],
@@ -116,7 +124,10 @@ async function duplicateAdminEquipmentSet(id, { idAdmin, req }) {
       { transaction },
     );
     for (const peca of original.pecas ?? []) {
-      await EquipmentSetPiece.create({ equipment_set_id: copia.id, item_id: peca.item_id, piece_key: peca.piece_key, ordem: peca.ordem }, { transaction });
+      await EquipmentSetPiece.create(
+        { equipment_set_id: copia.id, item_id: peca.item_id, id_blueprint: peca.id_blueprint, piece_key: peca.piece_key, ordem: peca.ordem },
+        { transaction },
+      );
     }
     for (const bonus of original.bonuses ?? []) {
       await EquipmentSetBonus.create(
@@ -132,8 +143,16 @@ async function duplicateAdminEquipmentSet(id, { idAdmin, req }) {
 
 // ------------------------------------------------------------------ PEÇAS
 async function addAdminEquipmentSetPiece(idSet, payload, { idAdmin, req }) {
-  const { item_id, piece_key, ordem } = payload ?? {};
-  if (!item_id || !piece_key) throw erro("item_id e piece_key são obrigatórios.");
+  const { item_id, id_blueprint, piece_key, ordem } = payload ?? {};
+  if (!piece_key) throw erro("piece_key é obrigatório.");
+  // Uma peça aponta pra um Item específico OU pra um ForgeBlueprint da
+  // Forja (qualquer raridade que o blueprint produzir conta pra peça) —
+  // nunca os dois, nunca nenhum (CHECK equipment_set_pieces_item_xor_blueprint
+  // no banco, ver migration 20261206010000). item_id continua o caminho
+  // de sempre pra itens que não vêm de blueprint.
+  if (item_id && id_blueprint) throw erro("Informe item_id OU id_blueprint, nunca os dois.");
+  if (!item_id && !id_blueprint) throw erro("Informe item_id ou id_blueprint.");
+
   // Bug reportado no painel ("não consigo colocar o ID do item que eu
   // quero") era o seletor de item do frontend (ItemPicker.tsx), não isso
   // — mas o service aceitava qualquer valor "truthy" (string, float,
@@ -142,21 +161,34 @@ async function addAdminEquipmentSetPiece(idSet, payload, { idAdmin, req }) {
   // chamada direta à API) só ia falhar depois, com Item.findByPk
   // devolvendo null pra um id inválido e um erro genérico "Item não
   // encontrado" em vez de deixar claro que o item_id em si é inválido.
-  if (!Number.isInteger(item_id) || item_id <= 0) {
+  if (item_id && (!Number.isInteger(item_id) || item_id <= 0)) {
     throw erro("item_id precisa ser um número inteiro positivo.");
+  }
+  if (id_blueprint && (!Number.isInteger(id_blueprint) || id_blueprint <= 0)) {
+    throw erro("id_blueprint precisa ser um número inteiro positivo.");
   }
 
   return sequelize.transaction(async (transaction) => {
     const set = await EquipmentSet.findByPk(idSet, { transaction });
     if (!set) throw erro("Conjunto não encontrado.", 404);
-    const item = await Item.findByPk(item_id, { transaction });
-    if (!item) throw erro("Item não encontrado.", 404);
-    if (!item.ativo) throw erro("Item desativado não pode virar peça de conjunto.");
+
+    if (item_id) {
+      const item = await Item.findByPk(item_id, { transaction });
+      if (!item) throw erro("Item não encontrado.", 404);
+      if (!item.ativo) throw erro("Item desativado não pode virar peça de conjunto.");
+    } else {
+      const blueprint = await ForgeBlueprint.findByPk(id_blueprint, { transaction });
+      if (!blueprint) throw erro("Blueprint não encontrado.", 404);
+      if (!blueprint.ativo) throw erro("Blueprint desativado não pode virar peça de conjunto.");
+    }
 
     const duplicada = await EquipmentSetPiece.findOne({ where: { equipment_set_id: idSet, piece_key }, transaction });
     if (duplicada) throw erro(`Já existe uma peça com piece_key "${piece_key}" nesse conjunto.`);
 
-    const peca = await EquipmentSetPiece.create({ equipment_set_id: idSet, item_id, piece_key, ordem: ordem ?? null }, { transaction });
+    const peca = await EquipmentSetPiece.create(
+      { equipment_set_id: idSet, item_id: item_id ?? null, id_blueprint: id_blueprint ?? null, piece_key, ordem: ordem ?? null },
+      { transaction },
+    );
     await registrarAcao({ idAdmin, acao: "criar", entidade: "EquipmentSetPiece", idEntidade: peca.id, dadosDepois: peca.toJSON(), req, transaction });
     return peca;
   });

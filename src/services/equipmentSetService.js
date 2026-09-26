@@ -14,6 +14,9 @@ const EquipmentSet = require("../models/EquipmentSet");
 const EquipmentSetPiece = require("../models/EquipmentSetPiece");
 const EquipmentSetBonus = require("../models/EquipmentSetBonus");
 const Item = require("../models/Item");
+const ForgeBlueprint = require("../models/ForgeBlueprint");
+const ForgeBlueprintResult = require("../models/ForgeBlueprintResult");
+const { Op } = require("sequelize");
 // Só o require garante que as associações (com alias explícito) já
 // foram declaradas — ver models/associations.js pra fonte única.
 require("../models/associations");
@@ -52,8 +55,23 @@ async function resolverConjuntosEquipados(idPersonagem, transaction) {
   // mesmo id_item.
   const idsItemEquipados = [...new Set(equipados.map((e) => e.id_item))];
 
+  // Peça por blueprint (qualquer raridade conta, ver EquipmentSetPiece):
+  // descobre de quais blueprints os itens equipados vieram, pra também
+  // casar EquipmentSetPiece.id_blueprint — não só item_id direto.
+  const resultadosBlueprint = await ForgeBlueprintResult.findAll({
+    where: { id_item: idsItemEquipados },
+    attributes: ["id_blueprint"],
+    transaction,
+  });
+  const idsBlueprintEquipados = [...new Set(resultadosBlueprint.map((r) => r.id_blueprint))];
+
+  const condicoesPeca = [{ item_id: idsItemEquipados }];
+  if (idsBlueprintEquipados.length > 0) {
+    condicoesPeca.push({ id_blueprint: idsBlueprintEquipados });
+  }
+
   const pecasEquipadas = await EquipmentSetPiece.findAll({
-    where: { item_id: idsItemEquipados },
+    where: { [Op.or]: condicoesPeca },
     include: [{ model: EquipmentSet, as: "equipmentSet", where: { ativo: true }, required: true }],
     transaction,
   });
@@ -81,7 +99,10 @@ async function resolverConjuntosEquipados(idPersonagem, transaction) {
   const [todasPecasDosSets, todosBonusDosSets] = await Promise.all([
     EquipmentSetPiece.findAll({
       where: { equipment_set_id: idsSets },
-      include: [{ model: Item, as: "item", attributes: ["id", "nome"] }],
+      include: [
+        { model: Item, as: "item", attributes: ["id", "nome"] },
+        { model: ForgeBlueprint, as: "blueprint", attributes: ["id", "nome"] },
+      ],
       order: [["ordem", "ASC"], ["id", "ASC"]],
       transaction,
     }),
@@ -146,7 +167,8 @@ async function resolverConjuntosEquipados(idPersonagem, transaction) {
       pieces: pecasDoSet.map((peca) => ({
         pieceKey: peca.piece_key,
         itemId: peca.item_id,
-        nome: peca.item?.nome ?? null,
+        blueprintId: peca.id_blueprint,
+        nome: peca.item?.nome ?? peca.blueprint?.nome ?? null,
         equipped: estado.pieceKeys.has(peca.piece_key),
       })),
       bonuses,
