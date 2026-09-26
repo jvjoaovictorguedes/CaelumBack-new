@@ -37,6 +37,12 @@ const GuildContribution = require("../src/models/GuildContribution");
 const UniqueFeat = require("../src/models/UniqueFeat");
 const UniqueFeatClaim = require("../src/models/UniqueFeatClaim");
 const uniqueFeatService = require("../src/services/uniqueFeatService");
+const Message = require("../src/models/Message");
+const Tournament = require("../src/models/Tournament");
+const TournamentParticipant = require("../src/models/TournamentParticipant");
+const TournamentSeries = require("../src/models/TournamentSeries");
+const MarketListing = require("../src/models/MarketListing");
+const CharacterEquipmentInstance = require("../src/models/CharacterEquipmentInstance");
 
 let temBanco = false;
 test.before(async () => {
@@ -210,6 +216,78 @@ testeComBanco("characterController.deleteCharacter (exclusão pelo próprio joga
 
   const personagemDepois = await Character.findByPk(personagem.id);
   assert.equal(personagemDepois, null);
+});
+
+testeComBanco("bulkDeleteUsers exclui conta que enviou e recebeu mensagens (bug reportado em produção: messages_id_remetente/destinatario_fkey)", async () => {
+  const { usuario: admin } = await criarPersonagem({ nivel: 1, isAdmin: true });
+  const { usuario, personagem } = await criarPersonagem({ nivel: 10 });
+  const { usuario: outroUsuario } = await criarPersonagem({ nivel: 10 });
+
+  const msgEnviada = await Message.create({ id_remetente: usuario.id, id_destinatario: outroUsuario.id, conteudo: "oi" });
+  const msgRecebida = await Message.create({ id_remetente: outroUsuario.id, id_destinatario: usuario.id, conteudo: "oi de volta" });
+
+  const resultado = await adminUserService.bulkDeleteUsers([usuario.id], { idAdmin: admin.id, req: null });
+  assert.equal(resultado.excluidos, 1, `esperava excluir — resultado: ${JSON.stringify(resultado)}`);
+
+  assert.equal(await Message.findByPk(msgEnviada.id), null, "mensagem enviada pela conta excluída também some (CASCADE)");
+  assert.equal(await Message.findByPk(msgRecebida.id), null, "mensagem recebida pela conta excluída também some (CASCADE)");
+  assert.equal(await Character.findByPk(personagem.id), null);
+});
+
+testeComBanco("bulkDeleteUsers exclui conta inscrita num torneio, e a série do bracket sobrevive com o slot vazio (SET NULL)", async () => {
+  const { usuario: admin } = await criarPersonagem({ nivel: 1, isAdmin: true });
+  const { usuario, personagem } = await criarPersonagem({ nivel: 10 });
+
+  const torneio = await Tournament.create({
+    name: `Torneio Teste ${sufixo()}`,
+    starts_at: new Date(),
+    created_by: admin.id,
+  });
+  const participante = await TournamentParticipant.create({ tournament_id: torneio.id, character_id: personagem.id });
+  const serie = await TournamentSeries.create({
+    tournament_id: torneio.id,
+    round: "Quartas",
+    participant_a_id: participante.id,
+    winner_participant_id: participante.id,
+  });
+
+  const resultado = await adminUserService.bulkDeleteUsers([usuario.id], { idAdmin: admin.id, req: null });
+  assert.equal(resultado.excluidos, 1, `esperava excluir — resultado: ${JSON.stringify(resultado)}`);
+
+  assert.equal(await TournamentParticipant.findByPk(participante.id), null, "inscrição do personagem excluído some (CASCADE, id_personagem->Characters)");
+  const serieDepois = await TournamentSeries.findByPk(serie.id);
+  assert.ok(serieDepois, "a série (jogo do bracket) NUNCA pode desaparecer — é histórico do torneio, não do jogador");
+  assert.equal(serieDepois.participant_a_id, null, "slot do participante excluído vira null (SET NULL), não bloqueia nem apaga a série");
+  assert.equal(serieDepois.winner_participant_id, null);
+});
+
+testeComBanco("bulkDeleteUsers exclui conta com anúncio ATIVO no mercado (market_listings.id_instancia é RESTRICT de propósito — precisa ser limpo no código, não só na FK)", async () => {
+  const { usuario: admin } = await criarPersonagem({ nivel: 1, isAdmin: true });
+  const { usuario, personagem } = await criarPersonagem({ nivel: 10 });
+
+  const item = await criarItemDeTeste();
+  const instancia = await CharacterEquipmentInstance.create({
+    id_personagem: personagem.id,
+    id_item: item.id,
+    raridade: "Comum",
+    refinamento: 0,
+    estado: "Mercado",
+  });
+  const anuncio = await MarketListing.create({
+    id_personagem_vendedor: personagem.id,
+    id_item: item.id,
+    id_instancia: instancia.id,
+    quantidade_total: 1,
+    quantidade_restante: 1,
+    preco_unitario: 100,
+    status: "Ativo",
+  });
+
+  const resultado = await adminUserService.bulkDeleteUsers([usuario.id], { idAdmin: admin.id, req: null });
+  assert.equal(resultado.excluidos, 1, `esperava excluir — resultado: ${JSON.stringify(resultado)}`);
+
+  assert.equal(await MarketListing.findByPk(anuncio.id), null, "anúncio do personagem excluído é removido junto, não bloqueia a exclusão da instância");
+  assert.equal(await CharacterEquipmentInstance.findByPk(instancia.id), null);
 });
 
 test.after(async () => {
