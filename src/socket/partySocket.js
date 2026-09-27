@@ -37,12 +37,7 @@ const {
   poderesPublicos,
   registrarAoIdentificar,
 } = require("./pvpLiveSocket");
-
-const TAMANHO_MAXIMO_GRUPO = 4;
-const TAMANHO_MINIMO_GRUPO = 2;
-const PRAZO_CONVITE_MS = 20000;
-const PRAZO_TURNO_MS = 20000;
-const MAX_RODADAS = 40;
+const partyBattleConfig = require("../config/partyBattleConfig");
 
 // partyId -> { id, hostId, membros: Map<charId,{id,nome,classe,pronto}>, ordem: [charId] }
 const grupos = new Map();
@@ -130,7 +125,7 @@ module.exports = function registerPartyHandlers(io) {
     const pendente = convitesPendentes.get(chave);
     if (!pendente) return;
 
-    const restanteMs = pendente.criadoEm + PRAZO_CONVITE_MS - Date.now();
+    const restanteMs = pendente.criadoEm + partyBattleConfig.PRAZO_CONVITE_MS - Date.now();
     if (restanteMs <= 0) return;
 
     const grupo = grupos.get(pendente.partyId);
@@ -236,8 +231,8 @@ module.exports = function registerPartyHandlers(io) {
         return socket.emit("party:erro", { mensagem: "Não dá pra chamar mais gente com o grupo em batalha." });
       }
 
-      if (grupo.membros.size >= TAMANHO_MAXIMO_GRUPO) {
-        return socket.emit("party:erro", { mensagem: `O grupo já está cheio (máximo ${TAMANHO_MAXIMO_GRUPO}).` });
+      if (grupo.membros.size >= partyBattleConfig.TAMANHO_MAXIMO_GRUPO) {
+        return socket.emit("party:erro", { mensagem: `O grupo já está cheio (máximo ${partyBattleConfig.TAMANHO_MAXIMO_GRUPO}).` });
       }
 
       // Anfitrião entra no próprio grupo já na primeira chamada (antes
@@ -260,7 +255,7 @@ module.exports = function registerPartyHandlers(io) {
         limparConvitePendente(chaveConvidado);
         socket.emit("party:convite-expirado", { idConvidado: chaveConvidado });
         io.to(socketIdConvidado).emit("party:convite-cancelado", { idConvidante });
-      }, PRAZO_CONVITE_MS);
+      }, partyBattleConfig.PRAZO_CONVITE_MS);
 
       convitesPendentes.set(chaveConvidado, {
         idConvidante,
@@ -270,13 +265,13 @@ module.exports = function registerPartyHandlers(io) {
         criadoEm: Date.now(),
       });
 
-      socket.emit("party:convite-enviado", { idConvidado: chaveConvidado, prazoSegundos: PRAZO_CONVITE_MS / 1000 });
+      socket.emit("party:convite-enviado", { idConvidado: chaveConvidado, prazoSegundos: partyBattleConfig.PRAZO_CONVITE_MS / 1000 });
       io.to(socketIdConvidado).emit("party:convite-recebido", {
         idConvidante,
         nomeConvidante: convidante.nome,
         partyId: grupo.id,
         membros: membrosPublicos(grupo),
-        prazoSegundos: PRAZO_CONVITE_MS / 1000,
+        prazoSegundos: partyBattleConfig.PRAZO_CONVITE_MS / 1000,
       });
     });
 
@@ -298,7 +293,7 @@ module.exports = function registerPartyHandlers(io) {
       if (!grupo) {
         return socket.emit("party:erro", { mensagem: "Esse grupo não existe mais." });
       }
-      if (grupo.membros.size >= TAMANHO_MAXIMO_GRUPO) {
+      if (grupo.membros.size >= partyBattleConfig.TAMANHO_MAXIMO_GRUPO) {
         return socket.emit("party:erro", { mensagem: "O grupo ficou cheio antes de você aceitar." });
       }
       if (grupoPorPersonagem.has(idConvidado) || batalhaPorPersonagem.has(idConvidado)) {
@@ -386,8 +381,8 @@ module.exports = function registerPartyHandlers(io) {
       if (grupo.emBatalha) {
         return socket.emit("party:erro", { mensagem: "O grupo já está em batalha." });
       }
-      if (grupo.membros.size < TAMANHO_MINIMO_GRUPO) {
-        return socket.emit("party:erro", { mensagem: `Precisa de pelo menos ${TAMANHO_MINIMO_GRUPO} aventureiros pra formar um grupo.` });
+      if (grupo.membros.size < partyBattleConfig.TAMANHO_MINIMO_GRUPO) {
+        return socket.emit("party:erro", { mensagem: `Precisa de pelo menos ${partyBattleConfig.TAMANHO_MINIMO_GRUPO} aventureiros pra formar um grupo.` });
       }
       const naoProntos = grupo.ordem.filter((id) => !grupo.membros.get(id)?.pronto);
       if (naoProntos.length > 0) {
@@ -452,14 +447,14 @@ module.exports = function registerPartyHandlers(io) {
         // AdventureMonster) é a escala pelo TAMANHO do grupo: N aliados
         // batem nele por rodada, então precisa aguentar os N golpes —
         // esse bônus extra, por cabeça além do mínimo de
-        // TAMANHO_MINIMO_GRUPO, empilha em cima disso um pouco mais de
+        // partyBattleConfig.TAMANHO_MINIMO_GRUPO, empilha em cima disso um pouco mais de
         // vida e dano (moderado — o resto do design já favorece ir em
         // grupo: XP/ouro cheios pra todo mundo, não divididos).
         const tamanhoGrupo = Math.max(1, membros.length);
-        const aventureirosExtras = Math.max(0, grupo.ordem.length - TAMANHO_MINIMO_GRUPO);
+        const aventureirosExtras = Math.max(0, grupo.ordem.length - partyBattleConfig.TAMANHO_MINIMO_GRUPO);
         const fatorDificuldadeGrupo = {
-          vida: 1 + aventureirosExtras * 0.12,
-          dano: 1 + aventureirosExtras * 0.08,
+          vida: 1 + aventureirosExtras * partyBattleConfig.FATOR_DIFICULDADE_VIDA_POR_EXTRA,
+          dano: 1 + aventureirosExtras * partyBattleConfig.FATOR_DIFICULDADE_DANO_POR_EXTRA,
         };
 
         const vidaMaxima = Math.max(
@@ -549,7 +544,7 @@ module.exports = function registerPartyHandlers(io) {
           })),
           ordem: batalha.ordem,
           turnoDe: batalha.ordem[0],
-          prazoSegundos: PRAZO_TURNO_MS / 1000,
+          prazoSegundos: partyBattleConfig.PRAZO_TURNO_MS / 1000,
         });
 
         iniciarTimerDeTurnoGrupo(io, battleId);
@@ -644,7 +639,7 @@ function iniciarTimerDeTurnoGrupo(io, battleId) {
       return;
     }
     executarTurnoAliado(io, battleId, characterId, { tipo: "attack" }, true);
-  }, PRAZO_TURNO_MS);
+  }, partyBattleConfig.PRAZO_TURNO_MS);
 }
 
 async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatico = false) {
@@ -744,7 +739,7 @@ function avancarTurnoAliado(io, battleId) {
     io.to(batalha.sala).emit("party:proximo-turno", {
       battleId,
       turnoDe: batalha.ordem[proximoIndex],
-      prazoSegundos: PRAZO_TURNO_MS / 1000,
+      prazoSegundos: partyBattleConfig.PRAZO_TURNO_MS / 1000,
       rodada: batalha.rodada,
     });
     iniciarTimerDeTurnoGrupo(io, battleId);
@@ -792,7 +787,7 @@ function executarTurnoMonstro(io, battleId) {
   }
 
   batalha.rodada += 1;
-  if (batalha.rodada > MAX_RODADAS) {
+  if (batalha.rodada > partyBattleConfig.MAX_RODADAS) {
     return finalizarBatalha(io, battleId, false, "tempo_esgotado");
   }
 
@@ -803,7 +798,7 @@ function executarTurnoMonstro(io, battleId) {
   io.to(batalha.sala).emit("party:proximo-turno", {
     battleId,
     turnoDe: batalha.ordem[primeiroVivoIndex],
-    prazoSegundos: PRAZO_TURNO_MS / 1000,
+    prazoSegundos: partyBattleConfig.PRAZO_TURNO_MS / 1000,
     rodada: batalha.rodada,
   });
   iniciarTimerDeTurnoGrupo(io, battleId);

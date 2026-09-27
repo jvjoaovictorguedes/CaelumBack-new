@@ -95,6 +95,7 @@ const maintenanceMiddleware = require("./middlewares/maintenanceMiddleware");
 const adminGlobalBuffRoutes = require("./routes/adminGlobalBuffRoutes");
 const adminTavernRoutes = require("./routes/adminTavernRoutes");
 const adminForgeRoutes = require("./routes/adminForgeRoutes");
+const adminExpeditionRoutes = require("./routes/adminExpeditionRoutes");
 const adminWorldBossRoutes = require("./routes/adminWorldBossRoutes");
 const alchemyRoutes = require("./routes/alchemyRoutes");
 const fishingRoutes = require("./routes/fishingRoutes");
@@ -131,6 +132,11 @@ connectDB()
     require("./services/forgeSettingsService")
       .aplicarPersistidosNoBoot()
       .catch((error) => console.error("[forgeSettingsService] falha ao aplicar overrides persistidos no boot:", error)),
+  )
+  .then(() =>
+    require("./services/expeditionSettingsService")
+      .aplicarPersistidosNoBoot()
+      .catch((error) => console.error("[expeditionSettingsService] falha ao aplicar overrides persistidos no boot:", error)),
   )
   .catch((error) => {
     console.error(
@@ -295,6 +301,7 @@ app.use("/api/admin/maintenance", adminMaintenanceRoutes);
 app.use("/api/admin/global-buffs", adminGlobalBuffRoutes);
 app.use("/api/admin/tavern", adminTavernRoutes);
 app.use("/api/admin/forge", adminForgeRoutes);
+app.use("/api/admin/expedition", adminExpeditionRoutes);
 app.use("/api/admin/world-boss", adminWorldBossRoutes);
 app.use("/api/admin/guild-journal", adminGuildJournalRoutes);
 app.use("/api/admin/fishing", adminFishingRoutes);

@@ -43,6 +43,22 @@ function calcularPerigo(nivelPersonagem, nivelMin, nivelMax) {
   return "EXTREMO";
 }
 
+// Painel Admin — mesmo padrão de mutação em-lugar do forgeConfig/
+// expeditionConfig. LIMIAR_PERIGO é o único valor daqui que ainda
+// afeta o gameplay de verdade (calcularPerigo, usado em
+// adventureService.js) — xpBaseDoNivel/ouroBaseDoNivel e os
+// multiplicadores de Raro ficaram sem consumidor depois da
+// Reformulação V2 (recompensa passou a vir de xp_recompensa/
+// ouro_recompensa por monstro), então não entram no balanceamento
+// admin pra não fingir que editá-los muda alguma coisa.
+function aplicarOverridesBalanceamento(grupo, valores) {
+  if (!valores || typeof valores !== "object") return;
+  if (grupo === "adventure.danger") {
+    if (typeof valores.MEDIO === "number") LIMIAR_PERIGO.MEDIO = valores.MEDIO;
+    if (typeof valores.ALTO === "number") LIMIAR_PERIGO.ALTO = valores.ALTO;
+  }
+}
+
 module.exports = {
   MULTIPLICADOR_RARO_XP,
   MULTIPLICADOR_RARO_OURO,
@@ -50,5 +66,7 @@ module.exports = {
   SUGESTAO_MULTIPLICADOR_RARO_DANO,
   xpBaseDoNivel,
   ouroBaseDoNivel,
+  LIMIAR_PERIGO,
   calcularPerigo,
+  aplicarOverridesBalanceamento,
 };

@@ -3,13 +3,13 @@
 // dropService/raridadeRolagemService: é "vale a pena tentar prever/
 // manipular".
 const crypto = require("crypto");
+const expeditionConfig = require("../config/expeditionConfig");
 const {
   BASE_SORTEIO,
   CHANCE_POR_NIVEL_PPM,
   QUANTIDADE_POR_NIVEL,
   aplicarTetoDeQualidade,
-  CHANCE_MONSTRO_PPM,
-} = require("../config/expeditionConfig");
+} = expeditionConfig;
 
 // Ordem da mais rara pra mais comum — soma cumulativa checando a mais
 // rara primeiro garante que a faixa pequena do Mítico não fique
@@ -59,7 +59,7 @@ function sortearQuantidade(nivel, qualidade) {
 // checado ANTES de sortearQualidade, nunca em conjunto (uma coleta ou
 // gera recurso ou vira combate, nunca os dois).
 function sortearInterrupcaoDeMonstro() {
-  return crypto.randomInt(0, BASE_SORTEIO) < CHANCE_MONSTRO_PPM;
+  return crypto.randomInt(0, BASE_SORTEIO) < expeditionConfig.CHANCE_MONSTRO_PPM;
 }
 
 module.exports = { sortearQualidade, sortearRecurso, sortearQuantidade, sortearInterrupcaoDeMonstro };
