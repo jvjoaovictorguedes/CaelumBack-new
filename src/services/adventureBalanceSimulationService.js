@@ -52,6 +52,12 @@ const ExpeditionRegion = require("../models/ExpeditionRegion");
 const { buscarPoderesDoPersonagem } = require("../controllers/pvpController");
 const { gerarInimigo } = require("../controllers/combatController");
 const { deslocamentoDeNivelPorRegiao } = require("../config/expeditionConfig");
+// Módulo inteiro (nunca desestruturado) — Painel Admin de Expedição
+// (aplicarOverridesBalanceamento) sobrescreve esses valores em tempo
+// real por mutação em-lugar; ler por propriedade a cada simulação é o
+// que garante que o simulador reflita o balanceamento ao vivo, nunca
+// os defaults congelados no load do processo.
+const partyBattleConfig = require("../config/partyBattleConfig");
 const { buscarBonusDeAtributos, personagemComBonus } = require("./equipmentBonusService");
 const {
   vidaMaximaDe,
@@ -73,14 +79,6 @@ const SIMULACOES_MAXIMAS = 1000;
 // ofensivo comprado contra um monstro com defesa alta demais) — um
 // combate real de PvE nunca chega nem perto disso.
 const MAX_TURNOS_POR_COMBATE = 60;
-
-// Mesmos valores de src/socket/partySocket.js (TAMANHO_MINIMO_GRUPO/
-// TAMANHO_MAXIMO_GRUPO/MAX_RODADAS) — não são fórmula de combate, só os
-// limites de UI/segurança do modo grupo; mantidos em sincronia manual
-// (poucas constantes, mudam raramente).
-const TAMANHO_MINIMO_GRUPO = 2;
-const TAMANHO_MAXIMO_GRUPO = 4;
-const MAX_RODADAS_GRUPO = 40;
 
 async function carregarPersonagemParaSimulacao(idPersonagem) {
   const personagem = await Character.findByPk(idPersonagem, { include: [{ model: Class }] });
@@ -311,10 +309,10 @@ async function simularExpedicao({ idPersonagem, idRegiaoExpedicao, quantidade })
 // manual que zona/expedição usam, porque a batalha em grupo de verdade
 // também não usa.
 function simularUmaBatalhaDeGrupo(personagem, monstro, tamanhoGrupo) {
-  const aventureirosExtras = Math.max(0, tamanhoGrupo - TAMANHO_MINIMO_GRUPO);
+  const aventureirosExtras = Math.max(0, tamanhoGrupo - partyBattleConfig.TAMANHO_MINIMO_GRUPO);
   const fatorDificuldadeGrupo = {
-    vida: 1 + aventureirosExtras * 0.12,
-    dano: 1 + aventureirosExtras * 0.08,
+    vida: 1 + aventureirosExtras * partyBattleConfig.FATOR_DIFICULDADE_VIDA_POR_EXTRA,
+    dano: 1 + aventureirosExtras * partyBattleConfig.FATOR_DIFICULDADE_DANO_POR_EXTRA,
   };
   const vidaMaxima = Math.max(20, Math.round(monstro.vida_maxima * tamanhoGrupo * fatorDificuldadeGrupo.vida));
   const danoMin = Math.max(0, Math.round(monstro.dano_min * fatorDificuldadeGrupo.dano));
@@ -353,7 +351,7 @@ function simularUmaBatalhaDeGrupo(personagem, monstro, tamanhoGrupo) {
     };
   }
 
-  while (rodada < MAX_RODADAS_GRUPO) {
+  while (rodada < partyBattleConfig.MAX_RODADAS) {
     rodada += 1;
 
     for (const membro of membros) {
@@ -399,8 +397,8 @@ async function simularGrupo({ idPersonagem, idMonstro, tamanhoGrupo, quantidade 
   if (!idPersonagem || !idMonstro) throw erro("Escolha um personagem e um monstro.");
   const n = Math.min(SIMULACOES_MAXIMAS, Math.max(1, Number.parseInt(quantidade, 10) || SIMULACOES_PADRAO));
   const tamanho = Math.min(
-    TAMANHO_MAXIMO_GRUPO,
-    Math.max(TAMANHO_MINIMO_GRUPO, Number.parseInt(tamanhoGrupo, 10) || TAMANHO_MINIMO_GRUPO),
+    partyBattleConfig.TAMANHO_MAXIMO_GRUPO,
+    Math.max(partyBattleConfig.TAMANHO_MINIMO_GRUPO, Number.parseInt(tamanhoGrupo, 10) || partyBattleConfig.TAMANHO_MINIMO_GRUPO),
   );
 
   const [personagem, monstro] = await Promise.all([
@@ -457,4 +455,4 @@ async function simularBalanceamento({ modo = "zona", idPersonagem, idMonstro, id
   throw erro(`Modo de simulação desconhecido: "${modo}".`);
 }
 
-module.exports = { simularBalanceamento, TAMANHO_MINIMO_GRUPO, TAMANHO_MAXIMO_GRUPO };
+module.exports = { simularBalanceamento };
