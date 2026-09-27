@@ -15,13 +15,13 @@ const ExpeditionResource = require("../models/ExpeditionResource");
 const ExpeditionResourceItem = require("../models/ExpeditionResourceItem");
 const CharacterInventory = require("../models/CharacterInventory");
 const Item = require("../models/Item");
+const expeditionConfig = require("../config/expeditionConfig");
 const {
-  TEMPO_COLETA_MS,
   CHANCE_POR_NIVEL_PPM,
   BASE_SORTEIO,
   NIVEL_MAXIMO,
   deslocamentoDeNivelPorRegiao,
-} = require("../config/expeditionConfig");
+} = expeditionConfig;
 const { sortearQualidade, sortearRecurso, sortearQuantidade, sortearInterrupcaoDeMonstro } = require("./expeditionRollService");
 const { nivelPorXpTotal, xpParaProximoNivel, aplicarGanhoDeXp } = require("./expeditionProgressionService");
 const { bonusesAtivosAgora } = require("./globalBuffService");
@@ -253,7 +253,7 @@ async function coletar(id_personagem, id_regiao) {
       // O cooldown de coleta é consumido igual (o clique já foi gasto),
       // mesmo sem gerar recurso — evita um segundo caminho de cooldown
       // só pra esse caso.
-      const proximaColetaEmInterrupcao = new Date(agora + TEMPO_COLETA_MS);
+      const proximaColetaEmInterrupcao = new Date(agora + expeditionConfig.TEMPO_COLETA_MS);
       for (const p of profissoesDoPersonagem) {
         p.proxima_coleta_em = proximaColetaEmInterrupcao;
         await p.save({ transaction });
@@ -344,7 +344,7 @@ async function coletar(id_personagem, id_regiao) {
     // Grava o mesmo cooldown nas 3 linhas (não só na que coletou agora)
     // — é isso que faz o cooldown ser global entre profissões, não só
     // "por profissão".
-    const proximaColetaEm = new Date(agora + TEMPO_COLETA_MS);
+    const proximaColetaEm = new Date(agora + expeditionConfig.TEMPO_COLETA_MS);
     for (const p of profissoesDoPersonagem) {
       p.proxima_coleta_em = proximaColetaEm;
       await p.save({ transaction });

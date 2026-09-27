@@ -185,6 +185,26 @@ async function resgatarRecompensaContrato(idPersonagem, idContrato, transaction)
   return { dinheiro, xp, nivel: resultadoXP?.nivel ?? character.nivel, itens: itensConcedidos };
 }
 
+// Bug reportado: depois de resgatar a recompensa (status "Resgatado"),
+// a oferta correspondente voltava a aparecer com "Aceitar" disponível —
+// listarContratosAtivos (usada pra montar ja_aceita) só enxerga
+// "Ativo"/"Concluido", então um contrato já resgatado simplesmente
+// sumia da visão, junto com a marca de "já aceita" na oferta. A trava
+// de duplicidade em aceitarOferta (linha ~53 acima) já checava
+// QUALQUER status corretamente — cada oferta é uma linha nova por
+// rotação (nunca reaproveitada entre janelas), então id_offer sozinho
+// já basta pra identificar "esse personagem já mexeu nessa oferta
+// específica", sem precisar filtrar por janela aqui.
+async function buscarStatusPorOferta(idPersonagem, idsOfertas, transaction) {
+  if (!idsOfertas.length) return new Map();
+  const contratos = await CharacterAdventureGuildContract.findAll({
+    where: { id_personagem: idPersonagem, id_offer: idsOfertas },
+    attributes: ["id_offer", "status"],
+    transaction,
+  });
+  return new Map(contratos.map((c) => [c.id_offer, c.status]));
+}
+
 async function listarContratosAtivos(idPersonagem, transaction) {
   return CharacterAdventureGuildContract.findAll({
     where: { id_personagem: idPersonagem, status: ["Ativo", "Concluido"] },
@@ -227,5 +247,6 @@ module.exports = {
   entregarItens,
   resgatarRecompensaContrato,
   listarContratosAtivos,
+  buscarStatusPorOferta,
   expirarContratosVencidos,
 };

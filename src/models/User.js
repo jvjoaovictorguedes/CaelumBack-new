@@ -78,6 +78,16 @@ const User = sequelize.define(
       unique: true,
       field: "google_id",
     },
+    // Sistema de Referral — quem indicou esta conta no registro (self-
+    // referencing, SET NULL). null = se registrou sem indicação, ou
+    // informou um nome que não bateu com nenhuma conta existente
+    // (registerUser rejeita esse caso antes de chegar aqui — nunca fica
+    // "indicado por alguém que não existe" silenciosamente).
+    id_indicado_por: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      field: "id_indicado_por",
+    },
   },
   {
     tableName: "users",
