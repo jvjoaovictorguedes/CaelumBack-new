@@ -269,7 +269,7 @@ exports.getAllCharacterInventory = async (req, res) => {
         { model: Character, attributes: ["id", "nome", "nivel"] },
         {
           model: Item,
-          attributes: ["id", "nome", "tipo_item", "raridade", "peso", "imagem_url"],
+          attributes: ["id", "nome", "tipo_item", "raridade", "peso", "imagem_url", "descricao"],
           // slot_equipamento é o que diferencia Tronco de Pé (os dois são
           // tipo_item "Armadura") — sem isso a tela de inventário
           // categorizado (Meus Equipamentos) não tinha como separar as
