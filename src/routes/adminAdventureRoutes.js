@@ -10,8 +10,12 @@
 // combates PvE de verdade (mesmas fórmulas/motor do jogo real, ver
 // adventureBalanceSimulationService.js) entre um personagem e um
 // monstro escolhidos, pra calibrar dificuldade sem precisar jogar de
-// verdade. Não simula Motor de Status/cooldown/buffs (V1) — ver
-// comentário no topo do service pra escopo completo.
+// verdade. Três modos (body.modo): "zona" (Modo Aventura solo, default),
+// "expedicao" (interrupção de monstro da coleta — GET /expedition-regions
+// alimenta o dropdown de região) e "grupo" (Aventura em Party, N cópias
+// do personagem vs 1 monstro escalado). Não simula Motor de Status/
+// cooldown/buffs (V1) — ver comentário no topo do service pra escopo
+// completo.
 const express = require("express");
 const adminAdventureController = require("../controllers/adminAdventureController");
 const authMiddleware = require("../middlewares/authMiddleware");
@@ -40,5 +44,6 @@ router.post("/loot", adminAdventureController.criarLoot);
 router.patch("/loot/:id", adminAdventureController.atualizarLoot);
 
 router.post("/balance/simulate", adminAdventureController.simularBalanceamento);
+router.get("/expedition-regions", adminAdventureController.listarRegioesExpedicao);
 
 module.exports = router;

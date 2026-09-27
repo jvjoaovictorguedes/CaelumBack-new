@@ -157,17 +157,33 @@ exports.atualizarLoot = async (req, res) => {
   }
 };
 
-// Simulador de Balanceamento — ver adventureBalanceSimulationService.js
+// Simulador de Balanceamento — ver adventureBalanceSimulationService.js.
+// modo "zona" (default, retrocompatível) | "expedicao" | "grupo".
 exports.simularBalanceamento = async (req, res) => {
   try {
-    const { id_personagem, id_monstro, quantidade } = req.body ?? {};
+    const { modo, id_personagem, id_monstro, id_regiao_expedicao, tamanho_grupo, quantidade } = req.body ?? {};
     const resultado = await adventureBalanceSimulationService.simularBalanceamento({
+      modo,
       idPersonagem: id_personagem,
       idMonstro: id_monstro,
+      idRegiaoExpedicao: id_regiao_expedicao,
+      tamanhoGrupo: tamanho_grupo,
       quantidade,
     });
     res.status(200).json({ status: "success", data: resultado });
   } catch (error) {
     tratarErro(res, error, "Erro interno do servidor ao simular combates.");
+  }
+};
+
+// Dropdown de região pro modo "expedicao" do simulador — mesmo catálogo
+// que o jogador vê em GET /expeditions/regions, só que sem depender de
+// nível/profissão de nenhum personagem específico.
+exports.listarRegioesExpedicao = async (req, res) => {
+  try {
+    const regioes = await adminAdventureService.listExpeditionRegions();
+    res.status(200).json({ status: "success", data: { regioes } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao listar regiões de expedição.");
   }
 };

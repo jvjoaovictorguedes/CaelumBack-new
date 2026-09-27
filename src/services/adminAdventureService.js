@@ -11,6 +11,7 @@ const AdventureMonster = require("../models/AdventureMonster");
 const AdventureZoneMonster = require("../models/AdventureZoneMonster");
 const AdventureMonsterLoot = require("../models/AdventureMonsterLoot");
 const Item = require("../models/Item");
+const ExpeditionRegion = require("../models/ExpeditionRegion");
 const { registrarAcao } = require("./adminAuditService");
 
 function erro(mensagem, statusCode = 400) {
@@ -470,6 +471,13 @@ async function updateAdminMonsterLoot(id, payload, { idAdmin, req }) {
   });
 }
 
+// Só leitura, pro Simulador de Balanceamento (modo "expedicao") montar
+// o dropdown de região sem duplicar o catálogo que expeditionController
+// já expõe pro jogador comum — nenhuma tabela/rota de escrita nova.
+async function listExpeditionRegions() {
+  return ExpeditionRegion.findAll({ where: { ativo: true }, order: [["ordem", "ASC"], ["id", "ASC"]] });
+}
+
 module.exports = {
   listAdminZones,
   createAdminZone,
@@ -484,4 +492,5 @@ module.exports = {
   listAdminMonsterLoot,
   createAdminMonsterLoot,
   updateAdminMonsterLoot,
+  listExpeditionRegions,
 };
