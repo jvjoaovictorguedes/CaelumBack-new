@@ -65,7 +65,8 @@ async function posicaoNivel(idPersonagem) {
 
   const [linhas] = await sequelize.query(
     `SELECT COUNT(*)::int AS count FROM "Characters"
-     WHERE nivel > :nivel OR (nivel = :nivel AND experiencia > :experiencia);`,
+     WHERE ${SQL_EXCLUIR_ADMINS}
+       AND (nivel > :nivel OR (nivel = :nivel AND experiencia > :experiencia));`,
     { replacements: { nivel: personagem.nivel, experiencia: personagem.experiencia } },
   );
   return linhas[0].count + 1;
@@ -104,7 +105,8 @@ async function posicaoGold(idPersonagem) {
   if (!personagem) return null;
 
   const [linhas] = await sequelize.query(
-    `SELECT COUNT(*)::int AS count FROM "Characters" WHERE dinheiro_total_ganho > :valor;`,
+    `SELECT COUNT(*)::int AS count FROM "Characters"
+     WHERE ${SQL_EXCLUIR_ADMINS} AND dinheiro_total_ganho > :valor;`,
     { replacements: { valor: personagem.dinheiro_total_ganho } },
   );
   return linhas[0].count + 1;
@@ -251,7 +253,9 @@ async function posicaoForja(idPersonagem) {
   if (!progresso) return null;
 
   const [linhas] = await sequelize.query(
-    `SELECT COUNT(*)::int AS count FROM character_forge_progress WHERE experiencia > :xp;`,
+    `SELECT COUNT(*)::int AS count FROM character_forge_progress cfp
+     JOIN "Characters" c ON c.id = cfp.id_personagem
+     WHERE ${SQL_EXCLUIR_ADMINS} AND cfp.experiencia > :xp;`,
     { replacements: { xp: progresso.experiencia } },
   );
   return linhas[0].count + 1;
@@ -334,7 +338,9 @@ async function posicaoPvp(idPersonagem) {
   // inteiro só pra achar minha posição (§19).
   const [linhas] = await sequelize.query(
     `SELECT COUNT(*)::int AS count FROM character_pvp_seasons cps
-     WHERE cps.season_id = :seasonId AND cps.jogos >= :minimo
+     JOIN "Characters" c ON c.id = cps.character_id
+     WHERE ${SQL_EXCLUIR_ADMINS}
+       AND cps.season_id = :seasonId AND cps.jogos >= :minimo
        AND (
          cps.rating > :rating
          OR (cps.rating = :rating AND cps.vitorias > :vitorias)
@@ -438,7 +444,8 @@ async function posicaoPvpCasual(idPersonagem) {
   // ANTES, sem carregar o ranking inteiro (§19 do Ranking v2).
   const [linhas] = await sequelize.query(
     `SELECT COUNT(*)::int AS count FROM "PvpStatuses" ps
-     WHERE (ps.vitorias + ps.derrotas) > 0 AND (
+     JOIN "Characters" c ON c.id = ps.id_personagem
+     WHERE ${SQL_EXCLUIR_ADMINS} AND (ps.vitorias + ps.derrotas) > 0 AND (
        ((ps.vitorias - ps.derrotas) * 10 + LEAST(30, FLOOR((ps.vitorias + ps.derrotas) / 5))) > :pontuacao
        OR (((ps.vitorias - ps.derrotas) * 10 + LEAST(30, FLOOR((ps.vitorias + ps.derrotas) / 5))) = :pontuacao
            AND (ps.vitorias - ps.derrotas) > :saldo)
