@@ -9,6 +9,7 @@ const {
   entregarItens,
   resgatarRecompensaContrato,
   listarContratosAtivos,
+  buscarStatusPorOferta,
   expirarContratosVencidos,
 } = require("../services/adventureGuildContractService");
 const { obterProvacaoAtiva, iniciarProvacao, falharProvacao } = require("../services/adventureGuildTrialService");
@@ -169,14 +170,24 @@ exports.obterQuadroDeRank = async (req, res) => {
       const progresso = await obterOuCriarProgresso(idPersonagem, transaction);
       const { janelaInicio, proximaJanela, ofertas } = await obterOfertasDoRank(progresso.rank, transaction);
       const contratos = await listarContratosAtivos(idPersonagem, transaction);
-      const idsOfertasAceitas = new Set(contratos.map((c) => c.id_offer).filter(Boolean));
+      // Bug reportado: depois de resgatar a recompensa (status
+      // "Resgatado"), a oferta voltava a mostrar "Aceitar" — porque
+      // `contratos` acima só enxerga "Ativo"/"Concluido". Oferta é uma
+      // linha nova a cada rotação (nunca reaproveitada), então basta
+      // checar diretamente por id_offer, em QUALQUER status, pra saber
+      // se o personagem já mexeu nela.
+      const statusPorOferta = await buscarStatusPorOferta(idPersonagem, ofertas.map((o) => o.id), transaction);
 
       return {
         rank: progresso.rank,
         apto_para_promocao: progresso.apto_para_promocao,
         janela_inicio: janelaInicio,
         proxima_rotacao_em: proximaJanela,
-        ofertas: ofertas.map((o) => ({ ...formatarOferta(o), ja_aceita: idsOfertasAceitas.has(o.id) })),
+        ofertas: ofertas.map((o) => ({
+          ...formatarOferta(o),
+          ja_aceita: statusPorOferta.has(o.id),
+          status_contrato: statusPorOferta.get(o.id) ?? null,
+        })),
         contratos_ativos: contratos.filter((c) => c.status === "Ativo").map(formatarContrato),
         contratos_concluidos: contratos.filter((c) => c.status === "Concluido").map(formatarContrato),
       };
