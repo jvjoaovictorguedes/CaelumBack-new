@@ -15,18 +15,17 @@ const BASE_SORTEIO = 10000;
 const CHANCE_ITEM_BASE10000 = 2000; // 20%
 const CHANCE_OURO_BONUS_BASE10000 = 2500; // 25% (checado só se não caiu no item)
 
-// Pool de tipos que fazem sentido cair como loot de monstro — sem
-// QuestItem/Currencia (não são itens "de verdade" pra dropar assim).
-const TIPOS_DROPAVEIS = [
-  "Armadura",
-  "Capacete",
-  "Escudo",
-  "Arma",
-  "Consumivel",
-  "Material",
-  "Acessorio1",
-  "Acessorio2",
-];
+// Pool de tipos que fazem sentido cair como loot GENÉRICO de monstro —
+// nunca equipamento de verdade (Arma/Armadura/Capacete/Escudo/
+// Acessorio1/Acessorio2, ex.: uma espada). Equipamento só entra no jogo
+// por caminhos curados (Forja, Loja, Mercado, espólio DE ZONA via
+// AdventureZoneLoot/AdventureMonsterLoot — que também nunca aponta pra
+// Arma/Armadura, só pra Espolio, ver adventureRewardService.js) — um
+// mob qualquer não pode dar de bandeja qualquer arma do catálogo
+// inteiro sem contexto de tier/nível nenhum (bug relatado). QuestItem/
+// Currencia continuam de fora por não serem itens "de verdade" pra
+// dropar assim.
+const TIPOS_DROPAVEIS = ["Consumivel", "Material"];
 
 // Quanto mais raro, mais raro cair — pesos decrescem rápido pra dar de
 // fato a sensação de "achado" quando sai algo Épico+ de um mob comum.
