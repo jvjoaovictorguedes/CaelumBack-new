@@ -5,8 +5,13 @@
 // REMOVIDO daqui: monstro agora tem stats fixos e autorais
 // (nivel/vida_maxima/dano_min/dano_max/agilidade/velocidade/
 // xp_recompensa/ouro_recompensa), editados direto pelos campos abaixo.
-// O Simulador de Balanceamento V2 (3 cenários A/B/C) é uma fase futura
-// separada, ainda não construída.
+//
+// Simulador de Balanceamento (POST /balance/simulate) — roda N
+// combates PvE de verdade (mesmas fórmulas/motor do jogo real, ver
+// adventureBalanceSimulationService.js) entre um personagem e um
+// monstro escolhidos, pra calibrar dificuldade sem precisar jogar de
+// verdade. Não simula Motor de Status/cooldown/buffs (V1) — ver
+// comentário no topo do service pra escopo completo.
 const express = require("express");
 const adminAdventureController = require("../controllers/adminAdventureController");
 const authMiddleware = require("../middlewares/authMiddleware");
@@ -33,5 +38,7 @@ router.patch("/zone-monsters/:id", adminAdventureController.atualizarAparicao);
 router.get("/loot", adminAdventureController.listarLoot);
 router.post("/loot", adminAdventureController.criarLoot);
 router.patch("/loot/:id", adminAdventureController.atualizarLoot);
+
+router.post("/balance/simulate", adminAdventureController.simularBalanceamento);
 
 module.exports = router;
