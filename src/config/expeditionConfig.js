@@ -122,7 +122,12 @@ function aplicarTetoDeQualidade(quantidadeBase, qualidade) {
 //
 // Baixado pra 3s a pedido do jogador pra agilizar teste no beta —
 // reverter pra um valor de produção antes do lançamento de verdade.
-const TEMPO_COLETA_MS = 3000;
+// `let` (não `const`) porque o Painel Admin de Expedição precisa
+// sobrescrever esse valor em tempo real (ver aplicarOverridesBalanceamento
+// no fim do arquivo) — consumidores devem ler `expeditionConfig.TEMPO_COLETA_MS`
+// por propriedade, nunca desestruturar (senão capturam o valor antigo pra
+// sempre, mesmo depois de um admin salvar um novo).
+let TEMPO_COLETA_MS = 3000;
 
 // Chance (em PPM, mesma escala de BASE_SORTEIO acima) de uma coleta ser
 // interrompida por um monstro em vez de gerar o recurso normal —
@@ -130,7 +135,7 @@ const TEMPO_COLETA_MS = 3000;
 // e da região específica, só do azar do sorteio. Moderada de propósito:
 // é uma variação de sabor pro modo AFK-ish de Expedição, não pode
 // dominar o ritmo normal de coleta.
-const CHANCE_MONSTRO_PPM = 60_000; // 6%
+let CHANCE_MONSTRO_PPM = 60_000; // 6% — mesmo motivo do `let` em TEMPO_COLETA_MS acima.
 
 // Quantos NÍVEIS DE COMBATE acima/abaixo do próprio personagem o
 // monstro da interrupção fica, por região — a região só tem
@@ -146,6 +151,66 @@ function deslocamentoDeNivelPorRegiao(nivelMinimoRegiao) {
   return Math.round((Math.max(1, nivelMinimoRegiao) - 1) / 3);
 }
 
+// ---------------------------------------------------------------------
+// PAINEL ADMINISTRATIVO — hot-reload de balanceamento (mesmo padrão de
+// forgeConfig.aplicarOverridesBalanceamento: aplica overrides já
+// VALIDADOS por cima destes defaults, sempre por mutação em-lugar dos
+// objetos já exportados — nunca reatribuindo o binding do módulo —
+// porque expeditionRollService/expeditionProgressionService já
+// desestruturaram essas tabelas no load; primitivos (TEMPO_COLETA_MS,
+// CHANCE_MONSTRO_PPM) exigem module.exports.<chave> também, já que
+// destructuring de número não acompanha mutação.
+function aplicarOverridesBalanceamento(grupo, valores) {
+  if (!valores || typeof valores !== "object") return;
+  switch (grupo) {
+    case "expedition.cooldown": {
+      if (typeof valores.TEMPO_COLETA_MS === "number") {
+        TEMPO_COLETA_MS = valores.TEMPO_COLETA_MS;
+        module.exports.TEMPO_COLETA_MS = TEMPO_COLETA_MS;
+      }
+      break;
+    }
+    case "expedition.progression": {
+      if (valores.XP_NECESSARIO_POR_ETAPA) {
+        Object.assign(XP_NECESSARIO_POR_ETAPA, valores.XP_NECESSARIO_POR_ETAPA);
+        let acumulado = 0;
+        for (let nivel = 2; nivel <= NIVEL_MAXIMO; nivel += 1) {
+          acumulado += XP_NECESSARIO_POR_ETAPA[nivel - 1];
+          XP_TOTAL_PARA_NIVEL[nivel] = acumulado;
+        }
+        for (let nivel = 2; nivel < NIVEL_MAXIMO; nivel += 1) {
+          MULTIPLICADOR_XP_POR_NIVEL[nivel] = Math.sqrt(XP_NECESSARIO_POR_ETAPA[nivel] / XP_NECESSARIO_POR_ETAPA[1]);
+        }
+        MULTIPLICADOR_XP_POR_NIVEL[NIVEL_MAXIMO] = MULTIPLICADOR_XP_POR_NIVEL[NIVEL_MAXIMO - 1];
+      }
+      if (valores.XP_POR_RESULTADO) Object.assign(XP_POR_RESULTADO, valores.XP_POR_RESULTADO);
+      break;
+    }
+    case "expedition.drops": {
+      if (valores.CHANCE_POR_NIVEL_PPM) {
+        for (const [nivel, tabela] of Object.entries(valores.CHANCE_POR_NIVEL_PPM)) {
+          CHANCE_POR_NIVEL_PPM[nivel] = { ...tabela };
+        }
+      }
+      if (valores.QUANTIDADE_POR_NIVEL) {
+        for (const [nivel, faixa] of Object.entries(valores.QUANTIDADE_POR_NIVEL)) {
+          QUANTIDADE_POR_NIVEL[nivel] = [...faixa];
+        }
+      }
+      break;
+    }
+    case "expedition.ambush": {
+      if (typeof valores.CHANCE_MONSTRO_PPM === "number") {
+        CHANCE_MONSTRO_PPM = valores.CHANCE_MONSTRO_PPM;
+        module.exports.CHANCE_MONSTRO_PPM = CHANCE_MONSTRO_PPM;
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
 module.exports = {
   NIVEL_MAXIMO,
   XP_NECESSARIO_POR_ETAPA,
@@ -159,4 +224,5 @@ module.exports = {
   TEMPO_COLETA_MS,
   CHANCE_MONSTRO_PPM,
   deslocamentoDeNivelPorRegiao,
+  aplicarOverridesBalanceamento,
 };
