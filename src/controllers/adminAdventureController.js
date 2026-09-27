@@ -1,6 +1,7 @@
 // Painel Administrativo Fase 8 (§19) — controller fino, delega pro
 // adminAdventureService.
 const adminAdventureService = require("../services/adminAdventureService");
+const adventureBalanceSimulationService = require("../services/adventureBalanceSimulationService");
 
 function tratarErro(res, error, mensagemPadrao) {
   const statusCode = error.statusCode || 500;
@@ -153,5 +154,20 @@ exports.atualizarLoot = async (req, res) => {
     res.status(200).json({ status: "success", data: { loot } });
   } catch (error) {
     tratarErro(res, error, "Erro interno do servidor ao atualizar drop.");
+  }
+};
+
+// Simulador de Balanceamento — ver adventureBalanceSimulationService.js
+exports.simularBalanceamento = async (req, res) => {
+  try {
+    const { id_personagem, id_monstro, quantidade } = req.body ?? {};
+    const resultado = await adventureBalanceSimulationService.simularBalanceamento({
+      idPersonagem: id_personagem,
+      idMonstro: id_monstro,
+      quantidade,
+    });
+    res.status(200).json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao simular combates.");
   }
 };
