@@ -1,5 +1,16 @@
 // src/config/database.js
 const { Sequelize } = require("sequelize");
+// Sequelize carrega o driver do dialect (`dialect: "postgres"` abaixo)
+// via require() DINÂMICO a partir da string do dialect — o bundler de
+// função serverless da Vercel (@vercel/nft) faz análise ESTÁTICA de
+// dependências e não enxerga esse require dinâmico, então `pg` fica de
+// fora do pacote da função e a Vercel derruba com "please install pg
+// package manually" mesmo com `pg` instalado normalmente em
+// node_modules. Este require explícito e estático força o bundler a
+// incluir o pacote — inofensivo em qualquer outro ambiente (Railway,
+// local), já que o Sequelize ia carregar o mesmo módulo de qualquer
+// jeito.
+require("pg");
 require("dotenv").config();
 
 const databaseUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
