@@ -238,9 +238,21 @@ async function coletar(id_personagem, id_regiao) {
       // um encontro sem esses campos como "não é de zona" e concede a
       // recompensa genérica (nunca a de zona), exatamente o que faz
       // sentido aqui: essa luta não pertence a nenhuma Área de Caça.
+      // origemExpedicao:true diz a mais a /combat/action pra NUNCA
+      // rolar o drop de item genérico legado (dropService.rolarDropDeVitoria)
+      // sobre essa vitória — bug relatado: esse pool legado sorteia
+      // entre QUALQUER Arma/Armadura/Capacete/Escudo/Acessório do jogo
+      // inteiro sem filtro nenhum de nível/contexto, e virou o ÚNICO
+      // caminho ainda vivo até esse pool desde que gerarInimigo() bruto
+      // (sem id_area) passou a só ser chamado daqui — uma interrupção
+      // de monstro na coleta (evento leve, não uma Área de Caça de
+      // verdade) não deveria conseguir dropar equipamento nenhum, só
+      // XP/ouro genéricos, igual o resto do sistema de Expedição (que
+      // só entrega Material via coletar()).
       character.encontro_pve = {
         ...inimigo,
         criadoEm: Date.now(),
+        origemExpedicao: true,
         statsPersonagem,
         // Motor de Status/Cooldown (§37 da Especificação Consolidada
         // Poder/Status/Cooldown/Balanceamento) — mesmo estado vazio
