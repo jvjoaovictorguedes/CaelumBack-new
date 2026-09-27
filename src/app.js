@@ -374,6 +374,22 @@ require("./services/worldBossScheduler").iniciar();
 // pra message:new/inbox:update quando a mensagem é enviada por REST.
 app.set("io", io);
 
-server.listen(port, () => {
-  console.log(`Servidor rodando em http://localhost:${port}`);
-});
+// Na Vercel o processo não fica de pé chamando .listen() — a Vercel
+// importa esse módulo e invoca `app` como handler serverless por
+// requisição (ver api/index.js). VERCEL=1 é injetada automaticamente
+// pela própria plataforma, nunca precisa ser configurada manualmente —
+// em qualquer outro host (Railway, local) essa variável não existe, o
+// "if" é sempre verdadeiro e o comportamento continua exatamente igual
+// a antes. IMPORTANTE: nesse modo o `server`/`io` acima nunca recebem
+// tráfego de verdade (a Vercel não usa esse http.Server, só a função
+// `app`), então upgrade de WebSocket não funciona em Serverless
+// Functions — é limitação da plataforma, não bug daqui. Os handlers de
+// socket continuam registrados (não quebram nada), só não têm como ser
+// alcançados até o backend rodar num processo de longa duração.
+if (!process.env.VERCEL) {
+  server.listen(port, () => {
+    console.log(`Servidor rodando em http://localhost:${port}`);
+  });
+}
+
+module.exports = app;
