@@ -23,7 +23,9 @@ const {
   comMultiplicadoresDeClasse,
   custoManaEfetivo,
 } = require("../services/combatFormulas");
-const { aplicarAcao } = require("../services/duelEngine");
+const { resolverTurnoComStatus } = require("../services/duelEngine");
+const statusEffectService = require("../services/statusEffectService");
+const WeaponStatusEffect = require("../models/WeaponStatusEffect");
 const {
   buscarBonusDeAtributos,
   personagemComBonus,
@@ -94,35 +96,90 @@ function escolherAcao(personagemAtual, poderes) {
   return { tipo: "power", power: escolhido };
 }
 
-function simularDuelo({ desafiante, desafiado, poderesDesafiante, poderesDesafiado }) {
+// Motor de Status (Evolução do Motor de Status — Habilidades + Armas):
+// bug real encontrado nesta revisão — o duelo assíncrono era o ÚNICO
+// modo de combate do jogo (PvE, PvP ao vivo e World Boss já usavam
+// resolverTurnoComStatus) que chamava aplicarAcao() puro direto, sem
+// NUNCA passar por statusEffectService. Resultado: Queimadura/
+// Sangramento/Veneno/Silêncio/Congelamento/Atordoamento/Paralisia/
+// Cegueira/Enfraquecimento configurados num Power ou numa arma nunca
+// eram aplicados, nunca causavam dano, nunca bloqueavam ação nenhuma —
+// mesmo o Admin cadastrando o efeito normalmente e ele funcionando em
+// todo outro modo. Corrigido usando exatamente o mesmo
+// resolverTurnoComStatus dos outros modos (mesma arma pré-carregada
+// uma vez, mesmas listas de status por lado, mesmo contador de ação
+// pra Paralyze nunca rerrolar duas vezes no "turno").
+async function simularDuelo({ desafiante, desafiado, poderesDesafiante, poderesDesafiado }) {
   const vidaMaxA = vidaMaximaDe(desafiante);
   const vidaMaxB = vidaMaximaDe(desafiado);
+  const manaMaxA = manaMaximaDe(desafiante);
+  const manaMaxB = manaMaximaDe(desafiado);
 
-  const estadoA = { ...desafiante, vida_atual: vidaMaxA, mana_atual: manaMaximaDe(desafiante) };
-  const estadoB = { ...desafiado, vida_atual: vidaMaxB, mana_atual: manaMaximaDe(desafiado) };
+  const estadoA = { ...desafiante, vida_atual: vidaMaxA, mana_atual: manaMaxA };
+  const estadoB = { ...desafiado, vida_atual: vidaMaxB, mana_atual: manaMaxB };
+
+  const [armaEfeitosA, armaEfeitosB] = await Promise.all([
+    estadoA.arma_equipada?.id_item
+      ? WeaponStatusEffect.findAll({ where: { id_item: estadoA.arma_equipada.id_item, ativo: true } })
+      : [],
+    estadoB.arma_equipada?.id_item
+      ? WeaponStatusEffect.findAll({ where: { id_item: estadoB.arma_equipada.id_item, ativo: true } })
+      : [],
+  ]);
 
   const primeiro = estadoA.velocidade >= estadoB.velocidade ? "A" : "B";
   const turnos = [];
   const log = [`${desafiante.nome} desafiou ${desafiado.nome} pra um duelo na ${NOME_ARENA}!`];
   let danoTotalA = 0;
   let danoTotalB = 0;
+  let statusA = statusEffectService.listaVazia();
+  let statusB = statusEffectService.listaVazia();
+  let numeroDaAcao = 0;
 
-  function executarAcao(chave) {
+  async function executarAcao(chave) {
+    numeroDaAcao += 1;
     const atacante = chave === "A" ? estadoA : estadoB;
     const defensor = chave === "A" ? estadoB : estadoA;
     const poderes = chave === "A" ? poderesDesafiante : poderesDesafiado;
     const vidaMaxAtacante = chave === "A" ? vidaMaxA : vidaMaxB;
+    const manaMaxAtacante = chave === "A" ? manaMaxA : manaMaxB;
+    const armaEfeitosAtacante = chave === "A" ? armaEfeitosA : armaEfeitosB;
+
+    const nomeAtacante = chave === "A" ? desafiante.nome : desafiado.nome;
+    const nomeDefensor = chave === "A" ? desafiado.nome : desafiante.nome;
 
     const acao = escolherAcao(atacante, poderes);
-    const { nomeAcao, dano, cura, esquivou } = aplicarAcao({
+    const {
+      nomeAcao,
+      dano,
+      cura,
+      esquivou,
+      statusAtacante,
+      statusDefensor,
+      log: logStatus,
+    } = await resolverTurnoComStatus({
       atacante,
       defensor,
       acao,
       vidaMaxAtacante,
+      manaMaxAtacante,
+      statusAtacante: chave === "A" ? statusA : statusB,
+      statusDefensor: chave === "A" ? statusB : statusA,
+      turno: numeroDaAcao,
+      casterActorId: chave,
+      armaEfeitosAtacante,
+      itemIdArmaAtacante: atacante.arma_equipada?.id_item ?? null,
+      nomeAtacante,
+      nomeDefensor,
     });
-
-    const nomeAtacante = chave === "A" ? desafiante.nome : desafiado.nome;
-    const nomeDefensor = chave === "A" ? desafiado.nome : desafiante.nome;
+    if (chave === "A") {
+      statusA = statusAtacante;
+      statusB = statusDefensor;
+    } else {
+      statusB = statusAtacante;
+      statusA = statusDefensor;
+    }
+    log.push(...logStatus);
 
     if (esquivou) {
       log.push(`${nomeDefensor} esquivou de ${nomeAcao} de ${nomeAtacante}!`);
@@ -151,9 +208,9 @@ function simularDuelo({ desafiante, desafiado, poderesDesafiante, poderesDesafia
 
   let rodada = 0;
   while (estadoA.vida_atual > 0 && estadoB.vida_atual > 0 && rodada < MAX_RODADAS) {
-    executarAcao(primeiro);
+    await executarAcao(primeiro);
     if (estadoA.vida_atual <= 0 || estadoB.vida_atual <= 0) break;
-    executarAcao(primeiro === "A" ? "B" : "A");
+    await executarAcao(primeiro === "A" ? "B" : "A");
     rodada += 1;
   }
 
@@ -485,7 +542,7 @@ exports.challenge = async (req, res) => {
         buscarBonusDeAtributos(desafiado.id),
       ]);
 
-    const resultado = simularDuelo({
+    const resultado = await simularDuelo({
       desafiante: comMultiplicadoresDeClasse(
         personagemComBonus(desafiante.toJSON(), bonusDesafiante),
         desafiante.Class,
@@ -548,3 +605,4 @@ exports.challenge = async (req, res) => {
 // reaproveitar em vez de duplicar.
 exports.buscarPoderesDoPersonagem = buscarPoderesDoPersonagem;
 exports.aplicarResultadoDuelo = aplicarResultadoDuelo;
+exports.simularDuelo = simularDuelo;

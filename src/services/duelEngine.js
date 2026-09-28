@@ -177,7 +177,21 @@ async function resolverTurnoComStatus({
   const controle = statusEffectService.resolverAcoesBloqueadasDoTurno(listaAtacante, turno);
   listaAtacante = controle.lista;
   if (controle.bloqueadas.has(tipoAcao)) {
-    log.push(`${nomeAtacante} está ${definicaoDoStatus(controle.motivoBloqueioTotal).nomeUi} e não conseguiu agir!`);
+    // Bug real encontrado nesta revisão (crash, não só resultado
+    // errado): motivoBloqueioTotal só é setado pelos hard controls
+    // (FREEZE/STUN/PARALYZE, ver PRIORIDADE_BLOQUEIO_TOTAL em
+    // statusEffectService.resolverAcoesBloqueadasDoTurno) — SILENCE
+    // bloqueia ACTION_TYPE.POWER sem nunca setar motivo nenhum. Como
+    // esta função (diferente de combatController.js, que só olha
+    // BASIC_ATTACK — nunca bloqueado por Silêncio puro) checa
+    // `tipoAcao` de verdade, tentar usar Power silenciado SEM nenhum
+    // hard control junto derrubava com TypeError (`.nomeUi` de null) —
+    // silêncio nunca chegava a aparecer no log, o turno inteiro
+    // quebrava. A única forma de `bloqueadas` conter a ação tentada
+    // sem motivoBloqueioTotal é justamente essa (Silêncio bloqueando
+    // Power), então o fallback é seguro.
+    const motivoBloqueio = controle.motivoBloqueioTotal ?? "SILENCE";
+    log.push(`${nomeAtacante} está ${definicaoDoStatus(motivoBloqueio).nomeUi} e não conseguiu agir!`);
     listaAtacante = statusEffectService.decrementarDuracoes(listaAtacante);
     return {
       nomeAcao: "Ação bloqueada",
