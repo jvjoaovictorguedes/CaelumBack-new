@@ -122,12 +122,31 @@ function aplicarTetoDeQualidade(quantidadeBase, qualidade) {
 //
 // Baixado pra 3s a pedido do jogador pra agilizar teste no beta —
 // reverter pra um valor de produção antes do lançamento de verdade.
-// `let` (não `const`) porque o Painel Admin de Expedição precisa
-// sobrescrever esse valor em tempo real (ver aplicarOverridesBalanceamento
-// no fim do arquivo) — consumidores devem ler `expeditionConfig.TEMPO_COLETA_MS`
-// por propriedade, nunca desestruturar (senão capturam o valor antigo pra
-// sempre, mesmo depois de um admin salvar um novo).
+// `let` = só o FALLBACK local (usado se o cache abaixo ainda não tiver
+// carregado nada, ex.: milissegundos depois do boot). O valor de
+// verdade, que reflete o que o admin salvou, vem de
+// tempoColetaMsAtual() via gameSettingCache — nunca leia esta variável
+// direto num consumidor novo.
+//
+// Por quê: em produção o Railway roda o backend com MAIS DE UMA
+// instância (réplicas) — cada uma tem sua PRÓPRIA cópia dessa variável
+// na memória. Quando o admin salvava, só a instância que atendeu
+// aquele POST atualizava a variável dela; as outras continuavam com o
+// valor de quando cada uma subiu, às vezes um valor antigo de muito
+// antes (bug real reportado: admin mostrando "3s" salvo, mas alguns
+// jogadores esporadicamente esperando 15s — dependia de qual instância
+// atendia a requisição). gameSettingCache já resolve exatamente esse
+// problema pra outras configs do jogo (reputação de Balcão/Caçadas):
+// recarrega do banco a cada 60s em TODA instância, e é recarregado na
+// hora (await) pela própria instância que processa o save do admin —
+// mesmo padrão, ver expeditionSettingsService.updateBalanceamento.
 let TEMPO_COLETA_MS = 3000;
+
+function tempoColetaMsAtual() {
+  // eslint-disable-next-line global-require -- evita ciclo de require no topo do arquivo
+  const gameSettingCache = require("../services/gameSettingCache");
+  return gameSettingCache.obter("expedition.cooldown", { TEMPO_COLETA_MS }).TEMPO_COLETA_MS;
+}
 
 // Chance (em PPM, mesma escala de BASE_SORTEIO acima) de uma coleta ser
 // interrompida por um monstro em vez de gerar o recurso normal —
@@ -222,6 +241,7 @@ module.exports = {
   QUANTIDADE_POR_NIVEL,
   aplicarTetoDeQualidade,
   TEMPO_COLETA_MS,
+  tempoColetaMsAtual,
   CHANCE_MONSTRO_PPM,
   deslocamentoDeNivelPorRegiao,
   aplicarOverridesBalanceamento,

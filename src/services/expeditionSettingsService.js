@@ -11,6 +11,7 @@ const GameSetting = require("../models/GameSetting");
 const expeditionConfig = require("../config/expeditionConfig");
 const adventureConfig = require("../config/adventureConfig");
 const partyBattleConfig = require("../config/partyBattleConfig");
+const gameSettingCache = require("./gameSettingCache");
 const { registrarAcao } = require("./adminAuditService");
 
 const GRUPOS = [
@@ -77,7 +78,7 @@ function getDefaults(grupo) {
 function getSnapshotAtual(grupo) {
   switch (grupo) {
     case "expedition.cooldown":
-      return { TEMPO_COLETA_MS: expeditionConfig.TEMPO_COLETA_MS };
+      return { TEMPO_COLETA_MS: expeditionConfig.tempoColetaMsAtual() };
     case "expedition.progression":
       return {
         XP_NECESSARIO_POR_ETAPA: { ...expeditionConfig.XP_NECESSARIO_POR_ETAPA },
@@ -240,6 +241,11 @@ async function updateBalanceamento(grupo, valores, { idAdmin, req } = {}) {
   });
 
   config.aplicarOverridesBalanceamento(grupo, valores);
+  // Sem isso, só a instância que atendeu ESSE POST enxergava o valor
+  // novo na hora — as outras réplicas do Railway só pegariam via o
+  // polling periódico de gameSettingCache (até 60s de atraso). Mesmo
+  // padrão de adminSpoilConfigService.js/adminHuntConfigService.js.
+  await gameSettingCache.recarregar();
   return { atual: getSnapshotAtual(grupo), padrao: getDefaults(grupo), atualizado_em: resultado.updatedAt };
 }
 
