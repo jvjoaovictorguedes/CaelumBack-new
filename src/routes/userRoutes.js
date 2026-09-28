@@ -5,24 +5,83 @@ const { criarLimitador } = require("../middlewares/rateLimitMiddleware");
 
 const router = express.Router();
 
-const limitadorLogin = criarLimitador({ janelaMs: 15 * 60 * 1000, maxTentativas: 10 });
-const limitadorRegistro = criarLimitador({ janelaMs: 60 * 60 * 1000, maxTentativas: 5 });
-// Mesmo limite curto pros dois passos do "esqueci minha senha" — sem
-// isso, dava pra scriptar POST /forgot-password em loop (spam de
-// e-mail pra qualquer endereço) ou forçar bruta o token de 32 bytes de
-// /reset-password (embora isso já seja inviável por tamanho, o rate
-// limit é uma segunda camada barata).
-const limitadorResetSenha = criarLimitador({ janelaMs: 15 * 60 * 1000, maxTentativas: 5 });
-// Mesmo raciocínio do limitador de reset por e-mail — sem isso dava pra
-// tentar forçar bruta a senha atual de uma conta já logada em loop.
-const limitadorTrocaSenha = criarLimitador({ janelaMs: 15 * 60 * 1000, maxTentativas: 5 });
+// Duas camadas em vez de uma só por IP (pedido real: IP compartilhado —
+// CGNAT, Wi-Fi de prédio/faculdade, rede corporativa — trancava jogador
+// nenhum tinha culpa junto com quem de fato abusou):
+//   - Camada por CONTA (e-mail/token do que está sendo tentado): pega
+//     quem insiste na MESMA conta/token, sem depender de IP nenhum.
+//   - Camada por IP: bem mais generosa, só existe pra pegar spam de
+//     massa (muitas contas/e-mails DIFERENTES saindo do mesmo IP num
+//     intervalo curto) — jogador normal num IP compartilhado nunca
+//     chega perto dela, porque cada um usa seu próprio e-mail.
+// As duas rodam em sequência (array de middlewares); qualquer uma que
+// travar já barra a requisição, a outra nem chega a ser avaliada.
+function chavePorEmail(req) {
+  const email = (req.body?.email || "").trim().toLowerCase();
+  // Sem e-mail no corpo (não deveria acontecer nas rotas onde isso é
+  // aplicado — validação de campo obrigatório vem depois, no
+  // controller), cai pro IP mesmo, pra nunca ficar sem key nenhuma.
+  return email ? `conta:${email}` : `ip:${req.ip}`;
+}
 
-router.post("/register", limitadorRegistro, userController.registerUser);
-router.post("/login", limitadorLogin, userController.loginUser);
-router.post("/google-login", limitadorLogin, userController.loginComGoogle);
-router.post("/forgot-password", limitadorResetSenha, userController.forgotPassword);
-router.post("/reset-password", limitadorResetSenha, userController.resetPassword);
-router.post("/change-password", limitadorTrocaSenha, authMiddleware, userController.changePassword);
+function chavePorToken(req) {
+  const token = req.body?.token;
+  return token ? `token:${token}` : `ip:${req.ip}`;
+}
+
+const limitadorRegistroIP = criarLimitador({ janelaMs: 60 * 60 * 1000, maxTentativas: 30 });
+const limitadorRegistroConta = criarLimitador({
+  janelaMs: 60 * 60 * 1000,
+  maxTentativas: 6,
+  obterChave: chavePorEmail,
+});
+
+const limitadorLoginIP = criarLimitador({ janelaMs: 15 * 60 * 1000, maxTentativas: 40 });
+const limitadorLoginConta = criarLimitador({
+  janelaMs: 15 * 60 * 1000,
+  maxTentativas: 8,
+  obterChave: chavePorEmail,
+});
+
+const limitadorForgotPasswordIP = criarLimitador({ janelaMs: 60 * 60 * 1000, maxTentativas: 20 });
+const limitadorForgotPasswordConta = criarLimitador({
+  janelaMs: 60 * 60 * 1000,
+  maxTentativas: 5,
+  obterChave: chavePorEmail,
+});
+
+const limitadorResetPasswordIP = criarLimitador({ janelaMs: 60 * 60 * 1000, maxTentativas: 20 });
+const limitadorResetPasswordConta = criarLimitador({
+  janelaMs: 60 * 60 * 1000,
+  maxTentativas: 5,
+  obterChave: chavePorToken,
+});
+
+// change-password já roda autenticado — não faz sentido nenhum contar
+// por IP aqui (dois jogadores na mesma rede trocando a própria senha
+// quase ao mesmo tempo não têm nada a ver um com o outro). authMiddleware
+// vem ANTES do limitador pra req.user.id já existir na hora de montar a
+// chave.
+const limitadorTrocaSenha = criarLimitador({
+  janelaMs: 15 * 60 * 1000,
+  maxTentativas: 5,
+  obterChave: (req) => `conta:${req.user.id}`,
+});
+
+router.post("/register", [limitadorRegistroConta, limitadorRegistroIP], userController.registerUser);
+router.post("/login", [limitadorLoginConta, limitadorLoginIP], userController.loginUser);
+router.post("/google-login", limitadorLoginIP, userController.loginComGoogle);
+router.post(
+  "/forgot-password",
+  [limitadorForgotPasswordConta, limitadorForgotPasswordIP],
+  userController.forgotPassword,
+);
+router.post(
+  "/reset-password",
+  [limitadorResetPasswordConta, limitadorResetPasswordIP],
+  userController.resetPassword,
+);
+router.post("/change-password", authMiddleware, limitadorTrocaSenha, userController.changePassword);
 router.get("/socket-ticket", authMiddleware, userController.getSocketTicket);
 router.post("/refresh", authMiddleware, userController.refreshToken);
 router.get("/", authMiddleware, userController.getAllUsers);
