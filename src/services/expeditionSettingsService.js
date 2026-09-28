@@ -249,17 +249,48 @@ async function updateBalanceamento(grupo, valores, { idAdmin, req } = {}) {
   return { atual: getSnapshotAtual(grupo), padrao: getDefaults(grupo), atualizado_em: resultado.updatedAt };
 }
 
-// Recarrega TODOS os grupos persistidos no boot — mesmo padrão do
-// forgeSettingsService, pra sobreviver a restart.
+// Recarrega TODOS os grupos persistidos — chamado no boot E
+// periodicamente (ver iniciarSincronizacaoPeriodica), nunca só uma vez.
+//
+// Por quê periodicamente: em produção o Railway roda o backend com
+// MAIS DE UMA instância (réplicas) — cada uma tem sua PRÓPRIA cópia
+// desses configs na memória. Rodar isso só no boot significava que só
+// a instância que atendeu o POST do admin (updateBalanceamento chama
+// aplicarOverridesBalanceamento na hora) enxergava o valor novo; as
+// outras réplicas só pegariam num restart/deploy futuro — na prática,
+// nunca, até alguém reiniciar o serviço (bug real reportado no
+// cooldown de Expedição: admin via "3s" salvo, mas jogadores em
+// réplicas diferentes viam valores diferentes, às vezes bem antigos).
+// Reaplicar a cada 60s (idempotente — todos os aplicarOverridesBalanceamento
+// dos 3 configs fazem atribuição direta, nunca soma incremental) faz o
+// banco ser a fonte de verdade de verdade: qualquer ajuste no Painel
+// Admin propaga pra TODAS as instâncias em até 60s, sem precisar de
+// deploy nem restart nenhum.
 async function aplicarPersistidosNoBoot() {
   const linhas = await GameSetting.findAll({ where: { chave: GRUPOS } });
   for (const linha of linhas) {
     try {
       CONFIG_POR_GRUPO[linha.chave].aplicarOverridesBalanceamento(linha.chave, linha.valor);
     } catch (error) {
-      console.error(`[expeditionSettingsService] falha ao aplicar overrides de "${linha.chave}" no boot:`, error);
+      console.error(`[expeditionSettingsService] falha ao aplicar overrides de "${linha.chave}":`, error);
     }
   }
+}
+
+const INTERVALO_SINCRONIZACAO_MS = 60_000;
+let intervaloSincronizacao = null;
+
+function iniciarSincronizacaoPeriodica() {
+  if (intervaloSincronizacao) return;
+  aplicarPersistidosNoBoot().catch((error) =>
+    console.error("[expeditionSettingsService] falha ao aplicar overrides persistidos no boot:", error),
+  );
+  intervaloSincronizacao = setInterval(() => {
+    aplicarPersistidosNoBoot().catch((error) =>
+      console.error("[expeditionSettingsService] falha na sincronização periódica:", error),
+    );
+  }, INTERVALO_SINCRONIZACAO_MS);
+  intervaloSincronizacao.unref?.();
 }
 
 module.exports = {
@@ -270,4 +301,5 @@ module.exports = {
   validarGrupo,
   updateBalanceamento,
   aplicarPersistidosNoBoot,
+  iniciarSincronizacaoPeriodica,
 };

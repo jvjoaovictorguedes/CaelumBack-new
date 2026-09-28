@@ -134,11 +134,7 @@ connectDB()
       .aplicarPersistidosNoBoot()
       .catch((error) => console.error("[forgeSettingsService] falha ao aplicar overrides persistidos no boot:", error)),
   )
-  .then(() =>
-    require("./services/expeditionSettingsService")
-      .aplicarPersistidosNoBoot()
-      .catch((error) => console.error("[expeditionSettingsService] falha ao aplicar overrides persistidos no boot:", error)),
-  )
+  .then(() => require("./services/expeditionSettingsService").iniciarSincronizacaoPeriodica())
   .catch((error) => {
     console.error(
       "Erro fatal e inesperado ao conectar ao banco de dados:",
