@@ -45,6 +45,14 @@ const CARENCIA_NOVO_MEMBRO_MS = 24 * 60 * 60 * 1000;
 
 function membroEmCarencia(guildMember, agora = new Date()) {
   if (!guildMember?.data_entrada) return false;
+  // O Fundador nunca "entrou" numa guilda já existente pra farmar
+  // recompensa — ele É a origem dela. Sem essa exceção, uma guilda com
+  // só o líder (nenhum segundo membro ainda) não progride missão
+  // nenhuma nas primeiras 24h depois de criada, porque data_entrada do
+  // Fundador é o próprio momento da criação — bug reportado: "só conta
+  // depois que entra um segundo membro" (na real, era só o relógio de
+  // 24h que não tinha passado ainda).
+  if (guildMember.cargo === "Fundador") return false;
   return agora.getTime() - new Date(guildMember.data_entrada).getTime() < CARENCIA_NOVO_MEMBRO_MS;
 }
 
