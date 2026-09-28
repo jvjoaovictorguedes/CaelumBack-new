@@ -38,9 +38,9 @@ test("mesmo snapshot gera sempre o mesmo Poder (determinístico, sem Math.random
   assert.equal(resultados.size, 1, "20 cálculos do mesmo snapshot deviam bater exatamente igual");
 });
 
-test("Poder carrega a versão da fórmula (§9)", () => {
+test("Poder carrega a versão da fórmula (§9, v2 desde a Especificação Admin Aventura+Defesa/Poder de Monstros)", () => {
   const resultado = combatPowerService.calcularPoderPersonagemDeSnapshot(snapshotBase());
-  assert.equal(resultado.version, 1);
+  assert.equal(resultado.version, 2);
 });
 
 test("aumentar stats reais nunca reduz o Poder sem trade-off (monotonicidade)", () => {
@@ -84,10 +84,41 @@ test("cooldown reduz o valor esperado de spam de uma habilidade forte", () => {
 });
 
 test("Poder do monstro vem do snapshot real, não fixo — muda com nível/multiplicadores diferentes", () => {
-  const fraco = combatPowerService.calcularPoderMonstro({ dano_base: 5, vida_maxima: 50 });
-  const forte = combatPowerService.calcularPoderMonstro({ dano_base: 50, vida_maxima: 500 });
+  const fraco = combatPowerService.calcularPoderMonstro({ dano_min: 5, dano_max: 5, vida_maxima: 50 });
+  const forte = combatPowerService.calcularPoderMonstro({ dano_min: 50, dano_max: 50, vida_maxima: 500 });
   assert.ok(forte.combatPower > fraco.combatPower);
-  assert.equal(fraco.version, 1);
+  assert.equal(fraco.version, 2);
+});
+
+test("calcularPoderMonstro: defesa=0 reproduz EHP=vida_maxima (§12.2)", () => {
+  const resultado = combatPowerService.calcularPoderMonstro({ dano_min: 10, dano_max: 10, vida_maxima: 100, defesa: 0 });
+  assert.equal(resultado.ehp, 100);
+  assert.equal(resultado.mitigacao, 0);
+});
+
+test("calcularPoderMonstro: aumentar defesa aumenta EHP/Poder (§12.2)", () => {
+  const semDefesa = combatPowerService.calcularPoderMonstro({ dano_min: 10, dano_max: 10, vida_maxima: 100, defesa: 0 });
+  const comDefesa = combatPowerService.calcularPoderMonstro({ dano_min: 10, dano_max: 10, vida_maxima: 100, defesa: 50 });
+  assert.ok(comDefesa.ehp > semDefesa.ehp);
+  assert.ok(comDefesa.combatPower > semDefesa.combatPower);
+});
+
+test("calcularPoderMonstro: aumentar dano_min/dano_max aumenta Poder (§12.2)", () => {
+  const danoBaixo = combatPowerService.calcularPoderMonstro({ dano_min: 5, dano_max: 5, vida_maxima: 100, defesa: 0 });
+  const danoAlto = combatPowerService.calcularPoderMonstro({ dano_min: 20, dano_max: 20, vida_maxima: 100, defesa: 0 });
+  assert.ok(danoAlto.combatPower > danoBaixo.combatPower);
+});
+
+test("calcularPoderMonstro: aceita dano_base legado (encontro antigo/hunterRewardService) sem quebrar (§6.6)", () => {
+  const resultado = combatPowerService.calcularPoderMonstro({ dano_base: 20, vida_maxima: 100 });
+  assert.equal(resultado.danoMedio, 20);
+  assert.ok(resultado.combatPower > 0);
+});
+
+test("calcularPoderMonstro: defesa ausente (encontro antigo persistido) vira 0 — mesmo resultado de antes da Defesa existir (§11.1)", () => {
+  const semCampo = combatPowerService.calcularPoderMonstro({ dano_min: 10, dano_max: 10, vida_maxima: 100 });
+  const comZero = combatPowerService.calcularPoderMonstro({ dano_min: 10, dano_max: 10, vida_maxima: 100, defesa: 0 });
+  assert.equal(semCampo.combatPower, comZero.combatPower);
 });
 
 test("calcularPoderPersonagem(characterId) monta o snapshot efetivo e devolve um Poder válido", async (t) => {
@@ -95,7 +126,7 @@ test("calcularPoderPersonagem(characterId) monta o snapshot efetivo e devolve um
   const { personagem } = await criarPersonagem({ nivel: 15 });
   const resultado = await combatPowerService.calcularPoderPersonagem(personagem.id);
   assert.ok(resultado);
-  assert.equal(resultado.version, 1);
+  assert.equal(resultado.version, 2);
   assert.ok(resultado.combatPower > 0);
   assert.ok(Number.isFinite(resultado.combatPower));
 });

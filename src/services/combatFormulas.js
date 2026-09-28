@@ -186,8 +186,11 @@ const CONSTANTE_MITIGACAO_DEFESA = 50;
 // Aplica a redução de dano da defesa do alvo — chamado depois de
 // calcularDanoBasico/calcularEfeitoPoder, nunca antes (a rolagem de
 // dano do atacante não sabe nada sobre o alvo). `defensor.defesa` vem
-// de personagemComBonus (equipmentBonusService.js); um inimigo de PvE
-// sem esse campo simplesmente não mitiga nada (0 de defesa).
+// de personagemComBonus (equipmentBonusService.js) pro jogador, ou de
+// AdventureMonster.defesa (Especificação "Admin de Aventura + Defesa/
+// Poder de Monstros" v3) pro monstro — um inimigo sem esse campo
+// (encontro antigo persistido antes da Defesa existir) simplesmente
+// não mitiga nada (0 de defesa).
 function aplicarMitigacaoDeDefesa(dano, defensor) {
   const defesa = defensor?.defesa || 0;
   if (defesa <= 0 || dano <= 0) return dano;

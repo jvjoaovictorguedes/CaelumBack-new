@@ -475,6 +475,11 @@ module.exports = function registerPartyHandlers(io) {
           vida_atual: vidaMaxima,
           dano_min: danoMin,
           dano_max: danoMax,
+          // Especificação "Admin de Aventura + Defesa/Poder de Monstros"
+          // v3 (§12.1) — Defesa NUNCA escala com fatorDificuldadeGrupo
+          // (só vida/dano escalam por tamanho de grupo); preservada tal
+          // qual configurada no catálogo.
+          defesa: monstro.defesa ?? 0,
           xp_recompensa: monstro.xp_recompensa,
           ouro_recompensa: monstro.ouro_recompensa,
         };

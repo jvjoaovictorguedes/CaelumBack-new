@@ -409,6 +409,12 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
         vida_atual: monstro.vida_maxima,
         dano_min: monstro.dano_min,
         dano_max: monstro.dano_max,
+        // Especificação "Admin de Aventura + Defesa/Poder de Monstros"
+        // v3 (§5.3) — mesma regra de mitigação do motor de combate
+        // (aplicarMitigacaoDeDefesa, chamado logo abaixo neste mesmo
+        // arquivo pro dano recebido pelo monstro); `?? 0` cobre monstros
+        // cadastrados antes desta coluna existir sem exigir backfill.
+        defesa: monstro.defesa ?? 0,
         // §7 — recompensa base é propriedade do monstro, fixa no
         // cadastro; nunca mais calculada por fórmula de nível na hora
         // da vitória (ver adventureRewardService.concederRecompensaDeZona).

@@ -164,19 +164,37 @@ async function calcularPoderPersonagem(characterId) {
   return calcularPoderPersonagemDeSnapshot({ ...jogadorEfetivo, habilidadesAtivas, fontesDeEfeitoParaUtilidade });
 }
 
-// Poder do monstro (§16) — calculado a partir do SNAPSHOT REAL do
-// encontro (vida_maxima/dano_base já calibrados por gerarInimigo), nunca
-// gravado fixo no AdventureMonster. Monstros de PvE hoje não têm Defesa
-// nem habilidades ativas (só ataque básico), então EHP = vida_maxima
-// puro e DPR = dano_base ao longo da janela.
+// Poder do monstro (§16, atualizado pela Especificação "Admin de
+// Aventura + Defesa/Poder de Monstros" v3 §6) — calculado a partir do
+// SNAPSHOT REAL do encontro/catálogo (vida_maxima/dano_min/dano_max/
+// defesa de AdventureMonster ou do encontro_pve persistido), nunca
+// gravado fixo no AdventureMonster (§9 "Não persistir Combat Power no
+// banco"). Monstros de PvE ainda não têm habilidades ativas (só ataque
+// básico), então utilityFactor fica fixo em 1 — Agilidade/Velocidade
+// deliberadamente NÃO entram aqui (§6.4, evita dupla contagem: já são
+// capturadas pelo Simulador via ordem de turno real).
+//
+// defesa ausente (encontro antigo persistido antes desta versão, ou
+// snapshot legado tipo hunterRewardService) vira 0 via `?? 0` — mesmo
+// resultado de antes da Defesa existir (§11.1).
 function calcularPoderMonstro(enemySnapshot) {
-  const dpr = Math.max(1, enemySnapshot.dano_base || 0) * HORIZONTE_PADRAO;
-  const ehp = Math.max(1, enemySnapshot.vida_maxima || 1);
+  const danoMin = enemySnapshot.dano_min ?? enemySnapshot.dano_base ?? 0;
+  const danoMax = enemySnapshot.dano_max ?? enemySnapshot.dano_base ?? 0;
+  const danoMedio = (danoMin + danoMax) / 2;
+  const dpr = Math.max(1, danoMedio) * HORIZONTE_PADRAO;
+
+  const defesa = enemySnapshot.defesa ?? 0;
+  const mitigacao = defesa / (defesa + CONSTANTE_MITIGACAO_DEFESA);
+  const vidaMaxima = Math.max(1, enemySnapshot.vida_maxima || 1);
+  const ehp = vidaMaxima / Math.max(0.01, 1 - mitigacao);
+
   const rawPower = Math.sqrt(Math.max(1, dpr) * Math.max(1, ehp));
 
   return {
     version: COMBAT_POWER_VERSION,
+    danoMedio,
     dpr,
+    mitigacao,
     ehp,
     utilityFactor: 1,
     rawPower,

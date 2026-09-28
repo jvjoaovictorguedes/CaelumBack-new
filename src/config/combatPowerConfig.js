@@ -7,7 +7,15 @@
 // por isso a versão (§9): resultado do cálculo sempre carrega
 // `version`, pra uma mudança futura nunca parecer "seu personagem ficou
 // mais fraco do nada".
-const COMBAT_POWER_VERSION = 1;
+//
+// v2 (Especificação "Admin de Aventura + Defesa/Poder de Monstros"
+// v3, §6.5): calcularPoderMonstro passou a consumir dano_min/dano_max
+// (em vez de dano_base) e incorporar Defesa/mitigação no EHP — o
+// significado do número mudou pra monstros, daí o incremento. O
+// cálculo de personagem (calcularPoderPersonagemDeSnapshot) não mudou
+// nesta versão, mas carrega a mesma `version` porque os dois números
+// precisam continuar comparáveis um com o outro (§6.3).
+const COMBAT_POWER_VERSION = 2;
 
 // Janela padrão de turnos pra medir dano sustentável (§13).
 const HORIZONTE_PADRAO = 4;

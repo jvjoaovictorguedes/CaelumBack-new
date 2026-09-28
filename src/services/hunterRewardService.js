@@ -34,15 +34,22 @@ function calcularRecompensaOuro({ ouroRecompensa, quantidade, difficulty, random
 }
 
 // §9.1 — Poder recomendado é só informativo (nunca um gate). Usa os
-// stats FIXOS de verdade do monstro (vida_maxima/dano_min/dano_max),
+// stats FIXOS de verdade do monstro (vida_maxima/dano_min/dano_max/
+// defesa — Defesa NUNCA é escalada pela dificuldade da Caçada, só HP/
+// dano, ver §12.1 "Party/Cacadas preservam defesa configurada"),
 // aplica por cima só os modificadores contextuais da dificuldade da
 // Caçada, e devolve o combatPower resultante.
-function calcularPoderRecomendado({ vidaMaxima, danoMin, danoMax, difficulty }) {
-  const danoMedio = ((danoMin ?? 0) + (danoMax ?? 0)) / 2;
+function calcularPoderRecomendado({ vidaMaxima, danoMin, danoMax, defesa, difficulty }) {
   const vidaFinal = Math.round((vidaMaxima ?? 0) * (1 + difficulty.hpMultiplier));
-  const danoFinal = Math.round(danoMedio * (1 + difficulty.damageMultiplier));
+  const danoMinFinal = Math.round((danoMin ?? 0) * (1 + difficulty.damageMultiplier));
+  const danoMaxFinal = Math.round((danoMax ?? 0) * (1 + difficulty.damageMultiplier));
 
-  return calcularPoderMonstro({ vida_maxima: vidaFinal, dano_base: danoFinal }).combatPower;
+  return calcularPoderMonstro({
+    vida_maxima: vidaFinal,
+    dano_min: danoMinFinal,
+    dano_max: danoMaxFinal,
+    defesa: defesa ?? 0,
+  }).combatPower;
 }
 
 module.exports = {

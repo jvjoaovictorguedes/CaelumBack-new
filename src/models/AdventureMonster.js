@@ -45,6 +45,10 @@ const AdventureMonster = sequelize.define(
     velocidade: { type: DataTypes.INTEGER, allowNull: true },
     xp_recompensa: { type: DataTypes.INTEGER, allowNull: true },
     ouro_recompensa: { type: DataTypes.INTEGER, allowNull: true },
+    // Especificação "Admin de Aventura + Defesa/Poder de Monstros" v3 —
+    // mesma regra de mitigação do motor de combate (aplicarMitigacaoDeDefesa
+    // em combatFormulas.js), nunca uma fórmula própria de monstro.
+    defesa: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
     ativo: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
   },
   {

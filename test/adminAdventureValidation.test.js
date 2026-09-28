@@ -526,6 +526,45 @@ testeComBanco("stats fixos: PATCH com valor inválido é rejeitado sem persistir
   assert.equal(depois.ouro_recompensa, null);
 });
 
+// ---------------------------------------------------------- DEFESA (v3)
+// Especificação "Admin de Aventura + Defesa/Poder de Monstros" v3 §5/§12.1
+// — defesa negativa rejeitada no Admin (e pelo CHECK do banco).
+
+testeComBanco("defesa: valor válido é aceito e persistido", async () => {
+  const monstro = await adminAdventureService.createAdminMonster(
+    { nome: `Monstro Teste ${sufixo()}`, defesa: 30 },
+    ADMIN_FAKE,
+  );
+  monstrosCriados.push(monstro.id);
+  assert.equal(monstro.defesa, 30);
+});
+
+testeComBanco("defesa: default é 0 quando não enviado", async () => {
+  const monstro = await criarMonstroDeTeste();
+  assert.equal(monstro.defesa, 0);
+});
+
+testeComBanco("defesa: valor negativo é rejeitado", async () => {
+  await assert.rejects(
+    () =>
+      adminAdventureService.createAdminMonster(
+        { nome: `Monstro Teste ${sufixo()}`, defesa: -1 },
+        ADMIN_FAKE,
+      ),
+    /defesa.*inteiro/i,
+  );
+});
+
+testeComBanco("defesa: PATCH com valor negativo é rejeitado sem persistir", async () => {
+  const monstro = await criarMonstroDeTeste();
+  await assert.rejects(
+    () => adminAdventureService.updateAdminMonster(monstro.id, { defesa: -10 }, ADMIN_FAKE),
+    /defesa.*inteiro/i,
+  );
+  const depois = await AdventureMonster.findByPk(monstro.id);
+  assert.equal(depois.defesa, 0);
+});
+
 testeComBanco("stats fixos: PATCH parcial só com dano_max menor que dano_min ATUAL é rejeitado", async () => {
   const monstro = await adminAdventureService.createAdminMonster(
     { nome: `Monstro Teste ${sufixo()}`, dano_min: 10, dano_max: 20 },

@@ -68,6 +68,7 @@ const {
 } = require("./combatFormulas");
 const { aplicarAcao } = require("./duelEngine");
 const { escolherAcaoIA } = require("./rankedAiService");
+const { calcularPoderMonstro } = require("./combatPowerService");
 
 function erro(mensagem, statusCode = 400) {
   return Object.assign(new Error(mensagem), { statusCode });
@@ -222,7 +223,7 @@ async function simularZona({ idPersonagem, idMonstro, quantidade }) {
 
   const resultados = [];
   for (let i = 0; i < n; i += 1) {
-    const monsterState = { vida_atual: monstro.vida_maxima, agilidade: monstro.agilidade ?? 0, defesa: 0 };
+    const monsterState = { vida_atual: monstro.vida_maxima, agilidade: monstro.agilidade ?? 0, defesa: monstro.defesa ?? 0 };
     resultados.push(
       simularUmCombateSolo(personagem, monsterState, () => crypto.randomInt(monstro.dano_min, monstro.dano_max + 1)),
     );
@@ -245,6 +246,8 @@ async function simularZona({ idPersonagem, idMonstro, quantidade }) {
       vida_maxima: monstro.vida_maxima,
       dano_min: monstro.dano_min,
       dano_max: monstro.dano_max,
+      defesa: monstro.defesa ?? 0,
+      combat_power: calcularPoderMonstro(monstro).combatPower,
     },
     ...agregarResultadosSolo(resultados),
   };
@@ -328,6 +331,9 @@ function simularUmaBatalhaDeGrupo(personagem, monstro, tamanhoGrupo) {
     vida_atual: vidaMaxima,
     dano_min: danoMin,
     dano_max: danoMax,
+    // §12.1 — Defesa NUNCA escala por fatorDificuldadeGrupo, igual
+    // partySocket.js já faz no combate real.
+    defesa: monstro.defesa ?? 0,
   };
 
   const membros = [];
@@ -432,6 +438,8 @@ async function simularGrupo({ idPersonagem, idMonstro, tamanhoGrupo, quantidade 
       vida_maxima: monstro.vida_maxima,
       dano_min: monstro.dano_min,
       dano_max: monstro.dano_max,
+      defesa: monstro.defesa ?? 0,
+      combat_power: calcularPoderMonstro(monstro).combatPower,
     },
     tamanho_grupo: tamanho,
     quantidade_simulacoes: n,

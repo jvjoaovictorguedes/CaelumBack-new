@@ -140,6 +140,7 @@ const CAMPOS_MONSTRO = [
   "velocidade",
   "xp_recompensa",
   "ouro_recompensa",
+  "defesa",
   "ativo",
 ];
 
@@ -148,7 +149,7 @@ const CAMPOS_MONSTRO = [
 // transaction dá uma mensagem de erro legível pro admin em vez de um
 // erro cru do Postgres.
 function validarStatsFixosMonstro(dados) {
-  const camposInteirosNaoNegativos = ["vida_maxima", "dano_min", "dano_max", "agilidade", "velocidade", "xp_recompensa", "ouro_recompensa"];
+  const camposInteirosNaoNegativos = ["vida_maxima", "dano_min", "dano_max", "agilidade", "velocidade", "xp_recompensa", "ouro_recompensa", "defesa"];
   for (const campo of camposInteirosNaoNegativos) {
     if (!foiEnviado(dados, campo) || dados[campo] == null) continue;
     if (!Number.isInteger(dados[campo]) || dados[campo] < 0) {

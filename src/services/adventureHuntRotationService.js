@@ -60,6 +60,7 @@ async function obterPoolDeAlvos(transaction) {
     vidaMaxima: v.monstro.vida_maxima,
     danoMin: v.monstro.dano_min,
     danoMax: v.monstro.dano_max,
+    defesa: v.monstro.defesa,
     ouroRecompensa: v.monstro.ouro_recompensa,
     idZona: v.AdventureZone.id,
     nomeZona: v.AdventureZone.nome,
@@ -118,6 +119,7 @@ async function montarDadosDeOferta(idPersonagem, transaction) {
     vidaMaxima: alvo.vidaMaxima,
     danoMin: alvo.danoMin,
     danoMax: alvo.danoMax,
+    defesa: alvo.defesa,
     difficulty,
   });
 
