@@ -12,6 +12,7 @@ const GuildMuralMessage = require("../models/GuildMuralMessage");
 const Character = require("../models/Character");
 const { temPermissao, podeGerenciarCargo, PADRAO, HIERARQUIA } = require("../services/guildPermissionService");
 const { pontuarContribuicao, pontosPorDoacao } = require("../services/guildContributionService");
+const { registrarProgressoMissaoGuilda } = require("../services/guildMissionService");
 const { emitParaGuild, removerDaSalaDeGuild } = require("../socket/guildSocket");
 const achievementService = require("../services/achievementService");
 
@@ -848,6 +849,15 @@ exports.doar = async (req, res) => {
 
       // §43/§44 — contribuição normalizada, não o Gold cru.
       await pontuarContribuicao(guild.id, idPersonagem, pontosPorDoacao(valorNumerico), transaction);
+
+      // As missões de categoria "GanharOuro" (ex: "Cofre Inicial: Junte
+      // ouro pela Guilda") são literalmente sobre financiar a guilda —
+      // doar pro Tesouro é a forma mais direta de fazer isso, então
+      // também progride essas missões (antes só combate contava,
+      // deixando essa missão praticamente impossível de perceber como
+      // relacionada à doação, que é a ação mais óbvia pra "juntar ouro
+      // pela Guilda").
+      await registrarProgressoMissaoGuilda(personagem, "GanharOuro", valorNumerico, transaction);
 
       await GuildTreasuryTransaction.create(
         {
