@@ -7,11 +7,14 @@ const { criarLimitador } = require("../middlewares/rateLimitMiddleware");
 
 const router = express.Router();
 
-// Mesmo raciocínio de raceRoutes.js — sem isso um script em loop
-// "vencia" o sorteio de classe rara (0.01% de chance) em tempo viável.
+// Mesmo raciocínio de raceRoutes.js — a proteção de verdade é
+// class_rare_won ficar travado no banco na primeira chamada, esse limite
+// é só segunda camada. Ver comentário completo em raceRoutes.js (o
+// limite de 5/hora estava derrubando jogadores legítimos que só
+// tentaram de novo depois de uma falha de rede/timeout).
 const limitadorSorteioRaro = criarLimitador({
   janelaMs: 60 * 60 * 1000,
-  maxTentativas: 5,
+  maxTentativas: 30,
   obterChave: (req) => `classe-rara:${req.user.id}`,
 });
 
