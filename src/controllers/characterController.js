@@ -45,6 +45,7 @@ const {
   buscarItemRequisito,
   contarMortesDoAlvo,
 } = require("../services/classEvolutionService");
+const CharacterClassEvolution = require("../models/CharacterClassEvolution");
 const {
   sincronizarRegeneracaoDeVidaEMana,
   msAteVidaRegenCompleta,
@@ -1343,13 +1344,20 @@ exports.evolveClass = async (req, res) => {
         await entradaInventario.destroy({ transaction });
       }
 
+      // Classes V2 §7 — a partir daqui, o bônus da evolução NUNCA mais é
+      // somado diretamente nos atributos-base do Character; fica
+      // registrado em CharacterClassEvolution (estágio 1 = Lv.40) e é
+      // resolvido dinamicamente a cada leitura por
+      // classEvolutionBonusService (via equipmentBonusService, mesma
+      // filosofia de equipamento/passivas/sets). id_evolucao_classe
+      // continua sendo escrito só como ponteiro de leitura/compat — não
+      // é mais fonte de bônus nenhum.
       character.id_evolucao_classe = caminho.id;
-      character.forca += caminho.bonus_forca;
-      character.vitalidade += caminho.bonus_vitalidade;
-      character.agilidade += caminho.bonus_agilidade;
-      character.inteligencia += caminho.bonus_inteligencia;
-      character.velocidade += caminho.bonus_velocidade;
       await character.save({ transaction });
+      await CharacterClassEvolution.create(
+        { id_personagem: character.id, id_evolucao: caminho.id, estagio: 1, legacy_bonus_materializado: false },
+        { transaction },
+      );
 
       return { character, nomeEvoluido: caminho.nome };
     });

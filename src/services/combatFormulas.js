@@ -90,6 +90,30 @@ function calcularDanoBasico(atacante) {
   return Math.max(1, Math.round(base * variacao * multiplicador));
 }
 
+// Classes V2 §4 — o multiplicador de classe aplicado ao DANO de um poder
+// depende do seu tipo_dano (Fisico/Magico/Verdadeiro/Nenhum), NUNCA mais
+// inferido pela escala_atributo (antes: Inteligencia = mágico, resto =
+// físico — um poder de Agilidade nunca podia ser mágico, nem um de
+// Força). Verdadeiro ignora os dois multiplicadores (dano cheio,
+// batendo igual em qualquer classe); Nenhum é só pra cura/passivo sem
+// componente de dano e nunca chega a multiplicar nada de fato (dano_base
+// zerado já retorna 0 antes de chegar aqui). Fallback pra Fisico só
+// existe pra nunca quebrar um Power sem tipo_dano carregado por engano
+// (NOT NULL no banco desde a migration de backfill).
+function multiplicadorDeClassePorTipoDano(power, personagem) {
+  switch (power.tipo_dano) {
+    case "Magico":
+      return personagem.multiplicador_dano_magico ?? 1;
+    case "Verdadeiro":
+      return 1;
+    case "Nenhum":
+      return 1;
+    case "Fisico":
+    default:
+      return personagem.multiplicador_dano_fisico ?? 1;
+  }
+}
+
 // `nivelHabilidade` (1 a 10, default 1 pra quem chama sem passar nada —
 // ex.: inimigo de PvE, que não tem CharacterAbilities) vem de
 // abilityLevelService.js: cada nível investido multiplica dano/cura por
@@ -100,18 +124,7 @@ function calcularEfeitoPoder(power, personagem, nivelHabilidade = 1) {
   const variacao = 0.9 + Math.random() * 0.2;
   const bonusNivel = bonusPorNivel(personagem, DANO_MAGICO_BASE_POR_NIVEL);
   const multiplicadorNivelHabilidade = multiplicadorEfeitoPorNivelHabilidade(nivelHabilidade);
-  // O multiplicador de classe aplicado ao DANO depende de como o poder
-  // escala: um poder de Inteligencia é mágico e usa multiplicador_dano_magico;
-  // qualquer outra escala (Forca/Vitalidade/Agilidade/Velocidade) é marcial
-  // e usa multiplicador_dano_fisico — senão um Guerreiro com habilidade de
-  // Força era punido pelo multiplicador mágico fraco da própria classe dele,
-  // igual ataque básico ficar mais forte que a habilidade. Nunca afeta a
-  // cura — um mago forte em dano não devia automaticamente curar mais forte
-  // só por isso.
-  const multiplicadorClassePorPoder =
-    power.escala_atributo === "Inteligencia"
-      ? (personagem.multiplicador_dano_magico ?? 1)
-      : (personagem.multiplicador_dano_fisico ?? 1);
+  const multiplicadorClassePorPoder = multiplicadorDeClassePorTipoDano(power, personagem);
 
   const dano = power.dano_base
     ? Math.round(
@@ -152,10 +165,7 @@ function calcularEfeitoPoderEsperado(power, personagem, nivelHabilidade = 1) {
   const valorAtributo = personagem[campoAtributo] || 0;
   const bonusNivel = bonusPorNivel(personagem, DANO_MAGICO_BASE_POR_NIVEL);
   const multiplicadorNivelHabilidade = multiplicadorEfeitoPorNivelHabilidade(nivelHabilidade);
-  const multiplicadorClassePorPoder =
-    power.escala_atributo === "Inteligencia"
-      ? (personagem.multiplicador_dano_magico ?? 1)
-      : (personagem.multiplicador_dano_fisico ?? 1);
+  const multiplicadorClassePorPoder = multiplicadorDeClassePorTipoDano(power, personagem);
 
   const dano = power.dano_base
     ? Math.round(
@@ -272,6 +282,7 @@ function comMultiplicadoresDeClasse(personagem, classe) {
 module.exports = {
   ATRIBUTO_PARA_CAMPO,
   CONSTANTE_MITIGACAO_DEFESA,
+  multiplicadorDeClassePorTipoDano,
   calcularDanoBasico,
   danoBasicoEsperado,
   calcularEfeitoPoder,

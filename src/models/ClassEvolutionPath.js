@@ -20,6 +20,36 @@ const ClassEvolutionPath = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
     },
+    // Classes V2 §5.1 — chave estável pra UI/integrações, não depender
+    // do nome (editável no Admin) pra lógica.
+    slug: {
+      type: DataTypes.STRING(100),
+      allowNull: false,
+      unique: true,
+    },
+    // 1 = Lv.40 (era o único estágio da V1), 2 = Lv.100, schema
+    // preparado pra estágios futuros sem alterar Characters.
+    estagio: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 1,
+    },
+    // NULL no estágio 1; obrigatório no estágio >1 (validado em
+    // classEvolutionService, não só no banco) — regra de linhagem §5.2:
+    // pai e filho pertencem à mesma classe, estagio_filho = estagio_pai+1.
+    id_evolucao_pai: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+    ativo: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
+    },
+    icone_url: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+    },
     nome: {
       type: DataTypes.STRING(100),
       allowNull: false,

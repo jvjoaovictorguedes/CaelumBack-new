@@ -18,6 +18,7 @@ const { multiplicadorEfeito } = require("./abilityLevelService");
 const { propriedadesEfetivasArma, propriedadesEfetivasArmadura } = require("./equipmentRefinementService");
 const { aplicarRaridadeArma, aplicarRaridadeArmadura } = require("./equipmentRarityService");
 const { resolverConjuntosEquipados } = require("./equipmentSetService");
+const { resolverBonusDeEvolucaoDeClasse } = require("./classEvolutionBonusService");
 // Só o require garante que a associação (com alias explícito) já foi
 // declarada — ver models/associations.js pra fonte única.
 require("../models/associations");
@@ -34,7 +35,7 @@ function bonusZerado() {
 // rodaria numa conexão separada e não enxergaria a alteração ainda não
 // commitada).
 async function buscarBonusDeAtributos(idPersonagem, transaction) {
-  const [equipamentos, passivasAtivas, setState] = await Promise.all([
+  const [equipamentos, passivasAtivas, setState, bonusEvolucaoClasse] = await Promise.all([
     CharacterEquipment.findAll({
       where: { id_personagem: idPersonagem },
       include: [
@@ -67,6 +68,10 @@ async function buscarBonusDeAtributos(idPersonagem, transaction) {
     // recalculado aqui); roda em paralelo por fazer sua própria query
     // independente de CharacterEquipment.
     resolverConjuntosEquipados(idPersonagem, transaction),
+    // Classes V2 §7 — bônus de evolução de classe, resolvido sob demanda
+    // igual equipamento/passivas/sets (ver classEvolutionBonusService.js
+    // pro motivo de nunca materializar isso em Character).
+    resolverBonusDeEvolucaoDeClasse(idPersonagem, transaction),
   ]);
 
   const bonus = bonusZerado();
@@ -154,6 +159,14 @@ async function buscarBonusDeAtributos(idPersonagem, transaction) {
   bonus.inteligencia += setState.statBonus.inteligencia || 0;
   bonus.velocidade += setState.statBonus.velocidade || 0;
   bonus.defesa += setState.statBonus.defesa || 0;
+
+  // Classes V2 §7 — bônus de evolução de classe (fluxo V2, nunca o
+  // materializado no backfill legado — ver classEvolutionBonusService.js).
+  bonus.forca += bonusEvolucaoClasse.forca || 0;
+  bonus.vitalidade += bonusEvolucaoClasse.vitalidade || 0;
+  bonus.agilidade += bonusEvolucaoClasse.agilidade || 0;
+  bonus.inteligencia += bonusEvolucaoClasse.inteligencia || 0;
+  bonus.velocidade += bonusEvolucaoClasse.velocidade || 0;
 
   // Arredonda aqui pra já sair um número limpo tanto pro combate quanto
   // pra exibição — bônus de arma (valor_bonus_atributo) é FLOAT.
