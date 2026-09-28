@@ -15,6 +15,12 @@ const Character = require("../models/Character");
 const CharacterFishingProgress = require("../models/CharacterFishingProgress");
 const { TAMANHO_PAGINA_PADRAO } = require("../config/rankingConfig");
 
+// Contas administrativas não aparecem em nenhum ranking (mesma regra e
+// mesmo motivo de rankingService.js) — a Pesca ficou de fora da
+// correção original porque é um serviço separado.
+const SQL_ADMINS_POR_PERSONAGEM =
+  'SELECT id FROM "Characters" WHERE id_usuario IN (SELECT id FROM users WHERE "isAdmin" = true)';
+
 function paginar(page) {
   const pagina = Math.max(1, Number.parseInt(page, 10) || 1);
   const offset = (pagina - 1) * TAMANHO_PAGINA_PADRAO;
@@ -31,7 +37,14 @@ async function rankingPescaTotal(page) {
   const { count, rows } = await CharacterFishingProgress.findAndCountAll({
     where: { total_capturado: { [Op.gt]: 0 } },
     attributes: ["id_personagem", "nivel", "total_capturado"],
-    include: [{ model: Character, attributes: ["id", "nome"] }],
+    include: [
+      {
+        model: Character,
+        attributes: ["id", "nome"],
+        where: sequelize.literal(`id NOT IN (${SQL_ADMINS_POR_PERSONAGEM})`),
+        required: true,
+      },
+    ],
     order: [
       ["total_capturado", "DESC"],
       ["nivel", "DESC"],
@@ -66,8 +79,9 @@ async function posicaoPescaTotal(idPersonagem) {
 
   const [linhas] = await sequelize.query(
     `SELECT COUNT(*)::int AS count FROM character_fishing_progress
-     WHERE total_capturado > :total
-        OR (total_capturado = :total AND nivel > :nivel);`,
+     WHERE (total_capturado > :total
+        OR (total_capturado = :total AND nivel > :nivel))
+       AND id_personagem NOT IN (${SQL_ADMINS_POR_PERSONAGEM});`,
     { replacements: { total: progresso.total_capturado, nivel: progresso.nivel } },
   );
   return { elegivel: true, posicao: linhas[0].count + 1, total_capturado: progresso.total_capturado };
@@ -78,7 +92,8 @@ async function rankingPescaMaiorPeixe(page) {
   const { pagina, offset, limite } = paginar(page);
 
   const [linhasContagem] = await sequelize.query(
-    `SELECT COUNT(DISTINCT id_personagem)::int AS count FROM fishing_catch_records;`,
+    `SELECT COUNT(DISTINCT id_personagem)::int AS count FROM fishing_catch_records
+     WHERE id_personagem NOT IN (${SQL_ADMINS_POR_PERSONAGEM});`,
   );
   const totalItens = linhasContagem[0].count;
 
@@ -92,6 +107,7 @@ async function rankingPescaMaiorPeixe(page) {
      JOIN "Characters" c ON c.id = fcr.id_personagem
      LEFT JOIN fishing_species fsp ON fsp.id = fcr.id_species
      LEFT JOIN "Items" it ON it.id = fsp.id_item
+     WHERE fcr.id_personagem NOT IN (${SQL_ADMINS_POR_PERSONAGEM})
      ORDER BY fcr.id_personagem, fcr.weight_g DESC, fcr.caught_at ASC`,
   );
 
@@ -122,7 +138,9 @@ async function posicaoPescaMaiorPeixe(idPersonagem) {
 
   const [contagem] = await sequelize.query(
     `SELECT COUNT(*)::int AS count FROM (
-       SELECT id_personagem, MAX(weight_g) AS maior FROM fishing_catch_records GROUP BY id_personagem
+       SELECT id_personagem, MAX(weight_g) AS maior FROM fishing_catch_records
+       WHERE id_personagem NOT IN (${SQL_ADMINS_POR_PERSONAGEM})
+       GROUP BY id_personagem
      ) t WHERE t.maior > :maior;`,
     { replacements: { maior } },
   );

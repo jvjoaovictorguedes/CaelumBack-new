@@ -20,6 +20,16 @@ const { TAMANHO_PAGINA_PADRAO } = require("../config/rankingConfig");
 // esta condição.
 const SQL_EXCLUIR_ADMINS = 'id_usuario NOT IN (SELECT id FROM users WHERE "isAdmin" = true)';
 
+// Mesma exclusão, mas para as queries raw de "sua posição" das
+// categorias cuja tabela não guarda id_usuario diretamente (chaveiam
+// por id_personagem/character_id até "Characters") — essas 5 queries
+// (posicaoNivel/Gold/Forja/Pvp/PvpCasual) ficaram de fora da correção
+// original de SQL_EXCLUIR_ADMINS porque usam sequelize.query() cru em
+// vez de where/include, e por isso um admin no topo do ranking inflava
+// a posição relatada a um jogador real mesmo sem aparecer na lista.
+const SQL_ADMINS_POR_PERSONAGEM =
+  'SELECT id FROM "Characters" WHERE id_usuario IN (SELECT id FROM users WHERE "isAdmin" = true)';
+
 function paginar(page) {
   const pagina = Math.max(1, Number.parseInt(page, 10) || 1);
   const offset = (pagina - 1) * TAMANHO_PAGINA_PADRAO;
@@ -65,7 +75,8 @@ async function posicaoNivel(idPersonagem) {
 
   const [linhas] = await sequelize.query(
     `SELECT COUNT(*)::int AS count FROM "Characters"
-     WHERE nivel > :nivel OR (nivel = :nivel AND experiencia > :experiencia);`,
+     WHERE (nivel > :nivel OR (nivel = :nivel AND experiencia > :experiencia))
+       AND ${SQL_EXCLUIR_ADMINS};`,
     { replacements: { nivel: personagem.nivel, experiencia: personagem.experiencia } },
   );
   return linhas[0].count + 1;
@@ -104,7 +115,8 @@ async function posicaoGold(idPersonagem) {
   if (!personagem) return null;
 
   const [linhas] = await sequelize.query(
-    `SELECT COUNT(*)::int AS count FROM "Characters" WHERE dinheiro_total_ganho > :valor;`,
+    `SELECT COUNT(*)::int AS count FROM "Characters"
+     WHERE dinheiro_total_ganho > :valor AND ${SQL_EXCLUIR_ADMINS};`,
     { replacements: { valor: personagem.dinheiro_total_ganho } },
   );
   return linhas[0].count + 1;
@@ -251,7 +263,8 @@ async function posicaoForja(idPersonagem) {
   if (!progresso) return null;
 
   const [linhas] = await sequelize.query(
-    `SELECT COUNT(*)::int AS count FROM character_forge_progress WHERE experiencia > :xp;`,
+    `SELECT COUNT(*)::int AS count FROM character_forge_progress
+     WHERE experiencia > :xp AND id_personagem NOT IN (${SQL_ADMINS_POR_PERSONAGEM});`,
     { replacements: { xp: progresso.experiencia } },
   );
   return linhas[0].count + 1;
@@ -335,6 +348,7 @@ async function posicaoPvp(idPersonagem) {
   const [linhas] = await sequelize.query(
     `SELECT COUNT(*)::int AS count FROM character_pvp_seasons cps
      WHERE cps.season_id = :seasonId AND cps.jogos >= :minimo
+       AND cps.character_id NOT IN (${SQL_ADMINS_POR_PERSONAGEM})
        AND (
          cps.rating > :rating
          OR (cps.rating = :rating AND cps.vitorias > :vitorias)
@@ -438,7 +452,9 @@ async function posicaoPvpCasual(idPersonagem) {
   // ANTES, sem carregar o ranking inteiro (§19 do Ranking v2).
   const [linhas] = await sequelize.query(
     `SELECT COUNT(*)::int AS count FROM "PvpStatuses" ps
-     WHERE (ps.vitorias + ps.derrotas) > 0 AND (
+     WHERE (ps.vitorias + ps.derrotas) > 0
+       AND ps.id_personagem NOT IN (${SQL_ADMINS_POR_PERSONAGEM})
+       AND (
        ((ps.vitorias - ps.derrotas) * 10 + LEAST(30, FLOOR((ps.vitorias + ps.derrotas) / 5))) > :pontuacao
        OR (((ps.vitorias - ps.derrotas) * 10 + LEAST(30, FLOOR((ps.vitorias + ps.derrotas) / 5))) = :pontuacao
            AND (ps.vitorias - ps.derrotas) > :saldo)
