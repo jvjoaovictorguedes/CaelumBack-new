@@ -21,10 +21,8 @@ const PROPOSITO_CLASSE = "classe-rara";
 // Mesmas chances que existiam antes — só a AUTORIDADE da decisão migrou
 // pro servidor, o balanceamento não mudou. Base 10.000 pra representar
 // exatamente 0.9% (90/10.000) e 0.01% (1/10.000) sem perda de precisão.
-// TEMPORÁRIO — só pra teste em dev, sempre ganha (100%). NUNCA subir
-// pra main assim: em produção precisa voltar pra 90/1 (0.9%/0.01%).
-const CHANCE_RACA_RARA_BASE10000 = 10000;
-const CHANCE_CLASSE_RARA_BASE10000 = 10000;
+const CHANCE_RACA_RARA_BASE10000 = 90;
+const CHANCE_CLASSE_RARA_BASE10000 = 1;
 const BASE_SORTEIO = 10000;
 
 // crypto.randomInt (CSPRNG) em vez de Math.random(): Math.random() usa
