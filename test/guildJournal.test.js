@@ -6,10 +6,11 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { bancoDisponivel, sufixo, sequelize } = require("./helpers/db");
+const { bancoDisponivel, criarPersonagem, sufixo, sequelize } = require("./helpers/db");
 require("../src/models/associations");
 
 const GuildJournalEntry = require("../src/models/GuildJournalEntry");
+const UserGuildJournalSeen = require("../src/models/UserGuildJournalSeen");
 const adminGuildJournalService = require("../src/services/adminGuildJournalService");
 const guildJournalController = require("../src/controllers/guildJournalController");
 
@@ -193,7 +194,8 @@ testeComBanco("público: getGuildJournal só mostra Publicado e Agendado já ven
   );
   entradasCriadas.push(publicado.id, rascunho.id, agendadoPassado.id, agendadoFuturo.id);
 
-  const req = {};
+  const { usuario } = await criarPersonagem();
+  const req = { user: { id: usuario.id } };
   const res = fakeRes();
   await guildJournalController.getGuildJournal(req, res);
 
@@ -203,6 +205,79 @@ testeComBanco("público: getGuildJournal só mostra Publicado e Agendado já ven
     .sort((x, y) => x - y);
 
   assert.deepEqual(idsVisiveis.sort((x, y) => x - y), [publicado.id, agendadoPassado.id].sort((x, y) => x - y));
+});
+
+// Notificação (pedido do jogador: "sempre que algo for postado no
+// jornal da guilda, ficar uma notificação tanto na guilda dos
+// aventureiros quanto no jornal da guilda") — mesmo padrão de
+// patchNotesController: ultimo_id_visto por conta, quantidade_nao_lida
+// derivada, mark-seen usa o maior id VISÍVEL (nunca um Rascunho/
+// Agendado futuro).
+testeComBanco("notificação: conta nova (nunca visitou) vê toda nota visível como não lida", async () => {
+  const marca = sufixo();
+  const nota = await adminGuildJournalService.createAdminGuildJournalEntry(
+    { titulo: `Nova ${marca}`, descricao: "d", status: "Publicado" },
+    { idAdmin: 1 },
+  );
+  entradasCriadas.push(nota.id);
+
+  const { usuario } = await criarPersonagem();
+  const req = { user: { id: usuario.id } };
+  const res = fakeRes();
+  await guildJournalController.getGuildJournal(req, res);
+
+  assert.equal(res.body.data.ultimo_id_visto, null);
+  assert.ok(res.body.data.quantidade_nao_lida >= 1, "nota publicada precisa contar como não lida");
+});
+
+testeComBanco("notificação: mark-seen zera quantidade_nao_lida e usa o maior id VISÍVEL (nunca Rascunho/Agendado futuro)", async () => {
+  const marca = sufixo();
+  const publicada = await adminGuildJournalService.createAdminGuildJournalEntry(
+    { titulo: `Pub ${marca}`, descricao: "d", status: "Publicado" },
+    { idAdmin: 1 },
+  );
+  const rascunhoDepois = await adminGuildJournalService.createAdminGuildJournalEntry(
+    { titulo: `RascDepois ${marca}`, descricao: "d", status: "Rascunho" },
+    { idAdmin: 1 },
+  );
+  entradasCriadas.push(publicada.id, rascunhoDepois.id);
+  assert.ok(rascunhoDepois.id > publicada.id, "precondição: o rascunho precisa ter id maior que a nota publicada");
+
+  const { usuario } = await criarPersonagem();
+  const req = { user: { id: usuario.id } };
+  const resMark = fakeRes();
+  await guildJournalController.marcarComoVisto(req, resMark);
+
+  assert.equal(
+    resMark.body.data.ultimo_id_visto,
+    publicada.id,
+    "mark-seen não pode contar um Rascunho como visto — só o que já está visível",
+  );
+
+  const resDepois = fakeRes();
+  await guildJournalController.getGuildJournal(req, resDepois);
+  assert.equal(resDepois.body.data.quantidade_nao_lida, 0);
+
+  const registro = await UserGuildJournalSeen.findByPk(usuario.id);
+  assert.equal(registro.ultimo_id_visto, publicada.id);
+});
+
+testeComBanco("notificação: nota nova publicada depois do mark-seen volta a contar como não lida", async () => {
+  const marca = sufixo();
+  const { usuario } = await criarPersonagem();
+  const req = { user: { id: usuario.id } };
+
+  await guildJournalController.marcarComoVisto(req, fakeRes());
+
+  const notaNova = await adminGuildJournalService.createAdminGuildJournalEntry(
+    { titulo: `PosMark ${marca}`, descricao: "d", status: "Publicado" },
+    { idAdmin: 1 },
+  );
+  entradasCriadas.push(notaNova.id);
+
+  const res = fakeRes();
+  await guildJournalController.getGuildJournal(req, res);
+  assert.equal(res.body.data.quantidade_nao_lida, 1);
 });
 
 testeComBanco("modelo: categorias e status inválidos são rejeitados pelo ENUM do Postgres", async () => {
