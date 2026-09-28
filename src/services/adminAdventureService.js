@@ -13,6 +13,7 @@ const AdventureMonsterLoot = require("../models/AdventureMonsterLoot");
 const Item = require("../models/Item");
 const ExpeditionRegion = require("../models/ExpeditionRegion");
 const { registrarAcao } = require("./adminAuditService");
+const { calcularPoderMonstro } = require("./combatPowerService");
 
 function erro(mensagem, statusCode = 400) {
   const e = new Error(mensagem);
@@ -179,8 +180,17 @@ function validarFaixaDanoMonstro(danoMinFinal, danoMaxFinal) {
   }
 }
 
+// Especificação "Admin de Aventura + Defesa/Poder de Monstros" v3 §3.2
+// — listagem precisa mostrar Poder pra ordenar/filtrar; combatPower
+// nunca é persistido (§9), sempre recalculado aqui em cima dos stats
+// reais de cada linha (cálculo puro e barato, sem N+1 de query).
 async function listAdminMonsters() {
-  return AdventureMonster.findAll({ order: [["nome", "ASC"]] });
+  const monstros = await AdventureMonster.findAll({ order: [["nome", "ASC"]] });
+  return monstros.map((monstro) => {
+    const json = monstro.toJSON();
+    json.combat_power = calcularPoderMonstro(json).combatPower;
+    return json;
+  });
 }
 
 async function createAdminMonster(payload, { idAdmin, req }) {
@@ -479,6 +489,191 @@ async function listExpeditionRegions() {
   return ExpeditionRegion.findAll({ where: { ativo: true }, order: [["ordem", "ASC"], ["id", "ASC"]] });
 }
 
+// ----------------------------------------------- ENDPOINTS AGREGADOS (V3)
+// Especificação "Admin de Aventura + Defesa/Poder de Monstros" v3 §2.4/
+// §4.2/§9 — ZoneEditor/MonsterEditor editam tudo localmente e mandam UMA
+// sincronização por Salvar, em vez de um PATCH por linha. Os endpoints
+// granulares acima continuam existindo (§9.1 "mantenha endpoints antigos
+// enquanto ainda houver consumidores") — estes são aditivos.
+
+// PUT /zones/:id/monsters (§2.4) — upsert lógico por (id_area, id_monstro):
+// vínculo ausente do payload não é deletado, vira ativo=false; um vínculo
+// previamente inativo que volta no payload é REATIVADO na linha
+// existente (nunca cria uma segunda linha — violaria a unique constraint
+// id_area+id_monstro). Uma única ação de auditoria com o roster completo
+// antes/depois, não uma por linha.
+async function sincronizarRosterZona(idZona, monstrosPayload, { idAdmin, req }) {
+  if (!Array.isArray(monstrosPayload)) throw erro("monsters precisa ser uma lista.");
+
+  const idsMonstro = monstrosPayload.map((m) => m.id_monstro);
+  if (idsMonstro.some((id) => !Number.isInteger(id))) throw erro("Todo item precisa de um id_monstro válido.");
+  if (new Set(idsMonstro).size !== idsMonstro.length) throw erro("O mesmo monstro não pode aparecer duas vezes no roster.");
+  for (const m of monstrosPayload) {
+    validarPesoAparicao(m.peso_aparicao);
+    if (!["Comum", "Raro"].includes(m.tipo_aparicao ?? "Comum")) {
+      throw erro(`tipo_aparicao inválido: "${m.tipo_aparicao}".`);
+    }
+    validarNivelJogadorMinimo(m.nivel_jogador_minimo ?? 1);
+  }
+
+  return sequelize.transaction(async (transaction) => {
+    // Lock na zona alvo (§2.4 passo 1) — serializa duas sincronizações
+    // concorrentes da MESMA zona; evita lost update.
+    const zona = await AdventureZone.findByPk(idZona, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!zona) throw erro("Zona não encontrada.", 404);
+
+    if (idsMonstro.length) {
+      const existentes = await AdventureMonster.count({ where: { id: idsMonstro }, transaction });
+      if (existentes !== idsMonstro.length) throw erro("Algum monstro do roster não existe.");
+    }
+
+    const linhasAtuais = await AdventureZoneMonster.findAll({ where: { id_area: idZona }, transaction });
+    const antes = linhasAtuais.map((l) => l.toJSON());
+    const porMonstro = new Map(linhasAtuais.map((l) => [l.id_monstro, l]));
+    const idsNoPayload = new Set(idsMonstro);
+
+    for (const m of monstrosPayload) {
+      const dados = {
+        tipo_aparicao: m.tipo_aparicao ?? "Comum",
+        peso_aparicao: m.peso_aparicao,
+        nivel_jogador_minimo: m.nivel_jogador_minimo ?? 1,
+        ativo: m.ativo ?? true,
+      };
+      const linha = porMonstro.get(m.id_monstro);
+      if (linha) await linha.update(dados, { transaction });
+      else await AdventureZoneMonster.create({ id_area: idZona, id_monstro: m.id_monstro, ...dados }, { transaction });
+    }
+    for (const linha of linhasAtuais) {
+      if (!idsNoPayload.has(linha.id_monstro) && linha.ativo) await linha.update({ ativo: false }, { transaction });
+    }
+
+    const depois = await AdventureZoneMonster.findAll({
+      where: { id_area: idZona },
+      include: [{ model: AdventureMonster, as: "monstro", attributes: ["id", "nome", "imagem_url"] }],
+      transaction,
+    });
+    await registrarAcao({
+      idAdmin,
+      acao: "sincronizar_roster",
+      entidade: "AdventureZoneMonster",
+      idEntidade: idZona,
+      dadosAntes: { id_area: idZona, roster: antes },
+      dadosDepois: { id_area: idZona, roster: depois.map((l) => l.toJSON()) },
+      req,
+      transaction,
+    });
+    return depois;
+  });
+}
+
+// PUT /monsters/:id/loot (§4.2) — mesmo padrão de sincronização do
+// roster de zona, mas identificado por `id` da linha (não há unique
+// constraint natural item+monstro — um mesmo item pode aparecer em
+// categorias diferentes de propósito). Entrada do payload SEM `id` é
+// tratada como criação nova; com `id` desconhecido/de outro monstro é
+// rejeitada (nunca deixa um admin sequestrar a linha de outro monstro
+// por engano).
+async function sincronizarLootMonstro(idMonstro, lootPayload, { idAdmin, req }) {
+  if (!Array.isArray(lootPayload)) throw erro("loot precisa ser uma lista.");
+
+  for (const l of lootPayload) {
+    if (!Number.isInteger(l.id_item)) throw erro("Todo item de loot precisa de um id_item válido.");
+    validarLoot(l);
+    const minFinal = foiEnviado(l, "quantidade_min") ? l.quantidade_min : QUANTIDADE_LOOT_PADRAO;
+    const maxFinal = foiEnviado(l, "quantidade_max") ? l.quantidade_max : QUANTIDADE_LOOT_PADRAO;
+    validarQuantidadeLoot(minFinal, maxFinal);
+  }
+
+  return sequelize.transaction(async (transaction) => {
+    const monstro = await AdventureMonster.findByPk(idMonstro, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!monstro) throw erro("Monstro não encontrado.", 404);
+
+    const idsItem = lootPayload.map((l) => l.id_item);
+    if (idsItem.length) {
+      const existentes = await Item.count({ where: { id: idsItem }, transaction });
+      if (existentes !== new Set(idsItem).size) throw erro("Algum item do payload não existe.");
+    }
+
+    const linhasAtuais = await AdventureMonsterLoot.findAll({ where: { id_monstro: idMonstro }, transaction });
+    const antes = linhasAtuais.map((l) => l.toJSON());
+    const porId = new Map(linhasAtuais.map((l) => [l.id, l]));
+
+    const idsMantidos = new Set();
+    for (const l of lootPayload) {
+      const dados = {
+        id_item: l.id_item,
+        chance_ppm: l.chance_ppm,
+        quantidade_min: foiEnviado(l, "quantidade_min") ? l.quantidade_min : QUANTIDADE_LOOT_PADRAO,
+        quantidade_max: foiEnviado(l, "quantidade_max") ? l.quantidade_max : QUANTIDADE_LOOT_PADRAO,
+        categoria: l.categoria ?? "Principal",
+        ativo: l.ativo ?? true,
+      };
+      if (l.id != null) {
+        const linha = porId.get(l.id);
+        if (!linha) throw erro(`Drop #${l.id} não pertence a este monstro.`, 404);
+        idsMantidos.add(l.id);
+        await linha.update(dados, { transaction });
+      } else {
+        const nova = await AdventureMonsterLoot.create({ id_monstro: idMonstro, ...dados }, { transaction });
+        idsMantidos.add(nova.id);
+      }
+    }
+    for (const linha of linhasAtuais) {
+      if (!idsMantidos.has(linha.id) && linha.ativo) await linha.update({ ativo: false }, { transaction });
+    }
+
+    const depois = await AdventureMonsterLoot.findAll({
+      where: { id_monstro: idMonstro },
+      include: [{ model: Item, as: "item", attributes: ["id", "nome", "raridade", "imagem_url"] }],
+      transaction,
+    });
+    await registrarAcao({
+      idAdmin,
+      acao: "sincronizar_loot",
+      entidade: "AdventureMonsterLoot",
+      idEntidade: idMonstro,
+      dadosAntes: { id_monstro: idMonstro, loot: antes },
+      dadosDepois: { id_monstro: idMonstro, loot: depois.map((l) => l.toJSON()) },
+      req,
+      transaction,
+    });
+    return depois;
+  });
+}
+
+// GET /monsters/:id (§7.3) — detalhe agregado: reduz o número de
+// requests que o MonsterEditor precisa fazer ao abrir (stats + Poder +
+// drops + zonas onde aparece, essa última só leitura aqui — editar
+// vínculo de zona continua sendo trabalho do ZoneEditor, nunca duplicado
+// aqui dentro).
+async function getAdminMonsterDetail(id) {
+  const monstro = await AdventureMonster.findByPk(id);
+  if (!monstro) throw erro("Monstro não encontrado.", 404);
+
+  const [loot, vinculos] = await Promise.all([
+    listAdminMonsterLoot({ idMonstro: id }),
+    AdventureZoneMonster.findAll({
+      where: { id_monstro: id },
+      include: [{ model: AdventureZone, attributes: ["id", "nome"] }],
+      order: [["id_area", "ASC"]],
+    }),
+  ]);
+
+  const json = monstro.toJSON();
+  return {
+    monstro: json,
+    combat_power: calcularPoderMonstro(json),
+    loot,
+    zonas: vinculos.map((v) => ({
+      id_area: v.id_area,
+      nome_zona: v.AdventureZone?.nome ?? null,
+      tipo_aparicao: v.tipo_aparicao,
+      peso_aparicao: v.peso_aparicao,
+      ativo: v.ativo,
+    })),
+  };
+}
+
 module.exports = {
   listAdminZones,
   createAdminZone,
@@ -494,4 +689,7 @@ module.exports = {
   createAdminMonsterLoot,
   updateAdminMonsterLoot,
   listExpeditionRegions,
+  sincronizarRosterZona,
+  sincronizarLootMonstro,
+  getAdminMonsterDetail,
 };

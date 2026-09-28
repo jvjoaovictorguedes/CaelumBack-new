@@ -157,6 +157,42 @@ exports.atualizarLoot = async (req, res) => {
   }
 };
 
+// Endpoints agregados (Especificação "Admin de Aventura + Defesa/Poder
+// de Monstros" v3 §2.4/§4.2/§7.3) — ZoneEditor/MonsterEditor usam
+// estes em vez de um PATCH por linha.
+exports.sincronizarRosterZona = async (req, res) => {
+  try {
+    const roster = await adminAdventureService.sincronizarRosterZona(req.params.id, req.body?.monsters ?? [], {
+      idAdmin: req.user.id,
+      req,
+    });
+    res.status(200).json({ status: "success", data: { roster } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao sincronizar o elenco da zona.");
+  }
+};
+
+exports.sincronizarLootMonstro = async (req, res) => {
+  try {
+    const loot = await adminAdventureService.sincronizarLootMonstro(req.params.id, req.body?.loot ?? [], {
+      idAdmin: req.user.id,
+      req,
+    });
+    res.status(200).json({ status: "success", data: { loot } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao sincronizar os drops do monstro.");
+  }
+};
+
+exports.detalheMonstro = async (req, res) => {
+  try {
+    const detalhe = await adminAdventureService.getAdminMonsterDetail(req.params.id);
+    res.status(200).json({ status: "success", data: detalhe });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao buscar detalhe do monstro.");
+  }
+};
+
 // Simulador de Balanceamento — ver adventureBalanceSimulationService.js.
 // modo "zona" (default, retrocompatível) | "expedicao" | "grupo".
 exports.simularBalanceamento = async (req, res) => {

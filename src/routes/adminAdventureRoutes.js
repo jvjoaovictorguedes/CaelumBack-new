@@ -29,11 +29,14 @@ router.use(authMiddleware, adminMiddleware, requireAdminPermission("adventure.ma
 router.get("/zones", adminAdventureController.listarZonas);
 router.post("/zones", adminAdventureController.criarZona);
 router.patch("/zones/:id", adminAdventureController.atualizarZona);
+router.put("/zones/:id/monsters", adminAdventureController.sincronizarRosterZona);
 
 router.get("/monsters", adminAdventureController.listarMonstros);
 router.post("/monsters", adminAdventureController.criarMonstro);
+router.get("/monsters/:id", adminAdventureController.detalheMonstro);
 router.patch("/monsters/:id", adminAdventureController.atualizarMonstro);
 router.post("/monsters/:id/duplicate", adminAdventureController.duplicarMonstro);
+router.put("/monsters/:id/loot", adminAdventureController.sincronizarLootMonstro);
 
 router.get("/zone-monsters", adminAdventureController.listarAparicoes);
 router.post("/zone-monsters", adminAdventureController.criarAparicao);
