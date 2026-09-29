@@ -12,11 +12,13 @@
 // no meio do lote, WorldBossEvent.participation_rewards_status fica
 // "Processing" — o scheduler (Fase 3) retoma dali no próximo tick, e
 // cada grant já concedido continua "Granted" (idempotente).
+const { Op } = require("sequelize");
 const { sequelize } = require("../config/database");
 const Character = require("../models/Character");
 const WorldBossEvent = require("../models/WorldBossEvent");
 const WorldBossContribution = require("../models/WorldBossContribution");
 const WorldBossRewardGrant = require("../models/WorldBossRewardGrant");
+const WorldBossRankingReward = require("../models/WorldBossRankingReward");
 const { concederOuro } = require("./goldService");
 const { adicionarExperiencia } = require("./experienceService");
 const { addStack } = require("./inventoryService");
@@ -137,6 +139,63 @@ async function concederParticipacaoSeElegivel(evento, contribuicao, transaction)
   await grant.save({ transaction });
 }
 
+// Ameaça Mundial V2 — Etapa 9 (§11.1/§11.2): TOP_DAMAGE pro vencedor
+// oficial do ranking final (evento.top_damage_character_id, já
+// CONGELADO no Golpe Final — Etapa 8/§10.7, nunca recalculado aqui).
+// §11.3 — WorldBossRankingReward já modela faixas futuras (2º-3º,
+// 4º-10º etc); a primeira entrega do Admin só cadastra "1º lugar", mas
+// esta função soma TODAS as faixas ativas cuja posicao_inicio/fim
+// cobrem a posição 1, nunca hardcoded pra uma faixa só. §11.4 — nunca
+// substitui id_item_golpe_final (isso é FINAL_BLOW, grant separado).
+async function concederMaiorDanoSeElegivel(evento, transaction) {
+  if (!evento.top_damage_character_id) return;
+  const grant = await obterOuCriarGrantPendente(evento.id, evento.top_damage_character_id, REWARD_KIND.TOP_DAMAGE, transaction);
+  if (!grant) return;
+
+  const faixas = await WorldBossRankingReward.findAll({
+    where: {
+      id_world_boss_config: evento.id_world_boss_config,
+      ativo: true,
+      posicao_inicio: { [Op.lte]: 1 },
+      posicao_fim: { [Op.gte]: 1 },
+    },
+    transaction,
+  });
+
+  const character = await Character.findByPk(evento.top_damage_character_id, { transaction, lock: transaction.LOCK.UPDATE });
+  if (!character) {
+    grant.status = REWARD_GRANT_STATUS.FAILED;
+    await grant.save({ transaction });
+    return;
+  }
+
+  let goldTotal = 0;
+  let xpTotal = 0;
+  const itensConcedidos = [];
+  for (const faixa of faixas) {
+    if (faixa.gold > 0) {
+      concederOuro(character, faixa.gold);
+      goldTotal += faixa.gold;
+    }
+    if (faixa.xp > 0) xpTotal += faixa.xp;
+    if (faixa.id_item && faixa.quantidade > 0) {
+      await addStack(evento.top_damage_character_id, faixa.id_item, faixa.quantidade, transaction);
+      itensConcedidos.push({ id_item: faixa.id_item, quantidade: faixa.quantidade });
+    }
+  }
+
+  if (xpTotal > 0) {
+    await adicionarExperiencia(character.id, xpTotal, { transaction, personagem: character });
+  } else {
+    await character.save({ transaction });
+  }
+
+  grant.status = REWARD_GRANT_STATUS.GRANTED;
+  grant.payload_snapshot = { gold: goldTotal, xp: xpTotal, itens: itensConcedidos };
+  grant.granted_at = new Date();
+  await grant.save({ transaction });
+}
+
 // Ponto de entrada — chamado uma vez logo após o Golpe Final (fora da
 // transação de combate, "fire and forget") E periodicamente pelo
 // scheduler como rede de segurança (recovery de um processo que caiu
@@ -162,6 +221,10 @@ async function processarRecompensas(eventId) {
       await sequelize.transaction((transaction) => concederParticipacaoSeElegivel(evento, contribuicao, transaction));
     }
 
+    // §11.5 — ordem sugerida: Descoberta, Participação, Maior Dano,
+    // Golpe Final. Nunca usada pra unicidade (cada grant já é
+    // independente/idempotente por si só) — só a sequência recomendada.
+    await sequelize.transaction((transaction) => concederMaiorDanoSeElegivel(evento, transaction));
     await sequelize.transaction((transaction) => concederGolpeFinalSeElegivel(evento, transaction));
 
     await WorldBossEvent.update(

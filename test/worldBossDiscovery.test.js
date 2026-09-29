@@ -2274,3 +2274,69 @@ testeComBanco("combate: last_damage_at só avança em dano EFETIVO — uma esqui
   assert.equal(contribuicao.last_action_at !== null, true);
   assert.equal(contribuicao.last_damage_at, null, "esquiva (dano 0) nunca pode adiantar last_damage_at");
 });
+
+// Ameaça Mundial V2 — Etapa 9: Recompensas — TOP_DAMAGE (§11).
+
+testeComBanco("recompensas: TOP_DAMAGE concede a faixa de 1º lugar pro vencedor do ranking congelado, idempotente em chamadas repetidas", async () => {
+  const config = await criarConfig();
+  const itemDoPremio = await criarItemGolpeFinal();
+  await WorldBossRankingReward.create({
+    id_world_boss_config: config.id,
+    posicao_inicio: 1,
+    posicao_fim: 1,
+    id_item: itemDoPremio.id,
+    quantidade: 2,
+    gold: 300,
+    xp: 150,
+  });
+
+  const { personagem: vencedor } = await criarPersonagem();
+  const dinheiroAntes = vencedor.dinheiro;
+  const evento = await criarEvento({
+    config,
+    status: EVENT_STATUS.DEFEATED,
+    overrides: {
+      top_damage_character_id: vencedor.id,
+      defeated_at: new Date(),
+      participation_rewards_status: PARTICIPATION_REWARDS_STATUS.PENDING,
+    },
+  });
+
+  await worldBossRewardService.processarRecompensas(evento.id);
+  await worldBossRewardService.processarRecompensas(evento.id); // repetição — nunca pode dobrar.
+
+  await vencedor.reload();
+  assert.equal(vencedor.dinheiro, dinheiroAntes + 300, "gold da faixa de 1º lugar precisa ser concedido exatamente uma vez");
+
+  const posse = await CharacterInventory.findOne({ where: { id_personagem: vencedor.id, id_item: itemDoPremio.id } });
+  assert.equal(posse.quantidade, 2, "quantidade da faixa, nunca dobrada por reprocessar");
+
+  const grant = await WorldBossRewardGrant.findOne({
+    where: { event_id: evento.id, character_id: vencedor.id, reward_kind: REWARD_KIND.TOP_DAMAGE },
+  });
+  assert.equal(grant.status, "Granted");
+});
+
+testeComBanco("recompensas: sem top_damage_character_id (nenhum dano real registrado), TOP_DAMAGE nunca é concedido a ninguém", async () => {
+  const config = await criarConfig();
+  const itemDoPremio = await criarItemGolpeFinal();
+  await WorldBossRankingReward.create({
+    id_world_boss_config: config.id,
+    posicao_inicio: 1,
+    posicao_fim: 1,
+    id_item: itemDoPremio.id,
+    quantidade: 1,
+    gold: 100,
+  });
+
+  const evento = await criarEvento({
+    config,
+    status: EVENT_STATUS.DEFEATED,
+    overrides: { defeated_at: new Date(), participation_rewards_status: PARTICIPATION_REWARDS_STATUS.PENDING },
+  });
+
+  await worldBossRewardService.processarRecompensas(evento.id);
+
+  const grants = await WorldBossRewardGrant.count({ where: { event_id: evento.id, reward_kind: REWARD_KIND.TOP_DAMAGE } });
+  assert.equal(grants, 0, "sem vencedor oficial (top_damage_character_id nulo), nenhum grant TOP_DAMAGE pode existir");
+});
