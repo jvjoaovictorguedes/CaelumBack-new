@@ -27,6 +27,24 @@ catalogo.post("/configs/:id/reactivate", adminWorldBossController.reativar);
 catalogo.get("/settings", adminWorldBossController.obterConfiguracoes);
 catalogo.patch("/settings", adminWorldBossController.atualizarConfiguracoes);
 catalogo.get("/metrics", adminWorldBossController.metricas);
+
+// Ameaça Mundial V2 — Etapa 11 (§13.2): sub-recursos do catálogo.
+catalogo.get("/configs/:id/abilities", adminWorldBossController.listarHabilidades);
+catalogo.post("/configs/:id/abilities", adminWorldBossController.criarHabilidade);
+catalogo.patch("/configs/:id/abilities/:idHabilidade", adminWorldBossController.atualizarHabilidade);
+catalogo.delete("/configs/:id/abilities/:idHabilidade", adminWorldBossController.excluirHabilidade);
+
+catalogo.get("/configs/:id/resistances", adminWorldBossController.listarResistencias);
+catalogo.post("/configs/:id/resistances", adminWorldBossController.criarResistencia);
+catalogo.patch("/configs/:id/resistances/:idResistencia", adminWorldBossController.atualizarResistencia);
+catalogo.delete("/configs/:id/resistances/:idResistencia", adminWorldBossController.excluirResistencia);
+
+catalogo.get("/configs/:id/ranking-rewards", adminWorldBossController.listarRecompensasRanking);
+catalogo.post("/configs/:id/ranking-rewards", adminWorldBossController.criarRecompensaRanking);
+catalogo.patch("/configs/:id/ranking-rewards/:idRecompensa", adminWorldBossController.atualizarRecompensaRanking);
+catalogo.delete("/configs/:id/ranking-rewards/:idRecompensa", adminWorldBossController.excluirRecompensaRanking);
+
+catalogo.post("/configs/:id/preview-damage", adminWorldBossController.previewDano);
 router.use("/", catalogo);
 
 const eventoAtual = express.Router();

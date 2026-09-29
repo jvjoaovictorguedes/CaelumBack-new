@@ -103,3 +103,125 @@ exports.metricas = async (req, res) => {
     tratarErro(res, error, "Erro interno do servidor ao obter métricas.");
   }
 };
+
+// Ameaça Mundial V2 — Etapa 11 (§13.2/§13.5): Habilidades.
+exports.listarHabilidades = async (req, res) => {
+  try {
+    const habilidades = await adminWorldBossService.listAdminWorldBossAbilities(req.params.id);
+    res.status(200).json({ status: "success", data: { habilidades } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao listar habilidades.");
+  }
+};
+
+exports.criarHabilidade = async (req, res) => {
+  try {
+    const habilidade = await adminWorldBossService.createAdminWorldBossAbility(req.params.id, req.body ?? {}, { idAdmin: req.user.id, req });
+    res.status(201).json({ status: "success", data: { habilidade } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao criar habilidade.");
+  }
+};
+
+exports.atualizarHabilidade = async (req, res) => {
+  try {
+    const habilidade = await adminWorldBossService.updateAdminWorldBossAbility(req.params.id, req.params.idHabilidade, req.body ?? {}, { idAdmin: req.user.id, req });
+    res.status(200).json({ status: "success", data: { habilidade } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao atualizar habilidade.");
+  }
+};
+
+exports.excluirHabilidade = async (req, res) => {
+  try {
+    await adminWorldBossService.deleteAdminWorldBossAbility(req.params.id, req.params.idHabilidade, { idAdmin: req.user.id, req });
+    res.status(200).json({ status: "success" });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao excluir habilidade.");
+  }
+};
+
+// Resistências (§7.1/§13.2).
+exports.listarResistencias = async (req, res) => {
+  try {
+    const resistencias = await adminWorldBossService.listAdminWorldBossResistances(req.params.id);
+    res.status(200).json({ status: "success", data: { resistencias } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao listar resistências.");
+  }
+};
+
+exports.criarResistencia = async (req, res) => {
+  try {
+    const resistencia = await adminWorldBossService.createAdminWorldBossResistance(req.params.id, req.body ?? {}, { idAdmin: req.user.id, req });
+    res.status(201).json({ status: "success", data: { resistencia } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao criar resistência.");
+  }
+};
+
+exports.atualizarResistencia = async (req, res) => {
+  try {
+    const resistencia = await adminWorldBossService.updateAdminWorldBossResistance(req.params.id, req.params.idResistencia, req.body ?? {}, { idAdmin: req.user.id, req });
+    res.status(200).json({ status: "success", data: { resistencia } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao atualizar resistência.");
+  }
+};
+
+exports.excluirResistencia = async (req, res) => {
+  try {
+    await adminWorldBossService.deleteAdminWorldBossResistance(req.params.id, req.params.idResistencia, { idAdmin: req.user.id, req });
+    res.status(200).json({ status: "success" });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao excluir resistência.");
+  }
+};
+
+// Recompensas de ranking (§11.3/§13.6).
+exports.listarRecompensasRanking = async (req, res) => {
+  try {
+    const recompensas = await adminWorldBossService.listAdminWorldBossRankingRewards(req.params.id);
+    res.status(200).json({ status: "success", data: { recompensas } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao listar recompensas de ranking.");
+  }
+};
+
+exports.criarRecompensaRanking = async (req, res) => {
+  try {
+    const recompensa = await adminWorldBossService.createAdminWorldBossRankingReward(req.params.id, req.body ?? {}, { idAdmin: req.user.id, req });
+    res.status(201).json({ status: "success", data: { recompensa } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao criar recompensa de ranking.");
+  }
+};
+
+exports.atualizarRecompensaRanking = async (req, res) => {
+  try {
+    const recompensa = await adminWorldBossService.updateAdminWorldBossRankingReward(req.params.id, req.params.idRecompensa, req.body ?? {}, { idAdmin: req.user.id, req });
+    res.status(200).json({ status: "success", data: { recompensa } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao atualizar recompensa de ranking.");
+  }
+};
+
+exports.excluirRecompensaRanking = async (req, res) => {
+  try {
+    await adminWorldBossService.deleteAdminWorldBossRankingReward(req.params.id, req.params.idRecompensa, { idAdmin: req.user.id, req });
+    res.status(200).json({ status: "success" });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao excluir recompensa de ranking.");
+  }
+};
+
+// Preview de dano server-side (§13.4).
+exports.previewDano = async (req, res) => {
+  try {
+    const { faseOrdem, acoes } = req.body ?? {};
+    const preview = await adminWorldBossService.previewDanoAdminWorldBoss(req.params.id, { faseOrdem, acoes });
+    res.status(200).json({ status: "success", data: preview });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao calcular preview de dano.");
+  }
+};

@@ -2406,3 +2406,206 @@ testeComBanco("histórico: obterHistoricoRecente lista só eventos DEFEATED, mai
   const linhaRecente = historico.find((h) => h.event_id === eventoRecente.id);
   assert.equal(linhaRecente.golpe_final_por.id, golpeFinalPor.id);
 });
+
+// Ameaça Mundial V2 — Etapa 11: Admin V2, backend (§13).
+
+testeComBanco("admin habilidades: CRUD completo — cria, lista com Power incluído, edita e exclui", async () => {
+  const { usuario } = await criarPersonagem();
+  const { payload } = await payloadConfigAdmin();
+  const criado = await adminWorldBossService.createAdminWorldBossConfig(payload, { idAdmin: usuario.id });
+  configsCriados.push(criado.id);
+
+  const power = await Power.create({
+    nome: `Poder Admin Teste ${sufixo()}`,
+    descricao: "teste",
+    tipo_poder: "Ativo",
+    escala_atributo: "Forca",
+    dano_base: 50,
+    custo_mana: 20,
+    cooldown: 3,
+  });
+  powersCriados.push(power.id);
+
+  const habilidade = await adminWorldBossService.createAdminWorldBossAbility(
+    criado.id,
+    { id_power: power.id, peso_uso: 5, prioridade: 2, tipo_alvo: "N_ALEATORIOS", quantidade_alvos: 3 },
+    { idAdmin: usuario.id },
+  );
+  assert.equal(habilidade.id_world_boss_config, criado.id);
+  assert.equal(habilidade.tipo_alvo, "N_ALEATORIOS");
+
+  const listadas = await adminWorldBossService.listAdminWorldBossAbilities(criado.id);
+  assert.equal(listadas.length, 1);
+  assert.equal(listadas[0].Power.id, power.id, "listagem precisa vir com o Power incluído (§13.5)");
+
+  const editada = await adminWorldBossService.updateAdminWorldBossAbility(criado.id, habilidade.id, { peso_uso: 9, ativo: false }, { idAdmin: usuario.id });
+  assert.equal(editada.peso_uso, 9);
+  assert.equal(editada.ativo, false);
+
+  await adminWorldBossService.deleteAdminWorldBossAbility(criado.id, habilidade.id, { idAdmin: usuario.id });
+  const depoisDeExcluir = await adminWorldBossService.listAdminWorldBossAbilities(criado.id);
+  assert.equal(depoisDeExcluir.length, 0);
+});
+
+testeComBanco("admin habilidades: N_ALEATORIOS sem quantidade_alvos é rejeitado; id_power inexistente é rejeitado", async () => {
+  const { usuario } = await criarPersonagem();
+  const { payload } = await payloadConfigAdmin();
+  const criado = await adminWorldBossService.createAdminWorldBossConfig(payload, { idAdmin: usuario.id });
+  configsCriados.push(criado.id);
+
+  const power = await Power.create({ nome: `Poder ${sufixo()}`, descricao: "x", tipo_poder: "Ativo", escala_atributo: "Forca", dano_base: 10, custo_mana: 5 });
+  powersCriados.push(power.id);
+
+  await assert.rejects(
+    () => adminWorldBossService.createAdminWorldBossAbility(criado.id, { id_power: power.id, tipo_alvo: "N_ALEATORIOS" }, { idAdmin: usuario.id }),
+    /quantidade_alvos/,
+  );
+  await assert.rejects(
+    () => adminWorldBossService.createAdminWorldBossAbility(criado.id, { id_power: 999999999 }, { idAdmin: usuario.id }),
+    /id_power não aponta/,
+  );
+});
+
+testeComBanco("admin resistências: CRUD completo e impede status_key duplicado no mesmo catálogo", async () => {
+  const { usuario } = await criarPersonagem();
+  const { payload } = await payloadConfigAdmin();
+  const criado = await adminWorldBossService.createAdminWorldBossConfig(payload, { idAdmin: usuario.id });
+  configsCriados.push(criado.id);
+
+  const resistencia = await adminWorldBossService.createAdminWorldBossResistance(criado.id, { status_key: "STUN", imune: true }, { idAdmin: usuario.id });
+  assert.equal(resistencia.status_key, "STUN");
+  assert.equal(resistencia.imune, true);
+
+  await assert.rejects(
+    () => adminWorldBossService.createAdminWorldBossResistance(criado.id, { status_key: "STUN", resistencia_pct: 50 }, { idAdmin: usuario.id }),
+    /Já existe uma resistência/,
+  );
+
+  await assert.rejects(
+    () => adminWorldBossService.createAdminWorldBossResistance(criado.id, { status_key: "NAO_EXISTE" }, { idAdmin: usuario.id }),
+    /status_key precisa ser um de/,
+  );
+
+  const editada = await adminWorldBossService.updateAdminWorldBossResistance(criado.id, resistencia.id, { imune: false, resistencia_pct: 75 }, { idAdmin: usuario.id });
+  assert.equal(editada.imune, false);
+  assert.equal(editada.resistencia_pct, 75);
+
+  await adminWorldBossService.deleteAdminWorldBossResistance(criado.id, resistencia.id, { idAdmin: usuario.id });
+  const listadas = await adminWorldBossService.listAdminWorldBossResistances(criado.id);
+  assert.equal(listadas.length, 0);
+});
+
+testeComBanco("admin recompensas de ranking: CRUD completo, valida posicao_fim >= posicao_inicio e id_item existente", async () => {
+  const { usuario } = await criarPersonagem();
+  const { payload } = await payloadConfigAdmin();
+  const criado = await adminWorldBossService.createAdminWorldBossConfig(payload, { idAdmin: usuario.id });
+  configsCriados.push(criado.id);
+  const item = await criarItemGolpeFinal();
+
+  const faixa = await adminWorldBossService.createAdminWorldBossRankingReward(
+    criado.id,
+    { posicao_inicio: 1, posicao_fim: 1, id_item: item.id, quantidade: 1, gold: 500, xp: 200 },
+    { idAdmin: usuario.id },
+  );
+  assert.equal(faixa.gold, 500);
+
+  await assert.rejects(
+    () => adminWorldBossService.createAdminWorldBossRankingReward(criado.id, { posicao_inicio: 3, posicao_fim: 2 }, { idAdmin: usuario.id }),
+    /posicao_fim precisa ser/,
+  );
+  await assert.rejects(
+    () => adminWorldBossService.createAdminWorldBossRankingReward(criado.id, { posicao_inicio: 2, posicao_fim: 3, id_item: 999999999 }, { idAdmin: usuario.id }),
+    /id_item não aponta/,
+  );
+
+  const editada = await adminWorldBossService.updateAdminWorldBossRankingReward(criado.id, faixa.id, { gold: 700 }, { idAdmin: usuario.id });
+  assert.equal(editada.gold, 700);
+
+  await adminWorldBossService.deleteAdminWorldBossRankingReward(criado.id, faixa.id, { idAdmin: usuario.id });
+  const listadas = await adminWorldBossService.listAdminWorldBossRankingRewards(criado.id);
+  assert.equal(listadas.length, 0);
+});
+
+testeComBanco("admin catálogo: duplicateAdminWorldBossConfig também copia habilidades/resistências/recompensas de ranking", async () => {
+  const { usuario } = await criarPersonagem();
+  const { payload } = await payloadConfigAdmin();
+  const original = await adminWorldBossService.createAdminWorldBossConfig(payload, { idAdmin: usuario.id });
+  configsCriados.push(original.id);
+
+  const power = await Power.create({ nome: `Poder ${sufixo()}`, descricao: "x", tipo_poder: "Ativo", escala_atributo: "Forca", dano_base: 10, custo_mana: 5 });
+  powersCriados.push(power.id);
+  await adminWorldBossService.createAdminWorldBossAbility(original.id, { id_power: power.id }, { idAdmin: usuario.id });
+  await adminWorldBossService.createAdminWorldBossResistance(original.id, { status_key: "POISON", resistencia_pct: 30 }, { idAdmin: usuario.id });
+  const item = await criarItemGolpeFinal();
+  await adminWorldBossService.createAdminWorldBossRankingReward(original.id, { posicao_inicio: 1, posicao_fim: 1, id_item: item.id, gold: 100 }, { idAdmin: usuario.id });
+
+  const copia = await adminWorldBossService.duplicateAdminWorldBossConfig(original.id, { idAdmin: usuario.id });
+  configsCriados.push(copia.id);
+
+  const habilidadesCopia = await adminWorldBossService.listAdminWorldBossAbilities(copia.id);
+  const resistenciasCopia = await adminWorldBossService.listAdminWorldBossResistances(copia.id);
+  const recompensasCopia = await adminWorldBossService.listAdminWorldBossRankingRewards(copia.id);
+  assert.equal(habilidadesCopia.length, 1);
+  assert.equal(resistenciasCopia.length, 1);
+  assert.equal(resistenciasCopia[0].status_key, "POISON");
+  assert.equal(recompensasCopia.length, 1);
+});
+
+testeComBanco("admin preview de dano: reaproveita furiaPctDe de verdade — dano cresce com a ação e respeita o limite de Fúria da fase", async () => {
+  const { usuario } = await criarPersonagem();
+  const item = await criarItemGolpeFinal();
+  const config = await WorldBossConfig.create({
+    nome: `Ameaça Preview ${sufixo()}`,
+    descricao: "teste",
+    ativo: true,
+    peso_selecao: 1,
+    vida_base: 100000,
+    defesa: 0,
+    mensagem_descoberta: "d",
+    mensagem_convocacao: "c",
+    id_item_golpe_final: item.id,
+  });
+  configsCriados.push(config.id);
+  await WorldBossPhase.create({
+    id_world_boss_config: config.id,
+    ordem: 1,
+    nome_fase: "Fase 1",
+    hp_percentual_max: 100,
+    modificador_dano_percentual: 0,
+    dano_min: 100,
+    dano_max: 100,
+    furia_por_acao_pct: 5,
+    limite_furia_pct: 20,
+  });
+  void usuario;
+
+  const preview = await adminWorldBossService.previewDanoAdminWorldBoss(config.id, { faseOrdem: 1, acoes: [1, 10, 50] });
+  assert.equal(preview.estimativas.length, 3);
+
+  const acao1 = preview.estimativas.find((e) => e.acao === 1);
+  const acao10 = preview.estimativas.find((e) => e.acao === 10);
+  const acao50 = preview.estimativas.find((e) => e.acao === 50);
+
+  assert.equal(acao1.furia_pct, 5);
+  assert.equal(acao1.dano_min, 105); // 100 * (1 + 5/100)
+  assert.equal(acao10.furia_pct, 20, "Fúria precisa respeitar limite_furia_pct=20 já na ação 10 (5%/ação * 10 = 50%, capado em 20%)");
+  assert.equal(acao50.furia_pct, 20, "continua capado em 20% muito depois do limite");
+  assert.equal(acao10.dano_min, acao50.dano_min, "dano estimado empata quando a Fúria já está no limite — nunca continua crescendo depois do cap");
+});
+
+testeComBanco("admin ciclo atual: getStatusOperacional inclui runtime_v2 (mana/fase/ranking/participantes) só quando ACTIVE", async () => {
+  const evento = await criarEventoAtivoV2({ hpCurrent: 800, hpMax: 1000 });
+  const { personagem } = await criarPersonagem();
+  await worldBossCombatService.entrar(personagem.id);
+
+  const status = await adminWorldBossEventService.getStatusOperacional();
+  assert.equal(status.id, evento.id);
+  assert.ok(status.runtime_v2, "evento ACTIVE precisa vir com runtime_v2 preenchido");
+  assert.equal(status.runtime_v2.participantes.ativos, 1);
+  assert.equal(status.runtime_v2.participantes.derrotados, 0);
+  assert.ok(Array.isArray(status.runtime_v2.ranking_ao_vivo));
+
+  await evento.update({ status: EVENT_STATUS.DORMANT });
+  const statusDormant = await adminWorldBossEventService.getStatusOperacional();
+  assert.equal(statusDormant.runtime_v2, null, "fora de ACTIVE, runtime_v2 precisa ser null — não faz sentido monitor de combate pra quem não despertou");
+});
