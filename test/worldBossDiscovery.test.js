@@ -2381,6 +2381,31 @@ testeComBanco("status público: maior_dano_por só aparece depois de DEFEATED �
   assert.equal(statusDerrotado.maior_dano_por.damage_total, 500);
 });
 
+testeComBanco("status público: campo combate expõe Fúria/próxima ação/cast em andamento só quando ACTIVE (§18.1/§18.3)", async () => {
+  const evento = await criarEventoAtivoV2({ nextActionAt: new Date(Date.now() + 2000) });
+  await evento.update({ furia_current_pct: 15, boss_action_seq: 4, phase_action_seq: 2 });
+
+  const status = await worldBossStatusService.obterStatusPublico();
+  assert.ok(status.combate, "evento ACTIVE precisa vir com o relógio de combate público");
+  assert.equal(status.combate.furia_atual_pct, 15);
+  assert.equal(status.combate.boss_action_seq, 4);
+  assert.equal(status.combate.phase_action_seq, 2);
+  assert.ok(status.combate.proxima_acao_em_ms > 0);
+  assert.equal(status.combate.cast_pendente, null);
+
+  const resolvesAt = new Date(Date.now() + 1200).toISOString();
+  await evento.update({
+    runtime_state: { ...evento.runtime_state, cast_pendente: { power_snapshot: { id: 42, nome: "Chamas do Cataclismo" }, resolves_at: resolvesAt } },
+  });
+  const statusComCast = await worldBossStatusService.obterStatusPublico();
+  assert.equal(statusComCast.combate.cast_pendente.power.nome, "Chamas do Cataclismo");
+  assert.equal(statusComCast.combate.cast_pendente.resolves_at, resolvesAt);
+
+  await evento.update({ status: EVENT_STATUS.DEFEATED, defeated_at: new Date() });
+  const statusDerrotado = await worldBossStatusService.obterStatusPublico();
+  assert.equal(statusDerrotado.combate, null, "fora de ACTIVE, combate precisa ser null — inclusive num evento já concluído");
+});
+
 testeComBanco("histórico: obterHistoricoRecente lista só eventos DEFEATED, mais recentes primeiro, nunca CANCELLED", async () => {
   const configA = await criarConfig();
   const { personagem: golpeFinalPor } = await criarPersonagem();

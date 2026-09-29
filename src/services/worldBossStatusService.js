@@ -72,6 +72,29 @@ async function obterStatusPublico() {
     // §12.3 — card "Ameaça Derrotada": Maior Dano só é oficial depois de
     // DEFEATED (top_damage_character_id só é preenchido no Golpe Final).
     maior_dano_por: maiorDanoPor ? { id: maiorDanoPor.id, nome: maiorDanoPor.nome, damage_total: evento.top_damage_total ? Number(evento.top_damage_total) : null } : null,
+    // §18.1/§18.3 — relógio de combate PÚBLICO (Furia/próxima ação/cast
+    // em andamento): mesma leitura do runtime_v2 do admin, mas sem nada
+    // sensível (nunca expõe threshold/progresso de descoberta, que
+    // continua exclusivo do painel). null fora de ACTIVE — não faz
+    // sentido "relógio de combate" pra quem ainda não despertou.
+    combate: evento.status === EVENT_STATUS.ACTIVE ? relogioDeCombatePublico(evento) : null,
+  };
+}
+
+function relogioDeCombatePublico(evento) {
+  const castPendente = evento.runtime_state?.cast_pendente ?? null;
+  const proximaAcaoEmMs = evento.next_action_at ? new Date(evento.next_action_at).getTime() - Date.now() : null;
+  return {
+    furia_atual_pct: Number(evento.furia_current_pct),
+    boss_action_seq: evento.boss_action_seq,
+    phase_action_seq: evento.phase_action_seq,
+    proxima_acao_em_ms: proximaAcaoEmMs !== null ? Math.max(0, proximaAcaoEmMs) : null,
+    cast_pendente: castPendente
+      ? {
+          power: castPendente.power_snapshot ? { id: castPendente.power_snapshot.id, nome: castPendente.power_snapshot.nome, imagem_url: castPendente.power_snapshot.imagem_url ?? null } : null,
+          resolves_at: castPendente.resolves_at,
+        }
+      : null,
   };
 }
 
