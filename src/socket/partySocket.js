@@ -429,6 +429,17 @@ module.exports = function registerPartyHandlers(io) {
         // BAIXO do grupo, então um vínculo só entra no pool se TODO
         // mundo já pode enfrentá-lo, não só a média.
         const menorNivelDoGrupo = Math.min(...membros.map((m) => m.estado.nivel || 1));
+
+        // Gate de ENTRADA na zona (pedido do jogador, mesmo campo que
+        // adventureService.entrarNaZona usa na Aventura solo) — usa o
+        // mesmo critério "todo mundo precisa poder entrar" do filtro de
+        // monstro logo abaixo, nunca só a média do grupo.
+        if (menorNivelDoGrupo < zona.nivel_jogador_minimo) {
+          return socket.emit("party:erro", {
+            mensagem: `O grupo precisa ter todo mundo nível ${zona.nivel_jogador_minimo}+ pra entrar em "${zona.nome}".`,
+          });
+        }
+
         const monstrosElegiveis = monstrosDaZona.filter(
           (zm) => menorNivelDoGrupo >= (zm.nivel_jogador_minimo ?? 1),
         );

@@ -63,9 +63,12 @@ const ClassEvolutionPath = sequelize.define(
       allowNull: false,
       defaultValue: 1,
     },
+    // NULL = caminho não tem requisito de item embutido nesta coluna
+    // legada — desde a Fase 2, requisito de ITEM real vem de
+    // ClassEvolutionRequirement (ver migration 20261227010000).
     id_item_requisito: {
       type: DataTypes.INTEGER,
-      allowNull: false,
+      allowNull: true,
     },
     quantidade_item_requisito: {
       type: DataTypes.INTEGER,

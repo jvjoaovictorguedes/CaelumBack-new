@@ -123,9 +123,10 @@ exports.atualizarAparicao = async (req, res) => {
 // Drops (loot por monstro)
 exports.listarLoot = async (req, res) => {
   try {
-    const { idMonstro } = req.query;
+    const { idMonstro, idItem } = req.query;
     const loot = await adminAdventureService.listAdminMonsterLoot({
       idMonstro: idMonstro ? Number(idMonstro) : undefined,
+      idItem: idItem ? Number(idItem) : undefined,
     });
     res.status(200).json({ status: "success", data: { loot } });
   } catch (error) {

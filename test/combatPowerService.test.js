@@ -5,8 +5,15 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const combatPowerService = require("../src/services/combatPowerService");
+// ./helpers/db precisa ser o PRIMEIRO require do arquivo: é ele quem copia
+// TEST_DATABASE_URL -> DATABASE_URL antes de qualquer outro módulo
+// carregar src/config/database.js. Na ordem antiga (combatPowerService
+// primeiro), database.js já tinha lido process.env.DATABASE_URL vazio e
+// caído no fallback DB_NAME (banco antigo, sem o schema atual) — o
+// teste passava por sorte enquanto os dois bancos ficavam parecidos o
+// bastante, e quebrou de vez assim que um divergiu de verdade.
 const { bancoDisponivel, criarPersonagem, sequelize } = require("./helpers/db");
+const combatPowerService = require("../src/services/combatPowerService");
 
 let temBanco = false;
 test.before(async () => {

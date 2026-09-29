@@ -45,7 +45,16 @@ function valorFinal(dados, atual, campo) {
 }
 
 // ---------------------------------------------------------------- ZONAS
-const CAMPOS_ZONA = ["nome", "descricao", "nivel_monstro_min", "nivel_monstro_max", "imagem_url", "ordem", "ativa"];
+const CAMPOS_ZONA = [
+  "nome",
+  "descricao",
+  "nivel_monstro_min",
+  "nivel_monstro_max",
+  "nivel_jogador_minimo",
+  "imagem_url",
+  "ordem",
+  "ativa",
+];
 
 // Valida a faixa de nível FINAL da zona (depois de mesclar payload +
 // valor já salvo, no caso de PATCH parcial — ver valorFinal acima).
@@ -73,6 +82,7 @@ async function createAdminZone(payload, { idAdmin, req }) {
     throw erro("nivel_monstro_min e nivel_monstro_max são obrigatórios.");
   }
   validarFaixaNivelZona(dados.nivel_monstro_min, dados.nivel_monstro_max);
+  if (foiEnviado(dados, "nivel_jogador_minimo")) validarNivelJogadorMinimo(dados.nivel_jogador_minimo);
 
   return sequelize.transaction(async (transaction) => {
     const zona = await AdventureZone.create(dados, { transaction });
@@ -102,6 +112,7 @@ async function updateAdminZone(id, payload, { idAdmin, req }) {
     const minFinal = valorFinal(dados, zona, "nivel_monstro_min");
     const maxFinal = valorFinal(dados, zona, "nivel_monstro_max");
     validarFaixaNivelZona(minFinal, maxFinal);
+    if (foiEnviado(dados, "nivel_jogador_minimo")) validarNivelJogadorMinimo(dados.nivel_jogador_minimo);
 
     const antes = zona.toJSON();
     await zona.update(dados, { transaction });
@@ -292,6 +303,9 @@ function validarPesoAparicao(peso) {
 // pool ponderado pra aquele jogador; nunca altera nível/stats do
 // monstro. Sem teto (jogador de nível alto pode continuar encontrando
 // monstros fracos, de propósito — §4.3 "sentir sua progressão").
+// Mesma validação (inteiro >= 1) reaproveitada pro nivel_jogador_minimo
+// da PRÓPRIA zona (gate de entrada, ver AdventureZone.js) — a regra é
+// idêntica, só o campo que ela guarda é que muda de sentido.
 function validarNivelJogadorMinimo(valor) {
   if (valor == null) return;
   if (!Number.isInteger(valor) || valor < 1) {
@@ -377,9 +391,13 @@ async function updateAdminZoneMonster(id, payload, { idAdmin, req }) {
 const PPM_MAXIMO = 1_000_000;
 const CAMPOS_LOOT = ["id_monstro", "id_item", "chance_ppm", "quantidade_min", "quantidade_max", "categoria", "ativo"];
 
-async function listAdminMonsterLoot({ idMonstro } = {}) {
+async function listAdminMonsterLoot({ idMonstro, idItem } = {}) {
   const where = {};
   if (idMonstro) where.id_monstro = idMonstro;
+  // idItem — busca reversa "quem dropa este item", usada pelo Painel de
+  // Classes (§ requisito ITEM de evolução) pra mostrar/configurar onde a
+  // relíquia exigida cai, sem precisar abrir a tela de Aventura à parte.
+  if (idItem) where.id_item = idItem;
   return AdventureMonsterLoot.findAll({
     where,
     // AdventureMonsterLoot->AdventureMonster também não tem alias em
@@ -643,9 +661,11 @@ async function sincronizarLootMonstro(idMonstro, lootPayload, { idAdmin, req }) 
 
 // GET /monsters/:id (§7.3) — detalhe agregado: reduz o número de
 // requests que o MonsterEditor precisa fazer ao abrir (stats + Poder +
-// drops + zonas onde aparece, essa última só leitura aqui — editar
-// vínculo de zona continua sendo trabalho do ZoneEditor, nunca duplicado
-// aqui dentro).
+// drops + zonas onde aparece). Pedido do jogador: MonsterEditor passou a
+// editar o vínculo de zona também (adicionar o monstro a qualquer zona,
+// nova ou antiga, sem depender de abrir o ZoneEditor pra isso) — por
+// isso `id`/`nivel_jogador_minimo` do vínculo vão junto agora, senão o
+// front não tem como chamar PATCH /zone-monsters/:id.
 async function getAdminMonsterDetail(id) {
   const monstro = await AdventureMonster.findByPk(id);
   if (!monstro) throw erro("Monstro não encontrado.", 404);
@@ -665,10 +685,12 @@ async function getAdminMonsterDetail(id) {
     combat_power: calcularPoderMonstro(json),
     loot,
     zonas: vinculos.map((v) => ({
+      id: v.id,
       id_area: v.id_area,
       nome_zona: v.AdventureZone?.nome ?? null,
       tipo_aparicao: v.tipo_aparicao,
       peso_aparicao: v.peso_aparicao,
+      nivel_jogador_minimo: v.nivel_jogador_minimo,
       ativo: v.ativo,
     })),
   };
