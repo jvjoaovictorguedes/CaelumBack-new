@@ -48,6 +48,12 @@ const { personagemComBonus, buscarBonusDeAtributos } = require("./equipmentBonus
 const { buscarPoderesDoPersonagem } = require("../controllers/pvpController");
 const worldBossStatusService = require("./worldBossStatusService");
 const worldBossRewardService = require("./worldBossRewardService");
+const worldBossRuntimeService = require("./worldBossRuntimeService");
+const statusEffectService = require("./statusEffectService");
+const { resolverEfeitosDoUso } = require("./combatEffectResolver");
+const { resolverEfeitosDeArmaNoHit } = require("./weaponEffectResolver");
+const { ACTION_TYPE } = require("../config/statusEffectConfig");
+const WeaponStatusEffect = require("../models/WeaponStatusEffect");
 const { emitGlobal } = require("../socket/worldBossSocket");
 const { EVENT_STATUS, COMBAT_SESSION_STATUS } = require("../config/worldBossConfig");
 const uniqueFeatService = require("./uniqueFeatService");
@@ -83,6 +89,36 @@ function estadoLutador(personagem, base, vidaMax, manaMax) {
     forca: base.forca,
     agilidade: base.agilidade,
     nivel: base.nivel,
+  };
+}
+
+// §7 — resultado de uma "ação" que nunca chegou a golpear o Boss (morte
+// por DoT antes de agir, ou ação bloqueada por Stun/Freeze/Paralyze/
+// Silence): mesmo formato de um resultado normal (dano=0), pra quem
+// consome a resposta (socket/REST) nunca precisar de um branch a mais
+// só pra esse caso.
+function montarResultadoSemAcao({ evento, personagem, vidaMax, manaMax, morreuAntesDeAgir = false, bloqueado = false, motivoBloqueio, actionSeq }) {
+  const hpAtual = Math.max(0, Number(evento.hp_current));
+  return {
+    nomeAcao: null,
+    dano: 0,
+    esquivou: false,
+    cura: 0,
+    manaCurada: 0,
+    golpeFinal: false,
+    proezasConquistadas: [],
+    morreuAntesDeAgir,
+    bloqueado,
+    motivoBloqueio: bloqueado ? motivoBloqueio : undefined,
+    action_seq: actionSeq,
+    lutador: { vida_atual: personagem.vida_atual, mana_atual: personagem.mana_atual, vida_max: vidaMax, mana_max: manaMax },
+    boss: {
+      event_id: evento.id,
+      hp_max: Number(evento.hp_max),
+      hp_current: hpAtual,
+      hp_percentual: Number(evento.hp_max) > 0 ? Math.round((hpAtual / Number(evento.hp_max)) * 10000) / 100 : 0,
+      derrotado: false,
+    },
   };
 }
 
@@ -203,6 +239,62 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
     const { base, vidaMax, manaMax } = await personagemEfetivoDe(personagem, transaction);
     const atacanteEstado = { ...base, vida_atual: personagem.vida_atual, mana_atual: personagem.mana_atual };
 
+    // §7 — motor de status existente, nunca um paralelo: o jogador tem
+    // sua PRÓPRIA lista de status contra esta Ameaça Mundial (debuffs
+    // que o Boss aplicou nele via habilidade), isolada em
+    // WorldBossCombatSession.state — nunca a mesma lista de um duelo
+    // PvP/PvE em paralelo. "Turno" do jogador é a própria action_seq da
+    // sessão dele (a próxima, ainda não persistida).
+    const turnoJogador = sessao.action_seq + 1;
+    let listaJogador = sessao.state?.status ?? [];
+
+    // 1) DoT de início de turno (§23 passo 1, mesmo critério do PvP/PvE)
+    // — pode matar antes do jogador conseguir agir.
+    const vidaAntesDoDot = atacanteEstado.vida_atual;
+    atacanteEstado.vida_atual = statusEffectService.processarTicksDeInicio({
+      vidaAtual: atacanteEstado.vida_atual,
+      defensor: atacanteEstado,
+      lista: listaJogador,
+      log: [],
+      nomeAlvo: personagem.nome,
+    });
+    personagem.vida_atual = Math.max(0, Math.min(Math.round(atacanteEstado.vida_atual), vidaMax));
+
+    if (personagem.vida_atual <= 0 && vidaAntesDoDot > 0) {
+      await personagem.save({ transaction });
+      sessao.status = COMBAT_SESSION_STATUS.DERROTADO;
+      sessao.derrotado_at = new Date();
+      sessao.state = { ...(sessao.state ?? {}), status: statusEffectService.decrementarDuracoes(listaJogador) };
+      await sessao.save({ transaction });
+      return montarResultadoSemAcao({ evento, personagem, vidaMax, manaMax, morreuAntesDeAgir: true, actionSeq: sessao.action_seq });
+    }
+
+    // 2) Política central de bloqueio de ação (Stun/Freeze/Paralyze
+    // bloqueiam tudo; Silence só Power) — resolvida uma vez, ANTES de
+    // decidir o que a ação pedida faz.
+    const controleJogador = statusEffectService.resolverAcoesBloqueadasDoTurno(listaJogador, turnoJogador);
+    listaJogador = controleJogador.lista;
+
+    if (tipo !== "attack" && tipo !== "power") {
+      throw erro("Ação inválida — só ataque básico ou poder valem contra a Ameaça Mundial.");
+    }
+    const tipoAcaoStatus = tipo === "power" ? ACTION_TYPE.POWER : ACTION_TYPE.BASIC_ATTACK;
+
+    if (controleJogador.bloqueadas.has(tipoAcaoStatus)) {
+      await personagem.save({ transaction });
+      sessao.state = { ...(sessao.state ?? {}), status: statusEffectService.decrementarDuracoes(listaJogador) };
+      await sessao.save({ transaction });
+      return montarResultadoSemAcao({
+        evento,
+        personagem,
+        vidaMax,
+        manaMax,
+        bloqueado: true,
+        motivoBloqueio: controleJogador.motivoBloqueioTotal ?? "SILENCE",
+        actionSeq: sessao.action_seq,
+      });
+    }
+
     let acao = { tipo: "attack" };
     if (tipo === "power") {
       const poderes = await buscarPoderesDoPersonagem(characterId);
@@ -212,33 +304,83 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
         throw erro("Mana insuficiente para esse poder.");
       }
       acao = { tipo: "power", power };
-    } else if (tipo !== "attack") {
-      throw erro("Ação inválida — só ataque básico ou poder valem contra a Ameaça Mundial.");
     }
 
     const snapshot = evento.config_snapshot ?? {};
     const hpAntes = Math.max(0, Number(evento.hp_current));
     const bossDefensor = { defesa: snapshot.defesa ?? 0, agilidade: 0, vida_atual: hpAntes };
 
+    // 3) Efeitos "Self" do poder usado aplicam sempre, dano ou não — os
+    // de alvo "Enemy" só entram depois (passo 5), se o golpe acertar.
+    let efeitosConfigurados = [];
+    if (acao.tipo === "power" && acao.power) {
+      efeitosConfigurados = await resolverEfeitosDoUso({
+        power: acao.power,
+        personagemCaster: atacanteEstado,
+        casterActorId: String(characterId),
+        turno: turnoJogador,
+      });
+      for (const efeito of efeitosConfigurados.filter((e) => e.target === "Self")) {
+        listaJogador = statusEffectService.aplicarStatus(listaJogador, efeito);
+      }
+    }
+    const efeitosNoBoss = efeitosConfigurados.filter((e) => e.target && e.target !== "Self");
+
+    const blindDoJogador = listaJogador.find((s) => s.key === "BLIND");
     const resultado = aplicarAcao({
       atacante: atacanteEstado,
       defensor: bossDefensor,
       acao,
       vidaMaxAtacante: vidaMax,
       manaMaxAtacante: manaMax,
+      blindPotency: blindDoJogador?.potency ?? 0,
+      multiplicadorDano: statusEffectService.multiplicadorDeDanoDeSaida(listaJogador),
     });
 
     const hpDepois = Math.max(0, Math.round(bossDefensor.vida_atual));
     const danoEfetivo = Math.max(0, hpAntes - hpDepois);
+
+    // 5) Dano DIRETO quebra Freeze do Boss e libera proc de arma
+    // (ataque básico) + efeitos de poder alvo Enemy — os dois passando
+    // pela resistência do Boss (§7.1) antes de entrar de verdade.
+    let statusBoss = evento.runtime_state?.status_boss ?? [];
+    if (danoEfetivo > 0) {
+      statusBoss = statusEffectService.removerFreezeAoReceberDanoDireto(statusBoss, danoEfetivo).lista;
+
+      let novosNoBoss = [...efeitosNoBoss];
+      if (acao.tipo === "attack" && base.arma_equipada?.id_item) {
+        const efeitosDaArma = await WeaponStatusEffect.findAll({
+          where: { id_item: base.arma_equipada.id_item, ativo: true },
+          transaction,
+        });
+        novosNoBoss = novosNoBoss.concat(
+          resolverEfeitosDeArmaNoHit({
+            efeitosDaArma,
+            personagemCaster: atacanteEstado,
+            casterActorId: String(characterId),
+            itemId: base.arma_equipada.id_item,
+            turno: turnoJogador,
+          }),
+        );
+      }
+      for (const efeito of novosNoBoss) {
+        statusBoss = worldBossRuntimeService.aplicarStatusNoBoss(statusBoss, efeito, snapshot.status_resistances);
+      }
+    }
 
     personagem.vida_atual = Math.max(0, Math.min(Math.round(atacanteEstado.vida_atual), vidaMax));
     personagem.mana_atual = Math.max(0, Math.min(Math.round(atacanteEstado.mana_atual), manaMax));
     await personagem.save({ transaction });
 
     sessao.action_seq += 1;
+    // Fim do turno do jogador (§23 passos 8/9) — decrementa a duração
+    // do que ELE está sofrendo; o status do Boss nunca decrementa aqui
+    // (só no próprio tick do Boss, worldBossRuntimeService).
+    sessao.state = { ...(sessao.state ?? {}), status: statusEffectService.decrementarDuracoes(listaJogador) };
     await sessao.save({ transaction });
 
     evento.hp_current = hpDepois;
+    evento.runtime_state = { ...(evento.runtime_state ?? {}), status_boss: statusBoss };
     let golpeFinal = false;
     if (hpAntes > 0 && hpDepois === 0) {
       golpeFinal = true;

@@ -1852,3 +1852,227 @@ testeComBanco("selecionarAlvos: TODOS retorna toda sessão Ativa do evento, N_AL
   assert.equal(doisAleatorios.length, 2);
   assert.equal(new Set(doisAleatorios.map((s) => s.character_id)).size, 2, "N_ALEATORIOS nunca pode repetir o mesmo participante");
 });
+
+// Ameaça Mundial V2 — Etapa 6: Status/resistência (§7). Reaproveita o
+// motor existente (statusEffectService/combatEffectResolver) o tempo
+// todo — nada aqui reimplementa duração/potência/stack/tick.
+
+test("aplicarStatusNoBoss: imune bloqueia completamente; resistencia_pct=100 sempre resiste; sem cadastro deixa entrar", () => {
+  const instancia = { key: "STUN", sourceActorId: "1", sourcePowerId: null, sourceItemId: null, remainingTurns: 2, stacks: 1, potency: 0, appliedAtTurn: 1 };
+
+  const comImunidade = worldBossRuntimeService.aplicarStatusNoBoss([], instancia, [{ status_key: "STUN", imune: true, resistencia_pct: 0 }]);
+  assert.equal(comImunidade.length, 0);
+
+  const comResistenciaTotal = worldBossRuntimeService.aplicarStatusNoBoss([], instancia, [{ status_key: "STUN", imune: false, resistencia_pct: 100 }]);
+  assert.equal(comResistenciaTotal.length, 0);
+
+  const semCadastro = worldBossRuntimeService.aplicarStatusNoBoss([], instancia, []);
+  assert.equal(semCadastro.length, 1);
+  assert.equal(semCadastro[0].key, "STUN");
+});
+
+// Retry até acertar com um PODER (mesmo critério de atacarAteAcertar,
+// que só cobre "attack") — chanceDeEsquiva nunca é 0%, mesmo com
+// Agilidade em desvantagem total pro alvo.
+async function usarPoderAteAcertar(characterId, idPoder, maxTentativas = 15) {
+  let ultimo = null;
+  for (let i = 0; i < maxTentativas; i += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    ultimo = await worldBossCombatService.executarAcao(characterId, { tipo: "power", idPoder });
+    if (!ultimo.esquivou) return ultimo;
+  }
+  return ultimo;
+}
+
+testeComBanco("combate: poder do jogador com PowerStatusEffect (Enemy) aplica status no Boss, gated pela resistência dele", async () => {
+  const CharacterAbilities = require("../src/models/CharacterAbilities");
+  const PowerStatusEffect = require("../src/models/PowerStatusEffect");
+
+  const { personagem } = await criarPersonagem({ nivel: 30 });
+  const evento = await criarEventoAtivo();
+
+  const power = await Power.create({
+    nome: `Poder Atordoante ${sufixo()}`,
+    descricao: "teste",
+    tipo_poder: "Ativo",
+    custo_mana: 0,
+    dano_base: 10,
+    escala_atributo: "Forca",
+    valor_escala: 0,
+  });
+  await CharacterAbilities.create({ id_personagem: personagem.id, id_power: power.id, is_active: true, nivel_habilidade: 1 });
+  const efeito = await PowerStatusEffect.create({
+    id_power: power.id,
+    status_key: "STUN",
+    chance_ppm: 1_000_000, // sempre proc-a — só a resistência do Boss decide se entra.
+    duration_turns: 2,
+    potency_base: 0,
+    target: "Enemy",
+  });
+
+  await worldBossCombatService.entrar(personagem.id);
+  await usarPoderAteAcertar(personagem.id, power.id);
+
+  await evento.reload();
+  assert.ok(
+    evento.runtime_state?.status_boss?.some((s) => s.key === "STUN"),
+    "Boss sem nenhuma resistência cadastrada pra STUN precisa receber o status normalmente",
+  );
+
+  await PowerStatusEffect.destroy({ where: { id: efeito.id } });
+  await CharacterAbilities.destroy({ where: { id_power: power.id } });
+  await power.destroy();
+});
+
+testeComBanco("combate: WorldBossStatusResistance imune impede o status de entrar no Boss, mesmo com proc garantido", async () => {
+  const CharacterAbilities = require("../src/models/CharacterAbilities");
+  const PowerStatusEffect = require("../src/models/PowerStatusEffect");
+
+  const { personagem } = await criarPersonagem({ nivel: 30 });
+  const evento = await criarEventoAtivo();
+  evento.config_snapshot = { ...evento.config_snapshot, status_resistances: [{ status_key: "STUN", imune: true, resistencia_pct: 0 }] };
+  await evento.save();
+
+  const power = await Power.create({
+    nome: `Poder Atordoante ${sufixo()}`,
+    descricao: "teste",
+    tipo_poder: "Ativo",
+    custo_mana: 0,
+    dano_base: 10,
+    escala_atributo: "Forca",
+    valor_escala: 0,
+  });
+  await CharacterAbilities.create({ id_personagem: personagem.id, id_power: power.id, is_active: true, nivel_habilidade: 1 });
+  const efeito = await PowerStatusEffect.create({
+    id_power: power.id,
+    status_key: "STUN",
+    chance_ppm: 1_000_000,
+    duration_turns: 2,
+    potency_base: 0,
+    target: "Enemy",
+  });
+
+  await worldBossCombatService.entrar(personagem.id);
+  await usarPoderAteAcertar(personagem.id, power.id);
+
+  await evento.reload();
+  assert.ok(
+    !evento.runtime_state?.status_boss?.some((s) => s.key === "STUN"),
+    "WorldBossStatusResistance.imune precisa impedir o status de entrar, mesmo com chance_ppm=100%",
+  );
+
+  await PowerStatusEffect.destroy({ where: { id: efeito.id } });
+  await CharacterAbilities.destroy({ where: { id_power: power.id } });
+  await power.destroy();
+});
+
+testeComBanco("combate: jogador atordoado (status próprio) não consegue agir — ação bloqueada, sem dano, sem gastar Mana", async () => {
+  const { personagem } = await criarPersonagem({ nivel: 30 });
+  await criarEventoAtivo();
+  await worldBossCombatService.entrar(personagem.id);
+
+  const sessao = await WorldBossCombatSession.findOne({ where: { character_id: personagem.id, status: COMBAT_SESSION_STATUS.ATIVO } });
+  sessao.state = { status: [{ key: "STUN", sourceActorId: "BOSS", sourcePowerId: null, sourceItemId: null, remainingTurns: 2, stacks: 1, potency: 0, appliedAtTurn: 0 }] };
+  await sessao.save();
+
+  const resultado = await worldBossCombatService.executarAcao(personagem.id, { tipo: "attack" });
+  assert.equal(resultado.bloqueado, true);
+  assert.equal(resultado.motivoBloqueio, "STUN");
+  assert.equal(resultado.dano, 0);
+
+  await sessao.reload();
+  assert.equal(sessao.action_seq, 0, "ação bloqueada nunca conta como uma ação de combate de verdade (action_seq intocado)");
+  assert.equal(sessao.state.status[0].remainingTurns, 1, "o turno bloqueado AINDA decrementa a duração — senão o Stun nunca acaba");
+});
+
+testeComBanco("combate: veneno no próprio jogador pode matá-lo ANTES de agir — sessão vira DERROTADO, nunca ataca", async () => {
+  const { personagem } = await criarPersonagem({ nivel: 30 });
+  personagem.vida_atual = 1;
+  await personagem.save();
+  const evento = await criarEventoAtivo();
+  const hpAntesDoEvento = Number(evento.hp_current);
+  await worldBossCombatService.entrar(personagem.id);
+
+  const sessao = await WorldBossCombatSession.findOne({ where: { character_id: personagem.id, status: COMBAT_SESSION_STATUS.ATIVO } });
+  sessao.state = { status: [{ key: "POISON", sourceActorId: "BOSS", sourcePowerId: null, sourceItemId: null, remainingTurns: 2, stacks: 3, potency: 999, appliedAtTurn: 0 }] };
+  await sessao.save();
+
+  const resultado = await worldBossCombatService.executarAcao(personagem.id, { tipo: "attack" });
+  assert.equal(resultado.morreuAntesDeAgir, true);
+  assert.equal(resultado.dano, 0, "morreu pro próprio veneno, nunca chegou a golpear o Boss");
+
+  await personagem.reload();
+  assert.equal(personagem.vida_atual, 0);
+
+  await sessao.reload();
+  assert.equal(sessao.status, COMBAT_SESSION_STATUS.DERROTADO);
+
+  await evento.reload();
+  assert.equal(Number(evento.hp_current), hpAntesDoEvento, "o Boss nunca pode perder HP de um jogador que morreu antes de agir");
+});
+
+testeComBanco("runtime: DoT no próprio Boss chipa HP a cada ação dele, mas nunca chega a zero por conta própria", async () => {
+  const evento = await criarEventoAtivoV2({ hpCurrent: 5, hpMax: 1000 });
+  await evento.update({ runtime_state: { status_boss: [{ key: "POISON", sourceActorId: "1", sourcePowerId: null, sourceItemId: null, remainingTurns: 5, stacks: 3, potency: 999, appliedAtTurn: 0 }] } });
+
+  await worldBossRuntimeService.processarProximaAcao();
+
+  await evento.reload();
+  assert.equal(Number(evento.hp_current), 1, "DoT nunca entrega o Golpe Final por conta própria — sempre clampado em 1");
+});
+
+testeComBanco("runtime: Boss atordoado perde a ação inteira (nem habilidade, nem ataque básico), mas o Stun expira normalmente", async () => {
+  const habilidade = habilidadeSnapshot({ idAbility: 1, custoMana: 0 });
+  const evento = await criarEventoAtivoV2({ snapshotOverrides: { manaMaxima: 100, abilities: [habilidade] } });
+  await evento.update({ runtime_state: { status_boss: [{ key: "STUN", sourceActorId: "1", sourcePowerId: null, sourceItemId: null, remainingTurns: 1, stacks: 1, potency: 0, appliedAtTurn: 0 }] } });
+  const { personagem } = await criarPersonagem();
+  await worldBossCombatService.entrar(personagem.id);
+
+  const resultado = await comMathRandomFixo(0.99, () => worldBossRuntimeService.processarProximaAcao());
+  assert.equal(resultado.boss_bloqueado, "STUN");
+  assert.equal(resultado.alvo, undefined);
+  assert.equal(resultado.habilidade, undefined);
+
+  await evento.reload();
+  assert.equal(evento.runtime_state.status_boss.length, 0, "duração 1 decrementa pra 0 e expira mesmo no turno em que bloqueou a ação");
+  assert.equal(evento.boss_action_seq, 1, "o turno bloqueado ainda avança o relógio — senão o Boss travaria pra sempre preso no Stun");
+});
+
+testeComBanco("runtime: habilidade do Boss com PowerStatusEffect (Enemy) aplica status no jogador atingido", async () => {
+  const CharacterAbilities = require("../src/models/CharacterAbilities");
+  const PowerStatusEffect = require("../src/models/PowerStatusEffect");
+
+  const power = await Power.create({
+    nome: `Veneno do Boss ${sufixo()}`,
+    descricao: "teste",
+    tipo_poder: "Ativo",
+    custo_mana: 0,
+    dano_base: 5,
+    escala_atributo: "Forca",
+    valor_escala: 0,
+  });
+  const efeito = await PowerStatusEffect.create({
+    id_power: power.id,
+    status_key: "POISON",
+    chance_ppm: 1_000_000,
+    duration_turns: 3,
+    potency_base: 5,
+    target: "Enemy",
+  });
+
+  const habilidade = habilidadeSnapshot({ idAbility: 1, custoMana: 0 });
+  habilidade.power_snapshot.id = power.id; // resolverEfeitosDoUso lê PowerStatusEffect por id_power de verdade.
+  const evento = await criarEventoAtivoV2({ snapshotOverrides: { manaMaxima: 100, abilities: [habilidade] } });
+  const { personagem } = await criarPersonagem();
+  personagem.vida_atual = 9999;
+  await personagem.save();
+  await worldBossCombatService.entrar(personagem.id);
+
+  await comMathRandomFixo(0.99, () => worldBossRuntimeService.processarProximaAcao());
+
+  const sessao = await WorldBossCombatSession.findOne({ where: { character_id: personagem.id, status: COMBAT_SESSION_STATUS.ATIVO } });
+  assert.ok(sessao.state?.status?.some((s) => s.key === "POISON"), "habilidade do Boss com PowerStatusEffect Enemy precisa aplicar o status no jogador atingido");
+
+  await PowerStatusEffect.destroy({ where: { id: efeito.id } });
+  await power.destroy();
+});

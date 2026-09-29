@@ -30,8 +30,12 @@ const {
   vidaMaximaDe,
 } = require("./combatFormulas");
 const { personagemComBonus, buscarBonusDeAtributos } = require("./equipmentBonusService");
+const statusEffectService = require("./statusEffectService");
+const { resolverEfeitosDoUso } = require("./combatEffectResolver");
+const { ACTION_TYPE } = require("../config/statusEffectConfig");
 const { emitGlobal } = require("../socket/worldBossSocket");
 const { EVENT_STATUS, COMBAT_SESSION_STATUS } = require("../config/worldBossConfig");
+const crypto = require("crypto");
 
 // Ordena as fases do snapshot por hp_percentual_max crescente e acha a
 // primeira cujo limiar cobre o hp% atual — mesma regra já usada pelo
@@ -75,6 +79,34 @@ async function carregarPersonagemEfetivo(characterId, transaction) {
   const bonus = await buscarBonusDeAtributos(personagem.id, transaction);
   const base = comMultiplicadoresDeClasse(personagemComBonus(personagem.toJSON(), bonus), personagem.Class);
   return { personagem, base, vidaMax: vidaMaximaDe(base) };
+}
+
+// --- Ameaça Mundial V2 — Etapa 6: Status/resistência (§7) ---
+//
+// OBRIGATÓRIO da spec: nunca criar um segundo sistema de status. Toda
+// regra de duração/potência/stack/tick/bloqueio de ação continua vindo
+// de statusEffectService (o MESMO motor do PvP/PvE) — a única coisa que
+// esta camada decide é SE um status recebido pelo Boss chega a entrar
+// na lista, e com que resistência (§7.1/§7.2).
+
+function resistenciaDoStatus(statusResistances, statusKey) {
+  return (statusResistances || []).find((r) => r.status_key === statusKey && r.ativo !== false) ?? null;
+}
+
+// imune nunca deixa entrar; resistencia_pct é uma chance extra de
+// RESISTIR (rolada uma vez por tentativa), nunca reduz potência/duração
+// — essas continuam inteiramente do motor existente. Sem resistência
+// cadastrada pra aquele status_key, entra normalmente (comportamento
+// "personagem comum" — §7.2 é sobre DEFAULTS sugeridos pro admin
+// cadastrar, não um piso hardcoded aqui).
+function aplicarStatusNoBoss(lista, instancia, statusResistances) {
+  const resistencia = resistenciaDoStatus(statusResistances, instancia.key);
+  if (resistencia?.imune) return lista;
+  if (resistencia?.resistencia_pct > 0) {
+    const resistiu = crypto.randomInt(0, 10000) < Number(resistencia.resistencia_pct) * 100;
+    if (resistiu) return lista;
+  }
+  return statusEffectService.aplicarStatus(lista, instancia);
 }
 
 // Resolve o ataque básico do boss contra UM alvo já travado — devolve
@@ -281,6 +313,31 @@ function resolverEfeitoSelf({ snapshot, ability }) {
 // outro ponto) — mesma correção já aplicada nos testes da Etapa 3 pra
 // nunca depender de um objeto Sequelize potencialmente desatualizado.
 async function aplicarEfeitoDeHabilidadeEmAlvos({ characterIds, snapshot, fase, furiaPct, ability, evento, transaction, agora }) {
+  // §6.1/§7 — Powers reutilizados já podem ter PowerStatusEffect
+  // configurado (mesmo cadastro do PvP/PvE); rolado UMA VEZ pra este
+  // uso da habilidade (não por alvo — mesmo critério de "uma nova de
+  // área proc-a igual pra quem for atingido"), nunca um sistema
+  // paralelo. `target: "Enemy"` é quem importa aqui — "Self" é tratado
+  // fora, por quem chama (a cura/buff SELF do próprio Boss).
+  const bossComoAtacante = {
+    forca: snapshot.forca,
+    agilidade: snapshot.agilidade,
+    inteligencia: snapshot.inteligencia,
+    vitalidade: snapshot.vitalidade,
+    velocidade: snapshot.velocidade,
+    nivel: snapshot.nivel,
+  };
+  const efeitosDeStatusNoInimigo = ability.power_snapshot?.id
+    ? (
+        await resolverEfeitosDoUso({
+          power: { id: ability.power_snapshot.id },
+          personagemCaster: bossComoAtacante,
+          casterActorId: "BOSS",
+          turno: evento.boss_action_seq + 1,
+        })
+      ).filter((efeito) => efeito.target !== "Self")
+    : [];
+
   const detalhes = [];
   for (const characterId of characterIds) {
     const efetivo = await carregarPersonagemEfetivo(characterId, transaction);
@@ -301,6 +358,26 @@ async function aplicarEfeitoDeHabilidadeEmAlvos({ characterIds, snapshot, fase, 
         await WorldBossCombatSession.update(
           { status: COMBAT_SESSION_STATUS.DERROTADO, derrotado_at: agora },
           { where: { event_id: evento.id, character_id: characterId, status: COMBAT_SESSION_STATUS.ATIVO }, transaction },
+        );
+      }
+    }
+
+    // Só quem foi de fato atingido (nunca esquivou) recebe o status —
+    // mesmo critério do motor existente (proc de arma/poder só no hit).
+    if (!efeito.esquivou && efeitosDeStatusNoInimigo.length > 0 && !derrotado) {
+      const sessaoDoAlvo = await WorldBossCombatSession.findOne({
+        where: { event_id: evento.id, character_id: characterId, status: COMBAT_SESSION_STATUS.ATIVO },
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+      if (sessaoDoAlvo) {
+        let statusDoAlvo = sessaoDoAlvo.state?.status ?? [];
+        for (const instancia of efeitosDeStatusNoInimigo) {
+          statusDoAlvo = statusEffectService.aplicarStatus(statusDoAlvo, instancia);
+        }
+        await WorldBossCombatSession.update(
+          { state: { ...(sessaoDoAlvo.state ?? {}), status: statusDoAlvo } },
+          { where: { id: sessaoDoAlvo.id }, transaction },
         );
       }
     }
@@ -437,14 +514,46 @@ async function processarProximaAcao() {
     // habilidade escolhida (ninguém Ativo agora), cai pro ataque básico
     // sem gastar Mana/cooldown de uma habilidade que não teve efeito.
     const bossActionSeqDaAcao = evento.boss_action_seq + 1;
+
+    // §7 — o Boss "combate como um personagem": sofre DoT e pode ser
+    // hard-CC'd pelos MESMOS status que recebe de armas/poderes de
+    // jogador (aplicados em worldBossCombatService, gated por
+    // WorldBossStatusResistance). DoT nunca entrega o Golpe Final por
+    // conta própria (§11.4 exige um hit rastreado de UM personagem
+    // específico) — só chipa até 1 de HP, nunca zera.
+    let statusBoss = evento.runtime_state?.status_boss ?? [];
+    const hpAntesDoDot = Math.max(0, Number(evento.hp_current));
+    evento.hp_current = Math.max(
+      1,
+      statusEffectService.processarTicksDeInicio({
+        vidaAtual: hpAntesDoDot,
+        defensor: { defesa: snapshot.defesa || 0 },
+        lista: statusBoss,
+        log: [],
+        nomeAlvo: snapshot.nome || "Ameaça Mundial",
+      }),
+    );
+
+    const controleBoss = statusEffectService.resolverAcoesBloqueadasDoTurno(statusBoss, bossActionSeqDaAcao);
+    statusBoss = controleBoss.lista;
+    // Hard CC (FREEZE/STUN/PARALYZE) bloqueia ATÉ o ataque básico — o
+    // Boss simplesmente perde a ação nesta vez. SILENCE bloqueia só
+    // Power (§7.2 "hard CC pode iniciar como imune" é sobre a
+    // resistência cadastrada, não uma regra hardcoded aqui).
+    const bossTotalmenteBloqueado = controleBoss.bloqueadas.has(ACTION_TYPE.BASIC_ATTACK);
+    const bossSilenciado = controleBoss.bloqueadas.has(ACTION_TYPE.POWER);
+
     const cooldownsAtuais = evento.runtime_state?.cooldowns_habilidades ?? {};
-    const elegiveis = habilidadesElegiveis(snapshot.abilities, {
-      faseId: fase.id,
-      manaAtual,
-      cooldowns: cooldownsAtuais,
-      bossActionSeqDaAcao,
-    });
-    let abilityEscolhida = escolherHabilidade(elegiveis);
+    let abilityEscolhida = null;
+    if (!bossTotalmenteBloqueado && !bossSilenciado) {
+      const elegiveis = habilidadesElegiveis(snapshot.abilities, {
+        faseId: fase.id,
+        manaAtual,
+        cooldowns: cooldownsAtuais,
+        bossActionSeqDaAcao,
+      });
+      abilityEscolhida = escolherHabilidade(elegiveis);
+    }
 
     let alvosDaHabilidade = [];
     if (abilityEscolhida && abilityEscolhida.tipo_alvo !== "SELF") {
@@ -506,8 +615,10 @@ async function processarProximaAcao() {
 
     // Ataque básico — fallback do passo 6 (§6.3): nenhuma habilidade
     // elegível (ou nenhuma com alvo válido) nunca deixa o Boss "parado".
+    // Hard CC (bossTotalmenteBloqueado) é a ÚNICA situação em que nem
+    // isso acontece — o Boss perde a ação de verdade.
     let danoInfo = null;
-    if (!abilityEscolhida) {
+    if (!abilityEscolhida && !bossTotalmenteBloqueado) {
       const alvoBasico = await selecionarAlvoAleatorio(evento.id, transaction);
       if (alvoBasico) {
         const efetivo = await carregarPersonagemEfetivo(alvoBasico.character_id, transaction);
@@ -551,6 +662,11 @@ async function processarProximaAcao() {
       fase_atual_ordem: fase.ordem,
       cooldowns_habilidades: cooldownsNovos,
       cast_pendente: castIniciado,
+      // §7 — fim do turno do Boss: decrementa a duração de todo status
+      // que ele está sofrendo, uma vez só por ação (nunca por hit
+      // recebido — quem aplica é worldBossCombatService, quem decrementa
+      // é sempre aqui).
+      status_boss: statusEffectService.decrementarDuracoes(statusBoss),
     };
     await evento.save({ transaction });
 
@@ -562,6 +678,7 @@ async function processarProximaAcao() {
       furia_current_pct: furiaPct,
       mana_current: manaAtual,
       fase: { ordem: fase.ordem, nome_fase: fase.nome_fase },
+      boss_bloqueado: bossTotalmenteBloqueado ? controleBoss.motivoBloqueioTotal : undefined,
     };
 
     if (abilityEscolhida && !castIniciado) {
@@ -626,4 +743,6 @@ module.exports = {
   resolverEfeitoSelf,
   cooldownDaHabilidade,
   custoManaDaHabilidade,
+  resistenciaDoStatus,
+  aplicarStatusNoBoss,
 };
