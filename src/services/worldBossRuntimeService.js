@@ -395,6 +395,30 @@ async function aplicarEfeitoDeHabilidadeEmAlvos({ characterIds, snapshot, fase, 
   return detalhes;
 }
 
+// Ameaça Mundial V2 — Etapa 12 (§14.1): métricas pós-evento que não
+// merecem coluna própria (nunca lidas pelo motor de combate em si, só
+// pelo painel admin) — vivem dentro de runtime_state, mesmo critério já
+// usado por cooldowns_habilidades/cast_pendente/status_boss. Chamado
+// UMA VEZ por ação de verdade (nunca em no-op), nos dois pontos em que
+// evento.runtime_state é persistido: a ação normal e a resolução de um
+// cast pendente.
+function mesclarMetricasDeAcao(runtimeStateAtual, { furiaPct, faseOrdem, entrouNaFaseEm, danoNestaAcao, idsAbilityDerrota }) {
+  const anterior = runtimeStateAtual ?? {};
+  const habilidadeDerrotas = { ...(anterior.habilidade_derrotas ?? {}) };
+  for (const idAbility of idsAbilityDerrota) {
+    const chave = idAbility === null || idAbility === undefined ? "basico" : String(idAbility);
+    habilidadeDerrotas[chave] = (habilidadeDerrotas[chave] ?? 0) + 1;
+  }
+  return {
+    furia_maxima_pct: Math.max(Number(anterior.furia_maxima_pct || 0), furiaPct ?? 0),
+    dano_total_recebido_jogadores: Number(anterior.dano_total_recebido_jogadores || 0) + (danoNestaAcao || 0),
+    habilidade_derrotas: habilidadeDerrotas,
+    fase_timestamps: entrouNaFaseEm
+      ? { ...(anterior.fase_timestamps ?? {}), [String(faseOrdem)]: entrouNaFaseEm }
+      : (anterior.fase_timestamps ?? {}),
+  };
+}
+
 // Uma única ação oficial do Boss — chamada pelo scheduler (Etapa 3) em
 // intervalo curto; no-op na grande maioria das chamadas (só executa de
 // verdade quando next_action_at já passou). Sempre commita a transação
@@ -471,7 +495,18 @@ async function processarProximaAcao() {
 
       const intervaloMs = fase.intervalo_acao_ms ?? snapshot.intervalo_acao_ms ?? 3000;
       evento.next_action_at = new Date(agora.getTime() + Math.max(1, intervaloMs));
-      evento.runtime_state = { ...(evento.runtime_state ?? {}), fase_atual_ordem: fase.ordem, cast_pendente: null };
+      const danoDoCast = detalhesAlvos.reduce((soma, alvo) => soma + (alvo.dano || 0), 0);
+      const idsAbilityDerrotaCast = detalhesAlvos.filter((alvo) => alvo.derrotado).map(() => castPendente.id_ability);
+      evento.runtime_state = {
+        ...(evento.runtime_state ?? {}),
+        fase_atual_ordem: fase.ordem,
+        cast_pendente: null,
+        ...mesclarMetricasDeAcao(evento.runtime_state, {
+          furiaPct: castPendente.furia_pct_no_cast,
+          danoNestaAcao: danoDoCast,
+          idsAbilityDerrota: idsAbilityDerrotaCast,
+        }),
+      };
       await evento.save({ transaction });
 
       resultado = {
@@ -652,6 +687,18 @@ async function processarProximaAcao() {
 
     const intervaloMs = fase.intervalo_acao_ms ?? snapshot.intervalo_acao_ms ?? 3000;
 
+    // §14.1 — dano recebido/derrotas desta ação: só existe efeito de
+    // verdade quando NÃO é um cast recém-iniciado (telegraph resolve
+    // depois, contabilizado no branch de resolução acima).
+    const danoDaHabilidade = detalhesAlvosHabilidade.reduce((soma, alvo) => soma + (alvo.dano || 0), 0);
+    const danoNestaAcao = castIniciado ? 0 : (resultado?.alvo?.dano || 0) + danoDaHabilidade;
+    const idsAbilityDerrota = castIniciado
+      ? []
+      : [
+          ...(resultado?.alvo?.derrotado ? [null] : []),
+          ...detalhesAlvosHabilidade.filter((alvo) => alvo.derrotado).map(() => abilityEscolhida?.id_ability ?? null),
+        ];
+
     evento.boss_action_seq = bossActionSeqDaAcao;
     evento.phase_action_seq = phaseActionSeq;
     evento.furia_current_pct = furiaPct;
@@ -667,6 +714,13 @@ async function processarProximaAcao() {
       // recebido — quem aplica é worldBossCombatService, quem decrementa
       // é sempre aqui).
       status_boss: statusEffectService.decrementarDuracoes(statusBoss),
+      ...mesclarMetricasDeAcao(evento.runtime_state, {
+        furiaPct,
+        faseOrdem: fase.ordem,
+        entrouNaFaseEm: mudouFase ? agora.toISOString() : null,
+        danoNestaAcao,
+        idsAbilityDerrota,
+      }),
     };
     await evento.save({ transaction });
 

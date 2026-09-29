@@ -2799,3 +2799,55 @@ testeComBanco("simulador: Fúria cresce e respeita o limite da fase; habilidade 
   assert.ok(resultado.frequencia_powers.length > 0, "habilidade de prioridade máxima e mana sempre disponível precisa aparecer na frequência");
   assert.equal(resultado.frequencia_powers[0].nome, power.nome);
 });
+
+// Ameaça Mundial V2 — Etapa 12 (§14.1): métricas pós-evento.
+testeComBanco("admin métricas: evento DEFEATED expõe métricas pós-evento — Furia máxima, dano recebido, participantes, tempo por fase", async () => {
+  const { personagem } = await criarPersonagem();
+  const evento = await criarEventoAtivoV2({
+    hpCurrent: 1,
+    hpMax: 100000,
+    snapshotOverrides: {
+      fases: [
+        { id: 1, ordem: 1, nome_fase: "Fase Única", hp_percentual_max: 100, modificador_dano_percentual: 0, dano_min: 1, dano_max: 1, furia_por_acao_pct: 10, limite_furia_pct: 50, intervalo_acao_ms: 3000, mana_ao_entrar: null, texto_alerta: null },
+      ],
+    },
+  });
+  await worldBossCombatService.entrar(personagem.id);
+
+  await comMathRandomFixo(0.99, async () => {
+    await worldBossRuntimeService.processarProximaAcao();
+    await evento.reload();
+    evento.next_action_at = new Date(0);
+    await evento.save();
+    await worldBossRuntimeService.processarProximaAcao();
+  });
+
+  await evento.reload();
+  assert.equal(Number(evento.runtime_state.furia_maxima_pct), 20, "10%/ação * 2 ações executadas");
+  assert.ok(Number(evento.runtime_state.dano_total_recebido_jogadores) > 0, "as 2 ações do Boss acertaram o único participante");
+  assert.ok(evento.runtime_state.fase_timestamps["1"], "entrada na Fase Única precisa ter sido carimbada");
+  // Ligeiramente no passado, pra duracao_segundos nunca zerar por
+  // colidir no mesmo segundo do defeated_at que vem a seguir.
+  evento.activated_at = new Date(Date.now() - 5000);
+  await evento.save();
+
+  const golpe = await atacarAteAcertar(personagem.id);
+  assert.equal(golpe.golpeFinal, true, "boss com 1 de HP morre no primeiro acerto");
+  await evento.reload();
+  assert.equal(evento.status, EVENT_STATUS.DEFEATED);
+
+  const metricas = await adminWorldBossService.getAdminWorldBossMetrics();
+  const linha = metricas.historico.find((h) => h.id === evento.id);
+  assert.ok(linha, "evento recém-derrotado precisa aparecer no histórico");
+  assert.ok(linha.metricas, "todo evento DEFEATED sempre vem com métricas calculadas");
+  assert.equal(linha.metricas.participantes, 1);
+  assert.equal(linha.metricas.derrotados, 0);
+  assert.equal(linha.metricas.taxa_sobrevivencia_pct, 100);
+  assert.equal(linha.metricas.furia_maxima_pct, 20);
+  assert.ok(linha.metricas.dano_medio_recebido_por_jogador > 0);
+  assert.equal(linha.metricas.habilidade_mais_derrotas, null, "ninguém foi derrotado durante o combate");
+  assert.equal(linha.metricas.tempo_por_fase.length, 1);
+  assert.equal(linha.metricas.tempo_por_fase[0].ordem, 1);
+  assert.ok(Number.isInteger(linha.metricas.duracao_segundos) && linha.metricas.duracao_segundos > 0);
+  assert.ok(linha.metricas.dps_agregado_jogadores === null || linha.metricas.dps_agregado_jogadores >= 0);
+});

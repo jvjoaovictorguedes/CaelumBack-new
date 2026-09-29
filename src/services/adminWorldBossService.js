@@ -16,12 +16,14 @@ const WorldBossStatusResistance = require("../models/WorldBossStatusResistance")
 const WorldBossRankingReward = require("../models/WorldBossRankingReward");
 const WorldBossActivityMetric = require("../models/WorldBossActivityMetric");
 const WorldBossEvent = require("../models/WorldBossEvent");
+const WorldBossCombatSession = require("../models/WorldBossCombatSession");
+const WorldBossContribution = require("../models/WorldBossContribution");
 const Power = require("../models/Power");
 const Item = require("../models/Item");
 const GameSetting = require("../models/GameSetting");
 const gameSettingCache = require("./gameSettingCache");
 const { registrarAcao } = require("./adminAuditService");
-const { GAME_SETTINGS_DEFAULT } = require("../config/worldBossConfig");
+const { GAME_SETTINGS_DEFAULT, COMBAT_SESSION_STATUS } = require("../config/worldBossConfig");
 const { CHAVES_VALIDAS: STATUS_KEYS_VALIDAS } = require("../config/statusEffectConfig");
 const worldBossRuntimeService = require("./worldBossRuntimeService");
 const { calcularEfeitoPoderEsperado, custoManaEfetivo } = require("./combatFormulas");
@@ -458,6 +460,69 @@ async function updateAdminWorldBossSettings(payload, { idAdmin, req }) {
 // Métricas (somente leitura)
 // ---------------------------------------------------------------------
 
+// Ameaça Mundial V2 — Etapa 12 (§14.1): métricas pós-evento — nunca
+// recalcula dano/Furia (esses valores vêm PRONTOS de runtime_state,
+// acumulados ação a ação pelo motor real em worldBossRuntimeService.
+// mesclarMetricasDeAcao); aqui só agrega o que É simples derivar de
+// dados já existentes (duração, participantes, DPS agregado) e resolve
+// nomes pra exibição (habilidade com mais derrotas, tempo por fase).
+function resolverNomeHabilidade(chave, abilitiesSnapshot) {
+  if (chave === "basico") return "Ataque básico";
+  const ability = (abilitiesSnapshot || []).find((a) => String(a.id_ability) === chave);
+  return ability?.power_snapshot?.nome ?? `Habilidade #${chave}`;
+}
+
+function tempoPorFase(evento) {
+  const timestamps = evento.runtime_state?.fase_timestamps ?? {};
+  const fases = (evento.config_snapshot?.fases ?? []).slice().sort((a, b) => a.ordem - b.ordem);
+  const entradas = fases
+    .map((f) => ({ ordem: f.ordem, nome_fase: f.nome_fase, entrada: timestamps[String(f.ordem)] ? new Date(timestamps[String(f.ordem)]) : null }))
+    .filter((f) => f.entrada);
+  const fimDoEvento = evento.defeated_at ? new Date(evento.defeated_at) : null;
+  return entradas.map((f, i) => {
+    const proximaEntrada = entradas[i + 1]?.entrada ?? fimDoEvento;
+    const duracaoMs = proximaEntrada ? proximaEntrada.getTime() - f.entrada.getTime() : null;
+    return { ordem: f.ordem, nome_fase: f.nome_fase, duracao_segundos: duracaoMs !== null ? Math.round(duracaoMs / 1000) : null };
+  });
+}
+
+async function metricasDoEvento(evento) {
+  const inicio = evento.activated_at ? new Date(evento.activated_at) : null;
+  const fim = evento.defeated_at ? new Date(evento.defeated_at) : null;
+  const duracaoSegundos = inicio && fim ? Math.round((fim.getTime() - inicio.getTime()) / 1000) : null;
+
+  // Participantes conta TODA sessão do evento, não só as ainda "Ativo"
+  // (um evento DEFEATED normalmente não tem mais nenhuma — o Golpe
+  // Final encerra a sessão de quem o deu, e o resto fica Ativo/
+  // Derrotado até o processamento de recompensas rodar por cima).
+  const [participantes, derrotados, contribuicoes] = await Promise.all([
+    WorldBossCombatSession.count({ where: { event_id: evento.id } }),
+    WorldBossCombatSession.count({ where: { event_id: evento.id, status: COMBAT_SESSION_STATUS.DERROTADO } }),
+    WorldBossContribution.findAll({ where: { event_id: evento.id }, attributes: ["damage_total"] }),
+  ]);
+  const danoTotalJogadores = contribuicoes.reduce((soma, c) => soma + Number(c.damage_total), 0);
+
+  const habilidadeDerrotas = evento.runtime_state?.habilidade_derrotas ?? {};
+  const habilidadesMaisLetais = Object.entries(habilidadeDerrotas).sort((a, b) => b[1] - a[1]);
+  const habilidadeMaisDerrotas = habilidadesMaisLetais.length > 0
+    ? { nome: resolverNomeHabilidade(habilidadesMaisLetais[0][0], evento.config_snapshot?.abilities), derrotas: habilidadesMaisLetais[0][1] }
+    : null;
+
+  return {
+    duracao_segundos: duracaoSegundos,
+    participantes,
+    derrotados,
+    taxa_sobrevivencia_pct: participantes > 0 ? Math.round(((participantes - derrotados) / participantes) * 10000) / 100 : null,
+    boss_action_seq_final: evento.boss_action_seq,
+    furia_maxima_pct: evento.runtime_state?.furia_maxima_pct !== undefined ? Number(evento.runtime_state.furia_maxima_pct) : null,
+    dano_medio_recebido_por_jogador: participantes > 0 ? Math.round(Number(evento.runtime_state?.dano_total_recebido_jogadores || 0) / participantes) : null,
+    habilidade_mais_derrotas: habilidadeMaisDerrotas,
+    dps_agregado_jogadores: duracaoSegundos && duracaoSegundos > 0 ? Math.round(danoTotalJogadores / duracaoSegundos) : null,
+    tempo_por_fase: tempoPorFase(evento),
+    top_damage_character_id: evento.top_damage_character_id,
+  };
+}
+
 async function getAdminWorldBossMetrics() {
   const metricas = await WorldBossActivityMetric.findAll({
     order: [["window_start", "DESC"]],
@@ -468,12 +533,8 @@ async function getAdminWorldBossMetrics() {
     order: [["id", "DESC"]],
     limit: 20,
   });
-  return {
-    encontrosElegiveisPorHora: metricas.reverse().map((m) => ({
-      window_start: m.window_start,
-      encontros_elegiveis: Number(m.encontros_elegiveis),
-    })),
-    historico: historico.map((e) => ({
+  const historicoComMetricas = await Promise.all(
+    historico.map(async (e) => ({
       id: e.id,
       status: e.status,
       nome: e.config_snapshot?.nome ?? null,
@@ -483,7 +544,17 @@ async function getAdminWorldBossMetrics() {
       discoverer_character_id: e.discoverer_character_id,
       final_blow_character_id: e.final_blow_character_id,
       participation_rewards_status: e.participation_rewards_status,
+      // §14.1 — só faz sentido pra um evento que chegou a ser lutado
+      // (DEFEATED); um CANCELLED nunca ativou o relógio de combate.
+      metricas: e.status === "DEFEATED" ? await metricasDoEvento(e) : null,
     })),
+  );
+  return {
+    encontrosElegiveisPorHora: metricas.reverse().map((m) => ({
+      window_start: m.window_start,
+      encontros_elegiveis: Number(m.encontros_elegiveis),
+    })),
+    historico: historicoComMetricas,
   };
 }
 
