@@ -45,7 +45,16 @@ function valorFinal(dados, atual, campo) {
 }
 
 // ---------------------------------------------------------------- ZONAS
-const CAMPOS_ZONA = ["nome", "descricao", "nivel_monstro_min", "nivel_monstro_max", "imagem_url", "ordem", "ativa"];
+const CAMPOS_ZONA = [
+  "nome",
+  "descricao",
+  "nivel_monstro_min",
+  "nivel_monstro_max",
+  "nivel_jogador_minimo",
+  "imagem_url",
+  "ordem",
+  "ativa",
+];
 
 // Valida a faixa de nível FINAL da zona (depois de mesclar payload +
 // valor já salvo, no caso de PATCH parcial — ver valorFinal acima).
@@ -73,6 +82,7 @@ async function createAdminZone(payload, { idAdmin, req }) {
     throw erro("nivel_monstro_min e nivel_monstro_max são obrigatórios.");
   }
   validarFaixaNivelZona(dados.nivel_monstro_min, dados.nivel_monstro_max);
+  if (foiEnviado(dados, "nivel_jogador_minimo")) validarNivelJogadorMinimo(dados.nivel_jogador_minimo);
 
   return sequelize.transaction(async (transaction) => {
     const zona = await AdventureZone.create(dados, { transaction });
@@ -102,6 +112,7 @@ async function updateAdminZone(id, payload, { idAdmin, req }) {
     const minFinal = valorFinal(dados, zona, "nivel_monstro_min");
     const maxFinal = valorFinal(dados, zona, "nivel_monstro_max");
     validarFaixaNivelZona(minFinal, maxFinal);
+    if (foiEnviado(dados, "nivel_jogador_minimo")) validarNivelJogadorMinimo(dados.nivel_jogador_minimo);
 
     const antes = zona.toJSON();
     await zona.update(dados, { transaction });
@@ -292,6 +303,9 @@ function validarPesoAparicao(peso) {
 // pool ponderado pra aquele jogador; nunca altera nível/stats do
 // monstro. Sem teto (jogador de nível alto pode continuar encontrando
 // monstros fracos, de propósito — §4.3 "sentir sua progressão").
+// Mesma validação (inteiro >= 1) reaproveitada pro nivel_jogador_minimo
+// da PRÓPRIA zona (gate de entrada, ver AdventureZone.js) — a regra é
+// idêntica, só o campo que ela guarda é que muda de sentido.
 function validarNivelJogadorMinimo(valor) {
   if (valor == null) return;
   if (!Number.isInteger(valor) || valor < 1) {

@@ -5,6 +5,7 @@ const AdventureZone = require("../models/AdventureZone");
 const AdventureZoneMonster = require("../models/AdventureZoneMonster");
 const AdventureMonster = require("../models/AdventureMonster");
 const CharacterAdventureSession = require("../models/CharacterAdventureSession");
+const Character = require("../models/Character");
 const { calcularPerigo } = require("../config/adventureConfig");
 
 // Lista as zonas ativas com o suficiente pro frontend montar a UI de
@@ -26,6 +27,12 @@ async function listarZonas(nivelPersonagem) {
     nivel_monstro_max: zona.nivel_monstro_max,
     nivel_recomendado: `${zona.nivel_monstro_min}-${zona.nivel_monstro_max}`,
     perigo: calcularPerigo(nivelPersonagem, zona.nivel_monstro_min, zona.nivel_monstro_max),
+    // Gate de entrada de verdade (diferente do "perigo" acima, que é só
+    // indicativo) — o frontend usa isto pra travar o botão de entrar,
+    // e entrarNaZona() revalida o mesmo campo server-side (nunca confia
+    // só no que o cliente decidiu mostrar).
+    nivel_jogador_minimo: zona.nivel_jogador_minimo,
+    bloqueada_por_nivel: nivelPersonagem < zona.nivel_jogador_minimo,
   }));
 }
 
@@ -72,6 +79,27 @@ async function entrarNaZona(idPersonagem, idZona, transaction) {
   if (!zona) {
     const erro = new Error("Área de Caça não encontrada.");
     erro.status = 404;
+    throw erro;
+  }
+
+  // Gate de nível de verdade (pedido do jogador) — sempre revalidado
+  // aqui, nunca confia que o frontend só escondeu/desabilitou o botão
+  // (§ mesma filosofia do resto do jogo: cliente nunca decide sozinho
+  // se um requisito foi cumprido). Só nivel é lido, sem lock — quem
+  // chama já travou o Character na mesma transação quando precisa
+  // (ver comentário de obterSessaoAtiva acima sobre o motivo de nunca
+  // travar aqui de novo).
+  const personagem = await Character.findByPk(idPersonagem, { attributes: ["id", "nivel"], transaction });
+  if (!personagem) {
+    const erro = new Error("Personagem não encontrado.");
+    erro.status = 404;
+    throw erro;
+  }
+  if (personagem.nivel < zona.nivel_jogador_minimo) {
+    const erro = new Error(
+      `Você precisa ser nível ${zona.nivel_jogador_minimo} pra entrar em "${zona.nome}" (nível atual: ${personagem.nivel}).`,
+    );
+    erro.status = 403;
     throw erro;
   }
 
