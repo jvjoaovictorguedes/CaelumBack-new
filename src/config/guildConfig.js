@@ -26,7 +26,12 @@ function ehRankGuildaValido(rank) {
 }
 
 // §14 — requisitos de promoção configuráveis (valores de referência
-// inicial, a calibrar depois com dados reais de conclusão).
+// inicial, a calibrar depois com dados reais de conclusão). Objeto
+// mutável em-lugar (Object.assign em aplicarOverridesBalanceamento) —
+// mesmo padrão de expeditionConfig.js/forgeConfig.js: nunca reatribuir
+// o binding do módulo, senão quem já desestruturou essa tabela no load
+// (ex.: `const { REQUISITOS_RANK_GUILDA } = require(...)`) fica preso
+// no valor antigo pra sempre.
 const REQUISITOS_RANK_GUILDA = {
   F: 20,
   E: 35,
@@ -41,7 +46,7 @@ const REQUISITOS_RANK_GUILDA = {
 // Missões, não conta pra progresso de Rank, não recebe recompensa do
 // Boss nem benefícios econômicos dos Buffs (§27: mesma carência pros
 // dois, pra simplificar a v1).
-const CARENCIA_NOVO_MEMBRO_MS = 24 * 60 * 60 * 1000;
+let CARENCIA_NOVO_MEMBRO_MS = 24 * 60 * 60 * 1000;
 
 function membroEmCarencia(guildMember, agora = new Date()) {
   if (!guildMember?.data_entrada) return false;
@@ -123,8 +128,8 @@ function pontosMissaoRank(rank) {
 
 // §12/§65 XP de Missão de Rank da Guilda — mesma ideia (interpolado
 // pela posição no rank), valores de referência inicial.
-const XP_GUILDA_MISSAO_RANK_MIN = 40;
-const XP_GUILDA_MISSAO_RANK_MAX = 300;
+let XP_GUILDA_MISSAO_RANK_MIN = 40;
+let XP_GUILDA_MISSAO_RANK_MAX = 300;
 
 function xpGuildaMissaoRank(rank) {
   const indice = indiceDoRankGuilda(rank);
@@ -137,8 +142,8 @@ function xpGuildaMissaoRank(rank) {
 
 // §33/§34 — Boss: recompensa por dano é 25% dividido igualmente entre
 // participantes elegíveis + 75% proporcional à participação de dano.
-const BOSS_FRACAO_IGUALITARIA = 0.25;
-const BOSS_FRACAO_PROPORCIONAL = 0.75;
+let BOSS_FRACAO_IGUALITARIA = 0.25;
+let BOSS_FRACAO_PROPORCIONAL = 0.75;
 
 // Boss da Guilda V2.0 — batalha em tempo real (guildBossSocket.js),
 // mesmo modelo de turnos da Aventura em grupo (partySocket.js): grupo
@@ -147,15 +152,15 @@ const BOSS_FRACAO_PROPORCIONAL = 0.75;
 // persistida da tentativa da semana — várias salas ao vivo diferentes
 // (grupos distintos de membros) podem golpear o mesmo boss em paralelo,
 // cada golpe é salvo na hora.
-const BOSS_AO_VIVO_TAMANHO_MAXIMO = 8;
-const BOSS_AO_VIVO_TAMANHO_MINIMO = 1;
-const BOSS_AO_VIVO_PRAZO_TURNO_MS = 20 * 1000;
+let BOSS_AO_VIVO_TAMANHO_MAXIMO = 8;
+let BOSS_AO_VIVO_TAMANHO_MINIMO = 1;
+let BOSS_AO_VIVO_PRAZO_TURNO_MS = 20 * 1000;
 // Dano do boss começa em dano_base_ataque (rodada 1) e cresce por
 // rodada — "ataques fracos que vão aumentando com o passar dos turnos",
 // pedido do jogador. Buff leve (0.15 -> 0.20): rodada 5 já bate ~1.8x
 // mais forte que a 1ª em vez de ~1.6x, sem virar parede logo de cara.
-const BOSS_AO_VIVO_FATOR_ESCALADA_DANO = 0.2;
-const BOSS_AO_VIVO_MAX_RODADAS = 60;
+let BOSS_AO_VIVO_FATOR_ESCALADA_DANO = 0.2;
+let BOSS_AO_VIVO_MAX_RODADAS = 60;
 
 // §31 — 1 boss por semana, ciclo global semanal (mesma semana UTC usada
 // pelas missões Semanais de personagem/guilda).
@@ -165,6 +170,89 @@ const {
   inicioDoCicloMensal,
   fimDoCicloAtual,
 } = require("./adventureGuildConfig");
+
+// ---------------------------------------------------------------------
+// PAINEL ADMINISTRATIVO — hot-reload de balanceamento (mesmo padrão de
+// expeditionConfig.aplicarOverridesBalanceamento/forgeConfig.*: aplica
+// overrides já VALIDADOS por cima destes defaults, sempre por mutação
+// em-lugar dos objetos já exportados — nunca reatribuindo o binding do
+// módulo — porque guildBossService/guildMissionService/guildBuffService/
+// guildContributionService já desestruturaram essas tabelas no load;
+// primitivos (CARENCIA_NOVO_MEMBRO_MS, XP_GUILDA_MISSAO_RANK_MIN/MAX,
+// BOSS_FRACAO_*, BOSS_AO_VIVO_*) exigem module.exports.<chave> também,
+// já que destructuring de número não acompanha mutação — guildBossService.js
+// e guildBossSocket.js foram ajustados pra ler os BOSS_* via
+// guildConfig.<chave> (nunca desestruturado) por causa disso.
+function aplicarOverridesBalanceamento(grupo, valores) {
+  if (!valores || typeof valores !== "object") return;
+  switch (grupo) {
+    case "guild.ranks": {
+      Object.assign(REQUISITOS_RANK_GUILDA, valores);
+      break;
+    }
+    case "guild.carencia": {
+      if (typeof valores.CARENCIA_NOVO_MEMBRO_MS === "number") {
+        CARENCIA_NOVO_MEMBRO_MS = valores.CARENCIA_NOVO_MEMBRO_MS;
+        module.exports.CARENCIA_NOVO_MEMBRO_MS = CARENCIA_NOVO_MEMBRO_MS;
+      }
+      break;
+    }
+    case "guild.buffs": {
+      for (const tipo of BUFF_TIPOS) {
+        if (!valores[tipo]) continue;
+        for (const [nivel, tabela] of Object.entries(valores[tipo])) {
+          BUFF_NIVEIS[tipo][nivel] = { ...BUFF_NIVEIS[tipo][nivel], ...tabela };
+        }
+      }
+      break;
+    }
+    case "guild.contribuicao": {
+      if (valores.PONTOS_CONTRIBUICAO) Object.assign(PONTOS_CONTRIBUICAO, valores.PONTOS_CONTRIBUICAO);
+      if (typeof valores.XP_GUILDA_MISSAO_RANK_MIN === "number") {
+        XP_GUILDA_MISSAO_RANK_MIN = valores.XP_GUILDA_MISSAO_RANK_MIN;
+        module.exports.XP_GUILDA_MISSAO_RANK_MIN = XP_GUILDA_MISSAO_RANK_MIN;
+      }
+      if (typeof valores.XP_GUILDA_MISSAO_RANK_MAX === "number") {
+        XP_GUILDA_MISSAO_RANK_MAX = valores.XP_GUILDA_MISSAO_RANK_MAX;
+        module.exports.XP_GUILDA_MISSAO_RANK_MAX = XP_GUILDA_MISSAO_RANK_MAX;
+      }
+      break;
+    }
+    case "guild.boss": {
+      if (typeof valores.BOSS_FRACAO_IGUALITARIA === "number") {
+        BOSS_FRACAO_IGUALITARIA = valores.BOSS_FRACAO_IGUALITARIA;
+        module.exports.BOSS_FRACAO_IGUALITARIA = BOSS_FRACAO_IGUALITARIA;
+      }
+      if (typeof valores.BOSS_FRACAO_PROPORCIONAL === "number") {
+        BOSS_FRACAO_PROPORCIONAL = valores.BOSS_FRACAO_PROPORCIONAL;
+        module.exports.BOSS_FRACAO_PROPORCIONAL = BOSS_FRACAO_PROPORCIONAL;
+      }
+      if (typeof valores.BOSS_AO_VIVO_TAMANHO_MAXIMO === "number") {
+        BOSS_AO_VIVO_TAMANHO_MAXIMO = valores.BOSS_AO_VIVO_TAMANHO_MAXIMO;
+        module.exports.BOSS_AO_VIVO_TAMANHO_MAXIMO = BOSS_AO_VIVO_TAMANHO_MAXIMO;
+      }
+      if (typeof valores.BOSS_AO_VIVO_TAMANHO_MINIMO === "number") {
+        BOSS_AO_VIVO_TAMANHO_MINIMO = valores.BOSS_AO_VIVO_TAMANHO_MINIMO;
+        module.exports.BOSS_AO_VIVO_TAMANHO_MINIMO = BOSS_AO_VIVO_TAMANHO_MINIMO;
+      }
+      if (typeof valores.BOSS_AO_VIVO_PRAZO_TURNO_MS === "number") {
+        BOSS_AO_VIVO_PRAZO_TURNO_MS = valores.BOSS_AO_VIVO_PRAZO_TURNO_MS;
+        module.exports.BOSS_AO_VIVO_PRAZO_TURNO_MS = BOSS_AO_VIVO_PRAZO_TURNO_MS;
+      }
+      if (typeof valores.BOSS_AO_VIVO_FATOR_ESCALADA_DANO === "number") {
+        BOSS_AO_VIVO_FATOR_ESCALADA_DANO = valores.BOSS_AO_VIVO_FATOR_ESCALADA_DANO;
+        module.exports.BOSS_AO_VIVO_FATOR_ESCALADA_DANO = BOSS_AO_VIVO_FATOR_ESCALADA_DANO;
+      }
+      if (typeof valores.BOSS_AO_VIVO_MAX_RODADAS === "number") {
+        BOSS_AO_VIVO_MAX_RODADAS = valores.BOSS_AO_VIVO_MAX_RODADAS;
+        module.exports.BOSS_AO_VIVO_MAX_RODADAS = BOSS_AO_VIVO_MAX_RODADAS;
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
 
 module.exports = {
   RANKS_GUILDA,
@@ -187,6 +275,9 @@ module.exports = {
   BOSS_AO_VIVO_PRAZO_TURNO_MS,
   BOSS_AO_VIVO_FATOR_ESCALADA_DANO,
   BOSS_AO_VIVO_MAX_RODADAS,
+  XP_GUILDA_MISSAO_RANK_MIN,
+  XP_GUILDA_MISSAO_RANK_MAX,
+  aplicarOverridesBalanceamento,
   // Reexportados por conveniência — mesma fonte de verdade de ciclos
   // globais já usada pela Guilda dos Aventureiros/Missões livres (§9 do
   // documento novo pede exatamente os mesmos resets globais).

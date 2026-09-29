@@ -21,12 +21,15 @@ const {
   personagemComBonus,
 } = require("./equipmentBonusService");
 const { comMultiplicadoresDeClasse, calcularDanoBasico, aplicarMitigacaoDeDefesa } = require("./combatFormulas");
-const {
-  inicioDoCicloSemanal,
-  BOSS_FRACAO_IGUALITARIA,
-  BOSS_FRACAO_PROPORCIONAL,
-  membroEmCarencia,
-} = require("../config/guildConfig");
+const guildConfig = require("../config/guildConfig");
+const { inicioDoCicloSemanal, membroEmCarencia } = guildConfig;
+// BOSS_FRACAO_IGUALITARIA/PROPORCIONAL são lidos via guildConfig.<chave>
+// (nunca desestruturados) de propósito — são primitivos que o Painel
+// Administrativo pode sobrescrever em tempo real (guildSettingsService.
+// updateBalanceamento -> aplicarOverridesBalanceamento), e desestruturar
+// um número congela o valor de quando este módulo deu require, ignorando
+// qualquer ajuste feito depois no admin (mesmo motivo de TEMPO_COLETA_MS
+// em expeditionConfig.js).
 
 // Cooldown por membro entre ataques ao MESMO boss — sem isso, uma
 // pessoa sozinha conseguiria zerar o chefe batendo em loop. V2.0:
@@ -312,15 +315,15 @@ async function distribuirRecompensa(tentativa, chefe, transaction, { registrarLo
   const recompensasPorPersonagem = [];
 
   if (elegiveis.length > 0) {
-    const parteIgualDinheiro = (chefe.pool_dinheiro_total * BOSS_FRACAO_IGUALITARIA) / elegiveis.length;
-    const parteIgualXp = (chefe.pool_xp_total * BOSS_FRACAO_IGUALITARIA) / elegiveis.length;
+    const parteIgualDinheiro = (chefe.pool_dinheiro_total * guildConfig.BOSS_FRACAO_IGUALITARIA) / elegiveis.length;
+    const parteIgualXp = (chefe.pool_xp_total * guildConfig.BOSS_FRACAO_IGUALITARIA) / elegiveis.length;
 
     for (const c of elegiveis) {
       const participacao = danoTotalElegivel > 0 ? Number(c.dano_total) / danoTotalElegivel : 0;
       const dinheiro = Math.floor(
-        parteIgualDinheiro + chefe.pool_dinheiro_total * BOSS_FRACAO_PROPORCIONAL * participacao,
+        parteIgualDinheiro + chefe.pool_dinheiro_total * guildConfig.BOSS_FRACAO_PROPORCIONAL * participacao,
       );
-      const xp = Math.floor(parteIgualXp + chefe.pool_xp_total * BOSS_FRACAO_PROPORCIONAL * participacao);
+      const xp = Math.floor(parteIgualXp + chefe.pool_xp_total * guildConfig.BOSS_FRACAO_PROPORCIONAL * participacao);
 
       if (dinheiro > 0) {
         await Character.increment("dinheiro", { by: dinheiro, where: { id: c.id_personagem }, transaction });

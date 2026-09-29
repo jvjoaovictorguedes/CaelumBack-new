@@ -105,6 +105,7 @@ const worldBossRoutes = require("./routes/worldBossRoutes");
 const adminGuildJournalRoutes = require("./routes/adminGuildJournalRoutes");
 const guildJournalRoutes = require("./routes/guildJournalRoutes");
 const adminFishingRoutes = require("./routes/adminFishingRoutes");
+const adminGuildRoutes = require("./routes/adminGuildRoutes");
 const adminAlchemyRoutes = require("./routes/adminAlchemyRoutes");
 const adminPlayerRoutes = require("./routes/adminPlayerRoutes");
 const adminInventoryRoutes = require("./routes/adminInventoryRoutes");
@@ -136,6 +137,7 @@ connectDB()
       .catch((error) => console.error("[forgeSettingsService] falha ao aplicar overrides persistidos no boot:", error)),
   )
   .then(() => require("./services/expeditionSettingsService").iniciarSincronizacaoPeriodica())
+  .then(() => require("./services/guildSettingsService").iniciarSincronizacaoPeriodica())
   .catch((error) => {
     console.error(
       "Erro fatal e inesperado ao conectar ao banco de dados:",
@@ -304,6 +306,7 @@ app.use("/api/admin/expedition", adminExpeditionRoutes);
 app.use("/api/admin/world-boss", adminWorldBossRoutes);
 app.use("/api/admin/guild-journal", adminGuildJournalRoutes);
 app.use("/api/admin/fishing", adminFishingRoutes);
+app.use("/api/admin/guild", adminGuildRoutes);
 app.use("/api/admin/alchemy", adminAlchemyRoutes);
 app.use("/api/admin/players", adminPlayerRoutes);
 app.use("/api/admin/inventory", adminInventoryRoutes);

@@ -44,13 +44,12 @@ const GuildLog = require("../models/GuildLog");
 const { aplicarAcao } = require("../services/duelEngine");
 const { custoManaEfetivo } = require("../services/combatFormulas");
 const { atacarBossAoVivo, expirarSeNecessario, tempoRestanteCooldown } = require("../services/guildBossService");
-const {
-  BOSS_AO_VIVO_TAMANHO_MAXIMO,
-  BOSS_AO_VIVO_TAMANHO_MINIMO,
-  BOSS_AO_VIVO_PRAZO_TURNO_MS,
-  BOSS_AO_VIVO_FATOR_ESCALADA_DANO,
-  BOSS_AO_VIVO_MAX_RODADAS,
-} = require("../config/guildConfig");
+// Lido via guildConfig.<chave> (nunca desestruturado) de propósito — são
+// primitivos que o Painel Administrativo pode sobrescrever em tempo real
+// (guildSettingsService.updateBalanceamento -> aplicarOverridesBalanceamento),
+// e desestruturar um número congela o valor de quando este módulo deu
+// require, ignorando qualquer ajuste feito depois no admin.
+const guildConfig = require("../config/guildConfig");
 const { online, chaveOnline, carregarLutador, poderesPublicos } = require("./pvpLiveSocket");
 const { emitParaGuild } = require("./guildSocket");
 
@@ -157,8 +156,8 @@ module.exports = function registerGuildBossHandlers(io) {
           lobby = { idGuild: membro.id_guild, participantes: new Map(), ordem: [] };
           lobbies.set(membro.id_guild, lobby);
         }
-        if (lobby.participantes.size >= BOSS_AO_VIVO_TAMANHO_MAXIMO) {
-          return socket.emit("guildboss:erro", { mensagem: `A sala já está cheia (máximo ${BOSS_AO_VIVO_TAMANHO_MAXIMO}).` });
+        if (lobby.participantes.size >= guildConfig.BOSS_AO_VIVO_TAMANHO_MAXIMO) {
+          return socket.emit("guildboss:erro", { mensagem: `A sala já está cheia (máximo ${guildConfig.BOSS_AO_VIVO_TAMANHO_MAXIMO}).` });
         }
 
         const personagem = await Character.findByPk(characterId, { include: [{ model: Class }] });
@@ -191,7 +190,7 @@ module.exports = function registerGuildBossHandlers(io) {
       if (!idGuild) return socket.emit("guildboss:erro", { mensagem: "Você não está em nenhuma sala do Boss." });
       const lobby = lobbies.get(idGuild);
       if (!lobby) return;
-      if (lobby.ordem.length < BOSS_AO_VIVO_TAMANHO_MINIMO) {
+      if (lobby.ordem.length < guildConfig.BOSS_AO_VIVO_TAMANHO_MINIMO) {
         return socket.emit("guildboss:erro", { mensagem: "Precisa de pelo menos 1 aventureiro pra iniciar." });
       }
 
@@ -268,7 +267,7 @@ module.exports = function registerGuildBossHandlers(io) {
           ordem: batalha.ordem,
           turnoDe: batalha.ordem[0],
           rodada: batalha.rodada,
-          prazoSegundos: BOSS_AO_VIVO_PRAZO_TURNO_MS / 1000,
+          prazoSegundos: guildConfig.BOSS_AO_VIVO_PRAZO_TURNO_MS / 1000,
         });
 
         iniciarTimerDeTurno(io, battleId);
@@ -346,7 +345,7 @@ function iniciarTimerDeTurno(io, battleId) {
       return;
     }
     executarTurnoAliado(io, battleId, characterId, { tipo: "attack" }, true);
-  }, BOSS_AO_VIVO_PRAZO_TURNO_MS);
+  }, guildConfig.BOSS_AO_VIVO_PRAZO_TURNO_MS);
 }
 
 async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatico = false) {
@@ -464,7 +463,7 @@ function avancarTurnoAliado(io, battleId) {
     io.to(batalha.sala).emit("guildboss:proximo-turno", {
       battleId,
       turnoDe: batalha.ordem[proximoIndex],
-      prazoSegundos: BOSS_AO_VIVO_PRAZO_TURNO_MS / 1000,
+      prazoSegundos: guildConfig.BOSS_AO_VIVO_PRAZO_TURNO_MS / 1000,
       rodada: batalha.rodada,
     });
     iniciarTimerDeTurno(io, battleId);
@@ -482,7 +481,7 @@ function avancarTurnoAliado(io, battleId) {
 // produz o dano-alvo da rodada, mesmo truque já usado em
 // combatController.gerarInimigoDeGrupo pro monstro de grupo da Aventura.
 function forcaChefeParaRodada(batalha) {
-  const danoAlvo = batalha.danoBaseChefe * (1 + BOSS_AO_VIVO_FATOR_ESCALADA_DANO * (batalha.rodada - 1));
+  const danoAlvo = batalha.danoBaseChefe * (1 + guildConfig.BOSS_AO_VIVO_FATOR_ESCALADA_DANO * (batalha.rodada - 1));
   return Math.max(1, Math.round((danoAlvo - 4) / 0.9));
 }
 
@@ -525,7 +524,7 @@ function executarTurnoChefe(io, battleId) {
   }
 
   batalha.rodada += 1;
-  if (batalha.rodada > BOSS_AO_VIVO_MAX_RODADAS) {
+  if (batalha.rodada > guildConfig.BOSS_AO_VIVO_MAX_RODADAS) {
     return finalizarBatalha(io, battleId, false, null, "tempo_esgotado");
   }
 
@@ -536,7 +535,7 @@ function executarTurnoChefe(io, battleId) {
   io.to(batalha.sala).emit("guildboss:proximo-turno", {
     battleId,
     turnoDe: batalha.ordem[primeiroVivoIndex],
-    prazoSegundos: BOSS_AO_VIVO_PRAZO_TURNO_MS / 1000,
+    prazoSegundos: guildConfig.BOSS_AO_VIVO_PRAZO_TURNO_MS / 1000,
     rodada: batalha.rodada,
   });
   iniciarTimerDeTurno(io, battleId);
