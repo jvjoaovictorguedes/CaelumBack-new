@@ -48,6 +48,7 @@ const { personagemComBonus, buscarBonusDeAtributos } = require("./equipmentBonus
 const { buscarPoderesDoPersonagem } = require("../controllers/pvpController");
 const worldBossStatusService = require("./worldBossStatusService");
 const worldBossRewardService = require("./worldBossRewardService");
+const worldBossRankingService = require("./worldBossRankingService");
 const worldBossRuntimeService = require("./worldBossRuntimeService");
 const statusEffectService = require("./statusEffectService");
 const { resolverEfeitosDoUso } = require("./combatEffectResolver");
@@ -419,7 +420,6 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
       evento.final_blow_character_id = characterId;
       evento.defeated_at = new Date();
     }
-    await evento.save({ transaction });
 
     const [contribuicao] = await WorldBossContribution.findOrCreate({
       where: { event_id: evento.id, character_id: characterId },
@@ -431,7 +431,33 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
     contribuicao.attacks_count += 1;
     contribuicao.last_action_seq = sessao.action_seq;
     contribuicao.last_action_at = new Date();
+    // §10.5 — desempate determinístico do ranking: atualizado SÓ quando
+    // dano EFETIVO > 0, nunca numa esquiva/ação sem dano (diferente de
+    // last_action_at, que sempre avança).
+    if (danoEfetivo > 0) contribuicao.last_damage_at = new Date();
     await contribuicao.save({ transaction });
+
+    if (golpeFinal) {
+      // §10.7 — vencedor oficial (TOP_DAMAGE) CONGELADO na MESMA
+      // transação que conclui o evento; depois disso o ranking final
+      // nunca muda. Mesmo desempate do ranking ao vivo (§10.5): maior
+      // damage_total, depois quem chegou lá primeiro, depois
+      // character_id como fallback determinístico.
+      const vencedor = await WorldBossContribution.findOne({
+        where: { event_id: evento.id },
+        order: [
+          ["damage_total", "DESC"],
+          ["last_damage_at", "ASC"],
+          ["character_id", "ASC"],
+        ],
+        transaction,
+      });
+      if (vencedor && Number(vencedor.damage_total) > 0) {
+        evento.top_damage_character_id = vencedor.character_id;
+        evento.top_damage_total = vencedor.damage_total;
+      }
+    }
+    await evento.save({ transaction });
 
     let proezasConquistadas = [];
     if (golpeFinal) {
@@ -495,6 +521,13 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
   if (contexto.golpeFinal) {
     const status = await worldBossStatusService.obterStatusPublico();
     emitGlobal("worldboss:derrotado", status);
+    // §10.7 — ranking oficial já está CONGELADO (top_damage_* setado na
+    // mesma transação acima); este broadcast só informa quem estava
+    // conectado no momento, nunca recalcula nada.
+    worldBossRankingService
+      .obterRanking({ eventId: contexto.boss.event_id })
+      .then((ranking) => emitGlobal("worldboss:ranking-final", ranking))
+      .catch((error) => console.error("[worldBossCombatService] falha ao emitir ranking final:", error));
     // Fase 5 (§16) — "fire and forget": processarRecompensas roda em
     // transações PRÓPRIAS (nunca a do combate, já finalizada aqui em
     // cima) e é idempotente, então mesmo se isso falhar ou o processo

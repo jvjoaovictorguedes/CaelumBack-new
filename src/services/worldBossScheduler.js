@@ -28,6 +28,7 @@ const worldBossLifecycleService = require("./worldBossLifecycleService");
 const worldBossRuntimeService = require("./worldBossRuntimeService");
 const worldBossStatusService = require("./worldBossStatusService");
 const worldBossRewardService = require("./worldBossRewardService");
+const worldBossRankingService = require("./worldBossRankingService");
 const { emitGlobal } = require("../socket/worldBossSocket");
 const { EVENT_STATUS } = require("../config/worldBossConfig");
 
@@ -40,8 +41,13 @@ const INTERVALO_MS = 15_000;
 // é no-op na esmagadora maioria das chamadas (só age quando o horário
 // realmente já passou).
 const INTERVALO_COMBATE_MS = 1_000;
+// §10.6 — "não consultar e emitir o ranking inteiro a cada hit";
+// broadcast consolidado a cada ~1.5s enquanto o evento estiver ATIVO,
+// nunca por ação individual.
+const INTERVALO_RANKING_MS = 1_500;
 let intervalo = null;
 let intervaloCombate = null;
+let intervaloRanking = null;
 
 async function despertarSeNecessario() {
   return sequelize.transaction(async (transaction) => {
@@ -98,6 +104,17 @@ async function tickCombate() {
   }
 }
 
+async function tickRanking() {
+  try {
+    const evento = await WorldBossEvent.findOne({ where: { status: EVENT_STATUS.ACTIVE } });
+    if (!evento) return;
+    const ranking = await worldBossRankingService.obterRanking({ eventId: evento.id });
+    emitGlobal("worldboss:ranking-update", ranking);
+  } catch (error) {
+    console.error("[worldBossScheduler] falha ao emitir ranking ao vivo:", error);
+  }
+}
+
 function iniciar() {
   if (intervalo) return;
   tick().catch((error) => console.error("[worldBossScheduler] falha no tick inicial:", error));
@@ -108,6 +125,9 @@ function iniciar() {
 
   intervaloCombate = setInterval(tickCombate, INTERVALO_COMBATE_MS);
   intervaloCombate.unref?.();
+
+  intervaloRanking = setInterval(tickRanking, INTERVALO_RANKING_MS);
+  intervaloRanking.unref?.();
 }
 
-module.exports = { iniciar, tick, tickCombate };
+module.exports = { iniciar, tick, tickCombate, tickRanking };

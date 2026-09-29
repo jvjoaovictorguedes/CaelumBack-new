@@ -49,6 +49,7 @@ const worldBossScheduler = require("../src/services/worldBossScheduler");
 const worldBossCombatService = require("../src/services/worldBossCombatService");
 const worldBossRuntimeService = require("../src/services/worldBossRuntimeService");
 const worldBossRewardService = require("../src/services/worldBossRewardService");
+const worldBossRankingService = require("../src/services/worldBossRankingService");
 const registerWorldBossHandlers = require("../src/socket/worldBossSocket");
 const { emitirTicket } = require("../src/services/socketTicketService");
 const { EventEmitter } = require("node:events");
@@ -2155,4 +2156,121 @@ testeComBanco("combate: reentrada com cooldown passado e vida recuperada cria um
 
   await personagem.reload();
   assert.equal(personagem.vida_atual, vidaAntesDeReentrar, "reentrar nunca cura silenciosamente (§8.3)");
+});
+
+// Ameaça Mundial V2 — Etapa 8: Ranking/finalização (§10).
+
+testeComBanco("ranking: Top N ordenado por dano, desempate por last_damage_at (mais antigo primeiro) e depois character_id", async () => {
+  const evento = await criarEventoAtivo();
+  const { personagem: maiorDano } = await criarPersonagem();
+  const { personagem: empateAntigo } = await criarPersonagem();
+  const { personagem: empateRecente } = await criarPersonagem();
+
+  await WorldBossContribution.create({ event_id: evento.id, character_id: maiorDano.id, damage_total: 1000, last_damage_at: new Date() });
+  await WorldBossContribution.create({
+    event_id: evento.id,
+    character_id: empateAntigo.id,
+    damage_total: 500,
+    last_damage_at: new Date(Date.now() - 60_000),
+  });
+  await WorldBossContribution.create({ event_id: evento.id, character_id: empateRecente.id, damage_total: 500, last_damage_at: new Date() });
+
+  const ranking = await worldBossRankingService.obterRanking({ eventId: evento.id, limit: 10 });
+  assert.equal(ranking.top.length, 3);
+  assert.equal(ranking.top[0].character_id, maiorDano.id);
+  assert.equal(ranking.top[1].character_id, empateAntigo.id, "empate em dano: quem chegou lá PRIMEIRO (last_damage_at mais antigo) vence");
+  assert.equal(ranking.top[2].character_id, empateRecente.id);
+  assert.equal(ranking.top[0].posicao, 1);
+  assert.ok(ranking.top[0].damage_percent > 0);
+});
+
+testeComBanco("ranking: minha_posicao aparece mesmo fora do Top N — nunca esconde a posição do próprio jogador", async () => {
+  const evento = await criarEventoAtivo({ hpMax: 10000 });
+  const { personagem: foraDoTop } = await criarPersonagem();
+  await WorldBossContribution.create({ event_id: evento.id, character_id: foraDoTop.id, damage_total: 1, last_damage_at: new Date() });
+
+  for (let i = 0; i < 3; i++) {
+    const { personagem } = await criarPersonagem();
+    await WorldBossContribution.create({ event_id: evento.id, character_id: personagem.id, damage_total: 1000 - i, last_damage_at: new Date() });
+  }
+
+  const ranking = await worldBossRankingService.obterRanking({ eventId: evento.id, limit: 2, characterId: foraDoTop.id });
+  assert.equal(ranking.top.length, 2);
+  assert.ok(!ranking.top.some((linha) => linha.character_id === foraDoTop.id));
+  assert.ok(ranking.minha_posicao, "jogador fora do Top N precisa continuar aparecendo em minha_posicao");
+  assert.equal(ranking.minha_posicao.character_id, foraDoTop.id);
+  assert.equal(ranking.minha_posicao.posicao, 4, "4º colocado entre 4 participantes (3 com mais dano + ele)");
+});
+
+testeComBanco("ranking: badges GOLPE_FINAL/DESCOBRIDOR aparecem sempre; MAIOR_DANO só depois de DEFEATED (top_damage_character_id)", async () => {
+  const evento = await criarEventoAtivo();
+  const { personagem } = await criarPersonagem();
+  await WorldBossContribution.create({ event_id: evento.id, character_id: personagem.id, damage_total: 100, last_damage_at: new Date() });
+  evento.final_blow_character_id = personagem.id;
+  evento.discoverer_character_id = personagem.id;
+  await evento.save();
+
+  const rankingAtivo = await worldBossRankingService.obterRanking({ eventId: evento.id });
+  assert.equal(rankingAtivo.lider_oficial, false, "evento ACTIVE nunca tem líder OFICIAL ainda — só 'líder de dano' (decidido pelo front)");
+  assert.deepEqual(new Set(rankingAtivo.top[0].badges), new Set(["GOLPE_FINAL", "DESCOBRIDOR"]));
+  assert.ok(!rankingAtivo.top[0].badges.includes("MAIOR_DANO"), "MAIOR_DANO nunca aparece antes do evento concluir");
+
+  evento.status = EVENT_STATUS.DEFEATED;
+  evento.top_damage_character_id = personagem.id;
+  evento.top_damage_total = 100;
+  await evento.save();
+
+  const rankingFinal = await worldBossRankingService.obterRanking({ eventId: evento.id });
+  assert.equal(rankingFinal.lider_oficial, true);
+  assert.ok(rankingFinal.top[0].badges.includes("MAIOR_DANO"));
+});
+
+testeComBanco("combate: Golpe Final congela top_damage_character_id pelo MAIOR dano acumulado, não por quem deu o golpe final", async () => {
+  const { personagem: maiorDano } = await criarPersonagem({ nivel: 30 });
+  const { personagem: golpeFinalPor } = await criarPersonagem({ nivel: 50 });
+  // criarPersonagem não aceita override de força — ajusta direto, igual
+  // ao padrão já usado noutros testes deste arquivo (personagem.defesa
+  // = 0; await personagem.save()), pra garantir overkill de um hit só.
+  golpeFinalPor.forca = 999;
+  await golpeFinalPor.save();
+
+  // HP baixo o bastante pra golpeFinalPor (forte) zerar de um hit só,
+  // mas maiorDano já acumulou mais dano total ANTES disso.
+  const evento = await criarEventoAtivo({ hpCurrent: 200, hpMax: 100000, defesa: 0 });
+  await worldBossCombatService.entrar(maiorDano.id);
+  await worldBossCombatService.entrar(golpeFinalPor.id);
+
+  await atacarAteAcertar(maiorDano.id); // acumula dano real primeiro (evento.hp_current cai, mas segue > 0).
+  await evento.reload();
+  assert.ok(Number(evento.hp_current) > 0, "cenário precisa do evento ainda vivo depois do primeiro ataque");
+
+  const contribuicaoMaiorDanoAntes = await WorldBossContribution.findOne({ where: { event_id: evento.id, character_id: maiorDano.id } });
+  // Garante um dano acumulado bem maior que o golpe final que vem a
+  // seguir, isolando a variável do teste (não depender de sorte de RNG).
+  await contribuicaoMaiorDanoAntes.update({ damage_total: Number(evento.hp_current) + 999999, last_damage_at: new Date(Date.now() - 5000) });
+
+  const golpeFinal = await atacarAteAcertar(golpeFinalPor.id);
+  assert.equal(golpeFinal.golpeFinal, true);
+
+  await evento.reload();
+  assert.equal(evento.final_blow_character_id, golpeFinalPor.id, "final_blow é sempre de quem literalmente zerou o HP");
+  assert.equal(evento.top_damage_character_id, maiorDano.id, "top_damage é de quem acumulou MAIS dano total, não de quem deu o golpe final");
+});
+
+testeComBanco("combate: last_damage_at só avança em dano EFETIVO — uma esquiva nunca conta pro desempate do ranking", async () => {
+  const { personagem } = await criarPersonagem({ nivel: 30 });
+  personagem.agilidade = 0;
+  await personagem.save();
+  await criarEventoAtivo();
+  await worldBossCombatService.entrar(personagem.id);
+
+  // Math.random()=0 força esquiva (chanceDeEsquiva nunca é menor que o
+  // piso de 5%) — dano zero, ação registrada, mas sem golpe de verdade.
+  const resultadoEsquivado = await comMathRandomFixo(0, () => worldBossCombatService.executarAcao(personagem.id, { tipo: "attack" }));
+  assert.equal(resultadoEsquivado.esquivou, true);
+  assert.equal(resultadoEsquivado.dano, 0);
+
+  const contribuicao = await WorldBossContribution.findOne({ where: { character_id: personagem.id } });
+  assert.equal(contribuicao.last_action_at !== null, true);
+  assert.equal(contribuicao.last_damage_at, null, "esquiva (dano 0) nunca pode adiantar last_damage_at");
 });

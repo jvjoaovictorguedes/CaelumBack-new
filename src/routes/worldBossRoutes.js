@@ -9,8 +9,10 @@ const router = express.Router();
 router.use(authMiddleware);
 
 router.get("/status", worldBossController.obterStatus);
+router.get("/ranking", worldBossController.obterRanking);
 
 router.use(carregarPersonagemAtual);
+router.get("/ranking/me", worldBossController.obterMinhaPosicaoNoRanking);
 router.post("/join", worldBossCombatController.entrar);
 router.post("/leave", worldBossCombatController.sair);
 router.post("/action", worldBossCombatController.acao);
