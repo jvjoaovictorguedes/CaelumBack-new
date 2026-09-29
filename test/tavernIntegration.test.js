@@ -213,11 +213,13 @@ testeComBanco("Pesca normal: FISHING_CONTROL_PCT da Taverna aumenta o `controle`
   const estadoSemBuff = await fishingService.recolher(p1.id, sessaoSemBuff, false);
   const estadoComBuff = await fishingService.recolher(p2.id, sessaoComBuff, false);
 
-  // REEL OFF: tensao -= 20 + round(controle/1000*18).
-  // Sem buff: controle=500 -> drop=20+round(9)=29 -> tensao=400-29=371.
-  // Com +50%: controle efetivo=750 -> drop=20+round(13.5)=34 -> tensao=400-34=366.
-  assert.equal(estadoSemBuff.tensao, 371, "sem buff, o controle efetivo é o puro da vara (500)");
-  assert.equal(estadoComBuff.tensao, 366, "com FISHING_CONTROL_PCT +50%, o controle efetivo sobe pra 750");
+  // REEL OFF: tensao -= round((16 + round(controle/1000*34)) / fatorDificuldade(100)).
+  // fatorDificuldade(100) = 0,65. Sem buff: controle=500 -> reducaoBase=16+17=33
+  // -> drop=round(33/0,65)=51 -> tensao=400-51=349. Com +50%: controle
+  // efetivo=750 -> reducaoBase=16+26=42 -> drop=round(42/0,65)=65 ->
+  // tensao=400-65=335.
+  assert.equal(estadoSemBuff.tensao, 349, "sem buff, o controle efetivo é o puro da vara (500)");
+  assert.equal(estadoComBuff.tensao, 335, "com FISHING_CONTROL_PCT +50%, o controle efetivo sobe pra 750");
   assert.ok(
     estadoComBuff.tensao < estadoSemBuff.tensao,
     "FISHING_CONTROL_PCT deveria reduzir a tensão mais (vara mais controlável) na pesca normal",

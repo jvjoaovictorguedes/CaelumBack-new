@@ -274,46 +274,55 @@ testeComBanco("admin fishing embarcações: create/update com validação de key
 });
 
 // --------------------------------------------------- ROTAS MARÍTIMAS
-testeComBanco("admin fishing rotas marítimas: create exige porto/zona existentes e rejeita conexão duplicada", async () => {
-  const nodeOrigem = await WorldMapNode.create({ nome: `Node Origem ${sufixo()}`, tipo: "Landmark", x: 10, y: 10 });
-  nodesCriados.push(nodeOrigem.id);
-  const nodeDestino = await WorldMapNode.create({ nome: `Node Destino ${sufixo()}`, tipo: "Landmark", x: 20, y: 20 });
-  nodesCriados.push(nodeDestino.id);
-  const conexao = await WorldMapConnection.create({ id_origem: nodeOrigem.id, id_destino: nodeDestino.id });
-  conexoesCriadas.push(conexao.id);
-
+testeComBanco("admin fishing rotas marítimas: create exige porto/zona existentes, rejeita porto+zona duplicado e nunca pede id_world_connection (bug real: rota criada apontava pra conexão errada/inexistente e só quebrava na hora de viajar)", async () => {
   const porto = await adminFishingService.createAdminFishingPort({ key: `porto_rota_${sufixo()}`, nome: "Porto Rota" }, { idAdmin: 1 });
   portosCriados.push(porto.id);
   const zona = await adminFishingService.createAdminFishingZone({ key: `zona_rota_${sufixo()}`, nome: "Zona Rota" }, { idAdmin: 1 });
   zonasCriadas.push(zona.id);
 
   await assert.rejects(
-    () =>
-      adminFishingService.createAdminMarineRoute(
-        { id_world_connection: conexao.id, id_port_origem: 999999999, id_zone_destino: zona.id },
-        { idAdmin: 1 },
-      ),
+    () => adminFishingService.createAdminMarineRoute({ id_port_origem: 999999999, id_zone_destino: zona.id }, { idAdmin: 1 }),
     (err) => err.statusCode === 404,
   );
 
   const rota = await adminFishingService.createAdminMarineRoute(
-    { id_world_connection: conexao.id, id_port_origem: porto.id, id_zone_destino: zona.id, min_vessel_tier: 2, distance: 5 },
+    { id_port_origem: porto.id, id_zone_destino: zona.id, min_vessel_tier: 2, distance: 5 },
     { idAdmin: 1 },
   );
   rotasCriadas.push(rota.id);
+  conexoesCriadas.push(rota.id_world_connection);
   assert.equal(rota.distance, 5);
 
+  // A WorldMapConnection técnica é criada AUTOMATICAMENTE, sempre válida
+  // pra fishingNavigationService.viajar (tipo "RotaMaritima" + ativa) —
+  // nunca mais um id digitado à mão pelo admin.
+  const conexaoCriada = await WorldMapConnection.findByPk(rota.id_world_connection);
+  assert.ok(conexaoCriada, "deveria ter criado uma WorldMapConnection técnica junto");
+  assert.equal(conexaoCriada.tipo, "RotaMaritima");
+  assert.equal(conexaoCriada.ativo, true);
+
+  // Duplicidade agora é por PORTO+ZONA (o que o admin realmente escolhe
+  // no formulário), não mais por id_world_connection (campo que nem
+  // existe mais no payload).
   await assert.rejects(
-    () =>
-      adminFishingService.createAdminMarineRoute(
-        { id_world_connection: conexao.id, id_port_origem: porto.id, id_zone_destino: zona.id },
-        { idAdmin: 1 },
-      ),
+    () => adminFishingService.createAdminMarineRoute({ id_port_origem: porto.id, id_zone_destino: zona.id }, { idAdmin: 1 }),
     /já existe uma rota/i,
   );
 
   const atualizada = await adminFishingService.updateAdminMarineRoute(rota.id, { distance: 9 }, { idAdmin: 1 });
   assert.equal(atualizada.distance, 9);
+
+  // Editar porto/zona agora É possível (bug real reportado: "não tem
+  // como editar as Rotas marítimas do painel admin").
+  const outraZona = await adminFishingService.createAdminFishingZone({ key: `zona_rota2_${sufixo()}`, nome: "Zona Rota 2" }, { idAdmin: 1 });
+  zonasCriadas.push(outraZona.id);
+  const atualizadaZona = await adminFishingService.updateAdminMarineRoute(rota.id, { id_zone_destino: outraZona.id }, { idAdmin: 1 });
+  assert.equal(atualizadaZona.id_zone_destino, outraZona.id);
+
+  await assert.rejects(
+    () => adminFishingService.updateAdminMarineRoute(rota.id, { id_zone_destino: 999999999 }, { idAdmin: 1 }),
+    (err) => err.statusCode === 404,
+  );
 });
 
 async function criarItemVara(nome = "Vara de Teste") {

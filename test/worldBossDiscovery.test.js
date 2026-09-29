@@ -2033,7 +2033,14 @@ testeComBanco("combate: jogador atordoado (status próprio) não consegue agir �
   assert.equal(sessao.state.status[0].remainingTurns, 1, "o turno bloqueado AINDA decrementa a duração — senão o Stun nunca acaba");
 });
 
-testeComBanco("combate: veneno no próprio jogador pode matá-lo ANTES de agir — sessão vira DERROTADO, nunca ataca", async () => {
+testeComBanco("combate: veneno no próprio jogador mata DEPOIS de agir — ataque conta contra o Boss, sessão vira DERROTADO em seguida", async () => {
+  // Bug real reportado e corrigido (status effects, ver duelEngine.js/
+  // combatController.js/worldBossCombatService.js): Burn/Bleed/Poison
+  // ticavam no INÍCIO do turno do personagem afetado — matando ANTES
+  // dele conseguir agir, revertendo até o dano que ele já teria
+  // causado. O tick agora acontece no FIM do turno, depois da ação —
+  // o ataque contra o Boss vale, mesmo que o veneno mate o jogador
+  // logo em seguida.
   const { personagem } = await criarPersonagem({ nivel: 30 });
   personagem.vida_atual = 1;
   await personagem.save();
@@ -2046,17 +2053,17 @@ testeComBanco("combate: veneno no próprio jogador pode matá-lo ANTES de agir �
   await sessao.save();
 
   const resultado = await worldBossCombatService.executarAcao(personagem.id, { tipo: "attack" });
-  assert.equal(resultado.morreuAntesDeAgir, true);
-  assert.equal(resultado.dano, 0, "morreu pro próprio veneno, nunca chegou a golpear o Boss");
+  assert.equal(resultado.morreuAoFimDoTurno, true);
+  assert.ok(resultado.dano > 0, "ataque foi resolvido ANTES do tick do próprio veneno — precisa ter causado dano de verdade no Boss");
 
   await personagem.reload();
-  assert.equal(personagem.vida_atual, 0);
+  assert.equal(personagem.vida_atual, 0, "veneno tica no fim do turno e mata o jogador mesmo assim");
 
   await sessao.reload();
   assert.equal(sessao.status, COMBAT_SESSION_STATUS.DERROTADO);
 
   await evento.reload();
-  assert.equal(Number(evento.hp_current), hpAntesDoEvento, "o Boss nunca pode perder HP de um jogador que morreu antes de agir");
+  assert.equal(Number(evento.hp_current), hpAntesDoEvento - resultado.dano, "o dano do ataque conta contra o Boss — o veneno que mata DEPOIS nunca desfaz uma ação que já aconteceu");
 });
 
 testeComBanco("runtime: DoT no próprio Boss chipa HP a cada ação dele, mas nunca chega a zero por conta própria", async () => {

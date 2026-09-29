@@ -5,6 +5,7 @@
 // nenhuma tabela nova. Vara de Pesca (FishingRodProperties) já é
 // gerenciada dentro do admin de Itens (tipo "Ferramenta"), não
 // duplicada aqui.
+const { Op } = require("sequelize");
 const { sequelize } = require("../config/database");
 const FishingZone = require("../models/FishingZone");
 const FishingSpecies = require("../models/FishingSpecies");
@@ -14,6 +15,7 @@ const FishingBait = require("../models/FishingBait");
 const FishingBaitAffinity = require("../models/FishingBaitAffinity");
 const Vessel = require("../models/Vessel");
 const MarineRoute = require("../models/MarineRoute");
+const WorldMapConnection = require("../models/WorldMapConnection");
 const FishingTournament = require("../models/FishingTournament");
 const Item = require("../models/Item");
 const WorldMapNode = require("../models/WorldMapNode");
@@ -534,7 +536,22 @@ async function updateAdminVessel(id, payload, { idAdmin, req }) {
 }
 
 // ------------------------------------------------------- ROTAS MARÍTIMAS
-const CAMPOS_ROTA = ["id_world_connection", "id_port_origem", "id_zone_destino", "min_vessel_tier", "distance", "ativo"];
+// Bug real reportado: o formulário do admin pedia pra DIGITAR um
+// id_world_connection (WorldMapConnection — entidade do Mapa Mundial,
+// sem NENHUM CRUD no admin pra criar uma "estrada" nova, muito menos
+// uma do tipo "RotaMaritima" certo) — não tinha onde conseguir esse id
+// além do único registro simbólico que o seed inicial já cria (spec
+// §18.3 "fatia mínima"), então qualquer rota nova ou apontava pro
+// mesmo id já usado (rejeitado como duplicado) ou pra uma conexão de
+// tipo errado — que fishingNavigationService.viajar só descobre ser
+// inválida NA HORA DE VIAJAR ("Rota inválida."), bem depois de já
+// criada. id_world_connection nunca teve significado pra fora daqui —
+// fishingNavigationService.viajar só confere `ativo`/`tipo`, nunca lê
+// id_origem/id_destino — então o admin nunca deveria precisar
+// preenchê-lo: cria-se a WorldMapConnection técnica (tipo
+// "RotaMaritima", sempre ativa) junto, na mesma transação, auto-loop
+// no id_world_node do próprio porto (mesmo padrão do seed).
+const CAMPOS_ROTA = ["id_port_origem", "id_zone_destino", "min_vessel_tier", "distance", "ativo"];
 
 async function listAdminMarineRoutes() {
   return MarineRoute.findAll({
@@ -548,8 +565,8 @@ async function listAdminMarineRoutes() {
 
 async function createAdminMarineRoute(payload, { idAdmin, req }) {
   const dados = somenteCampos(payload, CAMPOS_ROTA);
-  if (!dados.id_world_connection || !dados.id_port_origem || !dados.id_zone_destino) {
-    throw erro("id_world_connection, id_port_origem e id_zone_destino são obrigatórios.");
+  if (!dados.id_port_origem || !dados.id_zone_destino) {
+    throw erro("id_port_origem e id_zone_destino são obrigatórios.");
   }
 
   return sequelize.transaction(async (transaction) => {
@@ -558,10 +575,23 @@ async function createAdminMarineRoute(payload, { idAdmin, req }) {
     const zona = await FishingZone.findByPk(dados.id_zone_destino, { transaction });
     if (!zona) throw erro("Zona de destino não encontrada.", 404);
 
-    const existente = await MarineRoute.findOne({ where: { id_world_connection: dados.id_world_connection }, transaction });
-    if (existente) throw erro("Já existe uma rota marítima pra essa conexão do mapa.");
+    const existente = await MarineRoute.findOne({
+      where: { id_port_origem: dados.id_port_origem, id_zone_destino: dados.id_zone_destino },
+      transaction,
+    });
+    if (existente) throw erro("Já existe uma rota marítima desse porto pra essa zona.");
 
-    const rota = await MarineRoute.create(dados, { transaction });
+    // WorldMapConnection técnica — nunca exposta/editável pelo admin
+    // (ver comentário acima). id_world_node do porto pode ser nulo
+    // (campo opcional em FishingPort); cai pro nó 1 (Capital), mesmo
+    // fallback simbólico do seed original.
+    const idNode = porto.id_world_node ?? 1;
+    const conexao = await WorldMapConnection.create(
+      { id_origem: idNode, id_destino: idNode, tipo: "RotaMaritima", ativo: true },
+      { transaction },
+    );
+
+    const rota = await MarineRoute.create({ ...dados, id_world_connection: conexao.id }, { transaction });
     await registrarAcao({
       idAdmin,
       acao: "criar",
@@ -576,11 +606,30 @@ async function createAdminMarineRoute(payload, { idAdmin, req }) {
 }
 
 async function updateAdminMarineRoute(id, payload, { idAdmin, req }) {
-  const dados = somenteCampos(payload, ["min_vessel_tier", "distance", "ativo"]);
+  const dados = somenteCampos(payload, ["id_port_origem", "id_zone_destino", "min_vessel_tier", "distance", "ativo"]);
 
   return sequelize.transaction(async (transaction) => {
     const rota = await MarineRoute.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
     if (!rota) throw erro("Rota marítima não encontrada.", 404);
+
+    if (dados.id_port_origem != null) {
+      const porto = await FishingPort.findByPk(dados.id_port_origem, { transaction });
+      if (!porto) throw erro("Porto de origem não encontrado.", 404);
+    }
+    if (dados.id_zone_destino != null) {
+      const zona = await FishingZone.findByPk(dados.id_zone_destino, { transaction });
+      if (!zona) throw erro("Zona de destino não encontrada.", 404);
+    }
+    if (dados.id_port_origem != null || dados.id_zone_destino != null) {
+      const idPortoFinal = dados.id_port_origem ?? rota.id_port_origem;
+      const idZonaFinal = dados.id_zone_destino ?? rota.id_zone_destino;
+      const conflito = await MarineRoute.findOne({
+        where: { id_port_origem: idPortoFinal, id_zone_destino: idZonaFinal, id: { [Op.ne]: rota.id } },
+        transaction,
+      });
+      if (conflito) throw erro("Já existe uma rota marítima desse porto pra essa zona.");
+    }
+
     const antes = rota.toJSON();
     await rota.update(dados, { transaction });
     await registrarAcao({
