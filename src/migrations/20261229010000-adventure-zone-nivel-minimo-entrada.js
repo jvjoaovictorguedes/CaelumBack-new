@@ -8,11 +8,14 @@
 // ser >= nivel_jogador_minimo da zona pra entrar (ver adventureService.
 // entrarNaZona e partySocket "party:iniciar").
 //
-// Backfill usa o próprio nivel_monstro_min de cada zona já cadastrada
-// — é exatamente o valor que a progressão 1→50 das 10 áreas do Beta já
-// usa pra decidir "a partir de que nível essa área faz sentido" (ver
-// config/adventureExpansionData.js), só que agora vira regra, não só
-// indicação visual.
+// Sem backfill de valor de propósito (pedido explícito, decisão de
+// negócio de produção): toda zona nasce com nivel_jogador_minimo=1 (ou
+// seja, SEM gate nenhum) até o Admin configurar cada uma manualmente
+// pelo Painel — nunca herda nivel_monstro_min automaticamente. Em
+// `dev` os valores de teste (1/6/11.../46) já foram configurados à mão
+// depois que esta migration rodou; produção já está sendo configurada
+// do mesmo jeito, separadamente — esta migration nunca deve sobrescrever
+// isso.
 module.exports = {
   async up(queryInterface, Sequelize) {
     const colunas = await queryInterface.describeTable("AdventureZones");
@@ -23,10 +26,6 @@ module.exports = {
         defaultValue: 1,
       });
     }
-
-    await queryInterface.sequelize.query(
-      `UPDATE "AdventureZones" SET nivel_jogador_minimo = nivel_monstro_min;`,
-    );
   },
 
   async down(queryInterface) {
