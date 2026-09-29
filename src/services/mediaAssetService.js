@@ -179,8 +179,24 @@ async function listGroupVersions(grupo) {
   return MediaAsset.findAll({ where: { grupo }, order: [["versao", "DESC"]] });
 }
 
+// Só grava se vier preenchido e a categoria for "Avatar" — restrição só
+// faz sentido nesse caso; um valor deixado em qualquer outra categoria
+// (ex.: reenviado sem querer de um formulário genérico) seria uma
+// restrição fantasma, nunca lida por ninguém, mas confusa de auditar.
+async function normalizarRestricaoAvatar(categoria, restritoRacaId, restritoClasseId) {
+  if (categoria !== "Avatar") return { restrito_raca_id: null, restrito_classe_id: null };
+  const [Race, Class] = [require("../models/Race"), require("../models/Class")];
+  if (restritoRacaId != null && !(await Race.findByPk(restritoRacaId))) {
+    throw erro("restrito_raca_id não corresponde a nenhuma raça.");
+  }
+  if (restritoClasseId != null && !(await Class.findByPk(restritoClasseId))) {
+    throw erro("restrito_classe_id não corresponde a nenhuma classe.");
+  }
+  return { restrito_raca_id: restritoRacaId ?? null, restrito_classe_id: restritoClasseId ?? null };
+}
+
 async function uploadMediaAsset(payload, { idAdmin, req }) {
-  const { grupo, categoria, descricao, buffer, nomeArquivoOriginal, mimeDeclarado } = payload;
+  const { grupo, categoria, descricao, buffer, nomeArquivoOriginal, mimeDeclarado, restritoRacaId, restritoClasseId } = payload;
   const tipo = payload.tipo && TIPOS_VALIDOS.includes(payload.tipo) ? payload.tipo : "imagem";
   validarGrupo(grupo);
   if (!categoria || !CATEGORIAS_VALIDAS.includes(categoria)) {
@@ -192,6 +208,7 @@ async function uploadMediaAsset(payload, { idAdmin, req }) {
   if (tipo === "imagem" && categoria === "Musica") {
     throw erro('A categoria "Musica" é só pra arquivos de áudio.');
   }
+  const { restrito_raca_id, restrito_classe_id } = await normalizarRestricaoAvatar(categoria, restritoRacaId, restritoClasseId);
   const { buffer: dados, mime, largura, altura } =
     tipo === "audio" ? await validarAudio(buffer, mimeDeclarado) : await validarEReencodarImagem(buffer);
 
@@ -227,6 +244,8 @@ async function uploadMediaAsset(payload, { idAdmin, req }) {
         descricao: descricao ?? null,
         ativo: true,
         id_admin_criador: idAdmin,
+        restrito_raca_id,
+        restrito_classe_id,
       },
       { transaction },
     );
@@ -280,6 +299,8 @@ async function revertToVersion(grupo, versaoAlvo, { idAdmin, req }) {
         descricao: alvo.descricao,
         ativo: true,
         id_admin_criador: idAdmin,
+        restrito_raca_id: alvo.restrito_raca_id,
+        restrito_classe_id: alvo.restrito_classe_id,
       },
       { transaction },
     );
@@ -333,6 +354,90 @@ async function getBytesForServing(grupo, versaoQuery) {
   return MediaAsset.scope("comDados").findOne({ where, order: [["versao", "DESC"]] });
 }
 
+// Extrai grupo (+ versão fixada, se houver) de uma imagem_url no
+// formato /api/media/<grupo> ou /api/media/<grupo>?v=<versao> (com ou
+// sem host completo na frente — resolveMediaUrl no frontend aceita
+// path relativo ou URL absoluta). Qualquer imagem_url que NÃO seja
+// desse formato (ex.: arte estática em /images/..., ou vazia) não é
+// responsabilidade da Biblioteca de Mídia, então nunca conta como
+// "quebrada" aqui.
+const REGEX_GRUPO_NA_URL = /\/api\/media\/([^/?]+)(?:\?v=(\d+))?/;
+function extrairGrupoEVersao(imagemUrl) {
+  const match = imagemUrl?.match(REGEX_GRUPO_NA_URL);
+  if (!match) return null;
+  return { grupo: match[1], versaoFixada: match[2] ? Number(match[2]) : null };
+}
+
+// Diagnóstico (§ bug relatado: imagem que "funcionava antes" passou a
+// dar 404 — servidor sempre respondia isso pro jogador sem NENHUM jeito
+// de descobrir quais itens/poderes/monstros estavam nessa situação sem
+// checar um por um). Verifica a EXISTÊNCIA REAL da versão que a
+// imagem_url pede — nunca só "o grupo tem alguma versão ativa": uma
+// imagem_url presa (?v=N) precisa da linha (grupo, versao=N) existir,
+// não importa se é a versão ativa hoje (pinned ignora ativo, mesmo
+// critério de getBytesForServing); sem ?v=, precisa existir alguma
+// versão ATIVA pro grupo. Sempre devolve o que existe de verdade pra
+// aquele grupo (versões e qual está ativa agora), pra decidir se é
+// reapontar pra versão certa ou reenviar do zero. Nunca modifica nada,
+// só lê.
+async function listarReferenciasQuebradas() {
+  const [Item, Power, EquipmentSet, AdventureMonster] = [
+    require("../models/Item"),
+    require("../models/Power"),
+    require("../models/EquipmentSet"),
+    require("../models/AdventureMonster"),
+  ];
+
+  const FONTES = [
+    { modelo: Item, entidade: "Item", campoNome: "nome" },
+    { modelo: Power, entidade: "Power", campoNome: "nome" },
+    { modelo: EquipmentSet, entidade: "EquipmentSet", campoNome: "nome" },
+    { modelo: AdventureMonster, entidade: "AdventureMonster", campoNome: "nome" },
+  ];
+
+  const todasAsVersoes = await MediaAsset.findAll({ attributes: ["grupo", "versao", "ativo"] });
+  const versoesPorGrupo = new Map();
+  for (const linha of todasAsVersoes) {
+    if (!versoesPorGrupo.has(linha.grupo)) versoesPorGrupo.set(linha.grupo, []);
+    versoesPorGrupo.get(linha.grupo).push({ versao: linha.versao, ativo: linha.ativo });
+  }
+
+  const quebrados = [];
+  for (const { modelo, entidade, campoNome } of FONTES) {
+    const linhas = await modelo.findAll({
+      where: { imagem_url: { [Op.ne]: null } },
+      attributes: ["id", campoNome, "imagem_url"],
+    });
+    for (const linha of linhas) {
+      const referencia = extrairGrupoEVersao(linha.imagem_url);
+      if (!referencia) continue;
+      const { grupo, versaoFixada } = referencia;
+      const versoesDoGrupo = versoesPorGrupo.get(grupo) ?? [];
+
+      const existeAVersaoPedida = versaoFixada
+        ? versoesDoGrupo.some((v) => v.versao === versaoFixada)
+        : versoesDoGrupo.some((v) => v.ativo);
+      if (existeAVersaoPedida) continue;
+
+      const versaoAtivaAgora = versoesDoGrupo.find((v) => v.ativo)?.versao ?? null;
+      quebrados.push({
+        entidade,
+        id: linha.id,
+        nome: linha[campoNome],
+        imagem_url: linha.imagem_url,
+        grupo,
+        versao_pedida: versaoFixada,
+        // null = grupo nunca existiu (precisa reenviar do zero);
+        // número = existe outra versão ativa, só a referência ficou
+        // desatualizada (provável conserto: reapontar pra essa versão).
+        versao_ativa_agora: versaoAtivaAgora,
+        versoes_existentes: versoesDoGrupo.map((v) => v.versao).sort((a, b) => a - b),
+      });
+    }
+  }
+  return quebrados;
+}
+
 module.exports = {
   listMediaGroups,
   listGroupVersions,
@@ -340,4 +445,5 @@ module.exports = {
   revertToVersion,
   deactivateGroup,
   getBytesForServing,
+  listarReferenciasQuebradas,
 };

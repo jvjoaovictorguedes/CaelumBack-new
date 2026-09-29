@@ -95,7 +95,11 @@ exports.obterVisaoGeral = async (req, res) => {
     const dados = await sequelize.transaction(async (transaction) => {
       await expirarContratosVencidos(idPersonagem, transaction);
       const progresso = await obterOuCriarProgresso(idPersonagem, transaction);
-      const provacaoAtiva = await obterProvacaoAtiva(idPersonagem, transaction);
+      // Também busca "Concluido" aqui (só aqui — iniciar/falhar Provação
+      // continuam olhando só "Ativo") pra Provação recém-completada
+      // continuar aparecendo (com "Resgatar Promoção") até o jogador
+      // resgatar, em vez de sumir da tela no instante em que completa.
+      const provacaoAtiva = await obterProvacaoAtiva(idPersonagem, transaction, ["Ativo", "Concluido"]);
 
       let cooldownProvacaoRestanteMs = 0;
       if (progresso.ultima_falha_provacao_em) {

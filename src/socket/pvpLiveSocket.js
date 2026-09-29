@@ -170,6 +170,8 @@ function poderesPublicos(poderes) {
     dano_base: p.dano_base,
     cura_base: p.cura_base,
     nivel_habilidade: p.nivel_habilidade ?? 1,
+    escala_atributo: p.escala_atributo,
+    valor_escala: p.valor_escala,
   }));
 }
 

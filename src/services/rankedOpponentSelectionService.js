@@ -18,9 +18,11 @@
 const { Op } = require("sequelize");
 const CharacterPvpSeason = require("../models/CharacterPvpSeason");
 const Character = require("../models/Character");
+const { sequelize } = require("../config/database");
 const rankedTierService = require("./rankedTierService");
 const rankedAntifarmService = require("./rankedAntifarmService");
 const { RANKED_TAMANHO_POOL_OPONENTES } = require("../config/rankedConfig");
+const { SQL_EXCLUIR_ADMINS } = require("./rankingService");
 
 async function selecionarOponente({
   idDesafiante,
@@ -46,7 +48,18 @@ async function selecionarOponente({
 
   const candidatos = await CharacterPvpSeason.findAll({
     where,
-    include: [{ model: Character, as: "personagem", attributes: ["id", "nome", "nivel"] }],
+    include: [
+      {
+        model: Character,
+        as: "personagem",
+        attributes: ["id", "nome", "nivel"],
+        // Conta administrativa nunca deve ser pareada como oponente
+        // real (nem via defensor controlado por IA) — mesmo pedido de
+        // "esconder admin do PvP" que já esconde admins dos rankings.
+        where: sequelize.literal(SQL_EXCLUIR_ADMINS),
+        required: true,
+      },
+    ],
     // Teto generoso só pra não carregar a temporada inteira num servidor
     // grande; a ordenação fina por proximidade acontece em memória
     // porque envolve |rating - meuRating|, que nenhum índice ajuda.

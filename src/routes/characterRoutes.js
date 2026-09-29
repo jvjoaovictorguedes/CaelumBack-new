@@ -3,6 +3,7 @@ const express = require("express");
 const characterController = require("../controllers/characterController");
 const characterProfileController = require("../controllers/characterProfileController");
 const missionController = require("../controllers/missionController");
+const redemptionCodeController = require("../controllers/redemptionCodeController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const adminMiddleware = require("../middlewares/adminMiddleware");
 const {
@@ -50,6 +51,12 @@ router
   .route("/:id/powers")
   .get(authMiddleware, exigirDonoOuAdmin("id"), characterController.getPoderesDisponiveis);
 
+// Também precisa vir antes de "/:id" pelo mesmo motivo — avatares
+// disponíveis pro AvatarPickerModal (ver characterController.getAvataresDisponiveis).
+router
+  .route("/:id/avatares-disponiveis")
+  .get(authMiddleware, exigirDonoOuAdmin("id"), characterController.getAvataresDisponiveis);
+
 router
   .route("/:id/powers/:idPower/purchase")
   .post(authMiddleware, exigirDonoDoPersonagem("id"), characterController.comprarPoder);
@@ -88,6 +95,11 @@ router
 router
   .route("/:id/missions/:missionId/claim")
   .post(authMiddleware, exigirDonoDoPersonagem("id"), missionController.resgatarMissao);
+
+// Código de resgate — ver redemptionCodeService.js.
+router
+  .route("/:id/redemption-codes/resgatar")
+  .post(authMiddleware, exigirDonoDoPersonagem("id"), redemptionCodeController.resgatar);
 
 router
   .route("/:id")

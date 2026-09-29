@@ -209,6 +209,8 @@ async function entrar(characterId) {
         dano_base: p.dano_base,
         cooldown: p.cooldown,
         nivel_habilidade: p.nivel_habilidade ?? 1,
+        escala_atributo: p.escala_atributo,
+        valor_escala: p.valor_escala,
       })),
       // §18.1/§18.3 — cooldowns dos Powers do próprio jogador contra o
       // Boss: turnos restantes por power_id, exatamente o formato de

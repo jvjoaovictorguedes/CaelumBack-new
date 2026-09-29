@@ -1171,8 +1171,13 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       // character.save() abaixo persiste tudo junto numa vez só.
       // Encontro de zona já resolveu o espólio próprio dentro de
       // concederRecompensaDeZona (§14 — Aventura não deve puxar do
-      // mesmo pool genérico de Material/drop).
-      const drop = ehEncontroDeZona
+      // mesmo pool genérico de Material/drop). Interrupção de monstro
+      // da Expedição (origemExpedicao, ver expeditionService.coletar)
+      // também fica de fora: esse pool legado inclui Arma/Armadura/
+      // Capacete/Escudo/Acessório de QUALQUER tier do catálogo inteiro,
+      // sem filtro de nível — bug relatado (equipamento "do banco de
+      // dados inteiro" caindo de uma coleta de Expedição).
+      const drop = ehEncontroDeZona || inimigoAtual.origemExpedicao
         ? null
         : await rolarDropDeVitoria(character, inimigoAtual, transaction);
       if (drop?.tipo === "item") {
