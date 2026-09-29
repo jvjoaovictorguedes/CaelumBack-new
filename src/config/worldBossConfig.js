@@ -20,7 +20,10 @@ const EVENT_STATUS = {
 // world_boss_events_um_aberto_idx no banco, não só aqui).
 const EVENT_STATUS_ABERTOS = [EVENT_STATUS.DORMANT, EVENT_STATUS.DISCOVERED, EVENT_STATUS.ACTIVE];
 
-const COMBAT_SESSION_STATUS = { ATIVO: "Ativo", ENCERRADA: "Encerrada" };
+// "Derrotado" (Ameaça Mundial V2 §8.1) — HP do personagem chegou a
+// zero durante a luta contra o boss; sai do pool de alvos ativos
+// (worldBossRuntimeService), mas a contribuição acumulada permanece.
+const COMBAT_SESSION_STATUS = { ATIVO: "Ativo", ENCERRADA: "Encerrada", DERROTADO: "Derrotado" };
 
 const PARTICIPATION_REWARDS_STATUS = { PENDING: "Pending", PROCESSING: "Processing", DONE: "Done" };
 

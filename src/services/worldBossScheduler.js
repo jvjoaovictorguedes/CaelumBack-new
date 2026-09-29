@@ -25,13 +25,23 @@
 const { sequelize } = require("../config/database");
 const WorldBossEvent = require("../models/WorldBossEvent");
 const worldBossLifecycleService = require("./worldBossLifecycleService");
+const worldBossRuntimeService = require("./worldBossRuntimeService");
 const worldBossStatusService = require("./worldBossStatusService");
 const worldBossRewardService = require("./worldBossRewardService");
 const { emitGlobal } = require("../socket/worldBossSocket");
 const { EVENT_STATUS } = require("../config/worldBossConfig");
 
 const INTERVALO_MS = 15_000;
+// Ameaça Mundial V2 §3.2/§9.2 — o relógio do Boss precisa de um tick
+// bem mais curto que o de gerenciamento de ciclo acima: intervalo_acao_ms
+// default é 3000ms e uma fase pode configurar algo ainda mais curto.
+// 1000ms garante next_action_at nunca atrasar mais que 1s em relação ao
+// que foi persistido — worldBossRuntimeService.processarProximaAcao já
+// é no-op na esmagadora maioria das chamadas (só age quando o horário
+// realmente já passou).
+const INTERVALO_COMBATE_MS = 1_000;
 let intervalo = null;
+let intervaloCombate = null;
 
 async function despertarSeNecessario() {
   return sequelize.transaction(async (transaction) => {
@@ -80,6 +90,14 @@ async function tick() {
   }
 }
 
+async function tickCombate() {
+  try {
+    await worldBossRuntimeService.processarProximaAcao();
+  } catch (error) {
+    console.error("[worldBossScheduler] falha no tick de combate do boss:", error);
+  }
+}
+
 function iniciar() {
   if (intervalo) return;
   tick().catch((error) => console.error("[worldBossScheduler] falha no tick inicial:", error));
@@ -87,6 +105,9 @@ function iniciar() {
     tick().catch((error) => console.error("[worldBossScheduler] falha no tick:", error));
   }, INTERVALO_MS);
   intervalo.unref?.();
+
+  intervaloCombate = setInterval(tickCombate, INTERVALO_COMBATE_MS);
+  intervaloCombate.unref?.();
 }
 
-module.exports = { iniciar, tick };
+module.exports = { iniciar, tick, tickCombate };

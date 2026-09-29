@@ -47,6 +47,7 @@ const worldBossLifecycleService = require("../src/services/worldBossLifecycleSer
 const worldBossStatusService = require("../src/services/worldBossStatusService");
 const worldBossScheduler = require("../src/services/worldBossScheduler");
 const worldBossCombatService = require("../src/services/worldBossCombatService");
+const worldBossRuntimeService = require("../src/services/worldBossRuntimeService");
 const worldBossRewardService = require("../src/services/worldBossRewardService");
 const adminWorldBossService = require("../src/services/adminWorldBossService");
 const adminWorldBossEventService = require("../src/services/adminWorldBossEventService");
@@ -1096,4 +1097,263 @@ testeComBanco("admin evento atual: cancelarCicloAtual cancela o evento aberto e 
 
   const statusDepois = await adminWorldBossEventService.getStatusOperacional();
   assert.equal(statusDepois.status, "Nenhum");
+});
+
+// ---------------------------------------------------------------------
+// Ameaça Mundial V2 — Etapa 3: Runtime persistente (relógio global do
+// Boss, §3.2/§5/§9). Mesmo arquivo/invariante de evento único aberto
+// que o resto desta suíte (ver comentário no topo do arquivo).
+// ---------------------------------------------------------------------
+
+async function comMathRandomFixo(valor, fn) {
+  const original = Math.random;
+  Math.random = () => valor;
+  try {
+    return await fn();
+  } finally {
+    Math.random = original;
+  }
+}
+
+function comMathRandomFixoSync(valor, fn) {
+  const original = Math.random;
+  Math.random = () => valor;
+  try {
+    return fn();
+  } finally {
+    Math.random = original;
+  }
+}
+
+// Snapshot mínimo pra exercitar o relógio: 2 fases (uma com limite de
+// Fúria, outra soft-enrage sem limite) — mesmo par de exemplo da
+// especificação (§5.4).
+function snapshotV2({ forca = 0, agilidade = 0, defesa = 0, manaMaxima = 0, regenManaPorAcao = 0, intervaloAcaoMs = 3000, fases } = {}) {
+  return {
+    nome: "Ameaça V2 Teste",
+    defesa,
+    forca,
+    agilidade,
+    mana_maxima: manaMaxima,
+    regeneracao_mana_por_acao: regenManaPorAcao,
+    intervalo_acao_ms: intervaloAcaoMs,
+    fases: fases ?? [
+      { ordem: 1, nome_fase: "Fase 1", hp_percentual_max: 100, modificador_dano_percentual: 0, dano_min: 10, dano_max: 10, furia_por_acao_pct: 5, limite_furia_pct: 20, intervalo_acao_ms: null, mana_ao_entrar: null, texto_alerta: null },
+      { ordem: 2, nome_fase: "Fase 2 - Enrage", hp_percentual_max: 30, modificador_dano_percentual: 0, dano_min: 10, dano_max: 10, furia_por_acao_pct: 5, limite_furia_pct: null, intervalo_acao_ms: 500, mana_ao_entrar: 999, texto_alerta: "Ela enfurece!" },
+    ],
+  };
+}
+
+async function criarEventoAtivoV2({ hpCurrent = 1000, hpMax = 1000, nextActionAt = new Date(0), snapshotOverrides = {} } = {}) {
+  const item = await criarItemGolpeFinal();
+  const config = await WorldBossConfig.create({
+    nome: `Ameaça V2 Teste ${sufixo()}`,
+    descricao: "teste",
+    ativo: true,
+    peso_selecao: 1,
+    vida_base: hpMax,
+    defesa: 0,
+    mensagem_descoberta: "descoberta",
+    mensagem_convocacao: "convocacao",
+    id_item_golpe_final: item.id,
+  });
+  configsCriados.push(config.id);
+  const evento = await WorldBossEvent.create({
+    id_world_boss_config: config.id,
+    status: EVENT_STATUS.ACTIVE,
+    hp_max: hpMax,
+    hp_current: hpCurrent,
+    config_snapshot: snapshotV2(snapshotOverrides),
+    activated_at: new Date(),
+    next_action_at: nextActionAt,
+  });
+  eventosCriados.push(evento.id);
+  return evento;
+}
+
+testeComBanco("runtime: sem evento ACTIVE, processarProximaAcao é no-op (nunca lança)", async () => {
+  const resultado = await worldBossRuntimeService.processarProximaAcao();
+  assert.equal(resultado, null);
+});
+
+testeComBanco("runtime: next_action_at no futuro é no-op — nada avança", async () => {
+  const evento = await criarEventoAtivoV2({ nextActionAt: new Date(Date.now() + 60_000) });
+  const resultado = await worldBossRuntimeService.processarProximaAcao();
+  assert.equal(resultado, null);
+
+  await evento.reload();
+  assert.equal(evento.boss_action_seq, 0);
+});
+
+testeComBanco("runtime: ação avança boss_action_seq/phase_action_seq e agenda next_action_at no futuro", async () => {
+  const antes = new Date();
+  const evento = await criarEventoAtivoV2();
+
+  const resultado = await comMathRandomFixo(0.99, () => worldBossRuntimeService.processarProximaAcao());
+  assert.ok(resultado, "esperava uma ação processada");
+  assert.equal(resultado.boss_action_seq, 1);
+  assert.equal(resultado.phase_action_seq, 1);
+
+  await evento.reload();
+  assert.equal(evento.boss_action_seq, 1);
+  assert.equal(evento.phase_action_seq, 1);
+  assert.ok(new Date(evento.next_action_at).getTime() > antes.getTime(), "next_action_at precisa ficar no futuro");
+});
+
+testeComBanco("runtime: Fúria cresce com o limite da fase respeitado (fase 1, limite 20%)", async () => {
+  const evento = await criarEventoAtivoV2();
+
+  // furia_por_acao_pct=5, limite=20 — depois de 3 ações: min(3*5,20)=15.
+  for (let i = 0; i < 3; i++) {
+    // eslint-disable-next-line no-await-in-loop -- precisa ser sequencial (mesmo relógio)
+    await comMathRandomFixo(0.99, () => worldBossRuntimeService.processarProximaAcao());
+    // eslint-disable-next-line no-await-in-loop
+    await WorldBossEvent.update({ next_action_at: new Date(0) }, { where: { id: evento.id } });
+  }
+  await evento.reload();
+  assert.equal(Number(evento.furia_current_pct), 15);
+
+  // Mais 2 ações (total 5): min(5*5,20)=25 estourava o limite -> capado em 20.
+  for (let i = 0; i < 2; i++) {
+    // eslint-disable-next-line no-await-in-loop
+    await comMathRandomFixo(0.99, () => worldBossRuntimeService.processarProximaAcao());
+    // eslint-disable-next-line no-await-in-loop
+    await WorldBossEvent.update({ next_action_at: new Date(0) }, { where: { id: evento.id } });
+  }
+  await evento.reload();
+  assert.equal(Number(evento.furia_current_pct), 20, "Fúria não pode passar do limite_furia_pct da fase");
+});
+
+testeComBanco("runtime: Fúria sem limite (soft-enrage) continua escalando sem cap", async () => {
+  // HP já dentro da Fase 2 (hp_percentual_max=30, sem limite_furia_pct)
+  // desde a primeira ação.
+  const evento = await criarEventoAtivoV2({ hpCurrent: 200, hpMax: 1000 });
+
+  for (let i = 0; i < 6; i++) {
+    // eslint-disable-next-line no-await-in-loop
+    await comMathRandomFixo(0.99, () => worldBossRuntimeService.processarProximaAcao());
+    // eslint-disable-next-line no-await-in-loop
+    await WorldBossEvent.update({ next_action_at: new Date(0) }, { where: { id: evento.id } });
+  }
+  await evento.reload();
+  // furia_por_acao_pct=5, 6 ações, sem cap: 6*5=30 (> 20, o limite da fase 1).
+  assert.equal(Number(evento.furia_current_pct), 30);
+});
+
+testeComBanco("runtime: cruzar o limiar de HP troca de fase, reseta phase_action_seq/Fúria e aplica novo intervalo", async () => {
+  // Começa na Fase 1 (100%) com HP logo acima do limiar da Fase 2 (30%).
+  // mana_maxima >= mana_ao_entrar(999) da Fase 2, senão o clamp de
+  // "nunca passar do máximo" (esperado, §6.5) capava o valor sozinho.
+  const evento = await criarEventoAtivoV2({ hpCurrent: 310, hpMax: 1000, snapshotOverrides: { manaMaxima: 999 } });
+
+  // Uma ação ainda na Fase 1 pra acumular Fúria.
+  await comMathRandomFixo(0.99, () => worldBossRuntimeService.processarProximaAcao());
+  await evento.reload();
+  assert.equal(evento.phase_action_seq, 1);
+  assert.ok(Number(evento.furia_current_pct) > 0);
+
+  // Zera o HP global manualmente pra simular jogadores derrubando o
+  // boss abaixo de 30% (o runtime não sabe fazer isso sozinho ainda —
+  // isso é worldBossCombatService, não a Etapa 3) e libera o relógio.
+  await WorldBossEvent.update({ hp_current: 290, next_action_at: new Date(0) }, { where: { id: evento.id } });
+
+  await comMathRandomFixo(0.99, () => worldBossRuntimeService.processarProximaAcao());
+  await evento.reload();
+  assert.equal(evento.runtime_state.fase_atual_ordem, 2, "precisa ter entrado na Fase 2");
+  assert.equal(evento.phase_action_seq, 1, "phase_action_seq reseta ao trocar de fase");
+  assert.equal(Number(evento.furia_current_pct), 5, "Fúria reseta e recomeça a contar na fase nova");
+  assert.equal(evento.mana_current, 999, "mana_ao_entrar da Fase 2 precisa ter sido aplicado");
+
+  // O intervalo da PRÓXIMA ação precisa refletir o override da Fase 2
+  // (500ms), não mais o intervalo base do catálogo (3000ms).
+  const proximaEm = new Date(evento.next_action_at).getTime() - Date.now();
+  assert.ok(proximaEm <= 600, `esperava próxima ação em ~500ms, ficou em ${proximaEm}ms`);
+});
+
+testeComBanco("runtime: ataque básico atinge um participante Ativo aleatório e aplica dano/mitigação de defesa", async () => {
+  const { personagem } = await criarPersonagem();
+  personagem.defesa = 0;
+  personagem.vida_atual = 9999;
+  await personagem.save();
+
+  const evento = await criarEventoAtivoV2();
+  await worldBossCombatService.entrar(personagem.id);
+
+  const vidaAntes = personagem.vida_atual;
+  const resultado = await comMathRandomFixo(0.99, () => worldBossRuntimeService.processarProximaAcao());
+
+  assert.ok(resultado.alvo, "esperava um alvo selecionado (só há 1 participante Ativo)");
+  assert.equal(resultado.alvo.character_id, personagem.id);
+  assert.equal(resultado.alvo.esquivou, false, "Math.random()=0.99 garante acerto");
+  assert.ok(resultado.alvo.dano > 0);
+
+  await personagem.reload();
+  assert.equal(personagem.vida_atual, vidaAntes - resultado.alvo.dano);
+});
+
+testeComBanco("runtime: dano do boss não pode derrubar HP do alvo abaixo de zero, e zera-lo marca a sessão DERROTADO", async () => {
+  const { personagem } = await criarPersonagem();
+  personagem.defesa = 0;
+  personagem.vida_atual = 3; // menos que o dano fixo de 10 da fase de teste
+  await personagem.save();
+
+  const evento = await criarEventoAtivoV2();
+  await worldBossCombatService.entrar(personagem.id);
+
+  const resultado = await comMathRandomFixo(0.99, () => worldBossRuntimeService.processarProximaAcao());
+  assert.equal(resultado.alvo.vida_atual, 0, "HP nunca pode ficar negativo");
+  assert.equal(resultado.alvo.derrotado, true);
+
+  await personagem.reload();
+  assert.equal(personagem.vida_atual, 0);
+
+  const sessao = await WorldBossCombatSession.findOne({ where: { event_id: evento.id, character_id: personagem.id } });
+  assert.equal(sessao.status, COMBAT_SESSION_STATUS.DERROTADO);
+  assert.ok(sessao.derrotado_at);
+});
+
+// Personagem não tem "defesa" base própria — vem inteiramente do
+// equipamento (equipmentBonusService.personagemComBonus). Montar um set
+// equipado de verdade só pra isso infla o teste sem testar nada que
+// aplicarMitigacaoDeDefesa (combatFormulas, já testada à parte) não
+// cubra sozinha; aqui o que importa pra Etapa 3 é só confirmar que o
+// runtime CHAMA a mitigação com o alvoDefesa certo — testado direto
+// contra a função exportada, sem precisar de Character/equipamento.
+test("runtime: resolverDanoBasico aplica mitigação de defesa do alvo (defesa alta reduz o dano)", () => {
+  const snapshot = snapshotV2();
+  const fase = snapshot.fases[0];
+
+  const semDefesa = comMathRandomFixoSync(0.99, () =>
+    worldBossRuntimeService.resolverDanoBasico({ snapshot, fase, furiaPct: 0, alvoBase: { agilidade: 0 }, alvoDefesa: 0 }),
+  );
+  const comDefesa = comMathRandomFixoSync(0.99, () =>
+    worldBossRuntimeService.resolverDanoBasico({ snapshot, fase, furiaPct: 0, alvoBase: { agilidade: 0 }, alvoDefesa: 100 }),
+  );
+
+  assert.equal(semDefesa.esquivou, false);
+  assert.equal(comDefesa.esquivou, false);
+  assert.ok(comDefesa.dano < semDefesa.dano, "defesa alta precisa reduzir o dano recebido do boss");
+});
+
+testeComBanco("runtime: concorrência — dois workers processando o mesmo tick só avançam boss_action_seq uma vez", async () => {
+  const evento = await criarEventoAtivoV2();
+
+  await comMathRandomFixo(0.99, () =>
+    Promise.all([worldBossRuntimeService.processarProximaAcao(), worldBossRuntimeService.processarProximaAcao()]),
+  );
+
+  await evento.reload();
+  assert.equal(evento.boss_action_seq, 1, "dois workers no mesmo instante não podem duplicar a ação do boss");
+});
+
+testeComBanco("runtime: faseAtualDe/furiaPctDe são funções puras determinísticas (sem banco)", () => {
+  const fases = snapshotV2().fases;
+  assert.equal(worldBossRuntimeService.faseAtualDe(fases, 100).ordem, 1);
+  assert.equal(worldBossRuntimeService.faseAtualDe(fases, 30).ordem, 2);
+  assert.equal(worldBossRuntimeService.faseAtualDe(fases, 0).ordem, 2);
+  assert.equal(worldBossRuntimeService.faseAtualDe([], 50), null);
+
+  assert.equal(worldBossRuntimeService.furiaPctDe(3, fases[0]), 15);
+  assert.equal(worldBossRuntimeService.furiaPctDe(10, fases[0]), 20, "capado pelo limite_furia_pct=20 da fase 1");
+  assert.equal(worldBossRuntimeService.furiaPctDe(10, fases[1]), 50, "fase 2 não tem limite (null) — nunca capa");
 });
