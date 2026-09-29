@@ -24,6 +24,7 @@ const { registrarAcao } = require("./adminAuditService");
 const { GAME_SETTINGS_DEFAULT } = require("../config/worldBossConfig");
 const { CHAVES_VALIDAS: STATUS_KEYS_VALIDAS } = require("../config/statusEffectConfig");
 const worldBossRuntimeService = require("./worldBossRuntimeService");
+const { calcularEfeitoPoderEsperado, custoManaEfetivo } = require("./combatFormulas");
 
 function erro(mensagem, statusCode = 400) {
   const e = new Error(mensagem);
@@ -784,6 +785,76 @@ async function previewDanoAdminWorldBoss(idConfig, { faseOrdem, acoes } = {}) {
   };
 }
 
+// Preview de dano de UMA habilidade (§13.5) — mesma fórmula DETERMINÍSTICA
+// do Power Score (calcularEfeitoPoderEsperado, sem RNG), com os atributos
+// ATUAIS do Boss cadastrados no catálogo; dano ainda passa pelo
+// modificador_dano_percentual da fase + escala de Fúria (igual ao runtime
+// real, worldBossRuntimeService.resolverEfeitoDeHabilidade) quando
+// escala_com_furia é true. Cura nunca escala com fase/Fúria (§5.5) — só
+// prossegue igual ao runtime. Sem hit-chance/mitigação (não há alvo real
+// aqui) — é uma estimativa da SAÍDA de efeito da habilidade, mesmo
+// critério ilustrativo do preview de dano de fase.
+async function previewHabilidadeAdminWorldBoss(idConfig, { idAbility, faseOrdem, acoes } = {}) {
+  const config = await WorldBossConfig.findByPk(idConfig);
+  if (!config) throw erro("Ameaça Mundial não encontrada.", 404);
+
+  if (!Number.isInteger(idAbility)) throw erro("idAbility é obrigatório.");
+  const habilidade = await WorldBossAbility.findOne({
+    where: { id: idAbility, id_world_boss_config: idConfig },
+    include: [{ model: Power }],
+  });
+  if (!habilidade) throw erro("Habilidade não encontrada.", 404);
+  if (!habilidade.Power) throw erro("Esta habilidade não tem nenhum Power vinculado.");
+
+  const fases = await WorldBossPhase.findAll({ where: { id_world_boss_config: idConfig }, order: [["ordem", "ASC"]] });
+  if (fases.length === 0) throw erro("Este catálogo ainda não tem nenhuma fase cadastrada.");
+  const fase = faseOrdem !== undefined && faseOrdem !== null ? fases.find((f) => f.ordem === Number(faseOrdem)) : fases[0];
+  if (!fase) throw erro("Fase não encontrada pra esse catálogo.");
+
+  const atacante = {
+    forca: config.forca,
+    vitalidade: config.vitalidade,
+    agilidade: config.agilidade,
+    inteligencia: config.inteligencia,
+    velocidade: config.velocidade,
+    nivel: config.nivel,
+  };
+  const listaAcoes = Array.isArray(acoes) && acoes.length > 0 ? acoes : [1, 5, 10, 20, 50];
+  const modificadorFase = 1 + Number(fase.modificador_dano_percentual || 0) / 100;
+  const efeito = calcularEfeitoPoderEsperado(habilidade.Power, atacante, 1);
+
+  return {
+    habilidade: {
+      id: habilidade.id,
+      tipo_alvo: habilidade.tipo_alvo,
+      tempo_conjuracao_ms: habilidade.tempo_conjuracao_ms,
+      escala_com_furia: habilidade.escala_com_furia,
+      cooldown: habilidade.cooldown_override ?? habilidade.Power.cooldown ?? 0,
+    },
+    power: {
+      id: habilidade.Power.id,
+      nome: habilidade.Power.nome,
+      escala_atributo: habilidade.Power.escala_atributo,
+      valor_escala: habilidade.Power.valor_escala,
+      custo_mana: custoManaEfetivo(habilidade.Power, 1),
+    },
+    fase: { ordem: fase.ordem, nome_fase: fase.nome_fase, limite_furia_pct: fase.limite_furia_pct !== null ? Number(fase.limite_furia_pct) : null },
+    estimativas: listaAcoes.map((numeroAcao) => {
+      const furiaPct = worldBossRuntimeService.furiaPctDe(Number(numeroAcao), {
+        furia_por_acao_pct: Number(fase.furia_por_acao_pct),
+        limite_furia_pct: fase.limite_furia_pct !== null ? Number(fase.limite_furia_pct) : null,
+      });
+      const escalaFuria = habilidade.escala_com_furia ? 1 + furiaPct / 100 : 1;
+      return {
+        acao: Number(numeroAcao),
+        furia_pct: furiaPct,
+        dano: efeito.dano > 0 ? Math.round(efeito.dano * modificadorFase * escalaFuria) : 0,
+        cura: efeito.cura,
+      };
+    }),
+  };
+}
+
 module.exports = {
   listAdminWorldBossConfigs,
   getAdminWorldBossConfig,
@@ -807,4 +878,5 @@ module.exports = {
   updateAdminWorldBossRankingReward,
   deleteAdminWorldBossRankingReward,
   previewDanoAdminWorldBoss,
+  previewHabilidadeAdminWorldBoss,
 };

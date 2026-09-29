@@ -45,6 +45,7 @@ catalogo.patch("/configs/:id/ranking-rewards/:idRecompensa", adminWorldBossContr
 catalogo.delete("/configs/:id/ranking-rewards/:idRecompensa", adminWorldBossController.excluirRecompensaRanking);
 
 catalogo.post("/configs/:id/preview-damage", adminWorldBossController.previewDano);
+catalogo.post("/configs/:id/preview-ability", adminWorldBossController.previewHabilidade);
 router.use("/", catalogo);
 
 const eventoAtual = express.Router();

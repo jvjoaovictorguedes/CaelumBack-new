@@ -225,3 +225,14 @@ exports.previewDano = async (req, res) => {
     tratarErro(res, error, "Erro interno do servidor ao calcular preview de dano.");
   }
 };
+
+// Preview de dano/cura de uma habilidade específica (§13.5).
+exports.previewHabilidade = async (req, res) => {
+  try {
+    const { idAbility, faseOrdem, acoes } = req.body ?? {};
+    const preview = await adminWorldBossService.previewHabilidadeAdminWorldBoss(req.params.id, { idAbility, faseOrdem, acoes });
+    res.status(200).json({ status: "success", data: preview });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao calcular preview de habilidade.");
+  }
+};

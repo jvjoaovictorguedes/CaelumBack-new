@@ -2593,6 +2593,65 @@ testeComBanco("admin preview de dano: reaproveita furiaPctDe de verdade — dano
   assert.equal(acao10.dano_min, acao50.dano_min, "dano estimado empata quando a Fúria já está no limite — nunca continua crescendo depois do cap");
 });
 
+testeComBanco("admin preview de habilidade: reaproveita calcularEfeitoPoderEsperado com os atributos do Boss + furia/fase da fase escolhida — cura nunca escala", async () => {
+  const { usuario } = await criarPersonagem();
+  const item = await criarItemGolpeFinal();
+  const config = await WorldBossConfig.create({
+    nome: `Ameaça Preview Habilidade ${sufixo()}`,
+    descricao: "teste",
+    ativo: true,
+    peso_selecao: 1,
+    vida_base: 100000,
+    defesa: 0,
+    mensagem_descoberta: "d",
+    mensagem_convocacao: "c",
+    id_item_golpe_final: item.id,
+    nivel: 1,
+    forca: 100,
+  });
+  configsCriados.push(config.id);
+  await WorldBossPhase.create({
+    id_world_boss_config: config.id,
+    ordem: 1,
+    nome_fase: "Fase 1",
+    hp_percentual_max: 100,
+    modificador_dano_percentual: 10,
+    dano_min: 50,
+    dano_max: 80,
+    furia_por_acao_pct: 5,
+    limite_furia_pct: 20,
+  });
+  const power = await Power.create({
+    nome: `Poder Preview ${sufixo()}`,
+    descricao: "teste",
+    tipo_poder: "Ativo",
+    escala_atributo: "Forca",
+    dano_base: 10,
+    cura_base: 30,
+    valor_escala: 2,
+    custo_mana: 15,
+    cooldown: 4,
+  });
+  powersCriados.push(power.id);
+  const habilidade = await adminWorldBossService.createAdminWorldBossAbility(config.id, { id_power: power.id }, { idAdmin: usuario.id });
+
+  const preview = await adminWorldBossService.previewHabilidadeAdminWorldBoss(config.id, { idAbility: habilidade.id, faseOrdem: 1, acoes: [1, 10] });
+  assert.equal(preview.power.custo_mana, 15);
+  assert.equal(preview.habilidade.cooldown, 4, "sem cooldown_override, cai pro cooldown do Power");
+  assert.equal(preview.habilidade.escala_com_furia, true, "default de createAdminWorldBossAbility");
+
+  const acao1 = preview.estimativas.find((e) => e.acao === 1);
+  const acao10 = preview.estimativas.find((e) => e.acao === 10);
+  // Efeito bruto determinístico (nivel=1 -> bonusNivel=0, multClasse Fisico=1, multNivelHabilidade(1)=1):
+  // dano = (dano_base=10 + forca=100 * valor_escala=2) = 210; cura = (cura_base=30 + 100*2) = 230.
+  assert.equal(acao1.furia_pct, 5);
+  assert.equal(acao1.dano, Math.round(210 * 1.1 * 1.05));
+  assert.equal(acao10.furia_pct, 20, "capado em limite_furia_pct=20 da fase");
+  assert.equal(acao10.dano, Math.round(210 * 1.1 * 1.2));
+  assert.equal(acao1.cura, 230, "cura nunca escala com o modificador de dano da fase nem com Fúria (§5.5)");
+  assert.equal(acao1.cura, acao10.cura, "cura idêntica em qualquer contagem de ação");
+});
+
 testeComBanco("admin ciclo atual: getStatusOperacional inclui runtime_v2 (mana/fase/ranking/participantes) só quando ACTIVE", async () => {
   const evento = await criarEventoAtivoV2({ hpCurrent: 800, hpMax: 1000 });
   const { personagem } = await criarPersonagem();
