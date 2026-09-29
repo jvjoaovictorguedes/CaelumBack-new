@@ -1131,19 +1131,84 @@ function comMathRandomFixoSync(valor, fn) {
 // Snapshot mínimo pra exercitar o relógio: 2 fases (uma com limite de
 // Fúria, outra soft-enrage sem limite) — mesmo par de exemplo da
 // especificação (§5.4).
-function snapshotV2({ forca = 0, agilidade = 0, defesa = 0, manaMaxima = 0, regenManaPorAcao = 0, intervaloAcaoMs = 3000, fases } = {}) {
+function snapshotV2({
+  forca = 0,
+  agilidade = 0,
+  inteligencia = 0,
+  vitalidade = 0,
+  nivel = 1,
+  defesa = 0,
+  manaMaxima = 0,
+  regenManaPorAcao = 0,
+  intervaloAcaoMs = 3000,
+  fases,
+  abilities = [],
+} = {}) {
   return {
     nome: "Ameaça V2 Teste",
     defesa,
     forca,
     agilidade,
+    inteligencia,
+    vitalidade,
+    nivel,
     mana_maxima: manaMaxima,
     regeneracao_mana_por_acao: regenManaPorAcao,
     intervalo_acao_ms: intervaloAcaoMs,
+    // id (Etapa 5, §6.2) — fases_permitidas de WorldBossAbility referencia
+    // id de WorldBossPhase, não ordem; os testes de habilidade usam esses
+    // ids fixos (1/2) pra montar fases_permitidas.
     fases: fases ?? [
-      { ordem: 1, nome_fase: "Fase 1", hp_percentual_max: 100, modificador_dano_percentual: 0, dano_min: 10, dano_max: 10, furia_por_acao_pct: 5, limite_furia_pct: 20, intervalo_acao_ms: null, mana_ao_entrar: null, texto_alerta: null },
-      { ordem: 2, nome_fase: "Fase 2 - Enrage", hp_percentual_max: 30, modificador_dano_percentual: 0, dano_min: 10, dano_max: 10, furia_por_acao_pct: 5, limite_furia_pct: null, intervalo_acao_ms: 500, mana_ao_entrar: 999, texto_alerta: "Ela enfurece!" },
+      { id: 1, ordem: 1, nome_fase: "Fase 1", hp_percentual_max: 100, modificador_dano_percentual: 0, dano_min: 10, dano_max: 10, furia_por_acao_pct: 5, limite_furia_pct: 20, intervalo_acao_ms: null, mana_ao_entrar: null, texto_alerta: null },
+      { id: 2, ordem: 2, nome_fase: "Fase 2 - Enrage", hp_percentual_max: 30, modificador_dano_percentual: 0, dano_min: 10, dano_max: 10, furia_por_acao_pct: 5, limite_furia_pct: null, intervalo_acao_ms: 500, mana_ao_entrar: 999, texto_alerta: "Ela enfurece!" },
     ],
+    abilities,
+  };
+}
+
+// Ameaça Mundial V2 — Etapa 5 (§6.2): uma entrada de snapshot.abilities
+// já no formato CONGELADO (o que worldBossLifecycleService.montarSnapshot
+// produziria a partir de WorldBossAbility+Power reais).
+function habilidadeSnapshot({
+  idAbility = 1,
+  danoBase = 20,
+  curaBase = 0,
+  custoMana = 10,
+  cooldown = 0,
+  escalaAtributo = "Forca",
+  valorEscala = 1,
+  pesoUso = 1,
+  prioridade = 0,
+  fasesPermitidas = null,
+  tipoAlvo = "ALEATORIO",
+  quantidadeAlvos = null,
+  tempoConjuracaoMs = 0,
+  cooldownOverride = null,
+  custoManaOverride = null,
+  escalaComFuria = true,
+} = {}) {
+  return {
+    id_ability: idAbility,
+    power_snapshot: {
+      id: 900 + idAbility,
+      nome: `Habilidade ${idAbility}`,
+      imagem_url: null,
+      dano_base: danoBase,
+      cura_base: curaBase,
+      custo_mana: custoMana,
+      cooldown,
+      escala_atributo: escalaAtributo,
+      valor_escala: valorEscala,
+    },
+    peso_uso: pesoUso,
+    prioridade,
+    fases_permitidas: fasesPermitidas,
+    tipo_alvo: tipoAlvo,
+    quantidade_alvos: quantidadeAlvos,
+    tempo_conjuracao_ms: tempoConjuracaoMs,
+    cooldown_override: cooldownOverride,
+    custo_mana_override: custoManaOverride,
+    escala_com_furia: escalaComFuria,
   };
 }
 
@@ -1472,7 +1537,7 @@ testeComBanco("socket: worldboss:entrar-combate exige identificação prévia", 
   conectar(socket);
 
   const resposta = await dispararComAck(socket, "worldboss:entrar-combate", {});
-  assert.equal(resposta.ok, undefined);
+  assert.equal(resposta.ok, false);
   assert.match(resposta.erro, /identifique/i);
 });
 
@@ -1504,4 +1569,286 @@ testeComBanco("socket: client_action_id repetido devolve a MESMA resposta sem re
   const diferente = await dispararComAck(socket, "worldboss:acao", { client_action_id: "acao-2", tipo: "attack" });
   assert.equal(diferente.accepted, true);
   assert.notEqual(diferente.server_action_seq, primeira.server_action_seq, "um client_action_id NOVO precisa processar uma ação nova de verdade");
+});
+
+// Ameaça Mundial V2 — Etapa 5: Habilidades do Boss + IA (§6).
+
+test("habilidadesElegiveis: filtra por fase (id, não ordem), cooldown e Mana", () => {
+  const habComFase2Só = habilidadeSnapshot({ idAbility: 1, fasesPermitidas: [2] });
+  const habSemRestricaoDeFase = habilidadeSnapshot({ idAbility: 2, fasesPermitidas: null });
+  const habCara = habilidadeSnapshot({ idAbility: 3, custoMana: 999 });
+  const habEmCooldown = habilidadeSnapshot({ idAbility: 4 });
+
+  const elegiveis = worldBossRuntimeService.habilidadesElegiveis(
+    [habComFase2Só, habSemRestricaoDeFase, habCara, habEmCooldown],
+    { faseId: 1, manaAtual: 50, cooldowns: { "4": 10 }, bossActionSeqDaAcao: 5 },
+  );
+
+  assert.deepEqual(elegiveis.map((h) => h.id_ability), [2], "só a habilidade sem fasesPermitidas passa: a de fase 2 não bate com faseId=1, a cara não tem Mana, a 4 está em cooldown até seq 10");
+});
+
+test("escolherHabilidade: só sorteia entre a maior prioridade elegível, nunca entre todas", () => {
+  const baixaPrioridade = habilidadeSnapshot({ idAbility: 1, prioridade: 0 });
+  const altaPrioridadeA = habilidadeSnapshot({ idAbility: 2, prioridade: 5, pesoUso: 1 });
+  const altaPrioridadeB = habilidadeSnapshot({ idAbility: 3, prioridade: 5, pesoUso: 999 });
+
+  for (let i = 0; i < 20; i++) {
+    const escolhida = comMathRandomFixoSync(0.01 + i * 0.04, () =>
+      worldBossRuntimeService.escolherHabilidade([baixaPrioridade, altaPrioridadeA, altaPrioridadeB]),
+    );
+    assert.notEqual(escolhida.id_ability, 1, "a de prioridade 0 nunca pode ser sorteada enquanto houver uma de prioridade 5 elegível");
+  }
+});
+
+testeComBanco("runtime: habilidade elegível (Mana suficiente, sem cooldown) substitui o ataque básico", async () => {
+  const { personagem } = await criarPersonagem();
+  personagem.defesa = 0;
+  personagem.vida_atual = 9999;
+  await personagem.save();
+
+  const habilidade = habilidadeSnapshot({ idAbility: 1, danoBase: 30, custoMana: 15 });
+  const evento = await criarEventoAtivoV2({ snapshotOverrides: { manaMaxima: 100, abilities: [habilidade] } });
+  await WorldBossEvent.update({ mana_current: 100 }, { where: { id: evento.id } });
+  await worldBossCombatService.entrar(personagem.id);
+
+  const resultado = await comMathRandomFixo(0.99, () => worldBossRuntimeService.processarProximaAcao());
+
+  assert.ok(resultado.habilidade, "esperava a IA usar a habilidade em vez do ataque básico");
+  assert.equal(resultado.habilidade.id_ability, 1);
+  assert.equal(resultado.alvo, undefined, "não é o caminho de ataque básico");
+  assert.equal(resultado.habilidade.alvos.length, 1);
+  assert.ok(resultado.habilidade.alvos[0].dano > 0);
+
+  await evento.reload();
+  assert.equal(evento.mana_current, 100 - 15, "custo de Mana da habilidade precisa ser descontado da reserva do Boss");
+
+  await personagem.reload();
+  assert.equal(personagem.vida_atual, 9999 - resultado.habilidade.alvos[0].dano);
+});
+
+testeComBanco("runtime: sem Mana suficiente pra nenhuma habilidade, a IA cai pro ataque básico", async () => {
+  const { personagem } = await criarPersonagem();
+  personagem.vida_atual = 9999;
+  await personagem.save();
+
+  const habilidadeCara = habilidadeSnapshot({ idAbility: 1, custoMana: 999 });
+  const evento = await criarEventoAtivoV2({ snapshotOverrides: { manaMaxima: 100, abilities: [habilidadeCara] } });
+  await worldBossCombatService.entrar(personagem.id);
+
+  const resultado = await comMathRandomFixo(0.99, () => worldBossRuntimeService.processarProximaAcao());
+  assert.equal(resultado.habilidade, undefined);
+  assert.ok(resultado.alvo, "sem Mana suficiente, precisa cair pro ataque básico");
+
+  await evento.reload();
+  assert.equal(evento.mana_current, 0, "habilidade nunca usada nunca desconta Mana nenhuma");
+});
+
+testeComBanco("runtime: habilidade fora da fase atual nunca é escolhida mesmo com Mana de sobra", async () => {
+  const { personagem } = await criarPersonagem();
+  personagem.vida_atual = 9999;
+  await personagem.save();
+
+  // fase atual (hp 100%) é a de id=1 no snapshot padrão; restringe a
+  // habilidade só pra fase id=2 (Enrage) — nunca deve ser elegível aqui.
+  // custoMana=0 de propósito: só a fase pode ser o motivo da rejeição
+  // aqui, nunca falta de Mana (senão o teste passaria pelo motivo errado).
+  const habilidadeSoOutraFase = habilidadeSnapshot({ idAbility: 1, custoMana: 0, fasesPermitidas: [2] });
+  const evento = await criarEventoAtivoV2({ snapshotOverrides: { manaMaxima: 100, abilities: [habilidadeSoOutraFase] } });
+  await worldBossCombatService.entrar(personagem.id);
+
+  const resultado = await comMathRandomFixo(0.99, () => worldBossRuntimeService.processarProximaAcao());
+  assert.equal(resultado.habilidade, undefined);
+  assert.ok(resultado.alvo, "habilidade da fase errada precisa ser ignorada, caindo pro ataque básico");
+});
+
+testeComBanco("runtime: habilidade some da rotação durante o cooldown e volta a ficar elegível depois de N ações", async () => {
+  const { personagem } = await criarPersonagem();
+  personagem.vida_atual = 999999;
+  await personagem.save();
+
+  // custoManaOverride=0 pra Mana nunca ser o motivo de cair pro básico —
+  // só o cooldown decide aqui. cooldownOverride=1 bloqueia exatamente a
+  // 1 próxima ação (mesma semântica de cooldownService.js).
+  const habilidade = habilidadeSnapshot({ idAbility: 1, custoMana: 0, cooldownOverride: 1 });
+  const evento = await criarEventoAtivoV2({ snapshotOverrides: { manaMaxima: 100, abilities: [habilidade] } });
+  await worldBossCombatService.entrar(personagem.id);
+
+  const primeira = await comMathRandomFixo(0.99, () => worldBossRuntimeService.processarProximaAcao());
+  assert.ok(primeira.habilidade, "primeira ação: habilidade sem cooldown nenhum, precisa ser usada");
+
+  await WorldBossEvent.update({ next_action_at: new Date(0) }, { where: { id: evento.id } });
+  const segunda = await comMathRandomFixo(0.99, () => worldBossRuntimeService.processarProximaAcao());
+  assert.equal(segunda.habilidade, undefined, "cooldown=1 precisa bloquear EXATAMENTE a próxima ação");
+  assert.ok(segunda.alvo, "com a única habilidade em cooldown, cai pro ataque básico");
+
+  await WorldBossEvent.update({ next_action_at: new Date(0) }, { where: { id: evento.id } });
+  const terceira = await comMathRandomFixo(0.99, () => worldBossRuntimeService.processarProximaAcao());
+  assert.ok(terceira.habilidade, "depois de exatamente 1 ação de cooldown, a habilidade volta a ficar elegível");
+});
+
+testeComBanco("runtime: tipo_alvo SELF cura o próprio Boss, nunca escala com Fúria e nunca toca em jogador nenhum", async () => {
+  const { personagem } = await criarPersonagem();
+  const vidaAntesDoPersonagem = personagem.vida_atual;
+
+  const habilidadeDeCura = habilidadeSnapshot({
+    idAbility: 1,
+    danoBase: 0,
+    curaBase: 50,
+    custoMana: 0,
+    tipoAlvo: "SELF",
+    escalaComFuria: true, // §5.5 — precisa ser ignorado mesmo assim: cura nunca escala com Fúria.
+  });
+  const evento = await criarEventoAtivoV2({ hpCurrent: 500, hpMax: 1000, snapshotOverrides: { manaMaxima: 100, abilities: [habilidadeDeCura] } });
+  await worldBossCombatService.entrar(personagem.id);
+
+  const resultado = await comMathRandomFixo(0.99, () => worldBossRuntimeService.processarProximaAcao());
+  assert.ok(resultado.habilidade, "esperava a IA usar a cura SELF");
+  assert.equal(resultado.habilidade.alvos.length, 0, "SELF não tem alvo de jogador nenhum");
+  assert.ok(resultado.habilidade.cura_self > 0);
+
+  await evento.reload();
+  // hp_current é BIGINT — Sequelize/pg devolve como string pra não
+  // perder precisão; Number(...) antes de comparar (mesmo cuidado já
+  // necessário em qualquer leitura de BIGINT deste projeto).
+  assert.equal(Number(evento.hp_current), 500 + resultado.habilidade.cura_self);
+
+  await personagem.reload();
+  assert.equal(personagem.vida_atual, vidaAntesDoPersonagem, "cura SELF do Boss nunca pode tocar na vida de um jogador");
+});
+
+testeComBanco("runtime: cast com tempo_conjuracao_ms > 0 só aplica dano quando resolves_at chega (telegraph antes)", async () => {
+  const { personagem } = await criarPersonagem();
+  personagem.defesa = 0;
+  personagem.vida_atual = 9999;
+  await personagem.save();
+
+  const habilidadeComCast = habilidadeSnapshot({ idAbility: 1, danoBase: 40, custoMana: 0, tempoConjuracaoMs: 5000 });
+  const evento = await criarEventoAtivoV2({ snapshotOverrides: { manaMaxima: 100, abilities: [habilidadeComCast] } });
+  await worldBossCombatService.entrar(personagem.id);
+
+  const inicioCast = await comMathRandomFixo(0.99, () => worldBossRuntimeService.processarProximaAcao());
+  assert.ok(inicioCast.castIniciado, "esperava o telegraph do cast, não o dano ainda");
+  assert.equal(inicioCast.habilidade, undefined, "cast em andamento não resolve efeito nenhum nesse mesmo tick");
+
+  await personagem.reload();
+  assert.equal(personagem.vida_atual, 9999, "nenhum dano antes do cast resolver");
+
+  await evento.reload();
+  assert.ok(evento.runtime_state.cast_pendente, "cast precisa sobreviver persistido, nunca só em memória");
+  assert.equal(new Date(evento.next_action_at).getTime(), new Date(inicioCast.castIniciado.resolves_at).getTime());
+
+  // Chamar de novo ANTES do prazo é no-op — next_action_at ainda no futuro.
+  const antesDoPrazo = await worldBossRuntimeService.processarProximaAcao();
+  assert.equal(antesDoPrazo, null);
+
+  // Simula o prazo já ter chegado (mesmo mecanismo de "avançar o relógio" já usado nos outros testes de runtime).
+  await WorldBossEvent.update({ next_action_at: new Date(0) }, { where: { id: evento.id } });
+  const resolucao = await comMathRandomFixo(0.99, () => worldBossRuntimeService.processarProximaAcao());
+  assert.equal(resolucao.castResolvido, true);
+  assert.ok(resolucao.habilidade.alvos[0].dano > 0);
+
+  await personagem.reload();
+  assert.equal(personagem.vida_atual, 9999 - resolucao.habilidade.alvos[0].dano);
+
+  await evento.reload();
+  assert.equal(evento.runtime_state.cast_pendente, null, "cast resolvido precisa ser limpo do runtime_state");
+});
+
+testeComBanco("runtime: cast pendente é descartado (nunca resolvido) se a fase mudar antes do prazo", async () => {
+  const { personagem } = await criarPersonagem();
+  personagem.defesa = 0;
+  personagem.vida_atual = 9999;
+  await personagem.save();
+
+  const habilidadeComCast = habilidadeSnapshot({ idAbility: 1, danoBase: 999, custoMana: 0, tempoConjuracaoMs: 5000 });
+  // hp 100% -> fase id=1 no início do cast.
+  const evento = await criarEventoAtivoV2({ hpCurrent: 1000, hpMax: 1000, snapshotOverrides: { manaMaxima: 100, abilities: [habilidadeComCast] } });
+  await worldBossCombatService.entrar(personagem.id);
+
+  const inicioCast = await comMathRandomFixo(0.99, () => worldBossRuntimeService.processarProximaAcao());
+  assert.ok(inicioCast.castIniciado);
+
+  // Outro jogador (ou o próprio scheduler de outra sessão) derruba o HP
+  // pra fase id=2 (<=30%) ENQUANTO o cast ainda está pendente — precisa
+  // ser descartado, nunca resolvido com dano da fase antiga.
+  await WorldBossEvent.update(
+    { hp_current: 200, next_action_at: new Date(0) },
+    { where: { id: evento.id } },
+  );
+
+  const resultadoAposMudarFase = await comMathRandomFixo(0.99, () => worldBossRuntimeService.processarProximaAcao());
+  assert.notEqual(resultadoAposMudarFase.castResolvido, true, "cast da fase anterior nunca pode resolver depois da troca de fase");
+  assert.equal(resultadoAposMudarFase.mudouFase, true);
+
+  // A habilidade não tem fasesPermitidas (elegível em toda fase), então
+  // é normal e correto a IA já iniciar um cast NOVO pra fase atual no
+  // mesmo tick em que descarta o antigo — o que nunca pode acontecer é
+  // aquele cast ANTIGO (com dano calculado pra fase anterior) sobreviver
+  // ou resolver.
+  await evento.reload();
+  if (evento.runtime_state.cast_pendente) {
+    assert.notEqual(
+      evento.runtime_state.cast_pendente.started_at,
+      inicioCast.castIniciado.started_at,
+      "um cast pendente depois da troca de fase só pode ser um cast NOVO, nunca o antigo sobrevivendo",
+    );
+  }
+
+  await personagem.reload();
+  assert.equal(personagem.vida_atual, 9999, "o dano do cast descartado nunca pode ter sido aplicado por engano");
+});
+
+testeComBanco("selecionarAlvos: MAIOR_DANO escolhe quem mais contribuiu, não um aleatório", async () => {
+  const evento = await criarEventoAtivoV2();
+  const { personagem: baixoDano } = await criarPersonagem();
+  const { personagem: altoDano } = await criarPersonagem();
+  await worldBossCombatService.entrar(baixoDano.id);
+  await worldBossCombatService.entrar(altoDano.id);
+
+  await WorldBossContribution.update({ damage_total: 10 }, { where: { event_id: evento.id, character_id: baixoDano.id } });
+  await WorldBossContribution.update({ damage_total: 500 }, { where: { event_id: evento.id, character_id: altoDano.id } });
+
+  const alvos = await sequelize.transaction((transaction) =>
+    worldBossRuntimeService.selecionarAlvos("MAIOR_DANO", null, evento.id, transaction),
+  );
+  assert.equal(alvos.length, 1);
+  assert.equal(alvos[0].character_id, altoDano.id);
+});
+
+testeComBanco("selecionarAlvos: MENOR_VIDA escolhe o participante com menor percentual de HP", async () => {
+  const evento = await criarEventoAtivoV2();
+  // Mesmos defaults de criarPersonagem() pros dois — vidaMax efetiva
+  // igual, então só vida_atual decide o percentual.
+  const { personagem: quaseMorto } = await criarPersonagem();
+  const { personagem: quaseCheio } = await criarPersonagem();
+  await worldBossCombatService.entrar(quaseMorto.id);
+  await worldBossCombatService.entrar(quaseCheio.id);
+
+  quaseMorto.vida_atual = 1;
+  await quaseMorto.save();
+
+  const alvos = await sequelize.transaction((transaction) =>
+    worldBossRuntimeService.selecionarAlvos("MENOR_VIDA", null, evento.id, transaction),
+  );
+  assert.equal(alvos.length, 1);
+  assert.equal(alvos[0].character_id, quaseMorto.id);
+});
+
+testeComBanco("selecionarAlvos: TODOS retorna toda sessão Ativa do evento, N_ALEATORIOS respeita a quantidade pedida", async () => {
+  const evento = await criarEventoAtivoV2();
+  const { personagem: p1 } = await criarPersonagem();
+  const { personagem: p2 } = await criarPersonagem();
+  const { personagem: p3 } = await criarPersonagem();
+  await worldBossCombatService.entrar(p1.id);
+  await worldBossCombatService.entrar(p2.id);
+  await worldBossCombatService.entrar(p3.id);
+
+  const todos = await sequelize.transaction((transaction) => worldBossRuntimeService.selecionarAlvos("TODOS", null, evento.id, transaction));
+  assert.equal(todos.length, 3);
+
+  const doisAleatorios = await sequelize.transaction((transaction) =>
+    worldBossRuntimeService.selecionarAlvos("N_ALEATORIOS", 2, evento.id, transaction),
+  );
+  assert.equal(doisAleatorios.length, 2);
+  assert.equal(new Set(doisAleatorios.map((s) => s.character_id)).size, 2, "N_ALEATORIOS nunca pode repetir o mesmo participante");
 });

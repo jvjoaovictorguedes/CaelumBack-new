@@ -134,6 +134,11 @@ async function montarSnapshot(config, transaction) {
       GAME_SETTINGS_DEFAULT["worldboss.cooldown_hours"],
     ),
     fases: fases.map((fase) => ({
+      // Etapa 5 (§6.2) — WorldBossAbility.fases_permitidas guarda id de
+      // WorldBossPhase, não ordem; sem congelar esse id aqui a IA nunca
+      // conseguiria bater fase_atual contra fases_permitidas depois que
+      // o evento já congelou o snapshot.
+      id: fase.id,
       ordem: fase.ordem,
       nome_fase: fase.nome_fase,
       hp_percentual_max: fase.hp_percentual_max,

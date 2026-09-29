@@ -81,10 +81,25 @@ module.exports = function registerWorldBossHandlers(io) {
       if (typeof callback === "function") callback({ ok: true });
     });
 
-    socket.on("worldboss:entrar-combate", async (_payload, callback) => {
-      const characterId = socket.characterId;
+    // §17.1 — a spec descreve o ticket vindo DIRETO no payload deste
+    // evento (não um "identificar" separado antes). Aceita os dois
+    // caminhos: ticket aqui identifica na hora (útil pro primeiro
+    // entrar/pro resync depois de uma queda de conexão, sempre com um
+    // ticket novo — o antigo já expirou em 30s); sem ticket, reaproveita
+    // o characterId já estabelecido por um "worldboss:identificar"
+    // anterior na MESMA conexão.
+    socket.on("worldboss:entrar-combate", async ({ ticket } = {}, callback) => {
+      let characterId = socket.characterId;
+      if (ticket) {
+        const characterIdViaTicket = await personagemViaTicket(ticket);
+        if (!characterIdViaTicket) {
+          return typeof callback === "function" && callback({ ok: false, erro: "Ticket inválido ou expirado." });
+        }
+        characterId = characterIdViaTicket;
+        socket.characterId = characterId;
+      }
       if (!characterId) {
-        return typeof callback === "function" && callback({ erro: "Identifique seu personagem antes de entrar em combate." });
+        return typeof callback === "function" && callback({ ok: false, erro: "Identifique seu personagem antes de entrar em combate." });
       }
       try {
         const resultado = await combatService().entrar(characterId);
