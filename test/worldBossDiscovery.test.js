@@ -735,6 +735,52 @@ testeComBanco("combate: poder sem mana suficiente é rejeitado, e nunca desconta
   await power.destroy();
 });
 
+testeComBanco("combate: cooldown real do Power (§18.1/§34) — bloqueia exatamente os próximos N turnos e reflete em entrar()", async () => {
+  const CharacterAbilities = require("../src/models/CharacterAbilities");
+  const { personagem } = await criarPersonagem();
+  const evento = await criarEventoAtivo();
+  void evento;
+
+  const power = await Power.create({
+    nome: `Poder com cooldown ${sufixo()}`,
+    descricao: "teste",
+    tipo_poder: "Ativo",
+    custo_mana: 0,
+    dano_base: 1,
+    escala_atributo: "Forca",
+    valor_escala: 0,
+    cooldown: 2,
+  });
+  await CharacterAbilities.create({ id_personagem: personagem.id, id_power: power.id, is_active: true, nivel_habilidade: 1 });
+
+  await worldBossCombatService.entrar(personagem.id);
+  const chave = `power:${power.id}`;
+
+  const r1 = await worldBossCombatService.executarAcao(personagem.id, { tipo: "power", idPoder: power.id });
+  assert.equal(r1.cooldowns[chave], 2, "cooldown recém-aplicado não decrementa no próprio turno de uso");
+
+  await assert.rejects(
+    () => worldBossCombatService.executarAcao(personagem.id, { tipo: "power", idPoder: power.id }),
+    /cooldown/,
+    "usar de novo no turno seguinte precisa ser rejeitado — ainda bloqueado",
+  );
+
+  const reentrada = await worldBossCombatService.entrar(personagem.id);
+  assert.equal(reentrada.cooldowns[chave], 2, "reconexão (entrar()) precisa devolver o cooldown real da sessão, não zerado");
+
+  const r2 = await worldBossCombatService.executarAcao(personagem.id, { tipo: "attack" });
+  assert.equal(r2.cooldowns[chave], 1, "1º turno depois do uso decrementa");
+
+  const r3 = await worldBossCombatService.executarAcao(personagem.id, { tipo: "attack" });
+  assert.equal(r3.cooldowns[chave], undefined, "2º turno depois do uso expira o cooldown por completo");
+
+  const r4 = await worldBossCombatService.executarAcao(personagem.id, { tipo: "power", idPoder: power.id });
+  assert.equal(r4.cooldowns[chave], 2, "cooldown expirado — pode usar de novo, e reinicia a contagem");
+
+  await CharacterAbilities.destroy({ where: { id_power: power.id } });
+  await power.destroy();
+});
+
 testeComBanco("combate: Golpe Final — overkill nunca conta, evento vira DEFEATED com final_blow_character_id, e a sessão encerra", async () => {
   const { personagem } = await criarPersonagem({ nivel: 50, forca: 999 });
   // HP baixíssimo — qualquer acerto de um personagem forte excede

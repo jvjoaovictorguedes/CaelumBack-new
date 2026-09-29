@@ -51,6 +51,7 @@ const worldBossRewardService = require("./worldBossRewardService");
 const worldBossRankingService = require("./worldBossRankingService");
 const worldBossRuntimeService = require("./worldBossRuntimeService");
 const statusEffectService = require("./statusEffectService");
+const cooldownService = require("./cooldownService");
 const { resolverEfeitosDoUso } = require("./combatEffectResolver");
 const { resolverEfeitosDeArmaNoHit } = require("./weaponEffectResolver");
 const { ACTION_TYPE } = require("../config/statusEffectConfig");
@@ -98,7 +99,7 @@ function estadoLutador(personagem, base, vidaMax, manaMax) {
 // Silence): mesmo formato de um resultado normal (dano=0), pra quem
 // consome a resposta (socket/REST) nunca precisar de um branch a mais
 // só pra esse caso.
-function montarResultadoSemAcao({ evento, personagem, vidaMax, manaMax, morreuAntesDeAgir = false, bloqueado = false, motivoBloqueio, actionSeq }) {
+function montarResultadoSemAcao({ evento, personagem, vidaMax, manaMax, morreuAntesDeAgir = false, bloqueado = false, motivoBloqueio, actionSeq, cooldowns = {} }) {
   const hpAtual = Math.max(0, Number(evento.hp_current));
   return {
     nomeAcao: null,
@@ -112,6 +113,7 @@ function montarResultadoSemAcao({ evento, personagem, vidaMax, manaMax, morreuAn
     bloqueado,
     motivoBloqueio: bloqueado ? motivoBloqueio : undefined,
     action_seq: actionSeq,
+    cooldowns,
     lutador: { vida_atual: personagem.vida_atual, mana_atual: personagem.mana_atual, vida_max: vidaMax, mana_max: manaMax },
     boss: {
       event_id: evento.id,
@@ -205,8 +207,14 @@ async function entrar(characterId) {
         imagem_url: p.imagem_url ?? null,
         custo_mana: custoManaEfetivo(p, p.nivel_habilidade ?? 1),
         dano_base: p.dano_base,
+        cooldown: p.cooldown,
         nivel_habilidade: p.nivel_habilidade ?? 1,
       })),
+      // §18.1/§18.3 — cooldowns dos Powers do próprio jogador contra o
+      // Boss: turnos restantes por power_id, exatamente o formato de
+      // cooldownService (`power:<id>` -> turnos), pra reconexão
+      // devolver o estado real sem o cliente ter que adivinhar.
+      cooldowns: sessao.state?.cooldowns ?? {},
       status: await worldBossStatusService.obterStatusPublico(),
     };
   });
@@ -279,6 +287,7 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
     // sessão dele (a próxima, ainda não persistida).
     const turnoJogador = sessao.action_seq + 1;
     let listaJogador = sessao.state?.status ?? [];
+    let cooldownsJogador = sessao.state?.cooldowns ?? {};
 
     // 1) DoT de início de turno (§23 passo 1, mesmo critério do PvP/PvE)
     // — pode matar antes do jogador conseguir agir.
@@ -296,9 +305,10 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
       await personagem.save({ transaction });
       sessao.status = COMBAT_SESSION_STATUS.DERROTADO;
       sessao.derrotado_at = new Date();
-      sessao.state = { ...(sessao.state ?? {}), status: statusEffectService.decrementarDuracoes(listaJogador) };
+      cooldownsJogador = cooldownService.decrementarCooldowns(cooldownsJogador);
+      sessao.state = { ...(sessao.state ?? {}), status: statusEffectService.decrementarDuracoes(listaJogador), cooldowns: cooldownsJogador };
       await sessao.save({ transaction });
-      return montarResultadoSemAcao({ evento, personagem, vidaMax, manaMax, morreuAntesDeAgir: true, actionSeq: sessao.action_seq });
+      return montarResultadoSemAcao({ evento, personagem, vidaMax, manaMax, morreuAntesDeAgir: true, actionSeq: sessao.action_seq, cooldowns: cooldownsJogador });
     }
 
     // 2) Política central de bloqueio de ação (Stun/Freeze/Paralyze
@@ -314,7 +324,8 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
 
     if (controleJogador.bloqueadas.has(tipoAcaoStatus)) {
       await personagem.save({ transaction });
-      sessao.state = { ...(sessao.state ?? {}), status: statusEffectService.decrementarDuracoes(listaJogador) };
+      cooldownsJogador = cooldownService.decrementarCooldowns(cooldownsJogador);
+      sessao.state = { ...(sessao.state ?? {}), status: statusEffectService.decrementarDuracoes(listaJogador), cooldowns: cooldownsJogador };
       await sessao.save({ transaction });
       return montarResultadoSemAcao({
         evento,
@@ -324,6 +335,7 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
         bloqueado: true,
         motivoBloqueio: controleJogador.motivoBloqueioTotal ?? "SILENCE",
         actionSeq: sessao.action_seq,
+        cooldowns: cooldownsJogador,
       });
     }
 
@@ -334,6 +346,12 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
       if (!power) throw erro("Poder inválido.");
       if (custoManaEfetivo(power, power.nivel_habilidade ?? 1) > atacanteEstado.mana_atual) {
         throw erro("Mana insuficiente para esse poder.");
+      }
+      // §18.1/§34 — cooldown real do Power, mesma semântica/estado do
+      // resto do jogo (cooldownService), isolado na sessão contra ESTA
+      // Ameaça (nunca em Character como regra global).
+      if (!cooldownService.podeUsar(cooldownsJogador, power.id)) {
+        throw erro("Essa habilidade ainda está em cooldown.");
       }
       acao = { tipo: "power", power };
     }
@@ -407,8 +425,16 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
     sessao.action_seq += 1;
     // Fim do turno do jogador (§23 passos 8/9) — decrementa a duração
     // do que ELE está sofrendo; o status do Boss nunca decrementa aqui
-    // (só no próprio tick do Boss, worldBossRuntimeService).
-    sessao.state = { ...(sessao.state ?? {}), status: statusEffectService.decrementarDuracoes(listaJogador) };
+    // (só no próprio tick do Boss, worldBossRuntimeService). Cooldown
+    // segue a MESMA regra (§36): o Power recém-usado neste turno entra
+    // no mapa mas não decrementa ainda — só os já ativos de turnos
+    // anteriores.
+    if (acao.tipo === "power" && acao.power.cooldown > 0) {
+      cooldownsJogador = cooldownService.iniciarCooldown(cooldownsJogador, acao.power.id, acao.power.cooldown);
+    }
+    const chaveRecemAplicada = acao.tipo === "power" ? new Set([cooldownService.chaveDoPoder(acao.power.id)]) : undefined;
+    cooldownsJogador = cooldownService.decrementarCooldowns(cooldownsJogador, chaveRecemAplicada);
+    sessao.state = { ...(sessao.state ?? {}), status: statusEffectService.decrementarDuracoes(listaJogador), cooldowns: cooldownsJogador };
     await sessao.save({ transaction });
 
     evento.hp_current = hpDepois;
@@ -495,6 +521,7 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
       // global (esse é do relógio do boss, Etapa 3) — já resolvido
       // dentro desta MESMA transação, nunca uma query extra pós-commit.
       action_seq: sessao.action_seq,
+      cooldowns: cooldownsJogador,
       lutador: {
         vida_atual: personagem.vida_atual,
         mana_atual: personagem.mana_atual,

@@ -157,6 +157,7 @@ module.exports = function registerWorldBossHandlers(io) {
           golpeFinal: resultado.golpeFinal,
           proezasConquistadas: resultado.proezasConquistadas,
           lutador: resultado.lutador,
+          cooldowns: resultado.cooldowns,
           boss: resultado.boss,
         };
         if (client_action_id) ultimaAcaoPorPersonagem.set(characterId, { clientActionId: client_action_id, resposta });
