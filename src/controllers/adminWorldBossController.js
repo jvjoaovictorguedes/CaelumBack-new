@@ -1,6 +1,7 @@
 // Painel Administrativo — Boss Global (catálogo) — controller fino,
 // delega tudo pro adminWorldBossService.
 const adminWorldBossService = require("../services/adminWorldBossService");
+const worldBossBalanceSimulationService = require("../services/worldBossBalanceSimulationService");
 
 function tratarErro(res, error, mensagemPadrao) {
   const statusCode = error.statusCode || 500;
@@ -234,5 +235,15 @@ exports.previewHabilidade = async (req, res) => {
     res.status(200).json({ status: "success", data: preview });
   } catch (error) {
     tratarErro(res, error, "Erro interno do servidor ao calcular preview de habilidade.");
+  }
+};
+
+// Simulador de balanceamento (§14.2).
+exports.simularBalanceamento = async (req, res) => {
+  try {
+    const resultado = await worldBossBalanceSimulationService.simularBalanceamentoWorldBossAdmin(req.params.id, req.body ?? {});
+    res.status(200).json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao simular o balanceamento.");
   }
 };

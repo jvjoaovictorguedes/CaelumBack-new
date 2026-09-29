@@ -55,6 +55,7 @@ const { emitirTicket } = require("../src/services/socketTicketService");
 const { EventEmitter } = require("node:events");
 const adminWorldBossService = require("../src/services/adminWorldBossService");
 const adminWorldBossEventService = require("../src/services/adminWorldBossEventService");
+const worldBossBalanceSimulationService = require("../src/services/worldBossBalanceSimulationService");
 const {
   EVENT_STATUS,
   COMBAT_SESSION_STATUS,
@@ -2667,4 +2668,134 @@ testeComBanco("admin ciclo atual: getStatusOperacional inclui runtime_v2 (mana/f
   await evento.update({ status: EVENT_STATUS.DORMANT });
   const statusDormant = await adminWorldBossEventService.getStatusOperacional();
   assert.equal(statusDormant.runtime_v2, null, "fora de ACTIVE, runtime_v2 precisa ser null — não faz sentido monitor de combate pra quem não despertou");
+});
+
+// Ameaça Mundial V2 — Etapa 12 (§14.2): Simulador de balanceamento.
+testeComBanco("simulador: dano leve contra HP alto — sobrevivência ~100% e dano médio por fase próximo do esperado", async () => {
+  const item = await criarItemGolpeFinal();
+  const config = await WorldBossConfig.create({
+    nome: `Ameaça Simulador Leve ${sufixo()}`,
+    descricao: "teste",
+    ativo: true,
+    peso_selecao: 1,
+    vida_base: 100000,
+    defesa: 0,
+    mensagem_descoberta: "d",
+    mensagem_convocacao: "c",
+    id_item_golpe_final: item.id,
+  });
+  configsCriados.push(config.id);
+  await WorldBossPhase.create({
+    id_world_boss_config: config.id,
+    ordem: 1,
+    nome_fase: "Fase 1",
+    hp_percentual_max: 100,
+    dano_min: 50,
+    dano_max: 50,
+    furia_por_acao_pct: 0,
+  });
+
+  const resultado = await worldBossBalanceSimulationService.simularBalanceamentoWorldBossAdmin(config.id, {
+    personagem: { hp_maximo: 100000, defesa: 0, agilidade: 0 },
+    acoes_por_fase: 100,
+    quantidade_simulacoes: 50,
+  });
+
+  assert.equal(resultado.taxa_sobrevivencia_pct, 100, "100 ações de 50 de dano (5000 no máximo) nunca derruba 100000 de HP");
+  assert.equal(resultado.acao_media_ate_derrotar, null, "ninguém morreu — não há média de ação até derrotar");
+  assert.equal(resultado.furia_media_pct, 0);
+  assert.equal(resultado.furia_maxima_pct, 0);
+  assert.equal(resultado.dano_por_fase.length, 1);
+  const fase1 = resultado.dano_por_fase[0];
+  assert.equal(fase1.acoes_estimadas, 100);
+  // ~95% de chance de acerto (agilidade 0 dos dois lados) * 50 de dano * 100 ações ~= 4750, com folga generosa pra RNG.
+  assert.ok(fase1.dano_medio > 3800 && fase1.dano_medio < 5000, `dano médio esperado por volta de 4750, veio ${fase1.dano_medio}`);
+  assert.equal(fase1.alcancada_em_pct, 100);
+});
+
+testeComBanco("simulador: dano letal contra HP baixo — sobrevivência baixa e fase mais letal identificada", async () => {
+  const item = await criarItemGolpeFinal();
+  const config = await WorldBossConfig.create({
+    nome: `Ameaça Simulador Letal ${sufixo()}`,
+    descricao: "teste",
+    ativo: true,
+    peso_selecao: 1,
+    vida_base: 100000,
+    defesa: 0,
+    mensagem_descoberta: "d",
+    mensagem_convocacao: "c",
+    id_item_golpe_final: item.id,
+  });
+  configsCriados.push(config.id);
+  await WorldBossPhase.create({
+    id_world_boss_config: config.id,
+    ordem: 1,
+    nome_fase: "Fase Única",
+    hp_percentual_max: 100,
+    dano_min: 500,
+    dano_max: 500,
+    furia_por_acao_pct: 0,
+  });
+
+  const resultado = await worldBossBalanceSimulationService.simularBalanceamentoWorldBossAdmin(config.id, {
+    personagem: { hp_maximo: 100, defesa: 0, agilidade: 0 },
+    acoes_por_fase: 10,
+    quantidade_simulacoes: 100,
+  });
+
+  assert.ok(resultado.taxa_sobrevivencia_pct < 20, `perfil de 100 HP contra 500 de dano por ação quase nunca sobrevive, veio ${resultado.taxa_sobrevivencia_pct}%`);
+  assert.ok(resultado.acao_media_ate_derrotar !== null && resultado.acao_media_ate_derrotar <= 3, "primeiro acerto já é fatal — morte esperada bem no início");
+  assert.equal(resultado.fase_mais_letal, 1, "só existe uma fase, então ela é sempre a mais letal quando alguém morre");
+});
+
+testeComBanco("simulador: Fúria cresce e respeita o limite da fase; habilidade cadastrada aparece na frequência de Powers", async () => {
+  const { usuario } = await criarPersonagem();
+  const item = await criarItemGolpeFinal();
+  const config = await WorldBossConfig.create({
+    nome: `Ameaça Simulador Furia ${sufixo()}`,
+    descricao: "teste",
+    ativo: true,
+    peso_selecao: 1,
+    vida_base: 100000,
+    defesa: 0,
+    forca: 50,
+    mana_maxima: 1000,
+    regeneracao_mana_por_acao: 1000,
+    mensagem_descoberta: "d",
+    mensagem_convocacao: "c",
+    id_item_golpe_final: item.id,
+  });
+  configsCriados.push(config.id);
+  await WorldBossPhase.create({
+    id_world_boss_config: config.id,
+    ordem: 1,
+    nome_fase: "Fase 1",
+    hp_percentual_max: 100,
+    dano_min: 10,
+    dano_max: 10,
+    furia_por_acao_pct: 10,
+    limite_furia_pct: 30,
+  });
+  const power = await Power.create({
+    nome: `Poder Simulador ${sufixo()}`,
+    descricao: "teste",
+    tipo_poder: "Ativo",
+    escala_atributo: "Forca",
+    dano_base: 5,
+    custo_mana: 10,
+    cooldown: 0,
+  });
+  powersCriados.push(power.id);
+  await adminWorldBossService.createAdminWorldBossAbility(config.id, { id_power: power.id, peso_uso: 100, prioridade: 10 }, { idAdmin: usuario.id });
+
+  const resultado = await worldBossBalanceSimulationService.simularBalanceamentoWorldBossAdmin(config.id, {
+    personagem: { hp_maximo: 1000000, defesa: 0, agilidade: 0 },
+    acoes_por_fase: 20,
+    quantidade_simulacoes: 30,
+  });
+
+  assert.equal(resultado.furia_maxima_pct, 30, "com 10%/ação e 20 ações, a Fúria bate o limite de 30% bem antes do fim");
+  assert.ok(resultado.furia_media_pct > 0 && resultado.furia_media_pct <= 30);
+  assert.ok(resultado.frequencia_powers.length > 0, "habilidade de prioridade máxima e mana sempre disponível precisa aparecer na frequência");
+  assert.equal(resultado.frequencia_powers[0].nome, power.nome);
 });

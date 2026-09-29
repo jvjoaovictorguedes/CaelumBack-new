@@ -46,6 +46,7 @@ catalogo.delete("/configs/:id/ranking-rewards/:idRecompensa", adminWorldBossCont
 
 catalogo.post("/configs/:id/preview-damage", adminWorldBossController.previewDano);
 catalogo.post("/configs/:id/preview-ability", adminWorldBossController.previewHabilidade);
+catalogo.post("/configs/:id/simulate-balance", adminWorldBossController.simularBalanceamento);
 router.use("/", catalogo);
 
 const eventoAtual = express.Router();
