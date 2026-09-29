@@ -498,4 +498,5 @@ module.exports = {
   posicaoPvp,
   rankingBoss,
   posicaoBoss,
+  SQL_EXCLUIR_ADMINS,
 };

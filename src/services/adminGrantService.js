@@ -11,13 +11,9 @@ const { Op } = require("sequelize");
 const { sequelize } = require("../config/database");
 const Character = require("../models/Character");
 const User = require("../models/User");
-const Item = require("../models/Item");
-const { concederOuro } = require("./goldService");
-const { adicionarExperiencia } = require("./experienceService");
-const { addStack } = require("./inventoryService");
-const { ehInstanciavel, create: criarInstanciaEquipamento } = require("./equipmentInstanceService");
 const { validarRaridade } = require("./equipmentRarityService");
 const { registrarAcao } = require("./adminAuditService");
+const { aplicarPacoteDeRecompensa } = require("./rewardPayoutService");
 
 function erro(mensagem, statusCode = 400) {
   const e = new Error(mensagem);
@@ -91,42 +87,11 @@ async function grantToCharacter(idPersonagem, payload, { idAdmin, req }) {
   }
 
   return sequelize.transaction(async (transaction) => {
-    const character = await Character.findByPk(idPersonagem, { transaction, lock: transaction.LOCK.UPDATE });
-    if (!character) throw erro("Personagem não encontrado.", 404);
-
-    const concedido = { ouro: 0, xp: 0, niveisGanhos: 0, itens: [], equipamentos: [] };
-
-    if (ouro != null) {
-      concederOuro(character, ouro);
-      concedido.ouro = ouro;
-    }
-
-    for (const linha of itensValidados) {
-      const item = await Item.findByPk(linha.id_item, { transaction });
-      if (!item) throw erro(`Item #${linha.id_item} não encontrado.`);
-      if (ehInstanciavel(item.tipo_item)) {
-        const raridade = linha.raridade ?? item.raridade;
-        for (let i = 0; i < linha.quantidade; i++) {
-          await criarInstanciaEquipamento({ idPersonagem, idItem: item.id, raridade, refinamento: linha.refinamento ?? 0 }, transaction);
-        }
-        concedido.equipamentos.push({ id_item: item.id, nome: item.nome, raridade, quantidade: linha.quantidade });
-      } else {
-        await addStack(idPersonagem, item.id, linha.quantidade, transaction);
-        concedido.itens.push({ id_item: item.id, nome: item.nome, quantidade: linha.quantidade });
-      }
-    }
-
-    await character.save({ transaction });
-
-    // adicionarExperiencia já salva o character sozinha (inclusive
-    // recalculando vida/mana no level up) — roda por último, depois do
-    // save acima, pra não sobrescrever o ouro concedido com um character
-    // desatualizado.
-    if (xp != null) {
-      const resultado = await adicionarExperiencia(idPersonagem, xp, { transaction, personagem: character });
-      concedido.xp = xp;
-      concedido.niveisGanhos = resultado.niveisGanhos;
-    }
+    const { character, concedido } = await aplicarPacoteDeRecompensa(
+      idPersonagem,
+      { ouro, xp, itens: itensValidados },
+      transaction,
+    );
 
     await registrarAcao({
       idAdmin,

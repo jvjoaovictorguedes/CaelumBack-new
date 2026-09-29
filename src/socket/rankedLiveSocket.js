@@ -28,6 +28,9 @@ const rankedDailyLimitService = require("../services/rankedDailyLimitService");
 const rankedAiService = require("../services/rankedAiService");
 const tournamentService = require("../services/tournamentService");
 const pvpLiveSocket = require("./pvpLiveSocket");
+const { registrarProgresso } = require("../services/missionService");
+const { registrarProgressoContrato } = require("../services/adventureGuildObjectiveService");
+const { registrarProgressoMissaoGuilda } = require("../services/guildMissionService");
 const { JANELA_RECONEXAO_SEGUNDOS, IA_DELAY_TURNO_MS } = require("../config/rankedConfig");
 
 const NOME_ARENA_RANKED = "Arena Ranqueada de Caelum";
@@ -237,6 +240,24 @@ async function finalizarDueloRanked(io, duelId, vencedorChave, motivo = "combate
             venceu: humanoVenceu,
             transaction,
           });
+
+          // Bug relatado: jogador vencia na Arena Ranqueada e nenhuma
+          // missão/contrato/missão de guilda de "vencer duelos" registrava
+          // — aplicarResultadoDuelo (pvpController.js) só é chamado pelo
+          // duelo casual (assíncrono/ao vivo), nunca por aqui. O defensor
+          // é sempre controlado por IA (nunca um jogador de verdade), só o
+          // desafiante humano credita progresso, e só quando ele venceu.
+          if (humanoVenceu) {
+            const desafianteTravado = await Character.findByPk(idDesafiante, {
+              transaction,
+              lock: transaction.LOCK.UPDATE,
+            });
+            if (desafianteTravado) {
+              await registrarProgresso(desafianteTravado, "VencerDuelos", 1, transaction);
+              await registrarProgressoContrato(desafianteTravado, "VencerDuelos", 1, {}, transaction);
+              await registrarProgressoMissaoGuilda(desafianteTravado, "VencerDuelos", 1, transaction);
+            }
+          }
         } else {
           // §11 — falha comprovada do servidor devolve a tentativa. Dentro
           // da MESMA transação, pra nunca estornar sem registrar o motivo.

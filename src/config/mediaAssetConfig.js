@@ -15,7 +15,7 @@ module.exports = {
   // tipo é o service (validarEReencodarImagem/validarAudio).
   TAMANHO_MAXIMO_BYTES_AUDIO: 20 * 1024 * 1024, // 20 MB (áudio)
   TIPOS_ACEITOS_AUDIO: ["audio/mpeg", "audio/mp3", "audio/ogg", "audio/wav", "audio/x-wav", "audio/wave"],
-  CATEGORIAS_VALIDAS: ["Item", "Power", "Monster", "EquipmentSet", "Musica", "Outro"],
+  CATEGORIAS_VALIDAS: ["Item", "Power", "Monster", "EquipmentSet", "Musica", "Outro", "Avatar"],
   TIPOS_VALIDOS: ["imagem", "audio"],
   // Slug do grupo: minúsculas, números, hífen e underscore — mesmo
   // formato de "key" já usado em EquipmentSet.key, pra ficar previsível

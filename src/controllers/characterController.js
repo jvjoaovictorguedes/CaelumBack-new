@@ -603,29 +603,9 @@ exports.getMeuPersonagem = async (req, res) => {
   }
 };
 
-// Catálogo fixo de avatares de perfil — todos reaproveitando arte que
-// já existe no jogo (ilustrações de raça/classe), sem depender de URL
-// arbitrária vinda do cliente (evita um jogador setar avatar_key pra
-// uma URL de fora e o app renderizar imagem de terceiro sem controle
-// nenhum). O frontend resolve cada chave pra um arquivo estático — ver
-// AVATAR_CATALOGO em media-url.ts, que precisa ficar em sincronia com
-// esta lista.
-const AVATARES_VALIDOS = [
-  "guerreiro",
-  "mago",
-  "humano",
-  "humana",
-  "elfo",
-  "elfa",
-  "anao",
-  "ana",
-  "orc",
-  "orca",
-  "celestial",
-  "minotauro",
-  "dragao",
-  "guardiao_celeste",
-];
+// Avatares de perfil — ver avatarService.js pro catálogo completo
+// (estáticos + enviados pelo admin) e a regra de quem pode usar qual.
+const { avatarKeyPermitidoParaPersonagem, listarAvataresDisponiveis } = require("../services/avatarService");
 
 // Único uso legítimo hoje é a troca de sexo (GenderToggleButton) e a
 // troca de avatar (AvatarPickerModal). Sem uma lista explícita, esse
@@ -643,12 +623,15 @@ exports.updateCharacter = async (req, res) => {
       return res.status(400).json({ message: "Nenhum campo editável foi enviado." });
     }
 
-    if (
-      dadosPermitidos.avatar_key !== undefined &&
-      dadosPermitidos.avatar_key !== null &&
-      !AVATARES_VALIDOS.includes(dadosPermitidos.avatar_key)
-    ) {
-      return res.status(400).json({ message: "Avatar inválido." });
+    if (dadosPermitidos.avatar_key !== undefined && dadosPermitidos.avatar_key !== null) {
+      const personagemAtual = await Character.findByPk(req.params.id, { include: CHARACTER_INCLUDES });
+      if (!personagemAtual) {
+        return res.status(404).json({ message: "Personagem não encontrado." });
+      }
+      const permitido = await avatarKeyPermitidoParaPersonagem(dadosPermitidos.avatar_key, personagemAtual);
+      if (!permitido) {
+        return res.status(400).json({ message: "Avatar inválido pra sua raça/classe." });
+      }
     }
 
     const [updatedRows] = await Character.update(dadosPermitidos, {
@@ -681,6 +664,26 @@ exports.updateCharacter = async (req, res) => {
     res
       .status(500)
       .json({ message: "Erro interno do servidor ao atualizar personagem." });
+  }
+};
+
+// GET /api/characters/:id/avatares-disponiveis — opções que ESSE
+// personagem pode escolher no AvatarPickerModal (raças base livres +
+// guerreiro/mago/celestial só se aplicável + avatares extras do admin
+// já filtrados pela restrição de raça/classe deles). Nunca confiar só
+// na validação do PATCH pra isso — o picker não deve nem mostrar opção
+// que o servidor recusaria.
+exports.getAvataresDisponiveis = async (req, res) => {
+  try {
+    const character = await Character.findByPk(req.params.id, { include: CHARACTER_INCLUDES });
+    if (!character) {
+      return res.status(404).json({ message: "Personagem não encontrado." });
+    }
+    const avatares = await listarAvataresDisponiveis(character);
+    res.status(200).json({ status: "success", data: avatares });
+  } catch (error) {
+    console.error("Erro ao listar avatares disponíveis:", error);
+    res.status(500).json({ message: "Erro interno do servidor ao listar avatares." });
   }
 };
 

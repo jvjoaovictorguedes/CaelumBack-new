@@ -207,7 +207,12 @@ async function buscarStatusPorOferta(idPersonagem, idsOfertas, transaction) {
 
 async function listarContratosAtivos(idPersonagem, transaction) {
   return CharacterAdventureGuildContract.findAll({
-    where: { id_personagem: idPersonagem, status: ["Ativo", "Concluido"] },
+    // eh_provacao:false — a Provação tem seu próprio card dedicado
+    // (ProvacaoCard, alimentado por obterVisaoGeral/obterProvacaoAtiva);
+    // sem esse filtro ela aparecia duplicada aqui também (e, pior,
+    // sozinha aqui — sem o texto "promoção de Rank" — no intervalo em
+    // que obterProvacaoAtiva só reconhecia status "Ativo").
+    where: { id_personagem: idPersonagem, eh_provacao: false, status: ["Ativo", "Concluido"] },
     include: [
       {
         model: AdventureGuildMission,

@@ -18,9 +18,18 @@ function erroGuilda(statusCode, mensagem) {
   return Object.assign(new Error(mensagem), { statusCode });
 }
 
-async function obterProvacaoAtiva(idPersonagem, transaction) {
+// Bug relatado: a Provação completada nunca aparecia como concluída —
+// esta função só olhava status "Ativo", então no exato instante em que
+// registrarProgressoContrato marcava a Provação como "Concluido" (e já
+// promovia o Rank, ver adventureGuildProgressionService), ela
+// desaparecia da tela sem nunca ter mostrado o estado "concluída,
+// resgate a recompensa". `statuses` deixa o uso de bloqueio (iniciar/
+// falhar Provação, que só faz sentido contra uma Provação realmente
+// ATIVA) intocado, e só a tela (obterVisaoGeral) passa a pedir também
+// "Concluido" pra continuar mostrando o card até o jogador resgatar.
+async function obterProvacaoAtiva(idPersonagem, transaction, statuses = ["Ativo"]) {
   return CharacterAdventureGuildContract.findOne({
-    where: { id_personagem: idPersonagem, eh_provacao: true, status: "Ativo" },
+    where: { id_personagem: idPersonagem, eh_provacao: true, status: statuses },
     include: [
       {
         model: AdventureGuildMission,
