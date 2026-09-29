@@ -391,9 +391,13 @@ async function updateAdminZoneMonster(id, payload, { idAdmin, req }) {
 const PPM_MAXIMO = 1_000_000;
 const CAMPOS_LOOT = ["id_monstro", "id_item", "chance_ppm", "quantidade_min", "quantidade_max", "categoria", "ativo"];
 
-async function listAdminMonsterLoot({ idMonstro } = {}) {
+async function listAdminMonsterLoot({ idMonstro, idItem } = {}) {
   const where = {};
   if (idMonstro) where.id_monstro = idMonstro;
+  // idItem — busca reversa "quem dropa este item", usada pelo Painel de
+  // Classes (§ requisito ITEM de evolução) pra mostrar/configurar onde a
+  // relíquia exigida cai, sem precisar abrir a tela de Aventura à parte.
+  if (idItem) where.id_item = idItem;
   return AdventureMonsterLoot.findAll({
     where,
     // AdventureMonsterLoot->AdventureMonster também não tem alias em
@@ -657,9 +661,11 @@ async function sincronizarLootMonstro(idMonstro, lootPayload, { idAdmin, req }) 
 
 // GET /monsters/:id (§7.3) — detalhe agregado: reduz o número de
 // requests que o MonsterEditor precisa fazer ao abrir (stats + Poder +
-// drops + zonas onde aparece, essa última só leitura aqui — editar
-// vínculo de zona continua sendo trabalho do ZoneEditor, nunca duplicado
-// aqui dentro).
+// drops + zonas onde aparece). Pedido do jogador: MonsterEditor passou a
+// editar o vínculo de zona também (adicionar o monstro a qualquer zona,
+// nova ou antiga, sem depender de abrir o ZoneEditor pra isso) — por
+// isso `id`/`nivel_jogador_minimo` do vínculo vão junto agora, senão o
+// front não tem como chamar PATCH /zone-monsters/:id.
 async function getAdminMonsterDetail(id) {
   const monstro = await AdventureMonster.findByPk(id);
   if (!monstro) throw erro("Monstro não encontrado.", 404);
@@ -679,10 +685,12 @@ async function getAdminMonsterDetail(id) {
     combat_power: calcularPoderMonstro(json),
     loot,
     zonas: vinculos.map((v) => ({
+      id: v.id,
       id_area: v.id_area,
       nome_zona: v.AdventureZone?.nome ?? null,
       tipo_aparicao: v.tipo_aparicao,
       peso_aparicao: v.peso_aparicao,
+      nivel_jogador_minimo: v.nivel_jogador_minimo,
       ativo: v.ativo,
     })),
   };
