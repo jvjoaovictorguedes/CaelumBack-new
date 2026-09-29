@@ -148,6 +148,37 @@ async function entrar(characterId) {
       sessao = null;
     }
     if (!sessao) {
+      // §8.2 — reentrada configurável: DERROTADO neste MESMO evento
+      // nunca reabre sessão de graça. Sem regra nenhuma cadastrada
+      // (reentrada_permitida=false, default mais seguro), a derrota é
+      // definitiva pro resto do ciclo — a contribuição acumulada até
+      // ali permanece (§8.1), só o pool de alvos que não recebe ele de
+      // volta.
+      const derrotaAnterior = await WorldBossCombatSession.findOne({
+        where: { character_id: characterId, event_id: evento.id, status: COMBAT_SESSION_STATUS.DERROTADO },
+        order: [["derrotado_at", "DESC"]],
+        transaction,
+      });
+      if (derrotaAnterior) {
+        const snapshotReentrada = evento.config_snapshot ?? {};
+        if (!snapshotReentrada.reentrada_permitida) {
+          throw erro("Você foi derrotado pela Ameaça Mundial e não pode reentrar neste ciclo.");
+        }
+        const cooldownMs = Math.max(0, Number(snapshotReentrada.cooldown_reentrada_segundos) || 0) * 1000;
+        const liberadoEm = new Date((derrotaAnterior.derrotado_at?.getTime() ?? 0) + cooldownMs);
+        if (cooldownMs > 0 && liberadoEm.getTime() > Date.now()) {
+          const restanteSegundos = Math.ceil((liberadoEm.getTime() - Date.now()) / 1000);
+          throw erro(`Você poderá reentrar em ${restanteSegundos} segundo(s).`);
+        }
+        // §8.3 — nunca cura ao entrar; reentrar com HP ainda zerado (não
+        // recuperado por outro meio, ex.: Taverna) só devolveria um
+        // alvo morto pro pool. Rejeita explicitamente em vez de criar
+        // uma sessão Ativa inútil.
+        const personagemDerrotado = await Character.findByPk(characterId, { transaction });
+        if (!personagemDerrotado || personagemDerrotado.vida_atual <= 0) {
+          throw erro("Recupere sua vida antes de reentrar na Ameaça Mundial.");
+        }
+      }
       sessao = await WorldBossCombatSession.create(
         { event_id: evento.id, character_id: characterId, status: COMBAT_SESSION_STATUS.ATIVO, action_seq: 0, state: {} },
         { transaction },

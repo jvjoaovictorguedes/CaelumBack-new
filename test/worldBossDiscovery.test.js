@@ -2076,3 +2076,83 @@ testeComBanco("runtime: habilidade do Boss com PowerStatusEffect (Enemy) aplica 
   await PowerStatusEffect.destroy({ where: { id: efeito.id } });
   await power.destroy();
 });
+
+// Ameaça Mundial V2 — Etapa 7: Morte/reentrada (§8.2/§8.3).
+
+testeComBanco("combate: sem reentrada_permitida (default), jogador derrotado nunca pode entrar de novo no mesmo evento", async () => {
+  const { personagem } = await criarPersonagem();
+  const evento = await criarEventoAtivo();
+  await WorldBossCombatSession.create({
+    event_id: evento.id,
+    character_id: personagem.id,
+    status: COMBAT_SESSION_STATUS.DERROTADO,
+    action_seq: 3,
+    derrotado_at: new Date(),
+    state: {},
+  });
+
+  await assert.rejects(() => worldBossCombatService.entrar(personagem.id), /não pode reentrar/);
+});
+
+testeComBanco("combate: reentrada_permitida=true mas cooldown ainda não passou é rejeitada com o tempo restante", async () => {
+  const { personagem } = await criarPersonagem();
+  const evento = await criarEventoAtivo();
+  evento.config_snapshot = { ...evento.config_snapshot, reentrada_permitida: true, cooldown_reentrada_segundos: 60 };
+  await evento.save();
+  await WorldBossCombatSession.create({
+    event_id: evento.id,
+    character_id: personagem.id,
+    status: COMBAT_SESSION_STATUS.DERROTADO,
+    action_seq: 3,
+    derrotado_at: new Date(),
+    state: {},
+  });
+
+  await assert.rejects(() => worldBossCombatService.entrar(personagem.id), /poderá reentrar em/);
+});
+
+testeComBanco("combate: cooldown de reentrada já passado, mas HP ainda zerado, continua rejeitado até recuperar vida", async () => {
+  const { personagem } = await criarPersonagem();
+  personagem.vida_atual = 0;
+  await personagem.save();
+  const evento = await criarEventoAtivo();
+  evento.config_snapshot = { ...evento.config_snapshot, reentrada_permitida: true, cooldown_reentrada_segundos: 1 };
+  await evento.save();
+  await WorldBossCombatSession.create({
+    event_id: evento.id,
+    character_id: personagem.id,
+    status: COMBAT_SESSION_STATUS.DERROTADO,
+    action_seq: 3,
+    derrotado_at: new Date(Date.now() - 60_000),
+    state: {},
+  });
+
+  await assert.rejects(() => worldBossCombatService.entrar(personagem.id), /Recupere sua vida/);
+});
+
+testeComBanco("combate: reentrada com cooldown passado e vida recuperada cria uma sessão Ativa NOVA (nunca cura sozinha)", async () => {
+  const { personagem } = await criarPersonagem();
+  const vidaAntesDeReentrar = personagem.vida_atual;
+  const evento = await criarEventoAtivo();
+  evento.config_snapshot = { ...evento.config_snapshot, reentrada_permitida: true, cooldown_reentrada_segundos: 1 };
+  await evento.save();
+  const sessaoAntiga = await WorldBossCombatSession.create({
+    event_id: evento.id,
+    character_id: personagem.id,
+    status: COMBAT_SESSION_STATUS.DERROTADO,
+    action_seq: 3,
+    derrotado_at: new Date(Date.now() - 60_000),
+    state: {},
+  });
+
+  const resultado = await worldBossCombatService.entrar(personagem.id);
+  assert.notEqual(resultado.sessao.id, sessaoAntiga.id, "reentrada precisa criar uma sessão NOVA, nunca reabrir a DERROTADO");
+
+  const novaSessao = await WorldBossCombatSession.findOne({
+    where: { event_id: evento.id, character_id: personagem.id, status: COMBAT_SESSION_STATUS.ATIVO },
+  });
+  assert.ok(novaSessao);
+
+  await personagem.reload();
+  assert.equal(personagem.vida_atual, vidaAntesDeReentrar, "reentrar nunca cura silenciosamente (§8.3)");
+});
