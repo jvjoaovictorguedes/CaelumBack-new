@@ -20,6 +20,12 @@ router.patch("/species/:id", adminFishingController.atualizarEspecie);
 router.get("/pool", adminFishingController.listarPool);
 router.post("/pool", adminFishingController.criarPool);
 router.patch("/pool/:id", adminFishingController.atualizarPool);
+router.get("/pool/chance/:idZone", adminFishingController.previewChancePool);
+
+router.get("/rods", adminFishingController.listarVaras);
+
+router.post("/balance/simulate", adminFishingController.simularBalanceamento);
+router.get("/balance/matrix", adminFishingController.simularMatrizPorVara);
 
 router.get("/ports", adminFishingController.listarPortos);
 router.post("/ports", adminFishingController.criarPorto);

@@ -17,7 +17,10 @@ const MarineRoute = require("../models/MarineRoute");
 const FishingTournament = require("../models/FishingTournament");
 const Item = require("../models/Item");
 const WorldMapNode = require("../models/WorldMapNode");
+const FishingRodProperties = require("../models/FishingRodProperties");
 const { registrarAcao } = require("./adminAuditService");
+const { calcularPesosDoPool } = require("./fishingEncounterService");
+const { rotuloDificuldade } = require("../config/fishingConfig");
 
 function erro(mensagem, statusCode = 400) {
   const e = new Error(mensagem);
@@ -121,10 +124,17 @@ function validarEspecie(dados) {
   }
 }
 
+// Rótulo humano de faixa de dificuldade (spec §8.4 "Dificuldade base
+// 1..1000 com rótulo humano de faixa") — anexado na leitura, nunca
+// persistido (é puramente derivado de dificuldade_base).
 async function listAdminFishingSpecies() {
-  return FishingSpecies.findAll({
+  const especies = await FishingSpecies.findAll({
     include: [{ model: Item, as: "item", attributes: ["id", "nome", "raridade", "imagem_url"] }],
     order: [["key", "ASC"]],
+  });
+  return especies.map((especie) => {
+    const json = especie.toJSON();
+    return { ...json, dificuldade_rotulo: rotuloDificuldade(json.dificuldade_base) };
   });
 }
 
@@ -253,6 +263,38 @@ async function updateAdminFishingPool(id, payload, { idAdmin, req }) {
     });
     return vinculo;
   });
+}
+
+// Chance de encontro calculada (spec §5.1/§8.1/§10.1/§12.1) — o Admin
+// NUNCA digita percentual manualmente; a tela mostra a chance NORMALIZADA
+// pra um "Nível de Pesca de preview" e uma "Isca de preview", usando a
+// MESMA função (fishingEncounterService.calcularPesosDoPool) que o
+// sorteio real do jogador usa. Qualquer mudança de encounter_weight,
+// nível mínimo, ativo ou afinidade de isca se reflete aqui na próxima
+// leitura, sem cache/matriz persistida (spec §10.1: "nunca uma matriz
+// de chances... como fonte de verdade").
+async function previewChanceEncontroDaZona(idZone, { nivelPesca = 1, idBaitItem = null } = {}) {
+  if (!idZone) throw erro("idZone é obrigatório.");
+  const pesos = await calcularPesosDoPool(idZone, nivelPesca, idBaitItem);
+  const total = pesos.reduce((soma, p) => soma + p.peso, 0);
+
+  // calcularPesosDoPool é a MESMA função do runtime (nunca alterada aqui
+  // pra ficar idêntica ao sorteio real) — ela não carrega o nome
+  // exibível do Item, só a espécie/key. Busca o nome à parte, só pra UI.
+  const ids = pesos.map((p) => p.id_species);
+  const especies = ids.length
+    ? await FishingSpecies.findAll({ where: { id: ids }, include: [{ model: Item, as: "item", attributes: ["nome"] }] })
+    : [];
+  const nomePorId = new Map(especies.map((e) => [e.id, e.item?.nome ?? e.key]));
+
+  return pesos
+    .map((p) => ({
+      id_species: p.id_species,
+      nome: nomePorId.get(p.id_species) ?? p.species?.key,
+      peso_efetivo: p.peso,
+      chance: total > 0 ? p.peso / total : 0,
+    }))
+    .sort((a, b) => b.chance - a.chance);
 }
 
 // ---------------------------------------------------------------- PORTOS
@@ -621,6 +663,28 @@ async function updateAdminFishingTournament(id, payload, { idAdmin, req }) {
   });
 }
 
+// --------------------------------------------------------- VARAS (read-only)
+// Spec §8.3 "trazer varas pro contexto da Pesca... evitar duplicar
+// dados; reutilizar endpoints/services de Item sempre que possível" —
+// FishingRodProperties continua gerenciado pelo Admin de Itens (tipo
+// "Ferramenta"); isto é só uma LEITURA read-only pra comparação/
+// balanceamento dentro do Admin de Pesca, nunca um segundo CRUD.
+async function listAdminFishingRods() {
+  const itens = await Item.findAll({
+    where: { tipo_item: "Ferramenta" },
+    include: [{ model: FishingRodProperties, as: "fishingRodProperties" }],
+    order: [["nome", "ASC"]],
+  });
+  return itens
+    .filter((item) => item.fishingRodProperties)
+    .map((item) => ({
+      id_item: item.id,
+      nome: item.nome,
+      raridade: item.raridade,
+      propriedades_base: item.fishingRodProperties,
+    }));
+}
+
 module.exports = {
   listAdminFishingZones,
   createAdminFishingZone,
@@ -631,6 +695,8 @@ module.exports = {
   listAdminFishingPool,
   createAdminFishingPool,
   updateAdminFishingPool,
+  previewChanceEncontroDaZona,
+  listAdminFishingRods,
   listAdminFishingPorts,
   createAdminFishingPort,
   updateAdminFishingPort,

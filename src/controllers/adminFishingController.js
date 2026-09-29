@@ -1,5 +1,6 @@
 // Painel Administrativo — controller fino, delega pro adminFishingService.
 const adminFishingService = require("../services/adminFishingService");
+const fishingBalanceSimulatorService = require("../services/fishingBalanceSimulatorService");
 
 function tratarErro(res, error, mensagemPadrao) {
   const statusCode = error.statusCode || 500;
@@ -101,6 +102,57 @@ exports.atualizarPool = async (req, res) => {
     res.status(200).json({ status: "success", data: { item } });
   } catch (error) {
     tratarErro(res, error, "Erro interno do servidor ao atualizar vínculo no pool.");
+  }
+};
+
+// Chance de encontro calculada (spec §5.1/§8.1) — nunca digitada
+// manualmente, sempre recalculada pela mesma função do runtime.
+exports.previewChancePool = async (req, res) => {
+  try {
+    const { nivelPesca, idBaitItem } = req.query;
+    const chances = await adminFishingService.previewChanceEncontroDaZona(Number(req.params.idZone), {
+      nivelPesca: nivelPesca ? Number(nivelPesca) : 1,
+      idBaitItem: idBaitItem ? Number(idBaitItem) : null,
+    });
+    res.status(200).json({ status: "success", data: { chances } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao calcular a chance de encontro.");
+  }
+};
+
+// Varas (read-only — spec §8.3, fonte de verdade continua no Admin de Itens)
+exports.listarVaras = async (req, res) => {
+  try {
+    const varas = await adminFishingService.listAdminFishingRods();
+    res.status(200).json({ status: "success", data: { varas } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao listar varas de pesca.");
+  }
+};
+
+// Simulador / Balanceador (spec §9/§10/§17.4) — reutiliza o fishingEngine
+// real, nunca uma fórmula paralela no frontend.
+exports.simularBalanceamento = async (req, res) => {
+  try {
+    const resultado = await fishingBalanceSimulatorService.simularBalanceamento(req.body ?? {});
+    res.status(200).json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao simular o balanceamento.");
+  }
+};
+
+exports.simularMatrizPorVara = async (req, res) => {
+  try {
+    const { idRodItem, refinamentoVara, nivelPesca, numSimulacoes } = req.query;
+    const matriz = await fishingBalanceSimulatorService.simularMatrizPorVara({
+      idRodItem: idRodItem ? Number(idRodItem) : undefined,
+      refinamentoVara: refinamentoVara ? Number(refinamentoVara) : 0,
+      nivelPesca: nivelPesca ? Number(nivelPesca) : 1,
+      numSimulacoes: numSimulacoes ? Number(numSimulacoes) : undefined,
+    });
+    res.status(200).json({ status: "success", data: { matriz } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao simular a matriz vara x espécie.");
   }
 };
 

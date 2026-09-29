@@ -22,7 +22,9 @@ const MarineRoute = require("../src/models/MarineRoute");
 const FishingTournament = require("../src/models/FishingTournament");
 const WorldMapNode = require("../src/models/WorldMapNode");
 const WorldMapConnection = require("../src/models/WorldMapConnection");
+const FishingRodProperties = require("../src/models/FishingRodProperties");
 const adminFishingService = require("../src/services/adminFishingService");
+const fishingBalanceSimulatorService = require("../src/services/fishingBalanceSimulatorService");
 
 let temBanco = false;
 test.before(async () => {
@@ -60,6 +62,7 @@ test.after(async () => {
   await FishingSpecies.destroy({ where: { id: especiesCriadas.length ? especiesCriadas : [-1] } });
   await FishingZone.destroy({ where: { id: zonasCriadas.length ? zonasCriadas : [-1] } });
   await FishingPort.destroy({ where: { id: portosCriados.length ? portosCriados : [-1] } });
+  if (itensCriados.length > 0) await FishingRodProperties.destroy({ where: { id_item: itensCriados } });
   if (itensCriados.length > 0) await Item.destroy({ where: { id: itensCriados } });
   if (temBanco) await sequelize.close();
 });
@@ -311,6 +314,127 @@ testeComBanco("admin fishing rotas marítimas: create exige porto/zona existente
 
   const atualizada = await adminFishingService.updateAdminMarineRoute(rota.id, { distance: 9 }, { idAdmin: 1 });
   assert.equal(atualizada.distance, 9);
+});
+
+async function criarItemVara(nome = "Vara de Teste") {
+  const item = await Item.create({
+    nome: `${nome} ${sufixo()}`,
+    descricao: "Vara de teste do admin de Pesca.",
+    tipo_item: "Ferramenta",
+    raridade: "Comum",
+    tier_equipamento: 5,
+  });
+  itensCriados.push(item.id);
+  await FishingRodProperties.create({
+    id_item: item.id,
+    forca_linha: 300,
+    controle: 300,
+    recolhimento: 300,
+    precisao: 300,
+    estabilidade: 300,
+    nivel_pesca_minimo: 1,
+  });
+  return item;
+}
+
+// ------------------------------------------------------ CHANCE DE ENCONTRO
+testeComBanco("admin fishing chance de encontro: normaliza pra 100% entre espécies elegíveis (spec Pesca v3 §5.1/§10.1)", async () => {
+  const itemA = await criarItemMaterial("Peixe A");
+  const itemB = await criarItemMaterial("Peixe B");
+  const especieA = await adminFishingService.createAdminFishingSpecies(
+    { key: `especie_a_${sufixo()}`, id_item: itemA.id, comportamento_key: "CALM", dificuldade_base: 100, peso_min_g: 100, peso_max_g: 500 },
+    { idAdmin: 1 },
+  );
+  const especieB = await adminFishingService.createAdminFishingSpecies(
+    { key: `especie_b_${sufixo()}`, id_item: itemB.id, comportamento_key: "BURST", dificuldade_base: 500, peso_min_g: 100, peso_max_g: 500 },
+    { idAdmin: 1 },
+  );
+  especiesCriadas.push(especieA.id, especieB.id);
+
+  const zona = await adminFishingService.createAdminFishingZone(
+    { key: `zona_chance_${sufixo()}`, nome: "Zona Chance", nivel_pesca_minimo: 1 },
+    { idAdmin: 1 },
+  );
+  zonasCriadas.push(zona.id);
+
+  await adminFishingService.createAdminFishingPool({ id_zone: zona.id, id_species: especieA.id, encounter_weight: 300 }, { idAdmin: 1 });
+  await adminFishingService.createAdminFishingPool({ id_zone: zona.id, id_species: especieB.id, encounter_weight: 100 }, { idAdmin: 1 });
+
+  const chances = await adminFishingService.previewChanceEncontroDaZona(zona.id, { nivelPesca: 1 });
+  assert.equal(chances.length, 2);
+  const somaChances = chances.reduce((soma, c) => soma + c.chance, 0);
+  assert.ok(Math.abs(somaChances - 1) < 1e-9, "chances deveriam somar 100% entre espécies elegíveis");
+  const chanceA = chances.find((c) => c.id_species === especieA.id).chance;
+  assert.ok(Math.abs(chanceA - 0.75) < 1e-9, "peso 300 contra pool total 400 deveria dar 75%");
+
+  // Desativar o vínculo remove a espécie do cálculo sem exigir nenhuma
+  // edição manual de percentual — só recalcula (spec §10.2/§10.3).
+  const pool = await adminFishingService.listAdminFishingPool({ idZone: zona.id });
+  const vinculoB = pool.find((p) => p.id_species === especieB.id);
+  await adminFishingService.updateAdminFishingPool(vinculoB.id, { ativo: false }, { idAdmin: 1 });
+  const chancesDepois = await adminFishingService.previewChanceEncontroDaZona(zona.id, { nivelPesca: 1 });
+  assert.equal(chancesDepois.length, 1);
+  assert.equal(chancesDepois[0].id_species, especieA.id);
+  assert.ok(Math.abs(chancesDepois[0].chance - 1) < 1e-9);
+});
+
+// ---------------------------------------------------------------- VARAS
+testeComBanco("admin fishing varas: listagem read-only inclui varas reais do Admin de Itens (spec §8.3)", async () => {
+  const vara = await criarItemVara();
+  const varas = await adminFishingService.listAdminFishingRods();
+  const encontrada = varas.find((v) => v.id_item === vara.id);
+  assert.ok(encontrada, "vara recém-criada deveria aparecer na listagem");
+  assert.equal(encontrada.propriedades_base.forca_linha, 300);
+});
+
+// --------------------------------------------------------- SIMULADOR
+testeComBanco("simulador de balanceamento: reutiliza o fishingEngine real e mostra o breakdown de proficiência (spec §4.1/§9/§10.1)", async () => {
+  const itemPeixe = await criarItemMaterial("Peixe Simulado");
+  const especie = await adminFishingService.createAdminFishingSpecies(
+    { key: `especie_sim_${sufixo()}`, id_item: itemPeixe.id, comportamento_key: "CALM", dificuldade_base: 200, peso_min_g: 100, peso_max_g: 500 },
+    { idAdmin: 1 },
+  );
+  especiesCriadas.push(especie.id);
+  const vara = await criarItemVara();
+
+  const nivel1 = await fishingBalanceSimulatorService.simularBalanceamento({
+    idSpecies: especie.id,
+    idRodItem: vara.id,
+    nivelPesca: 1,
+    numSimulacoes: 200,
+  });
+  assert.ok(nivel1.resultado.taxa_captura >= 0 && nivel1.resultado.taxa_captura <= 1);
+  assert.deepEqual(nivel1.breakdown_stats.com_proficiencia.controle, nivel1.breakdown_stats.com_refinamento.controle);
+
+  const nivel25 = await fishingBalanceSimulatorService.simularBalanceamento({
+    idSpecies: especie.id,
+    idRodItem: vara.id,
+    nivelPesca: 25,
+    numSimulacoes: 200,
+  });
+  // Proficiência (spec §4) precisa aumentar o controle efetivo com o
+  // nível — nunca diminuir, e nunca ficar igual ao nível 1.
+  assert.ok(nivel25.breakdown_stats.com_proficiencia.controle > nivel1.breakdown_stats.com_proficiencia.controle);
+
+  await assert.rejects(
+    () => fishingBalanceSimulatorService.simularBalanceamento({ idSpecies: 999999999, idRodItem: vara.id }),
+    (err) => err.statusCode === 404,
+  );
+});
+
+testeComBanco("simulador: matriz por vara cobre todas as espécies ativas sem cadastro manual de combinação (spec §10.1/§10.2)", async () => {
+  const itemPeixe = await criarItemMaterial("Peixe Matriz");
+  const especie = await adminFishingService.createAdminFishingSpecies(
+    { key: `especie_matriz_${sufixo()}`, id_item: itemPeixe.id, comportamento_key: "ERRATIC", dificuldade_base: 400, peso_min_g: 100, peso_max_g: 500 },
+    { idAdmin: 1 },
+  );
+  especiesCriadas.push(especie.id);
+  const vara = await criarItemVara();
+
+  const matriz = await fishingBalanceSimulatorService.simularMatrizPorVara({ idRodItem: vara.id, nivelPesca: 5, numSimulacoes: 100 });
+  const linha = matriz.find((m) => m.id_species === especie.id);
+  assert.ok(linha, "espécie recém-criada deveria aparecer na matriz automaticamente, sem cadastro manual");
+  assert.ok(linha.taxa_captura >= 0 && linha.taxa_captura <= 1);
 });
 
 // ------------------------------------------------------------- TORNEIOS
