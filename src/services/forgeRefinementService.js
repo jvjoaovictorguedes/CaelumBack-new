@@ -21,17 +21,15 @@ const {
   MATERIAIS_BASE_REFINAMENTO_POR_CATEGORIA,
   OURO_BASE_REFINAMENTO_POR_QUALIDADE,
   XP_REFINAMENTO_POR_ALVO,
+  multiplicadorAntiFarmRefinamentoXp,
   SLOTS_FORJA,
   TIPOS_ACAO_FORJA,
 } = forgeConfig;
-// FATOR_XP_REFINAMENTO_FALHA fica de fora da desestruturação (mesmo
-// motivo do CAP_CHANCE_REFINAMENTO_PPM em forgeRollService.js) — é
-// balanceamento editável via Painel Administrativo (§9), lido sempre
-// por property access no momento do cálculo.
 const { REFINEMENT_COST_TIER_MULTIPLIER } = require("../config/equipmentTierConfig");
 const { resolverIdItemDoInsumo } = require("./forgeMaterialsService");
 const { chanceFinalRefinamentoPpm, rolarSucessoRefinamento } = require("./forgeRollService");
 const { nivelPorXpTotal } = require("./forgeProgressionService");
+const forgeBonusesService = require("./forgeBonusesService");
 
 // Recurso genérico usado como "barra"/"tronco" de refinamento pra
 // QUALQUER equipamento — nunca amarrado a uma receita de Fabricação
@@ -227,8 +225,11 @@ async function previaRefinamento(characterId, { id_instancia, id_item_pergaminho
     }
   }
 
-  const chancePpmSemPergaminho = chanceFinalRefinamentoPpm(info.alvo, nivelForja, 0);
-  const chancePpm = chanceFinalRefinamentoPpm(info.alvo, nivelForja, bonusPergaminho);
+  // Profissão de Ferreiro §6.2 — Tenaz equipada soma direto na chance de
+  // sucesso, junto do pergaminho (mesmo cap final).
+  const bonusFerramentaPpm = await forgeBonusesService.bonusRefinamentoPpm(characterId, null);
+  const chancePpmSemPergaminho = chanceFinalRefinamentoPpm(info.alvo, nivelForja, 0, bonusFerramentaPpm);
+  const chancePpm = chanceFinalRefinamentoPpm(info.alvo, nivelForja, bonusPergaminho, bonusFerramentaPpm);
 
   // Quanto o jogador já tem de cada material — pro frontend mostrar
   // "2/3" (igual já faz na tela de Fabricação) em vez de só o nome.
@@ -250,6 +251,7 @@ async function previaRefinamento(characterId, { id_instancia, id_item_pergaminho
     // chamada.
     chance_percentual: chancePpm / 10_000,
     chance_percentual_sem_pergaminho: chancePpmSemPergaminho / 10_000,
+    bonus_ferramenta_percentual: bonusFerramentaPpm / 10_000,
     ouro_custo: info.ouro,
     materiais: materiaisComEstoque,
     pergaminho_aplicado: pergaminhoAplicado,
@@ -347,7 +349,10 @@ async function iniciarRefinamento(characterId, { id_instancia, id_item_pergaminh
 
     // Resultado sorteado JÁ AGORA — consumo de material/ouro/pergaminho
     // acontece de qualquer jeito, sucesso ou falha (spec §31/§40).
-    const chancePpm = chanceFinalRefinamentoPpm(info.alvo, nivelForja, bonusPergaminho);
+    // Ferraria (Tenaz) congelada no MESMO instante — spec Profissão de
+    // Ferreiro §6.3, trocar a ferramenta depois não muda essa tentativa.
+    const bonusFerramentaPpm = await forgeBonusesService.bonusRefinamentoPpm(characterId, transaction);
+    const chancePpm = chanceFinalRefinamentoPpm(info.alvo, nivelForja, bonusPergaminho, bonusFerramentaPpm);
     const sucesso = rolarSucessoRefinamento(chancePpm);
 
     character.dinheiro -= info.ouro;
@@ -365,8 +370,13 @@ async function iniciarRefinamento(characterId, { id_instancia, id_item_pergaminh
       else await entradaPergaminho.save({ transaction });
     }
 
+    // Profissão de Ferreiro §3/§19: falha de Refinamento concede 0 XP —
+    // sucesso passa pelo mesmo anti-farm por dificuldade real das outras
+    // duas áreas (§3.1), usando o Tier do equipamento + alvo de refino.
     const xpSucesso = XP_REFINAMENTO_POR_ALVO[info.alvo] ?? 0;
-    const xpGanho = sucesso ? xpSucesso : Math.round(xpSucesso * forgeConfig.FATOR_XP_REFINAMENTO_FALHA);
+    const xpGanho = sucesso
+      ? Math.round(xpSucesso * multiplicadorAntiFarmRefinamentoXp(nivelForja, info.alvo))
+      : 0;
 
     const iniciadoEm = new Date();
     const prontoEm = new Date(iniciadoEm.getTime() + 60_000); // tempo fixo curto — spec não define tempo de refino

@@ -9,7 +9,7 @@ const CharacterEquipmentInstance = require("../models/CharacterEquipmentInstance
 const Item = require("../models/Item");
 const equipmentInstanceService = require("./equipmentInstanceService");
 const { TIPOS_ACAO_FORJA } = require("../config/forgeConfig");
-const { nivelPorXpTotal, xpParaProximoNivel, aplicarGanhoDeXp } = require("./forgeProgressionService");
+const { nivelPorXpTotal, xpParaProximoNivel, aplicarGanhoDeXp, tituloPorNivel } = require("./forgeProgressionService");
 const Character = require("../models/Character");
 const { registrarProgresso } = require("./missionService");
 const { registrarProgressoContrato } = require("./adventureGuildObjectiveService");
@@ -17,6 +17,7 @@ const { registrarProgressoMissaoGuilda } = require("./guildMissionService");
 const achievementService = require("./achievementService");
 const { bonusesAtivosPara: bonusesTavernaAtivosPara } = require("./tavernBuffService");
 const forgeTelemetryService = require("./forgeTelemetryService");
+const forgeStatsService = require("./forgeStatsService");
 const uniqueFeatService = require("./uniqueFeatService");
 const uniqueFeatPublicService = require("./uniqueFeatPublicService");
 
@@ -36,6 +37,8 @@ async function listarProgresso(characterId) {
     nivel,
     experiencia: progresso.experiencia,
     xp_proximo_nivel: xpParaProximoNivel(nivel),
+    // Profissão de Ferreiro §3.2/§7 — só apresentação.
+    titulo: tituloPorNivel(nivel),
   };
 }
 
@@ -102,6 +105,8 @@ async function coletar(characterId, slot) {
         tipo: "fabricacao",
         instancia: { id: instancia.id, id_item, nome: item.nome, raridade: qualidade_final, refinamento: 0 },
       };
+      // Profissão de Ferreiro §7 — contador de carreira, na coleta real.
+      await forgeStatsService.registrarFabricacao(characterId, qualidade_final, transaction);
 
       // Sistema de Proezas Únicas §16 — na coleta REAL da fabricação
       // (nunca na prévia/enfileiramento), dentro desta MESMA transaction.
@@ -139,6 +144,9 @@ async function coletar(characterId, slot) {
         sucesso,
         refinamento_atual: instancia?.refinamento ?? null,
       };
+      // Profissão de Ferreiro §7 — contador de carreira, na coleta real
+      // (sucesso ou falha; "maior refinamento" só sobe em sucesso).
+      await forgeStatsService.registrarRefinamento(characterId, sucesso, instancia?.refinamento ?? 0, transaction);
 
       // Sistema de Proezas Únicas §16 — na conclusão REAL do refino
       // (sucesso ou falha; a condição secreta decide o que importa),
@@ -181,6 +189,13 @@ async function coletar(characterId, slot) {
       if (resultadoXp.subiuNivel) {
         await achievementService.checkForgeAchievements(characterId, transaction);
       }
+    } else if (progresso) {
+      // Profissão de Ferreiro §3/§19 — falha de Refinamento concede 0 XP
+      // de verdade (não "nenhum campo"), pra UI/telemetria nunca
+      // confundir "0 XP" com "resposta incompleta".
+      resultado.xp_ganho = 0;
+      resultado.subiu_nivel = false;
+      resultado.nivel_forja = nivelPorXpTotal(progresso.experiencia);
     }
 
     // Guilda dos Aventureiros (§43/§45) — "fabrique X" (missão livre) e

@@ -23,11 +23,14 @@ const {
   QUALIDADE_MAXIMA_FUNDICAO_POR_NIVEL,
   CHANCE_BARRA_BONUS_PPM_POR_NIVEL,
   XP_FUNDICAO_POR_QUALIDADE_BARRA,
+  multiplicadorAntiFarmXp,
 } = require("../config/forgeConfig");
 const { rolarBarraBonus } = require("./forgeRollService");
 const { aplicarGanhoDeXp, nivelPorXpTotal } = require("./forgeProgressionService");
 const { addStack } = require("./inventoryService");
 const forgeTelemetryService = require("./forgeTelemetryService");
+const forgeStatsService = require("./forgeStatsService");
+const forgeBonusesService = require("./forgeBonusesService");
 
 function indiceQualidadeMaxima(nivelForja) {
   const qualidadeMaxima = QUALIDADE_MAXIMA_FUNDICAO_POR_NIVEL[nivelForja] ?? "Comum";
@@ -66,6 +69,9 @@ async function listarOpcoes(characterId) {
   const progresso = await garantirProgresso(characterId);
   const nivelForja = nivelPorXpTotal(progresso.experiencia);
   const indiceMax = indiceQualidadeMaxima(nivelForja);
+  // Profissão de Ferreiro §6.2 — Fole equipado já soma aqui, pro
+  // jogador ver a chance real antes de fundir (nunca só a do nível).
+  const bonusFerramentaPpm = await forgeBonusesService.bonusFundicaoPpm(characterId, null);
 
   const recursos = await ExpeditionResource.findAll({ where: { profissao: "Mineracao" } });
   const inventario = await CharacterInventory.findAll({ where: { id_personagem: characterId } });
@@ -98,7 +104,9 @@ async function listarOpcoes(characterId) {
         nivel_forja_necessario: nivelForjaMinimoParaQualidade(qualidade),
         fragmentos_disponiveis: desbloqueada ? (quantidadePorItem.get(fragmento.id_item) ?? 0) : 0,
         fragmentos_por_barra: FRAGMENTOS_POR_BARRA[qualidade],
-        bonus_chance_percentual: desbloqueada ? (CHANCE_BARRA_BONUS_PPM_POR_NIVEL[nivelForja] ?? 0) / 10_000 : 0,
+        bonus_chance_percentual: desbloqueada
+          ? ((CHANCE_BARRA_BONUS_PPM_POR_NIVEL[nivelForja] ?? 0) + bonusFerramentaPpm) / 10_000
+          : 0,
         nome_fragmento: fragmento.item.nome,
         imagem_fragmento: fragmento.item.imagem_url,
         nome_barra: barra.item.nome,
@@ -162,10 +170,13 @@ async function fundir(characterId, { id_recurso, qualidade, quantidadeBarras }) 
       );
     }
 
+    // Profissão de Ferreiro §6.2 — Fole equipado soma direto na chance
+    // de barra bônus (congelado aqui, no início da fundição síncrona).
+    const bonusFerramentaPpm = await forgeBonusesService.bonusFundicaoPpm(characterId, transaction);
     let totalBarras = 0;
     for (let i = 0; i < quantidadeBarras; i += 1) {
       totalBarras += 1;
-      if (rolarBarraBonus(nivelForja)) totalBarras += 1;
+      if (rolarBarraBonus(nivelForja, bonusFerramentaPpm)) totalBarras += 1;
     }
 
     entradaFragmento.quantidade -= fragmentosNecessarios;
@@ -179,8 +190,13 @@ async function fundir(characterId, { id_recurso, qualidade, quantidadeBarras }) 
 
     // XP contado só pelas barras-BASE pedidas, não pelas de bônus — senão
     // o próprio bônus de sorte vira uma segunda fonte de XP em cima da
-    // primeira.
-    const ganhoXp = XP_FUNDICAO_POR_QUALIDADE_BARRA[qualidade] * quantidadeBarras;
+    // primeira. Profissão de Ferreiro §3.1: anti-farm por dificuldade
+    // real reaproveita a mesma tabela/função da Fabricação (a
+    // "referência de dificuldade" da spec pra Fundição é a mesma —
+    // qualidade da barra vs. nível recomendado).
+    const ganhoXp = Math.round(
+      XP_FUNDICAO_POR_QUALIDADE_BARRA[qualidade] * quantidadeBarras * multiplicadorAntiFarmXp(nivelForja, qualidade),
+    );
     const progressoAtualizado =
       progresso ?? (await CharacterForgeProgress.create({ id_personagem: characterId }, { transaction }));
     const resultadoXp = aplicarGanhoDeXp(progressoAtualizado.experiencia, ganhoXp);
@@ -199,6 +215,7 @@ async function fundir(characterId, { id_recurso, qualidade, quantidadeBarras }) 
       },
       transaction,
     );
+    await forgeStatsService.registrarFundicao(characterId, totalBarras, transaction);
 
     return {
       barras_produzidas: totalBarras,

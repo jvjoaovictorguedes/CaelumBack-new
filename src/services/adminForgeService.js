@@ -10,6 +10,11 @@ const ForgeBlueprintIngredient = require("../models/ForgeBlueprintIngredient");
 const ForgeBarItem = require("../models/ForgeBarItem");
 const ForgeScroll = require("../models/ForgeScroll");
 const ForgeScrollIngredient = require("../models/ForgeScrollIngredient");
+const ForgeRecipe = require("../models/ForgeRecipe");
+const CharacterForgeRecipeUnlock = require("../models/CharacterForgeRecipeUnlock");
+const CharacterForgeProgress = require("../models/CharacterForgeProgress");
+const ForgeToolProperties = require("../models/ForgeToolProperties");
+const ForgeToolEffect = require("../models/ForgeToolEffect");
 const ExpeditionResource = require("../models/ExpeditionResource");
 const Item = require("../models/Item");
 const WeaponProperties = require("../models/WeaponProperties");
@@ -24,6 +29,7 @@ const { chanceFinalRefinamentoPpm } = require("./forgeRollService");
 const validation = require("./forgeAdminValidationService");
 const { registrarAcao } = require("./adminAuditService");
 const forgeTelemetryService = require("./forgeTelemetryService");
+const { nivelPorXpTotal } = require("./forgeProgressionService");
 
 function erro(mensagem, statusCode = 400) {
   const e = new Error(mensagem);
@@ -859,7 +865,7 @@ async function updateBalanceamentoAdmin(grupo, valores, ctx) {
 // §9.1 — Simulador OBRIGATÓRIO de Refinamento: usa a MESMA função de
 // gameplay (forgeRollService.chanceFinalRefinamentoPpm) e as MESMAS
 // tabelas (forgeConfig, já com overrides de balanceamento aplicados).
-async function previewRefinamentoAdmin({ categoria, qualidade, refinamentoAtual, nivelForja, idItemPergaminho, tierEquipamento }) {
+async function previewRefinamentoAdmin({ categoria, qualidade, refinamentoAtual, nivelForja, idItemPergaminho, tierEquipamento, bonusFerramentaPercentual }) {
   if (!forgeConfig.MATERIAIS_BASE_REFINAMENTO_POR_CATEGORIA[categoria]) throw erro("Categoria inválida.");
   if (!forgeConfig.ORDEM_QUALIDADE.includes(qualidade)) throw erro("Qualidade inválida.");
   const alvo = (Number(refinamentoAtual) || 0) + 1;
@@ -880,7 +886,11 @@ async function previewRefinamentoAdmin({ categoria, qualidade, refinamentoAtual,
   const chanceBasePpm = garantido ? 1_000_000 : forgeConfig.CHANCE_BASE_REFINAMENTO_PPM_POR_ALVO[alvo] ?? 0;
   const bonusForjaPpm = garantido ? 0 : forgeConfig.BONUS_FORJA_REFINAMENTO_PPM_POR_NIVEL[nivel] ?? 0;
   const bonusPergaminhoPpm = Math.round((bonusPergaminho / 100) * 1_000_000);
-  const chanceFinalPpm = chanceFinalRefinamentoPpm(alvo, nivel, bonusPergaminho);
+  // Profissão de Ferreiro §14.2 — Simulador de Ferraria: admin digita o
+  // bônus hipotético de uma Tenaz (nunca lido de um personagem real
+  // aqui, é simulação), mesma unidade PPM da chance real.
+  const bonusFerramentaPpm = Math.round((Number(bonusFerramentaPercentual) || 0) * 10_000);
+  const chanceFinalPpm = chanceFinalRefinamentoPpm(alvo, nivel, bonusPergaminho, bonusFerramentaPpm);
 
   const unidades = forgeConfig.UNIDADES_MATERIAL_REFINAMENTO_POR_ALVO[alvo] ?? 1;
   const base = forgeConfig.MATERIAIS_BASE_REFINAMENTO_POR_CATEGORIA[categoria];
@@ -901,8 +911,11 @@ async function previewRefinamentoAdmin({ categoria, qualidade, refinamentoAtual,
     materiais.push({ papel: "troncos", quantidade: base.troncos * unidades, nome: itemTronco?.nome ?? null, imagem_url: itemTronco?.imagem_url ?? null });
   }
 
-  const xpSucesso = forgeConfig.XP_REFINAMENTO_POR_ALVO[alvo] ?? 0;
-  const xpFalha = Math.round(xpSucesso * forgeConfig.FATOR_XP_REFINAMENTO_FALHA);
+  // Profissão de Ferreiro §3/§19: mesma lógica real — sucesso passa pelo
+  // anti-farm por alvo, falha é sempre 0 XP.
+  const xpSucessoBase = forgeConfig.XP_REFINAMENTO_POR_ALVO[alvo] ?? 0;
+  const xpSucesso = Math.round(xpSucessoBase * forgeConfig.multiplicadorAntiFarmRefinamentoXp(nivel, alvo));
+  const xpFalha = 0;
   const bonusAtributoAposSucesso = forgeConfig.BONUS_ATRIBUTO_REFINAMENTO_PCT[alvo] ?? null;
 
   return {
@@ -911,6 +924,7 @@ async function previewRefinamentoAdmin({ categoria, qualidade, refinamentoAtual,
     chance_base_percentual: chanceBasePpm / 10_000,
     bonus_forja_percentual: bonusForjaPpm / 10_000,
     bonus_pergaminho_percentual: bonusPergaminhoPpm / 10_000,
+    bonus_ferramenta_percentual: bonusFerramentaPpm / 10_000,
     chance_final_percentual: chanceFinalPpm / 10_000,
     cap_percentual: forgeConfig.CAP_CHANCE_REFINAMENTO_PPM / 10_000,
     custo_gold: ouro,
@@ -976,8 +990,302 @@ async function previewImpactoProgressaoAdmin(novaCurvaXpPorEtapa) {
   };
 }
 
+// Profissão de Ferreiro §14/§15 — adoção de Receitas/Ferramentas, pra
+// completar as métricas já existentes da Forja (XP/sucesso/refino).
+async function getMetricasFerreiroAdmin() {
+  const [porRaridade] = await sequelize.query(`
+    SELECT fr.raridade_receita AS raridade, COUNT(*)::int AS total
+    FROM character_forge_recipe_unlocks u
+    JOIN forge_recipes fr ON fr.id_blueprint = u.id_blueprint
+    GROUP BY fr.raridade_receita;
+  `);
+  const [porOrigem] = await sequelize.query(`
+    SELECT source_type AS origem, COUNT(*)::int AS total
+    FROM character_forge_recipe_unlocks
+    GROUP BY source_type;
+  `);
+  const [ferramentas] = await sequelize.query(`
+    SELECT
+      COUNT(*) FILTER (WHERE id_instancia_fole IS NOT NULL)::int AS fole,
+      COUNT(*) FILTER (WHERE id_instancia_martelo IS NOT NULL)::int AS martelo,
+      COUNT(*) FILTER (WHERE id_instancia_tenaz IS NOT NULL)::int AS tenaz
+    FROM character_forge_tool_loadout;
+  `);
+  const [blueprintsPorModo] = await sequelize.query(`
+    SELECT modo_desbloqueio AS modo, COUNT(*)::int AS total
+    FROM forge_blueprints
+    GROUP BY modo_desbloqueio;
+  `);
+  return {
+    receitas_aprendidas_por_raridade: porRaridade,
+    receitas_aprendidas_por_origem: porOrigem,
+    ferramentas_equipadas: ferramentas[0] ?? { fole: 0, martelo: 0, tenaz: 0 },
+    blueprints_por_modo: blueprintsPorModo,
+  };
+}
+
 async function getMetricasAdmin() {
-  return forgeTelemetryService.getMetricas();
+  const [metricasForja, metricasFerreiro] = await Promise.all([
+    forgeTelemetryService.getMetricas(),
+    getMetricasFerreiroAdmin(),
+  ]);
+  return { ...metricasForja, profissaoFerreiro: metricasFerreiro };
+}
+
+// -----------------------------------------------------------------
+// Profissão de Ferreiro §14/§14.1 — RECEITAS (conhecimento sobre um
+// Blueprint já existente; nunca duplica ingredientes/resultado/Tier).
+// -----------------------------------------------------------------
+
+const RARIDADES_RECEITA_VALIDAS = ["Comum", "Raro", "Lendario"];
+
+function validarReceitaPayload(dados, { parcial = false } = {}) {
+  const erros = [];
+  if (!parcial || dados.raridade_receita !== undefined) {
+    if (!RARIDADES_RECEITA_VALIDAS.includes(dados.raridade_receita)) {
+      erros.push(`raridade_receita precisa ser uma de: ${RARIDADES_RECEITA_VALIDAS.join(", ")}.`);
+    }
+  }
+  if (dados.pista_publica !== undefined && dados.pista_publica !== null && typeof dados.pista_publica !== "string") {
+    erros.push("pista_publica precisa ser texto.");
+  }
+  if (erros.length > 0) throw erro(erros.join(" "));
+}
+
+async function listarReceitasAdmin({ raridade } = {}) {
+  const where = {};
+  if (raridade) where.raridade_receita = raridade;
+  return ForgeRecipe.findAll({
+    where,
+    include: [
+      { model: ForgeBlueprint, as: "blueprint" },
+      { model: Item, as: "item" },
+    ],
+    order: [["id", "DESC"]],
+  });
+}
+
+async function criarReceitaAdmin(payload, { idAdmin, req }) {
+  if (!Number.isInteger(payload.id_blueprint)) throw erro("id_blueprint é obrigatório.");
+  if (!Number.isInteger(payload.id_item)) throw erro("id_item é obrigatório.");
+  validarReceitaPayload(payload);
+
+  return sequelize.transaction(async (transaction) => {
+    const blueprint = await ForgeBlueprint.findByPk(payload.id_blueprint, { transaction });
+    if (!blueprint) throw erro("Blueprint não encontrado.", 404);
+    const item = await Item.findByPk(payload.id_item, { transaction });
+    if (!item) throw erro("Item não encontrado.", 404);
+    if (item.tipo_item !== "Receita") throw erro('O Item vinculado precisa ser do tipo "Receita".');
+
+    const conflitoBlueprint = await ForgeRecipe.findOne({ where: { id_blueprint: payload.id_blueprint }, transaction });
+    if (conflitoBlueprint) throw erro("Esse Blueprint já tem uma Receita vinculada.");
+    const conflitoItem = await ForgeRecipe.findOne({ where: { id_item: payload.id_item }, transaction });
+    if (conflitoItem) throw erro("Esse Item de Receita já está vinculado a outro Blueprint.");
+
+    const receita = await ForgeRecipe.create(
+      {
+        id_blueprint: payload.id_blueprint,
+        id_item: payload.id_item,
+        raridade_receita: payload.raridade_receita,
+        negociavel: payload.negociavel ?? true,
+        consome_ao_aprender: payload.consome_ao_aprender ?? true,
+        ativo: payload.ativo ?? true,
+        pista_publica: payload.pista_publica ?? null,
+      },
+      { transaction },
+    );
+
+    await registrarAcao({
+      idAdmin, acao: "CREATE_FORGE_RECIPE", entidade: "ForgeRecipe", idEntidade: receita.id,
+      dadosDepois: receita.toJSON(), req, transaction,
+    });
+    return receita;
+  });
+}
+
+async function atualizarReceitaAdmin(id, payload, { idAdmin, req }) {
+  validarReceitaPayload(payload, { parcial: true });
+  return sequelize.transaction(async (transaction) => {
+    const receita = await ForgeRecipe.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!receita) throw erro("Receita não encontrada.", 404);
+    const dadosAntes = receita.toJSON();
+
+    const campos = ["raridade_receita", "negociavel", "consome_ao_aprender", "ativo", "pista_publica"];
+    const patch = {};
+    for (const campo of campos) if (payload[campo] !== undefined) patch[campo] = payload[campo];
+    if (Object.keys(patch).length > 0) await receita.update(patch, { transaction });
+
+    await registrarAcao({
+      idAdmin, acao: "UPDATE_FORGE_RECIPE", entidade: "ForgeRecipe", idEntidade: id,
+      dadosAntes, dadosDepois: receita.toJSON(), req, transaction,
+    });
+    return receita;
+  });
+}
+
+// Ativa/desativa a exigência de Receita num Blueprint — separado da
+// edição da Receita em si (§16: nunca trocar todos os Blueprints pra
+// "requires_recipe=true" sem plano de migração). grandfatherElegiveis
+// concede o desbloqueio a quem já tem Nível de Ferreiro suficiente
+// ANTES da mudança, pra não bloquear conteúdo que o jogador já
+// conseguia fabricar ontem (§16.4) — sempre explícito, nunca automático.
+async function setModoDesbloqueioBlueprintAdmin(idBlueprint, modo, { idAdmin, req, grandfatherElegiveis = false } = {}) {
+  if (!["Auto", "Receita"].includes(modo)) throw erro('modo precisa ser "Auto" ou "Receita".');
+
+  return sequelize.transaction(async (transaction) => {
+    const blueprint = await ForgeBlueprint.findByPk(idBlueprint, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!blueprint) throw erro("Blueprint não encontrado.", 404);
+
+    if (modo === "Receita") {
+      const receita = await ForgeRecipe.findOne({ where: { id_blueprint: idBlueprint, ativo: true }, transaction });
+      if (!receita) throw erro("Crie e ative uma Receita pra esse Blueprint antes de exigi-la.");
+    }
+
+    const dadosAntes = blueprint.toJSON();
+    await blueprint.update({ modo_desbloqueio: modo }, { transaction });
+
+    let personagensGrandfathered = 0;
+    if (modo === "Receita" && grandfatherElegiveis) {
+      const progressos = await CharacterForgeProgress.findAll({ transaction });
+      const elegiveis = progressos.filter((p) => nivelPorXpTotal(p.experiencia) >= blueprint.nivel_forja_minimo);
+      const jaTem = await CharacterForgeRecipeUnlock.findAll({
+        where: { id_blueprint: idBlueprint },
+        attributes: ["id_personagem"],
+        transaction,
+      });
+      const idsJaTem = new Set(jaTem.map((u) => u.id_personagem));
+      const paraCriar = elegiveis
+        .filter((p) => !idsJaTem.has(p.id_personagem))
+        .map((p) => ({ id_personagem: p.id_personagem, id_blueprint: idBlueprint, source_type: "ADMIN", learned_at: new Date() }));
+      if (paraCriar.length > 0) await CharacterForgeRecipeUnlock.bulkCreate(paraCriar, { transaction });
+      personagensGrandfathered = paraCriar.length;
+    }
+
+    await registrarAcao({
+      idAdmin, acao: "UPDATE_FORGE_BLUEPRINT_UNLOCK_MODE", entidade: "ForgeBlueprint", idEntidade: idBlueprint,
+      dadosAntes, dadosDepois: { ...blueprint.toJSON(), personagens_grandfathered: personagensGrandfathered }, req, transaction,
+    });
+    return { blueprint, personagens_grandfathered: personagensGrandfathered };
+  });
+}
+
+// -----------------------------------------------------------------
+// Profissão de Ferreiro §14/§6 — FERRAMENTAS (Fole/Martelo/Tenaz).
+// -----------------------------------------------------------------
+
+function validarFerramentaPayload(dados, { parcial = false } = {}) {
+  const erros = [];
+  if (!parcial || dados.slot !== undefined) {
+    if (!["Fole", "Martelo", "Tenaz"].includes(dados.slot)) erros.push('slot precisa ser "Fole", "Martelo" ou "Tenaz".');
+  }
+  if (!parcial || dados.nivel_ferreiro_minimo !== undefined) {
+    if (!Number.isInteger(dados.nivel_ferreiro_minimo) || dados.nivel_ferreiro_minimo < 1 || dados.nivel_ferreiro_minimo > forgeConfig.NIVEL_MAXIMO) {
+      erros.push(`nivel_ferreiro_minimo precisa ser um inteiro entre 1 e ${forgeConfig.NIVEL_MAXIMO}.`);
+    }
+  }
+  if (dados.efeitos !== undefined) {
+    if (!Array.isArray(dados.efeitos)) erros.push("efeitos precisa ser uma lista.");
+    else {
+      for (const efeito of dados.efeitos) {
+        if (!ForgeToolEffect.CHAVES_VALIDAS.includes(efeito.effect_key)) {
+          erros.push(`effect_key inválida: ${efeito.effect_key}.`);
+        }
+        if (!Number.isInteger(efeito.valor_ppm) || efeito.valor_ppm < 0 || efeito.valor_ppm > 1_000_000) {
+          erros.push(`valor_ppm de ${efeito.effect_key} precisa estar entre 0 e 1.000.000 PPM.`);
+        }
+      }
+    }
+  }
+  if (erros.length > 0) throw erro(erros.join(" "));
+}
+
+async function carregarFerramentaCompleta(idItem, transaction) {
+  return ForgeToolProperties.findByPk(idItem, {
+    include: [
+      { model: Item, as: "item" },
+      { model: ForgeToolEffect, as: "efeitos" },
+    ],
+    transaction,
+  });
+}
+
+async function listarFerramentasAdmin({ ativo } = {}) {
+  const where = {};
+  if (ativo !== undefined && ativo !== "") where.ativo = ativo === true || ativo === "true";
+  return ForgeToolProperties.findAll({
+    where,
+    include: [
+      { model: Item, as: "item" },
+      { model: ForgeToolEffect, as: "efeitos" },
+    ],
+    order: [["id_item", "DESC"]],
+  });
+}
+
+async function criarFerramentaAdmin(payload, { idAdmin, req }) {
+  if (!Number.isInteger(payload.id_item)) throw erro("id_item é obrigatório.");
+  validarFerramentaPayload(payload);
+
+  return sequelize.transaction(async (transaction) => {
+    const item = await Item.findByPk(payload.id_item, { transaction });
+    if (!item) throw erro("Item não encontrado.", 404);
+    if (item.tipo_item !== "Ferramenta") throw erro('O Item precisa ser do tipo "Ferramenta".');
+    const varaExistente = await FishingRodProperties.findByPk(payload.id_item, { transaction });
+    if (varaExistente) throw erro("Esse Item já é uma Vara de Pesca — não pode virar ferramenta de Ferraria também.");
+    const existente = await ForgeToolProperties.findByPk(payload.id_item, { transaction });
+    if (existente) throw erro("Esse Item já é uma ferramenta de Ferraria.");
+
+    await ForgeToolProperties.create(
+      { id_item: payload.id_item, slot: payload.slot, nivel_ferreiro_minimo: payload.nivel_ferreiro_minimo, ativo: payload.ativo ?? true },
+      { transaction },
+    );
+    const efeitos = payload.efeitos ?? [];
+    if (efeitos.length > 0) {
+      await ForgeToolEffect.bulkCreate(
+        efeitos.map((e) => ({ id_item: payload.id_item, effect_key: e.effect_key, valor_ppm: e.valor_ppm })),
+        { transaction },
+      );
+    }
+
+    const completo = await carregarFerramentaCompleta(payload.id_item, transaction);
+    await registrarAcao({
+      idAdmin, acao: "CREATE_FORGE_TOOL", entidade: "ForgeToolProperties", idEntidade: payload.id_item,
+      dadosDepois: completo.toJSON(), req, transaction,
+    });
+    return completo;
+  });
+}
+
+async function atualizarFerramentaAdmin(idItem, payload, { idAdmin, req }) {
+  validarFerramentaPayload(payload, { parcial: true });
+  return sequelize.transaction(async (transaction) => {
+    const ferramenta = await ForgeToolProperties.findByPk(idItem, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!ferramenta) throw erro("Ferramenta não encontrada.", 404);
+    const antes = await carregarFerramentaCompleta(idItem, transaction);
+    const dadosAntes = antes.toJSON();
+
+    const campos = ["slot", "nivel_ferreiro_minimo", "ativo"];
+    const patch = {};
+    for (const campo of campos) if (payload[campo] !== undefined) patch[campo] = payload[campo];
+    if (Object.keys(patch).length > 0) await ferramenta.update(patch, { transaction });
+
+    if (payload.efeitos !== undefined) {
+      await ForgeToolEffect.destroy({ where: { id_item: idItem }, transaction });
+      if (payload.efeitos.length > 0) {
+        await ForgeToolEffect.bulkCreate(
+          payload.efeitos.map((e) => ({ id_item: idItem, effect_key: e.effect_key, valor_ppm: e.valor_ppm })),
+          { transaction },
+        );
+      }
+    }
+
+    const depois = await carregarFerramentaCompleta(idItem, transaction);
+    await registrarAcao({
+      idAdmin, acao: "UPDATE_FORGE_TOOL", entidade: "ForgeToolProperties", idEntidade: idItem,
+      dadosAntes, dadosDepois: depois.toJSON(), req, transaction,
+    });
+    return depois;
+  });
 }
 
 module.exports = {
@@ -1008,4 +1316,11 @@ module.exports = {
   previewRefinamentoAdmin,
   previewImpactoProgressaoAdmin,
   getMetricasAdmin,
+  listarReceitasAdmin,
+  criarReceitaAdmin,
+  atualizarReceitaAdmin,
+  setModoDesbloqueioBlueprintAdmin,
+  listarFerramentasAdmin,
+  criarFerramentaAdmin,
+  atualizarFerramentaAdmin,
 };

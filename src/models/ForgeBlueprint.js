@@ -27,6 +27,16 @@ const ForgeBlueprint = sequelize.define(
     // blueprint (a variante Comum). ForgeBlueprintResult é removido no
     // Contract, depois que Forja/Refino/Sets tiverem migrado.
     id_item_resultado: { type: DataTypes.INTEGER, allowNull: true },
+    // Profissão de Ferreiro §4/§16 — "Auto" (default, todo blueprint
+    // existente permanece assim no lançamento — nunca bloquear conteúdo
+    // que o jogador já fabricava) ou "Receita" (exige
+    // CharacterForgeRecipeUnlock pra esse blueprint, ver
+    // forgeRecipeService.js). Nunca decidido pelo cliente.
+    modo_desbloqueio: {
+      type: DataTypes.ENUM("Auto", "Receita"),
+      allowNull: false,
+      defaultValue: "Auto",
+    },
   },
   { tableName: "forge_blueprints" },
 );

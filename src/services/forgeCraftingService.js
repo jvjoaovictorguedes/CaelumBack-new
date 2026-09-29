@@ -33,6 +33,8 @@ const { aplicarRaridadeArma, aplicarRaridadeArmadura, aplicarRaridadeVara } = re
 const { rolarDegrausQualidadeSuperior, qualidadeComDegraus } = require("./forgeRollService");
 const { bonusesAtivosPara } = require("./guildBuffService");
 const { nivelPorXpTotal } = require("./forgeProgressionService");
+const { garantirBlueprintDesbloqueado, idsBlueprintDesbloqueados } = require("./forgeRecipeService");
+const forgeBonusesService = require("./forgeBonusesService");
 
 async function resolverIngredientesResolvidos(blueprint, qualidade, transaction) {
   const resolvidos = [];
@@ -228,7 +230,7 @@ const CATEGORIAS_BLUEPRINT_VALIDAS = new Set(["Arma", "Armadura", "Capacete", "E
 async function listarBlueprints(characterId, categoria = null) {
   if (categoria && !CATEGORIAS_BLUEPRINT_VALIDAS.has(categoria)) return [];
 
-  const [progresso, blueprints, inventario, resolvedor] = await Promise.all([
+  const [progresso, blueprints, inventario, resolvedor, idsDesbloqueados] = await Promise.all([
     CharacterForgeProgress.findOne({ where: { id_personagem: characterId } }),
     ForgeBlueprint.findAll({
       where: categoria ? { ativo: true, categoria_equipamento: categoria } : { ativo: true },
@@ -252,6 +254,7 @@ async function listarBlueprints(characterId, categoria = null) {
     }),
     CharacterInventory.findAll({ where: { id_personagem: characterId } }),
     carregarResolvedorEmLote(),
+    idsBlueprintDesbloqueados(characterId),
   ]);
   const nivelForja = nivelPorXpTotal(progresso?.experiencia ?? 0);
   const quantidadePorItem = new Map(inventario.map((e) => [e.id_item, e.quantidade]));
@@ -281,6 +284,14 @@ async function listarBlueprints(characterId, categoria = null) {
   const dados = [];
   for (const blueprint of blueprints) {
     const itemCanonico = blueprint.itemResultado;
+    // Profissão de Ferreiro §11.2/§13.1 — estado de desbloqueio do
+    // blueprint (nunca por variante: Receita é do blueprint inteiro).
+    const requiresRecipe = blueprint.modo_desbloqueio === "Receita";
+    const recipeLearned = requiresRecipe && idsDesbloqueados.has(blueprint.id);
+    const nivelSuficiente = nivelForja >= blueprint.nivel_forja_minimo;
+    let blockReason = null;
+    if (!nivelSuficiente) blockReason = "LEVEL_TOO_LOW";
+    else if (requiresRecipe && !recipeLearned) blockReason = "RECIPE_NOT_LEARNED";
     const variantes = [];
     for (const qualidade of ORDEM_QUALIDADE) {
       const ingredientesResolvidos = resolverIngredientesResolvidosEmLote(blueprint, qualidade, resolvedor, itensPorId);
@@ -310,7 +321,7 @@ async function listarBlueprints(characterId, categoria = null) {
         qualidade,
         qualidade_exibicao: NOME_EXIBICAO_QUALIDADE[qualidade],
         ingredientes: ingredientesComEstoque,
-        pode_fabricar: temMateriais && nivelForja >= blueprint.nivel_forja_minimo,
+        pode_fabricar: temMateriais && blockReason === null,
         chances_percentual: chancesExibicao,
         // Atributos do item nesta qualidade (resultado garantido se não
         // rolar degrau de qualidade superior) — pro tooltip do frontend.
@@ -338,6 +349,11 @@ async function listarBlueprints(characterId, categoria = null) {
       tipo_arma: itemCanonico?.weaponProperties?.tipo_arma ?? null,
       nivel_forja_minimo: blueprint.nivel_forja_minimo,
       imagem_url: itemCanonico?.imagem_url ?? null,
+      // Profissão de Ferreiro §11.2 — estado de desbloqueio.
+      requires_recipe: requiresRecipe,
+      recipe_learned: recipeLearned,
+      can_craft: blockReason === null,
+      block_reason: blockReason,
       variantes,
     });
   }
@@ -388,6 +404,9 @@ async function iniciarFabricacao(characterId, { id_blueprint, qualidade }) {
         { statusCode: 400 },
       );
     }
+    // Profissão de Ferreiro §4/§17 — blueprint "Receita" exige
+    // CharacterForgeRecipeUnlock; nunca decidido pelo cliente.
+    await garantirBlueprintDesbloqueado(characterId, blueprint, transaction);
     if (!ORDEM_QUALIDADE.includes(qualidade)) {
       throw Object.assign(new Error("Qualidade de material inválida."), { statusCode: 400 });
     }
@@ -424,9 +443,13 @@ async function iniciarFabricacao(characterId, { id_blueprint, qualidade }) {
 
     // Resultado sorteado JÁ AGORA (spec §49) — nunca no collect. Buff de
     // Forja da Guilda (§21/§22) só afeta Fabricação, nunca Refinamento/
-    // Fundição/Pergaminhos.
+    // Fundição/Pergaminhos. Martelo da Ferraria (Profissão de Ferreiro
+    // §6.2) soma na MESMA fatia "+1" que o buff de guilda — ambos
+    // transferem probabilidade de "mesma qualidade" pra "+1" (ver
+    // forgeRollService.rolarDegrausQualidadeSuperior).
     const { forjaPontosPercentuais } = await bonusesAtivosPara(characterId, transaction);
-    const degraus = rolarDegrausQualidadeSuperior(nivelForja, forjaPontosPercentuais);
+    const bonusFerramentaPercentual = (await forgeBonusesService.bonusFabricacaoPpm(characterId, transaction)) / 10_000;
+    const degraus = rolarDegrausQualidadeSuperior(nivelForja, forjaPontosPercentuais + bonusFerramentaPercentual);
     const qualidadeFinal = qualidadeComDegraus(qualidade, degraus);
     // Reformulação V2 (§6.1): o blueprint produz sempre o MESMO Item
     // canônico (id_item_resultado) — a qualidade sorteada vira a

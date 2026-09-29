@@ -57,6 +57,17 @@ router.get("/resources", podeGerenciarConteudo, adminForgeController.listarRecur
 // (Forja-Materiais) — mesmo critério de permissão do seletor acima.
 router.get("/alchemy-products", podeGerenciarConteudo, adminForgeController.listarProdutosAlquimia);
 
+// Profissão de Ferreiro §14.1 — Receitas
+router.get("/recipes", podeGerenciarConteudo, adminForgeController.listarReceitas);
+router.post("/recipes", podeGerenciarConteudo, adminForgeController.criarReceita);
+router.put("/recipes/:id", podeGerenciarConteudo, adminForgeController.atualizarReceita);
+router.put("/blueprints/:id/unlock-mode", podeGerenciarConteudo, adminForgeController.setModoDesbloqueioBlueprint);
+
+// Profissão de Ferreiro §14 — Ferramentas (Ferraria)
+router.get("/tools", podeGerenciarConteudo, adminForgeController.listarFerramentas);
+router.post("/tools", podeGerenciarConteudo, adminForgeController.criarFerramenta);
+router.put("/tools/:itemId", podeGerenciarConteudo, adminForgeController.atualizarFerramenta);
+
 // Balanceamento / métricas
 router.get("/balance", podeBalancear, adminForgeController.obterBalanceamento);
 router.put("/balance/:group", podeBalancear, adminForgeController.atualizarBalanceamento);

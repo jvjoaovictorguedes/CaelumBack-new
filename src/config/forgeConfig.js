@@ -22,6 +22,14 @@ for (let nivel = 2; nivel <= NIVEL_MAXIMO; nivel += 1) {
   XP_TOTAL_PARA_NIVEL[nivel] = XP_TOTAL_PARA_NIVEL[nivel - 1] + XP_NECESSARIO_POR_ETAPA[nivel - 1];
 }
 
+// Profissão de Ferreiro §3.2 — só apresentação, derivado do Nível de
+// Forja (nunca lido como fonte de verdade em nenhum cálculo).
+const TITULO_FERREIRO_POR_NIVEL = {
+  1: "Aprendiz", 2: "Aprendiz", 3: "Ferreiro", 4: "Ferreiro",
+  5: "Artesão", 6: "Artesão", 7: "Mestre Ferreiro", 8: "Mestre Ferreiro",
+  9: "Mestre Artesão", 10: "Grão-Mestre Ferreiro",
+};
+
 const ORDEM_QUALIDADE = ["Comum", "Incomum", "Raro", "Epico", "Lendario", "Mitico"];
 const NOME_EXIBICAO_QUALIDADE = {
   Comum: "Comum", Incomum: "Incomum", Raro: "Raro", Epico: "Épico", Lendario: "Lendário", Mitico: "Mítico",
@@ -99,6 +107,23 @@ function multiplicadorAntiFarmXp(nivelForjaAtual, qualidadeBaseDaReceita) {
   return 0;
 }
 
+// Profissão de Ferreiro §3.1 — mesmo princípio de anti-farm acima, mas
+// pra Refinamento a "dificuldade real" é o ALVO de refino (+1..+10), não
+// uma qualidade de material. Nível esperado cresce com o alvo (quanto
+// mais alto o refino, mais Nível de Ferreiro ele pressupõe).
+const NIVEL_FORJA_ESPERADO_POR_ALVO_REFINAMENTO = {
+  1: 1, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5, 7: 6, 8: 7, 9: 8, 10: 9,
+};
+
+function multiplicadorAntiFarmRefinamentoXp(nivelForjaAtual, alvo) {
+  const nivelEsperado = NIVEL_FORJA_ESPERADO_POR_ALVO_REFINAMENTO[alvo] ?? 1;
+  const diferenca = nivelForjaAtual - nivelEsperado;
+  if (diferenca <= 2) return 1;
+  if (diferenca <= 5) return 0.5;
+  if (diferenca <= 8) return 0.1;
+  return 0;
+}
+
 // ---------------------------------------------------------------------
 // REFINAMENTO (§28-§35)
 // ---------------------------------------------------------------------
@@ -157,9 +182,10 @@ const OURO_BASE_REFINAMENTO_POR_QUALIDADE = {
   Comum: 20, Incomum: 50, Raro: 120, Epico: 300, Lendario: 800, Mitico: 2000,
 };
 
-// Em falha, ~25% do XP do sucesso (§35).
 const XP_REFINAMENTO_POR_ALVO = { 1: 30, 2: 45, 3: 65, 4: 90, 5: 130, 6: 190, 7: 280, 8: 420, 9: 650, 10: 1000 };
-let FATOR_XP_REFINAMENTO_FALHA = 0.25;
+// Profissão de Ferreiro §3/§19: falha de Refinamento concede SEMPRE 0 XP
+// — não é mais um percentual balanceável do sucesso (era
+// FATOR_XP_REFINAMENTO_FALHA, removido; ver forgeRefinementService.js).
 
 // ---------------------------------------------------------------------
 // FILA (§46-§48)
@@ -179,9 +205,8 @@ const TIPOS_ACAO_FORJA = { FUNDICAO: "Fundicao", FABRICACAO: "Fabricacao", REFIN
 // forgeSmeltingService/forgeRefinementService/forgeRollService já
 // desestruturaram essas TABELAS (dicionários) no load: como é o mesmo
 // objeto por referência, mutar as chaves dele é visto por todo mundo
-// sem precisar re-requerir nada. Os dois primitivos editáveis
-// (CAP_CHANCE_REFINAMENTO_PPM/FATOR_XP_REFINAMENTO_FALHA) são a exceção
-// — ver comentário ao lado da declaração de cada um.
+// sem precisar re-requerir nada. CAP_CHANCE_REFINAMENTO_PPM é o único
+// primitivo editável — ver comentário ao lado da sua declaração.
 function aplicarOverridesBalanceamento(grupo, valores) {
   if (!valores || typeof valores !== "object") return;
   switch (grupo) {
@@ -209,6 +234,12 @@ function aplicarOverridesBalanceamento(grupo, valores) {
       }
       if (valores.TEMPO_BASE_FABRICACAO_MS_POR_QUALIDADE) {
         Object.assign(TEMPO_BASE_FABRICACAO_MS_POR_QUALIDADE, valores.TEMPO_BASE_FABRICACAO_MS_POR_QUALIDADE);
+      }
+      // Compartilhado com o anti-farm de Fundição (multiplicadorAntiFarmXp
+      // é usado pelas duas áreas) — editável aqui porque a tabela nasceu
+      // na seção de Fabricação, mas mutar em-lugar vale pro objeto inteiro.
+      if (valores.NIVEL_FORJA_ESPERADO_POR_QUALIDADE) {
+        Object.assign(NIVEL_FORJA_ESPERADO_POR_QUALIDADE, valores.NIVEL_FORJA_ESPERADO_POR_QUALIDADE);
       }
       break;
     }
@@ -240,9 +271,8 @@ function aplicarOverridesBalanceamento(grupo, valores) {
         CAP_CHANCE_REFINAMENTO_PPM = valores.CAP_CHANCE_REFINAMENTO_PPM;
         module.exports.CAP_CHANCE_REFINAMENTO_PPM = CAP_CHANCE_REFINAMENTO_PPM;
       }
-      if (typeof valores.FATOR_XP_REFINAMENTO_FALHA === "number") {
-        FATOR_XP_REFINAMENTO_FALHA = valores.FATOR_XP_REFINAMENTO_FALHA;
-        module.exports.FATOR_XP_REFINAMENTO_FALHA = FATOR_XP_REFINAMENTO_FALHA;
+      if (valores.NIVEL_FORJA_ESPERADO_POR_ALVO_REFINAMENTO) {
+        Object.assign(NIVEL_FORJA_ESPERADO_POR_ALVO_REFINAMENTO, valores.NIVEL_FORJA_ESPERADO_POR_ALVO_REFINAMENTO);
       }
       break;
     }
@@ -267,6 +297,7 @@ function aplicarOverridesBalanceamento(grupo, valores) {
 
 module.exports = {
   NIVEL_MAXIMO,
+  TITULO_FERREIRO_POR_NIVEL,
   XP_NECESSARIO_POR_ETAPA,
   XP_TOTAL_PARA_NIVEL,
   ORDEM_QUALIDADE,
@@ -281,6 +312,8 @@ module.exports = {
   reducaoTempoPorNivelForja,
   NIVEL_FORJA_ESPERADO_POR_QUALIDADE,
   multiplicadorAntiFarmXp,
+  NIVEL_FORJA_ESPERADO_POR_ALVO_REFINAMENTO,
+  multiplicadorAntiFarmRefinamentoXp,
   CHANCE_BASE_REFINAMENTO_PPM_POR_ALVO,
   BONUS_FORJA_REFINAMENTO_PPM_POR_NIVEL,
   REFINAMENTOS_GARANTIDOS,
@@ -290,7 +323,6 @@ module.exports = {
   MATERIAIS_BASE_REFINAMENTO_POR_CATEGORIA,
   OURO_BASE_REFINAMENTO_POR_QUALIDADE,
   XP_REFINAMENTO_POR_ALVO,
-  FATOR_XP_REFINAMENTO_FALHA,
   SLOTS_FORJA,
   TIPOS_ACAO_FORJA,
   aplicarOverridesBalanceamento,

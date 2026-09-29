@@ -1,6 +1,6 @@
 // Progressão da Forja — mesmo critério do expeditionProgressionService.js:
 // nível sempre DERIVADO do XP total acumulado (nunca decrementado/zerado).
-const { NIVEL_MAXIMO, XP_TOTAL_PARA_NIVEL } = require("../config/forgeConfig");
+const { NIVEL_MAXIMO, XP_TOTAL_PARA_NIVEL, TITULO_FERREIRO_POR_NIVEL } = require("../config/forgeConfig");
 
 function nivelPorXpTotal(xpTotal) {
   let nivel = 1;
@@ -33,4 +33,9 @@ function aplicarGanhoDeXp(xpTotalAtual, ganho) {
   };
 }
 
-module.exports = { nivelPorXpTotal, xpParaProximoNivel, aplicarGanhoDeXp };
+// Profissão de Ferreiro §3.2 — título é só apresentação.
+function tituloPorNivel(nivel) {
+  return TITULO_FERREIRO_POR_NIVEL[nivel] ?? TITULO_FERREIRO_POR_NIVEL[1];
+}
+
+module.exports = { nivelPorXpTotal, xpParaProximoNivel, aplicarGanhoDeXp, tituloPorNivel };

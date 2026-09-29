@@ -191,6 +191,12 @@ async function reserveForMarket(idPersonagem, idInstancia, transaction) {
   if (loadout) {
     throw erro("Desequipe a vara de pesca (Loadout de Pesca) antes de anunciar no Mercado.", 400);
   }
+  // Ferramenta de Ferraria equipada (Fole/Martelo/Tenaz) — mesmo
+  // critério da Vara de Pesca acima (spec Profissão de Ferreiro §17).
+  const { instanciaEquipadaEmFerraria } = require("./forgeToolService");
+  if (await instanciaEquipadaEmFerraria(idPersonagem, idInstancia, transaction)) {
+    throw erro("Desequipe essa ferramenta da Ferraria antes de anunciar no Mercado.", 400);
+  }
   instancia.estado = ESTADOS.MERCADO;
   await instancia.save({ transaction });
   return instancia;

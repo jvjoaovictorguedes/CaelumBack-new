@@ -23,8 +23,10 @@ const BASE_SORTEIO = 1_000_000;
 
 // true = essa barra-base rendeu +1 extra (rolado POR BARRA, nunca em
 // lote — spec §8: dividir/juntar lotes não pode mudar a chance efetiva).
-function rolarBarraBonus(nivelForja) {
-  const chancePpm = CHANCE_BARRA_BONUS_PPM_POR_NIVEL[nivelForja] ?? 0;
+// bonusFerramentaPpm (Profissão de Ferreiro §6.2 — Fole) soma direto por
+// cima do bônus de nível, sempre resolvido por forgeBonusesService.
+function rolarBarraBonus(nivelForja, bonusFerramentaPpm = 0) {
+  const chancePpm = (CHANCE_BARRA_BONUS_PPM_POR_NIVEL[nivelForja] ?? 0) + bonusFerramentaPpm;
   return crypto.randomInt(0, BASE_SORTEIO) < chancePpm;
 }
 
@@ -75,14 +77,16 @@ function qualidadeComDegraus(qualidadeBase, degraus) {
 
 // Chance final de sucesso do refinamento — nunca aceitar chance vinda do
 // cliente (spec §54): sempre recalculada aqui a partir de dados do
-// servidor (nível de Forja, alvo, pergaminho).
-function chanceFinalRefinamentoPpm(alvo, nivelForja, bonusPergaminhoPercentual = 0) {
+// servidor (nível de Forja, alvo, pergaminho). bonusFerramentaPpm
+// (Profissão de Ferreiro §6.2 — Tenaz) sempre resolvido por
+// forgeBonusesService, nunca lido direto aqui.
+function chanceFinalRefinamentoPpm(alvo, nivelForja, bonusPergaminhoPercentual = 0, bonusFerramentaPpm = 0) {
   if (REFINAMENTOS_GARANTIDOS.includes(alvo)) return BASE_SORTEIO;
 
   const base = CHANCE_BASE_REFINAMENTO_PPM_POR_ALVO[alvo] ?? 0;
   const bonusForja = BONUS_FORJA_REFINAMENTO_PPM_POR_NIVEL[nivelForja] ?? 0;
   const bonusPergaminho = Math.round((bonusPergaminhoPercentual / 100) * BASE_SORTEIO);
-  const somaBruta = base + bonusForja + bonusPergaminho;
+  const somaBruta = base + bonusForja + bonusPergaminho + bonusFerramentaPpm;
   return Math.min(somaBruta, forgeConfig.CAP_CHANCE_REFINAMENTO_PPM);
 }
 
