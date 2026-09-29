@@ -14,6 +14,8 @@ const Character = require("../models/Character");
 const Item = require("../models/Item");
 const WeaponProperties = require("../models/WeaponProperties");
 const ArmorProperties = require("../models/ArmorProperties");
+const ConsumableProperties = require("../models/ConsumableProperties");
+const FishingRodProperties = require("../models/FishingRodProperties");
 const CharacterInventory = require("../models/CharacterInventory");
 const CharacterEquipmentInstance = require("../models/CharacterEquipmentInstance");
 const MarketListing = require("../models/MarketListing");
@@ -58,6 +60,8 @@ const INCLUDE_ITEM_COM_PROPRIEDADES = {
   include: [
     { model: WeaponProperties, as: "weaponProperties" },
     { model: ArmorProperties, as: "armorProperties" },
+    { model: ConsumableProperties, as: "consumableProperties" },
+    { model: FishingRodProperties, as: "fishingRodProperties" },
   ],
 };
 
@@ -224,18 +228,22 @@ exports.listarAnuncios = async (req, res) => {
     const { rows, count } = await MarketListing.findAndCountAll({
       where: whereListing,
       include: [
-        { model: Item, as: "item", where: Object.keys(whereItem).length ? whereItem : undefined },
+        // Bug real: este include nunca trazia weaponProperties/
+        // armorProperties/etc — a tela de listagem (a que o comprador
+        // realmente vê) mostrava descrição mas nenhum atributo, e
+        // comEfetivoNaInstancia (abaixo) sempre calculava undefined a
+        // partir de um item sem propriedades carregadas. INCLUDE_ITEM_
+        // COM_PROPRIEDADES já existia e resolvia isso — só nunca tinha
+        // sido usado aqui, só em meusAnuncios.
+        { ...INCLUDE_ITEM_COM_PROPRIEDADES, where: Object.keys(whereItem).length ? whereItem : undefined },
         { model: Character, as: "vendedor", attributes: ["id", "nome"] },
         // Inventário v2 — só existe quando o anúncio é de equipamento;
-        // é dali que vem o refinamento de verdade daquela cópia. Traz o
-        // Item completo (com propriedades) pra calcular o efetivo sem
-        // outra query.
+        // é dali que vem o refinamento de verdade daquela cópia.
         {
           model: CharacterEquipmentInstance,
           as: "instancia",
           required: instanciaObrigatoria,
           where: instanciaObrigatoria ? whereInstancia : undefined,
-          include: [INCLUDE_ITEM_COM_PROPRIEDADES],
         },
       ],
       order,
