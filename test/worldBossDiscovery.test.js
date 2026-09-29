@@ -49,6 +49,9 @@ const worldBossScheduler = require("../src/services/worldBossScheduler");
 const worldBossCombatService = require("../src/services/worldBossCombatService");
 const worldBossRuntimeService = require("../src/services/worldBossRuntimeService");
 const worldBossRewardService = require("../src/services/worldBossRewardService");
+const registerWorldBossHandlers = require("../src/socket/worldBossSocket");
+const { emitirTicket } = require("../src/services/socketTicketService");
+const { EventEmitter } = require("node:events");
 const adminWorldBossService = require("../src/services/adminWorldBossService");
 const adminWorldBossEventService = require("../src/services/adminWorldBossEventService");
 const {
@@ -1356,4 +1359,149 @@ testeComBanco("runtime: faseAtualDe/furiaPctDe são funções puras determiníst
   assert.equal(worldBossRuntimeService.furiaPctDe(3, fases[0]), 15);
   assert.equal(worldBossRuntimeService.furiaPctDe(10, fases[0]), 20, "capado pelo limite_furia_pct=20 da fase 1");
   assert.equal(worldBossRuntimeService.furiaPctDe(10, fases[1]), 50, "fase 2 não tem limite (null) — nunca capa");
+});
+
+// Ameaça Mundial V2 — Etapa 4: socket autenticado (§17/§20). Testado
+// contra o MÓDULO REAL (registerWorldBossHandlers), sem subir servidor
+// HTTP/rede de verdade: um `io` e um `socket` fake bastam porque
+// socket.io-client não está instalado neste projeto e um Socket real do
+// lado do servidor já é, por construção, um EventEmitter — `.on(evento,
+// handler)` registra exatamente como o real, e simular "o cliente
+// mandou uma mensagem com ack" é só chamar `.emit(evento, payload,
+// callback)` no mesmo objeto (é assim que o socket.io despacha um
+// packet recebido por baixo dos panos). O objetivo aqui é validar §20:
+// "cliente não consegue agir por outro characterId nem enviar dano
+// arbitrário" — nunca reimplementar a lógica dos handlers, só invocar a
+// de produção.
+function criarIoFake() {
+  const listenersDeConexao = [];
+  const io = {
+    on(evento, callback) {
+      if (evento === "connection") listenersDeConexao.push(callback);
+    },
+    to() {
+      return { emit() {} };
+    },
+  };
+  return { io, conectar: (socket) => listenersDeConexao.forEach((cb) => cb(socket)) };
+}
+
+function criarSocketFake() {
+  const socket = new EventEmitter();
+  socket.rooms = new Set();
+  socket.join = (sala) => socket.rooms.add(sala);
+  socket.leave = (sala) => socket.rooms.delete(sala);
+  return socket;
+}
+
+function dispararComAck(socket, evento, payload) {
+  return new Promise((resolve, reject) => {
+    if (socket.listenerCount(evento) === 0) return reject(new Error(`sem handler pra "${evento}"`));
+    socket.emit(evento, payload, resolve);
+  });
+}
+
+testeComBanco("socket: worldboss:acao sem se identificar antes é sempre rejeitado", async () => {
+  const { io, conectar } = criarIoFake();
+  registerWorldBossHandlers(io);
+  const socket = criarSocketFake();
+  conectar(socket);
+
+  const resposta = await dispararComAck(socket, "worldboss:acao", { tipo: "attack" });
+  assert.equal(resposta.accepted, false);
+  assert.match(resposta.erro, /identifique/i);
+});
+
+testeComBanco("socket: worldboss:identificar com ticket inválido nunca seta characterId", async () => {
+  const { io, conectar } = criarIoFake();
+  registerWorldBossHandlers(io);
+  const socket = criarSocketFake();
+  conectar(socket);
+
+  const resposta = await dispararComAck(socket, "worldboss:identificar", { ticket: "ticket-forjado-invalido" });
+  assert.ok(resposta.erro, "ticket inválido precisa devolver erro, nunca um ok silencioso");
+  assert.equal(socket.characterId, undefined);
+});
+
+testeComBanco("socket: worldboss:identificar com ticket válido seta o characterId do DONO do ticket, nunca outro", async () => {
+  const { personagem } = await criarPersonagem();
+  const { io, conectar } = criarIoFake();
+  registerWorldBossHandlers(io);
+  const socket = criarSocketFake();
+  conectar(socket);
+
+  const ticket = emitirTicket(personagem.id_usuario);
+  const resposta = await dispararComAck(socket, "worldboss:identificar", { ticket });
+  assert.equal(resposta.ok, true);
+  assert.equal(socket.characterId, String(personagem.id));
+});
+
+testeComBanco("socket: worldboss:acao só age pelo characterId do ticket — um characterId enviado no payload é ignorado", async () => {
+  await criarEventoAtivoV2();
+  const { personagem: dono } = await criarPersonagem();
+  const { personagem: outro } = await criarPersonagem();
+
+  const { io, conectar } = criarIoFake();
+  registerWorldBossHandlers(io);
+  const socket = criarSocketFake();
+  conectar(socket);
+
+  const ticket = emitirTicket(dono.id_usuario);
+  await dispararComAck(socket, "worldboss:identificar", { ticket });
+  // Dono nunca entrou em combate (sem sessão Ativa) — se o servidor
+  // fosse ler o characterId forjado no payload, agiria como "outro"
+  // (que também não tem sessão, mas é OUTRO personagem) em vez de
+  // rejeitar corretamente pela falta de sessão do dono de verdade.
+  const resposta = await dispararComAck(socket, "worldboss:acao", {
+    characterId: outro.id,
+    character_id: outro.id,
+    tipo: "attack",
+  });
+  assert.equal(resposta.accepted, false);
+  assert.match(resposta.erro, /sessão de combate/i);
+
+  const sessaoDoOutro = await WorldBossCombatSession.findOne({ where: { character_id: outro.id } });
+  assert.equal(sessaoDoOutro, null, "characterId forjado no payload nunca pode criar/afetar sessão de OUTRO personagem");
+});
+
+testeComBanco("socket: worldboss:entrar-combate exige identificação prévia", async () => {
+  await criarEventoAtivoV2();
+  const { io, conectar } = criarIoFake();
+  registerWorldBossHandlers(io);
+  const socket = criarSocketFake();
+  conectar(socket);
+
+  const resposta = await dispararComAck(socket, "worldboss:entrar-combate", {});
+  assert.equal(resposta.ok, undefined);
+  assert.match(resposta.erro, /identifique/i);
+});
+
+testeComBanco("socket: client_action_id repetido devolve a MESMA resposta sem reprocessar a ação (nunca dobra o dano)", async () => {
+  const evento = await criarEventoAtivoV2({ hpCurrent: 1000, hpMax: 1000 });
+  const { personagem } = await criarPersonagem({ nivel: 20 });
+
+  const { io, conectar } = criarIoFake();
+  registerWorldBossHandlers(io);
+  const socket = criarSocketFake();
+  conectar(socket);
+
+  const ticket = emitirTicket(personagem.id_usuario);
+  await dispararComAck(socket, "worldboss:identificar", { ticket });
+  await dispararComAck(socket, "worldboss:entrar-combate", {});
+
+  const primeira = await dispararComAck(socket, "worldboss:acao", { client_action_id: "acao-1", tipo: "attack" });
+  assert.equal(primeira.accepted, true);
+
+  await evento.reload();
+  const hpDepoisDaPrimeira = evento.hp_current;
+
+  const repetida = await dispararComAck(socket, "worldboss:acao", { client_action_id: "acao-1", tipo: "attack" });
+  assert.deepEqual(repetida, primeira, "o mesmo client_action_id precisa devolver o ack idêntico já dado, nunca reprocessar");
+
+  await evento.reload();
+  assert.equal(evento.hp_current, hpDepoisDaPrimeira, "reenviar o mesmo client_action_id nunca pode aplicar dano de novo");
+
+  const diferente = await dispararComAck(socket, "worldboss:acao", { client_action_id: "acao-2", tipo: "attack" });
+  assert.equal(diferente.accepted, true);
+  assert.notEqual(diferente.server_action_seq, primeira.server_action_seq, "um client_action_id NOVO precisa processar uma ação nova de verdade");
 });

@@ -290,6 +290,12 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
       manaCurada: resultado.manaCurada,
       golpeFinal,
       proezasConquistadas: proezasConquistadas.map((p) => ({ key: p.feat.key, nome: p.feat.nome })),
+      // Ameaça Mundial V2 §17.2 — server_action_seq do ACK autenticado
+      // (worldBossSocket, Etapa 4): sequência da SESSÃO do jogador
+      // (WorldBossCombatSession.action_seq), não do boss_action_seq
+      // global (esse é do relógio do boss, Etapa 3) — já resolvido
+      // dentro desta MESMA transação, nunca uma query extra pós-commit.
+      action_seq: sessao.action_seq,
       lutador: {
         vida_atual: personagem.vida_atual,
         mana_atual: personagem.mana_atual,
@@ -303,10 +309,6 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
         hp_percentual: Number(evento.hp_max) > 0 ? Math.round((hpDepois / Number(evento.hp_max)) * 10000) / 100 : 0,
         derrotado: golpeFinal,
       },
-      // action_seq resolvido dentro da MESMA transação que a query de
-      // status usaria — evitar outra ida ao banco pós-commit é só
-      // otimização; o payload de status completo (com fase, mensagens
-      // etc.) o cliente já tem de sobra vindo do GET /status/socket.
     };
   });
 
