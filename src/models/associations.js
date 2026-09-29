@@ -619,4 +619,38 @@ MusicPoolTrackAssignment.belongsTo(MusicTrack, { foreignKey: "id_track", as: "tr
 MusicPool.hasMany(MusicPoolTrackAssignment, { foreignKey: "id_pool", as: "memberships" });
 MusicTrack.hasMany(MusicPoolTrackAssignment, { foreignKey: "id_track", as: "poolMemberships" });
 
+// Classes V2 Fase 2 — Requirement/Ability/Effect genéricos de uma
+// evolução (ver ClassEvolutionRequirement/Ability/Effect.js), e a
+// linhagem pai/filho entre estágios (§5.2: um estágio 2 declara a
+// evolução pai obrigatória, mesma classe base). Fase 1 (commit 5615030)
+// já cadastrava ClassEvolutionPath/CharacterClassEvolution/Power sem
+// precisar de include — os services novos daqui pra frente (Admin,
+// árvore de evolução, validador) usam esses aliases.
+const ClassEvolutionPathModel = require("./ClassEvolutionPath");
+const ClassEvolutionRequirement = require("./ClassEvolutionRequirement");
+const ClassEvolutionAbility = require("./ClassEvolutionAbility");
+const ClassEvolutionEffect = require("./ClassEvolutionEffect");
+const ClassModel = require("./Class");
+const CharacterClassEvolutionModel = require("./CharacterClassEvolution");
+
+ClassModel.hasMany(ClassEvolutionPathModel, { foreignKey: "id_classe", as: "evolucoes" });
+ClassEvolutionPathModel.belongsTo(ClassModel, { foreignKey: "id_classe", as: "classe" });
+
+ClassEvolutionPathModel.belongsTo(ClassEvolutionPathModel, { foreignKey: "id_evolucao_pai", as: "evolucaoPai" });
+ClassEvolutionPathModel.hasMany(ClassEvolutionPathModel, { foreignKey: "id_evolucao_pai", as: "evolucoesFilhas" });
+
+ClassEvolutionPathModel.hasMany(ClassEvolutionRequirement, { foreignKey: "id_evolucao", as: "requisitos" });
+ClassEvolutionRequirement.belongsTo(ClassEvolutionPathModel, { foreignKey: "id_evolucao", as: "evolucao" });
+
+ClassEvolutionPathModel.hasMany(ClassEvolutionAbility, { foreignKey: "id_evolucao", as: "habilidadesConcedidas" });
+ClassEvolutionAbility.belongsTo(ClassEvolutionPathModel, { foreignKey: "id_evolucao", as: "evolucao" });
+ClassEvolutionAbility.belongsTo(Power, { foreignKey: "id_power", as: "power" });
+
+ClassEvolutionPathModel.hasMany(ClassEvolutionEffect, { foreignKey: "id_evolucao", as: "efeitos" });
+ClassEvolutionEffect.belongsTo(ClassEvolutionPathModel, { foreignKey: "id_evolucao", as: "evolucao" });
+
+CharacterClassEvolutionModel.belongsTo(ClassEvolutionPathModel, { foreignKey: "id_evolucao", as: "evolucao" });
+CharacterClassEvolutionModel.belongsTo(Character, { foreignKey: "id_personagem", as: "personagem" });
+Character.hasMany(CharacterClassEvolutionModel, { foreignKey: "id_personagem", as: "evolucoesDeClasse" });
+
 module.exports = {};

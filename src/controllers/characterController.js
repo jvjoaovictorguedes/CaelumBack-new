@@ -42,9 +42,11 @@ const {
 const {
   listarCaminhosDaClasse,
   buscarCaminho,
-  buscarItemRequisito,
-  contarMortesDoAlvo,
 } = require("../services/classEvolutionService");
+const {
+  avaliarRequisitosDaEvolucao,
+  consumirRequisitosGastaveis,
+} = require("../services/classEvolutionRequirementService");
 const CharacterClassEvolution = require("../models/CharacterClassEvolution");
 const {
   sincronizarRegeneracaoDeVidaEMana,
@@ -1176,88 +1178,91 @@ exports.comprarEvolucao = async (req, res) => {
   }
 };
 
-// GET a árvore de evolução de CLASSE — todos os caminhos configurados
-// pra classe do personagem, cada um já com "pode_evoluir" calculado
-// (nível + item o suficiente + ainda não escolheu nenhum caminho). Não
-// confundir com getEvolucoesDisponiveis (aquele é o sistema de Evolution
-// por natureza mágica, já existente, mantido à parte).
+// GET a árvore de evolução de CLASSE — Classes V2 §5: dois estágios,
+// Lv.40 (1) e Lv.100 (2). O jogador escolhe UM caminho de estágio 1 em
+// definitivo; se aquele caminho tiver filhos ativos (id_evolucao_pai),
+// o estágio 2 libera exclusivamente entre eles (§5.2 "não existe
+// Berserker -> Ascensão Paladino"). Requisitos vêm inteiramente de
+// ClassEvolutionRequirement agora (classEvolutionRequirementService),
+// nunca mais das colunas ad hoc de ClassEvolutionPath — essas continuam
+// no banco só como histórico dos caminhos publicados antes da Fase 2.
+// Não confundir com getEvolucoesDisponiveis (Evolution por natureza
+// mágica, sistema à parte).
 exports.getEvolucaoDeClasse = async (req, res) => {
   try {
     const character = await Character.findByPk(req.params.id, {
-      attributes: ["id", "nivel", "id_classe", "id_evolucao_classe", "dinheiro"],
+      attributes: ["id", "nivel", "id_classe", "id_evolucao_classe", "dinheiro", "rank"],
     });
     if (!character) {
       return res.status(404).json({ message: "Personagem não encontrado." });
     }
 
     const caminhos = await listarCaminhosDaClasse(character.id_classe);
-    if (caminhos.length === 0) {
-      return res.status(200).json({
-        status: "success",
-        data: { disponivel: false },
-      });
+    const caminhosAtivos = caminhos.filter((c) => c.ativo);
+    if (caminhosAtivos.length === 0) {
+      return res.status(200).json({ status: "success", data: { disponivel: false } });
     }
 
-    const inventario = await CharacterInventory.findAll({ where: { id_personagem: character.id } });
-    const quantidadePorItem = new Map(inventario.map((entrada) => [entrada.id_item, entrada.quantidade]));
+    const evolucoesAdquiridas = await CharacterClassEvolution.findAll({
+      where: { id_personagem: character.id },
+    });
+    const adquiridaPorEstagio = new Map(evolucoesAdquiridas.map((e) => [e.estagio, e]));
+    const adquiridaEstagio1 = adquiridaPorEstagio.get(1) ?? null;
+    const adquiridaEstagio2 = adquiridaPorEstagio.get(2) ?? null;
 
-    const caminhoEscolhido = character.id_evolucao_classe
-      ? caminhos.find((c) => c.id === character.id_evolucao_classe)
-      : null;
+    async function montarOpcao(caminho) {
+      const { atendidos, detalhes } = await avaliarRequisitosDaEvolucao(caminho.id, character);
+      return {
+        id: caminho.id,
+        nome: caminho.nome,
+        descricao: caminho.descricao,
+        estagio: caminho.estagio,
+        id_evolucao_pai: caminho.id_evolucao_pai,
+        icone_url: caminho.icone_url,
+        imagem_url: caminho.imagem_url,
+        bonus_forca: caminho.bonus_forca,
+        bonus_vitalidade: caminho.bonus_vitalidade,
+        bonus_agilidade: caminho.bonus_agilidade,
+        bonus_inteligencia: caminho.bonus_inteligencia,
+        bonus_velocidade: caminho.bonus_velocidade,
+        requisitos: detalhes,
+        atende_requisitos: atendidos,
+      };
+    }
 
-    const caminhosMontados = await Promise.all(
-      caminhos.map(async (caminho) => {
-        const item = await buscarItemRequisito(caminho.id_item_requisito);
-        const quantidadeNoInventario = item ? (quantidadePorItem.get(item.id) ?? 0) : 0;
-        const nivelOk = character.nivel >= caminho.nivel_necessario;
-        const itemOk = quantidadeNoInventario >= caminho.quantidade_item_requisito;
-
-        // Requisito de caça é opcional (nome_monstro_alvo pode ser NULL)
-        // — caminho sem ele não trava por monstroOk (fica sempre true).
-        const mortesAtuais = caminho.nome_monstro_alvo
-          ? await contarMortesDoAlvo(character.id, caminho.nome_monstro_alvo)
-          : 0;
-        const monstroOk = !caminho.nome_monstro_alvo || mortesAtuais >= caminho.quantidade_monstro_necessaria;
-        const ouroOk = character.dinheiro >= caminho.custo_ouro;
-
-        return {
-          id: caminho.id,
-          nome: caminho.nome,
-          descricao: caminho.descricao,
-          nivel_necessario: caminho.nivel_necessario,
-          nome_item_requisito: item?.nome ?? null,
-          imagem_item_requisito: item?.imagem_url ?? null,
-          quantidade_item_requisito: caminho.quantidade_item_requisito,
-          quantidade_no_inventario: quantidadeNoInventario,
-          nome_monstro_alvo: caminho.nome_monstro_alvo,
-          quantidade_monstro_necessaria: caminho.quantidade_monstro_necessaria,
-          quantidade_monstro_atual: mortesAtuais,
-          custo_ouro: caminho.custo_ouro,
-          bonus_forca: caminho.bonus_forca,
-          bonus_vitalidade: caminho.bonus_vitalidade,
-          bonus_agilidade: caminho.bonus_agilidade,
-          bonus_inteligencia: caminho.bonus_inteligencia,
-          bonus_velocidade: caminho.bonus_velocidade,
-          imagem_url: caminho.imagem_url,
-          escolhido: character.id_evolucao_classe === caminho.id,
-          pode_evoluir: !character.id_evolucao_classe && nivelOk && itemOk && monstroOk && ouroOk,
-          nivel_ok: nivelOk,
-          item_ok: itemOk,
-          monstro_ok: monstroOk,
-          ouro_ok: ouroOk,
-        };
-      }),
+    const opcoesEstagio1 = await Promise.all(
+      caminhosAtivos.filter((c) => c.estagio === 1).map(montarOpcao),
     );
+    const filhosDoEscolhido = adquiridaEstagio1
+      ? caminhosAtivos.filter((c) => c.estagio === 2 && c.id_evolucao_pai === adquiridaEstagio1.id_evolucao)
+      : [];
+    const opcoesEstagio2 = await Promise.all(filhosDoEscolhido.map(montarOpcao));
+
+    const caminhoPorId = new Map(caminhos.map((c) => [c.id, c]));
 
     res.status(200).json({
       status: "success",
       data: {
         disponivel: true,
-        ja_evoluida: Boolean(character.id_evolucao_classe),
-        caminho_escolhido: caminhoEscolhido?.nome ?? null,
         nivel_atual: character.nivel,
         dinheiro_atual: character.dinheiro,
-        caminhos: caminhosMontados,
+        estagio_1: {
+          adquirida: Boolean(adquiridaEstagio1),
+          caminho_escolhido_id: adquiridaEstagio1?.id_evolucao ?? null,
+          caminho_escolhido_nome: adquiridaEstagio1 ? caminhoPorId.get(adquiridaEstagio1.id_evolucao)?.nome ?? null : null,
+          opcoes: opcoesEstagio1,
+        },
+        estagio_2: {
+          // Só existe "disponível" de verdade quando o caminho de
+          // estágio 1 escolhido TEM filhos cadastrados — uma classe
+          // pode não ter estágio 2 ainda (§5 "schema preparado pra
+          // estágios futuros", não obrigatório publicar de cara).
+          disponivel: filhosDoEscolhido.length > 0,
+          adquirida: Boolean(adquiridaEstagio2),
+          caminho_escolhido_id: adquiridaEstagio2?.id_evolucao ?? null,
+          caminho_escolhido_nome: adquiridaEstagio2 ? caminhoPorId.get(adquiridaEstagio2.id_evolucao)?.nome ?? null : null,
+          opcoes: opcoesEstagio2,
+        },
       },
     });
   } catch (error) {
@@ -1266,9 +1271,51 @@ exports.getEvolucaoDeClasse = async (req, res) => {
   }
 };
 
+// Classes V2 §9 — concede os Powers configurados em ClassEvolutionAbility
+// pra essa evolução (auto_conceder=true), respeitando o limite de 5
+// habilidades ativas em combate (ativar_se_houver_slot) — mesmo padrão
+// de concederPoderesIniciais acima. UNIQUE_FEAT nunca é concedido por
+// aqui (§9 "validar server-side"): mesmo que um vínculo assim exista
+// por engano, é pulado silenciosamente, nunca concedido.
+async function concederHabilidadesDeEvolucao(character, idEvolucao, transaction) {
+  const ClassEvolutionAbility = require("../models/ClassEvolutionAbility");
+  const vinculos = await ClassEvolutionAbility.findAll({
+    where: { id_evolucao: idEvolucao, auto_conceder: true },
+    transaction,
+  });
+  if (vinculos.length === 0) return;
+
+  const [powers, aprendidos] = await Promise.all([
+    Power.findAll({ where: { id: vinculos.map((v) => v.id_power) }, transaction }),
+    CharacterAbilities.findAll({ where: { id_personagem: character.id }, transaction }),
+  ]);
+  const powerPorId = new Map(powers.map((p) => [p.id, p]));
+  const idsJaAprendidos = new Set(aprendidos.map((linha) => linha.id_power));
+  let vagasAtivasRestantes = Math.max(
+    0,
+    MAX_HABILIDADES_ATIVAS_COMBATE - aprendidos.filter((linha) => linha.is_active).length,
+  );
+
+  const linhas = [];
+  for (const vinculo of vinculos) {
+    if (idsJaAprendidos.has(vinculo.id_power)) continue;
+    const power = powerPorId.get(vinculo.id_power);
+    if (!power || power.acquisition_scope === "UNIQUE_FEAT") continue;
+    const ativar = vinculo.ativar_se_houver_slot && vagasAtivasRestantes > 0;
+    if (ativar) vagasAtivasRestantes -= 1;
+    linhas.push({ id_personagem: character.id, id_power: vinculo.id_power, level_learned: character.nivel, is_active: ativar });
+  }
+  if (linhas.length > 0) {
+    await CharacterAbilities.bulkCreate(linhas, { ignoreDuplicates: true, transaction });
+  }
+}
+
 // POST escolhe UM caminho da árvore de classe (body: { id_caminho }) —
-// consome a Relíquia de Ascensão específica desse caminho, exige nível
-// mínimo, e é definitivo (sem "desevoluir" nem trocar de caminho depois).
+// serve tanto pro estágio 1 (Lv.40) quanto pro estágio 2 (Lv.100): o
+// próprio caminho já diz o estágio dele (§23.1/23.2 do documento, um
+// único fluxo transacional pros dois casos, diferindo só na checagem de
+// linhagem). Consome os requisitos gastáveis (ouro/item), é definitivo
+// (sem desevoluir nem trocar de caminho depois).
 exports.evolveClass = async (req, res) => {
   try {
     const idCaminho = Number(req.body?.id_caminho);
@@ -1285,90 +1332,77 @@ exports.evolveClass = async (req, res) => {
         throw Object.assign(new Error("Personagem não encontrado."), { statusCode: 404 });
       }
 
-      if (character.id_evolucao_classe) {
-        throw Object.assign(new Error("Este personagem já evoluiu de classe."), {
-          statusCode: 409,
-        });
-      }
-
       const caminho = await buscarCaminho(idCaminho);
-      if (!caminho || caminho.id_classe !== character.id_classe) {
+      if (!caminho || !caminho.ativo || caminho.id_classe !== character.id_classe) {
         throw Object.assign(
           new Error("Esse caminho de evolução não pertence à classe deste personagem."),
           { statusCode: 404 },
         );
       }
-      if (character.nivel < caminho.nivel_necessario) {
-        throw Object.assign(
-          new Error(`Evoluir pra ${caminho.nome} exige nível ${caminho.nivel_necessario}.`),
-          { statusCode: 400 },
-        );
+
+      const evolucoesAtuais = await CharacterClassEvolution.findAll({
+        where: { id_personagem: character.id },
+        transaction,
+      });
+      const adquiridaEstagio1 = evolucoesAtuais.find((e) => e.estagio === 1) ?? null;
+      const adquiridaNoEstagioAlvo = evolucoesAtuais.find((e) => e.estagio === caminho.estagio);
+      if (adquiridaNoEstagioAlvo) {
+        throw Object.assign(new Error(`Este personagem já concluiu o estágio ${caminho.estagio} de evolução de classe.`), {
+          statusCode: 409,
+        });
       }
 
-      if (caminho.nome_monstro_alvo) {
-        const mortes = await contarMortesDoAlvo(character.id, caminho.nome_monstro_alvo, transaction);
-        if (mortes < caminho.quantidade_monstro_necessaria) {
+      // §5.2 — linhagem: estágio 2 exige a evolução PAI (mesma que o
+      // personagem escolheu no estágio 1) já adquirida; nunca aceita um
+      // filho de um caminho de estágio 1 diferente do escolhido.
+      if (caminho.estagio > 1) {
+        if (!adquiridaEstagio1) {
+          throw Object.assign(new Error("Complete o estágio 1 de evolução de classe antes deste."), { statusCode: 400 });
+        }
+        if (caminho.id_evolucao_pai !== adquiridaEstagio1.id_evolucao) {
           throw Object.assign(
-            new Error(
-              `Evoluir pra ${caminho.nome} exige ter derrotado ${caminho.quantidade_monstro_necessaria}x ${caminho.nome_monstro_alvo} (você já derrotou ${mortes}).`,
-            ),
+            new Error("Esse caminho de estágio 2 não pertence à linhagem que você escolheu no estágio 1."),
             { statusCode: 400 },
           );
         }
       }
 
-      if (character.dinheiro < caminho.custo_ouro) {
+      const { atendidos, detalhes } = await avaliarRequisitosDaEvolucao(caminho.id, character, transaction);
+      if (!atendidos) {
+        const faltando = detalhes.find((d) => !d.atendido);
         throw Object.assign(
-          new Error(`Evoluir pra ${caminho.nome} custa ${caminho.custo_ouro} de ouro.`),
+          new Error(`Requisito não cumprido pra evoluir pra ${caminho.nome} (${faltando?.tipo ?? "requisito"}).`),
           { statusCode: 400 },
         );
       }
+      await consumirRequisitosGastaveis(caminho.id, character, transaction);
+      await character.save({ transaction });
 
-      const entradaInventario = await CharacterInventory.findOne({
-        where: { id_personagem: character.id, id_item: caminho.id_item_requisito },
-        transaction,
-        lock: transaction.LOCK.UPDATE,
-      });
-      if (!entradaInventario || entradaInventario.quantidade < caminho.quantidade_item_requisito) {
-        const itemRequisito = await Item.findByPk(caminho.id_item_requisito, { transaction });
-        throw Object.assign(
-          new Error(
-            `Você precisa de ${caminho.quantidade_item_requisito}x ${itemRequisito?.nome ?? "item"} pra evoluir pra ${caminho.nome}.`,
-          ),
-          { statusCode: 400 },
-        );
-      }
-
-      character.dinheiro -= caminho.custo_ouro;
-      entradaInventario.quantidade -= caminho.quantidade_item_requisito;
-      if (entradaInventario.quantidade > 0) {
-        await entradaInventario.save({ transaction });
-      } else {
-        await entradaInventario.destroy({ transaction });
-      }
-
-      // Classes V2 §7 — a partir daqui, o bônus da evolução NUNCA mais é
-      // somado diretamente nos atributos-base do Character; fica
-      // registrado em CharacterClassEvolution (estágio 1 = Lv.40) e é
-      // resolvido dinamicamente a cada leitura por
+      // Classes V2 §7 — o bônus da evolução NUNCA é somado diretamente
+      // nos atributos-base do Character; fica registrado em
+      // CharacterClassEvolution e resolvido dinamicamente por
       // classEvolutionBonusService (via equipmentBonusService, mesma
       // filosofia de equipamento/passivas/sets). id_evolucao_classe
-      // continua sendo escrito só como ponteiro de leitura/compat — não
-      // é mais fonte de bônus nenhum.
-      character.id_evolucao_classe = caminho.id;
-      await character.save({ transaction });
+      // continua sendo escrito só no estágio 1, só como ponteiro de
+      // leitura/compat com o runtime V1 — nunca fonte de bônus.
+      if (caminho.estagio === 1) {
+        character.id_evolucao_classe = caminho.id;
+        await character.save({ transaction });
+      }
       await CharacterClassEvolution.create(
-        { id_personagem: character.id, id_evolucao: caminho.id, estagio: 1, legacy_bonus_materializado: false },
+        { id_personagem: character.id, id_evolucao: caminho.id, estagio: caminho.estagio, legacy_bonus_materializado: false },
         { transaction },
       );
+      await concederHabilidadesDeEvolucao(character, caminho.id, transaction);
 
-      return { character, nomeEvoluido: caminho.nome };
+      return { character, nomeEvoluido: caminho.nome, estagio: caminho.estagio };
     });
 
     res.status(200).json({
       status: "success",
       message: `Seu personagem evoluiu para ${resultado.nomeEvoluido}!`,
       data: {
+        estagio: resultado.estagio,
         id_evolucao_classe: resultado.character.id_evolucao_classe,
         nome_evoluido: resultado.nomeEvoluido,
       },

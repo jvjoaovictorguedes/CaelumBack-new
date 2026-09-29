@@ -19,6 +19,7 @@ const { propriedadesEfetivasArma, propriedadesEfetivasArmadura } = require("./eq
 const { aplicarRaridadeArma, aplicarRaridadeArmadura } = require("./equipmentRarityService");
 const { resolverConjuntosEquipados } = require("./equipmentSetService");
 const { resolverBonusDeEvolucaoDeClasse } = require("./classEvolutionBonusService");
+const { resolverBonusDeEfeitosDeEvolucao } = require("./classEvolutionEffectService");
 // Só o require garante que a associação (com alias explícito) já foi
 // declarada — ver models/associations.js pra fonte única.
 require("../models/associations");
@@ -35,7 +36,7 @@ function bonusZerado() {
 // rodaria numa conexão separada e não enxergaria a alteração ainda não
 // commitada).
 async function buscarBonusDeAtributos(idPersonagem, transaction) {
-  const [equipamentos, passivasAtivas, setState, bonusEvolucaoClasse] = await Promise.all([
+  const [equipamentos, passivasAtivas, setState, bonusEvolucaoClasse, bonusEfeitosEvolucao] = await Promise.all([
     CharacterEquipment.findAll({
       where: { id_personagem: idPersonagem },
       include: [
@@ -72,6 +73,11 @@ async function buscarBonusDeAtributos(idPersonagem, transaction) {
     // igual equipamento/passivas/sets (ver classEvolutionBonusService.js
     // pro motivo de nunca materializar isso em Character).
     resolverBonusDeEvolucaoDeClasse(idPersonagem, transaction),
+    // Classes V2 §10 — efeitos mecânicos de evolução (hoje só
+    // DAMAGE_REDUCTION, ver classEvolutionEffectService.js pro motivo
+    // do catálogo fechado). Mesma filosofia de sob-demanda, mesma
+    // exclusão de backfill legado.
+    resolverBonusDeEfeitosDeEvolucao(idPersonagem, transaction),
   ]);
 
   const bonus = bonusZerado();
@@ -167,6 +173,10 @@ async function buscarBonusDeAtributos(idPersonagem, transaction) {
   bonus.agilidade += bonusEvolucaoClasse.agilidade || 0;
   bonus.inteligencia += bonusEvolucaoClasse.inteligencia || 0;
   bonus.velocidade += bonusEvolucaoClasse.velocidade || 0;
+
+  // Classes V2 §10 — efeito DAMAGE_REDUCTION de evolução vira defesa
+  // extra, reaproveitando a MESMA mitigação de combatFormulas.js.
+  bonus.defesa += bonusEfeitosEvolucao.defesa || 0;
 
   // Arredonda aqui pra já sair um número limpo tanto pro combate quanto
   // pra exibição — bônus de arma (valor_bonus_atributo) é FLOAT.
