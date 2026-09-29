@@ -653,50 +653,18 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     }
 
     // ==========================================================
-    // MOTOR DE STATUS/COOLDOWN — INÍCIO DO TURNO DO JOGADOR
-    // (Especificação Consolidada Poder/Status/Cooldown/Balanceamento,
-    // §23 passos 1/2) — ticks de Burn/Bleed/Poison que estejam no
-    // próprio jogador podem matá-lo ANTES de agir; nesse caso a ação
-    // nem chega a acontecer.
+    // INÍCIO DO TURNO DO JOGADOR — só setup de cooldown/status aqui.
+    // Burn/Bleed/Poison NÃO ticam mais neste ponto (bug reportado:
+    // "status effect contabilizado junto com o ataque" — o tick
+    // acontecia ANTES da ação do jogador, no mesmo instante em que o
+    // turno começava, então visualmente parecia grudado no ataque
+    // anterior). O tick do jogador agora acontece no FIM do turno dele,
+    // depois da própria ação — ver bloco logo após a checagem de
+    // vitória mais abaixo.
     // ==========================================================
     const { statusEffects, cooldowns, combatTurn } = estadoDeStatusECooldown(inimigoAtual);
     const cooldownsPlayerAplicadosNesteTurno = new Set();
     const cooldownsEnemyAplicadosNesteTurno = new Set();
-
-    personagemAtual.vida_atual = statusEffectService.processarTicksDeInicio({
-      vidaAtual: personagemAtual.vida_atual,
-      defensor: personagemAtual,
-      lista: statusEffects.player,
-      log,
-      nomeAlvo: "Você",
-    });
-
-    if (personagemAtual.vida_atual <= 0) {
-      character.vida_atual = 0;
-      character.mana_atual = personagemAtual.mana_atual;
-      character.ultima_atualizacao_vida = new Date();
-      character.ultima_atualizacao_mana = new Date();
-      character.encontro_pve = null;
-      log.push("Você foi derrotado e precisa se recuperar antes de lutar de novo.");
-      await character.save({ transaction });
-      return res.status(200).json({
-        status: "success",
-        data: {
-          done: true,
-          victory: false,
-          log,
-          character: {
-            vida_atual: 0,
-            mana_atual: personagemAtual.mana_atual,
-            nivel: character.nivel,
-            experiencia: character.experiencia,
-            pontos_distribuir: character.pontos_distribuir,
-          },
-          enemy: inimigoAtual,
-          statusEffects,
-        },
-      });
-    }
 
     // ==========================================================
     // TURNO DO JOGADOR
@@ -1060,22 +1028,11 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     }
     } // fecha `if (!jogadorBloqueadoNesteTurno)`
 
-    // Fim do turno do JOGADOR (§23 passos 8/9) — decrementa cooldown e
-    // duração de status do jogador, exceto o que acabou de entrar agora.
+    // Fim do turno do JOGADOR (§23 passos 8/9, parte cooldown) — só o
+    // cooldown decrementa aqui; a duração de status do jogador decrementa
+    // junto com o tick de DoT dele, logo abaixo (depois da checagem de
+    // vitória — nunca antes).
     cooldowns.player = cooldownService.decrementarCooldowns(cooldowns.player, cooldownsPlayerAplicadosNesteTurno);
-    statusEffects.player = statusEffectService.decrementarDuracoes(statusEffects.player);
-
-    // Snapshot de vida/mana logo após a AÇÃO do jogador (poder/item/
-    // ataque), antes do contra-ataque do inimigo mais abaixo — sem
-    // isso, o cliente só via o resultado LÍQUIDO do turno inteiro
-    // (cura menos o dano que o inimigo causa em seguida), e uma cura
-    // real podia ficar "invisível" na tela sempre que o contra-ataque
-    // fosse maior que ela, mesmo com o log dizendo corretamente que a
-    // poção funcionou. Devolvido em character.vida_apos_sua_acao pro
-    // front mostrar a cura de verdade antes de aplicar o golpe do
-    // inimigo por cima.
-    const vidaAposAcaoJogador = personagemAtual.vida_atual;
-    const manaAposAcaoJogador = personagemAtual.mana_atual;
 
     // ==========================================================
     // CHECA VITÓRIA
@@ -1366,20 +1323,63 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     }
 
     // ==========================================================
-    // MOTOR DE STATUS/COOLDOWN — INÍCIO DO TURNO DO INIMIGO (§23
-    // passos 1/2) — ticks de Burn/Bleed/Poison aplicados nele por
-    // poderes do jogador podem matá-lo ANTES do contra-ataque.
+    // MOTOR DE STATUS — FIM DO TURNO DO JOGADOR (Burn/Bleed/Poison
+    // ticam DEPOIS da ação dele, não antes — bug reportado: o tick
+    // acontecia no INÍCIO do turno do jogador, antes de ele agir,
+    // então na prática ficava grudado visualmente no ataque anterior
+    // do inimigo. Só chega aqui se o inimigo sobreviveu à ação do
+    // jogador (vitória já foi resolvida acima) — um DoT que só ia
+    // terminar de aplicar DEPOIS nunca deve reverter uma vitória já
+    // conquistada nesta mesma resposta.
     // ==========================================================
-    inimigoAtual.vida_atual = statusEffectService.processarTicksDeInicio({
-      vidaAtual: inimigoAtual.vida_atual,
-      defensor: inimigoAtual,
-      lista: statusEffects.enemy,
+    personagemAtual.vida_atual = statusEffectService.processarTicksDeInicio({
+      vidaAtual: personagemAtual.vida_atual,
+      defensor: personagemAtual,
+      lista: statusEffects.player,
       log,
-      nomeAlvo: inimigoAtual.nome,
+      nomeAlvo: "Você",
     });
+    statusEffects.player = statusEffectService.decrementarDuracoes(statusEffects.player);
 
-    if (inimigoAtual.vida_atual <= 0) {
-      return await concederVitoriaEResponder();
+    // Snapshot de vida/mana ao FIM do turno do jogador (ação + tick de
+    // DoT próprio), antes do contra-ataque do inimigo mais abaixo — sem
+    // isso, o cliente só via o resultado LÍQUIDO do turno inteiro
+    // (cura menos o dano que o inimigo causa em seguida), e uma cura
+    // real podia ficar "invisível" na tela sempre que o contra-ataque
+    // fosse maior que ela, mesmo com o log dizendo corretamente que a
+    // poção funcionou. Devolvido em character.vida_apos_sua_acao pro
+    // front mostrar o resultado de verdade antes de aplicar o golpe do
+    // inimigo por cima.
+    const vidaAposAcaoJogador = personagemAtual.vida_atual;
+    const manaAposAcaoJogador = personagemAtual.mana_atual;
+
+    if (personagemAtual.vida_atual <= 0) {
+      character.vida_atual = 0;
+      character.mana_atual = personagemAtual.mana_atual;
+      character.ultima_atualizacao_vida = new Date();
+      character.ultima_atualizacao_mana = new Date();
+      character.encontro_pve = null;
+      log.push("Você foi derrotado e precisa se recuperar antes de lutar de novo.");
+      await character.save({ transaction });
+      return res.status(200).json({
+        status: "success",
+        data: {
+          done: true,
+          victory: false,
+          log,
+          character: {
+            vida_atual: 0,
+            mana_atual: personagemAtual.mana_atual,
+            vida_apos_sua_acao: 0,
+            mana_apos_sua_acao: manaAposAcaoJogador,
+            nivel: character.nivel,
+            experiencia: character.experiencia,
+            pontos_distribuir: character.pontos_distribuir,
+          },
+          enemy: inimigoAtual,
+          statusEffects,
+        },
+      });
     }
 
     // ==========================================================
@@ -1456,69 +1456,101 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       }
     }
 
-    // Fim do turno do INIMIGO (§23 passos 8/9) — decrementa cooldown
-    // (hoje sempre vazio: monstro de PvE ainda não usa Power nenhuma,
-    // só ataque básico — mas fica pronto) e duração de status dele.
+    // Fim do turno do INIMIGO (§23 passos 8/9, parte cooldown) — hoje
+    // sempre vazio (monstro de PvE ainda não usa Power nenhuma, só
+    // ataque básico), mas fica pronto.
     cooldowns.enemy = cooldownService.decrementarCooldowns(cooldowns.enemy, cooldownsEnemyAplicadosNesteTurno);
-    statusEffects.enemy = statusEffectService.decrementarDuracoes(statusEffects.enemy);
 
     // ==========================================================
-    // DERROTA DO PERSONAGEM
+    // DERROTA DO PERSONAGEM (pelo ataque DIRETO do inimigo) — checado
+    // ANTES do tick de DoT do próprio inimigo: se o contra-ataque já
+    // derrotou o jogador, a luta acabou aqui, sem chance de reverter
+    // pra vitória só porque o inimigo também estava queimando.
     // ==========================================================
-
-    const derrotado =
-      personagemAtual.vida_atual <= 0;
+    const derrotado = personagemAtual.vida_atual <= 0;
 
     if (derrotado) {
-      log.push(
-        "Você foi derrotado e precisa se recuperar antes de lutar de novo."
-      );
+      log.push("Você foi derrotado e precisa se recuperar antes de lutar de novo.");
+      character.vida_atual = 0;
+      character.mana_atual = personagemAtual.mana_atual;
+      character.ultima_atualizacao_vida = new Date();
+      character.ultima_atualizacao_mana = new Date();
+      character.encontro_pve = null;
+      await character.save({ transaction });
+      return res.status(200).json({
+        status: "success",
+        data: {
+          done: true,
+          victory: false,
+          log,
+          character: {
+            vida_atual: 0,
+            mana_atual: personagemAtual.mana_atual,
+            vida_apos_sua_acao: 0,
+            mana_apos_sua_acao: manaAposAcaoJogador,
+            nivel: character.nivel,
+            experiencia: character.experiencia,
+            pontos_distribuir: character.pontos_distribuir,
+          },
+          enemy: inimigoAtual,
+          statusEffects: { player: [], enemy: [] },
+          cooldowns: { player: {}, enemy: {} },
+        },
+      });
     }
 
-    character.vida_atual = derrotado ? 0 : personagemAtual.vida_atual;
+    // ==========================================================
+    // MOTOR DE STATUS — FIM DO TURNO DO INIMIGO (Burn/Bleed/Poison
+    // ticam DEPOIS do contra-ataque dele, não antes — mesmo raciocínio
+    // do bloco do jogador acima. Jogador sobreviveu ao ataque direto
+    // (checado logo acima), então um DoT que mate o inimigo agora
+    // ainda conta como vitória normal.
+    // ==========================================================
+    inimigoAtual.vida_atual = statusEffectService.processarTicksDeInicio({
+      vidaAtual: inimigoAtual.vida_atual,
+      defensor: inimigoAtual,
+      lista: statusEffects.enemy,
+      log,
+      nomeAlvo: inimigoAtual.nome,
+    });
+    statusEffects.enemy = statusEffectService.decrementarDuracoes(statusEffects.enemy);
+
+    if (inimigoAtual.vida_atual <= 0) {
+      return await concederVitoriaEResponder();
+    }
+
+    character.vida_atual = personagemAtual.vida_atual;
     character.mana_atual = personagemAtual.mana_atual;
     character.ultima_atualizacao_vida = new Date();
     character.ultima_atualizacao_mana = new Date();
-    // Combate derrotado encerra o encontro (precisa buscar um novo
-    // inimigo pra tentar de novo); senão, persiste o estado atualizado
-    // do inimigo (vida restante) E o estado de status/cooldown/turno
-    // pro próximo turno (§37 — extensão do JSONB já existente).
-    character.encontro_pve = derrotado
-      ? null
-      : { ...inimigoAtual, statusEffects, cooldowns, combatTurn };
+    // Persiste o estado atualizado do inimigo (vida restante) E o
+    // estado de status/cooldown/turno pro próximo turno (§37 —
+    // extensão do JSONB já existente).
+    character.encontro_pve = { ...inimigoAtual, statusEffects, cooldowns, combatTurn };
     await character.save({ transaction });
 
     return res.status(200).json({
       status: "success",
 
       data: {
-        done: derrotado,
+        done: false,
         victory: false,
 
         log,
 
         character: {
-          vida_atual: derrotado
-            ? 0
-            : personagemAtual.vida_atual,
-
-          mana_atual:
-            personagemAtual.mana_atual,
-
-          // Só faz sentido como um passo intermediário quando o
-          // combate CONTINUA — numa derrota o valor final já é 0 e o
-          // inimigo não chega a contra-atacar de novo.
-          vida_apos_sua_acao: derrotado ? 0 : vidaAposAcaoJogador,
+          vida_atual: personagemAtual.vida_atual,
+          mana_atual: personagemAtual.mana_atual,
+          vida_apos_sua_acao: vidaAposAcaoJogador,
           mana_apos_sua_acao: manaAposAcaoJogador,
-
           nivel: character.nivel,
           experiencia: character.experiencia,
           pontos_distribuir: character.pontos_distribuir,
         },
 
         enemy: inimigoAtual,
-        statusEffects: derrotado ? { player: [], enemy: [] } : statusEffects,
-        cooldowns: derrotado ? { player: {}, enemy: {} } : { player: cooldowns.player },
+        statusEffects,
+        cooldowns: { player: cooldowns.player },
       },
     });
 }

@@ -553,21 +553,15 @@ async function processarProximaAcao() {
     // §7 — o Boss "combate como um personagem": sofre DoT e pode ser
     // hard-CC'd pelos MESMOS status que recebe de armas/poderes de
     // jogador (aplicados em worldBossCombatService, gated por
-    // WorldBossStatusResistance). DoT nunca entrega o Golpe Final por
-    // conta própria (§11.4 exige um hit rastreado de UM personagem
-    // específico) — só chipa até 1 de HP, nunca zera.
+    // WorldBossStatusResistance). DoT NÃO tica mais aqui, no início do
+    // "turno" do Boss — bug reportado (mesmo caso do PvP/PvE): ticava
+    // antes da própria ação do Boss, grudado visualmente na ação
+    // anterior. Agora tica no fim do turno dele, depois de agir (ver
+    // bloco logo antes de persistir runtime_state, mais abaixo). DoT
+    // nunca entrega o Golpe Final por conta própria (§11.4 exige um hit
+    // rastreado de UM personagem específico) — só chipa até 1 de HP,
+    // nunca zera.
     let statusBoss = evento.runtime_state?.status_boss ?? [];
-    const hpAntesDoDot = Math.max(0, Number(evento.hp_current));
-    evento.hp_current = Math.max(
-      1,
-      statusEffectService.processarTicksDeInicio({
-        vidaAtual: hpAntesDoDot,
-        defensor: { defesa: snapshot.defesa || 0 },
-        lista: statusBoss,
-        log: [],
-        nomeAlvo: snapshot.nome || "Ameaça Mundial",
-      }),
-    );
 
     const controleBoss = statusEffectService.resolverAcoesBloqueadasDoTurno(statusBoss, bossActionSeqDaAcao);
     statusBoss = controleBoss.lista;
@@ -698,6 +692,21 @@ async function processarProximaAcao() {
           ...(resultado?.alvo?.derrotado ? [null] : []),
           ...detalhesAlvosHabilidade.filter((alvo) => alvo.derrotado).map(() => abilityEscolhida?.id_ability ?? null),
         ];
+
+    // §7 — fim do turno do Boss: DoT tica AGORA, depois que ele já agiu
+    // (ver comentário lá em cima, antes de `statusBoss` ser lido). Nunca
+    // entrega o Golpe Final sozinho (§11.4) — só chipa até 1 de HP.
+    const hpAntesDoDot = Math.max(0, Number(evento.hp_current));
+    evento.hp_current = Math.max(
+      1,
+      statusEffectService.processarTicksDeInicio({
+        vidaAtual: hpAntesDoDot,
+        defensor: { defesa: snapshot.defesa || 0 },
+        lista: statusBoss,
+        log: [],
+        nomeAlvo: snapshot.nome || "Ameaça Mundial",
+      }),
+    );
 
     evento.boss_action_seq = bossActionSeqDaAcao;
     evento.phase_action_seq = phaseActionSeq;

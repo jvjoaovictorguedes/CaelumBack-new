@@ -112,11 +112,14 @@ function aplicarAcao({
 
 // Envolve aplicarAcao com o Motor de Status inteiro (Evolução do Motor
 // de Status), pro PvP — ao vivo e assíncrono — passar a se comportar
-// exatamente como o PvE em combatController.js: DoT no início do turno
-// do atacante, bloqueio de ação por Freeze/Stun/Paralyze/Silêncio,
-// efeitos "Self" de poder (sempre, mesmo sem acertar), Enfraquecimento
-// reduzindo o dano de saída, quebra de Freeze por dano direto, e proc
-// de status de arma/poder no alvo quando o golpe acerta. Cada instância
+// exatamente como o PvE em combatController.js: DoT no FIM do turno
+// do atacante (depois da ação dele, não antes — bug reportado: o tick
+// acontecia ANTES de agir, então ficava visualmente grudado no golpe
+// anterior do oponente), bloqueio de ação por Freeze/Stun/Paralyze/
+// Silêncio, efeitos "Self" de poder (sempre, mesmo sem acertar),
+// Enfraquecimento reduzindo o dano de saída, quebra de Freeze por dano
+// direto, e proc de status de arma/poder no alvo quando o golpe acerta.
+// Cada instância
 // de status carrega `sourceActorId` — por isso `casterActorId` (a
 // chave "A"/"B" do atacante) é obrigatório aqui, diferente de
 // aplicarAcao (que nunca precisou saber "de qual lado" veio o golpe).
@@ -146,30 +149,7 @@ async function resolverTurnoComStatus({
   let listaAtacante = statusAtacante;
   let listaDefensor = statusDefensor;
 
-  // 1) Ticks de início de turno (Burn/Bleed/Poison) no próprio atacante
-  // — pode matá-lo antes de agir; nesse caso a ação nem acontece.
-  atacante.vida_atual = statusEffectService.processarTicksDeInicio({
-    vidaAtual: atacante.vida_atual,
-    defensor: atacante,
-    lista: listaAtacante,
-    log,
-    nomeAlvo: nomeAtacante,
-  });
-  if (atacante.vida_atual <= 0) {
-    return {
-      nomeAcao: null,
-      dano: 0,
-      cura: 0,
-      manaCurada: 0,
-      esquivou: false,
-      morteAntesDeAgir: true,
-      statusAtacante: listaAtacante,
-      statusDefensor: listaDefensor,
-      log,
-    };
-  }
-
-  // 2) Política central de bloqueio de ação — resolve de uma vez
+  // 1) Política central de bloqueio de ação — resolve de uma vez
   // (inclusive a única rolagem de Paralyze do turno) se o atacante
   // consegue executar o tipo de ação pedido.
   const tipoAcao =
@@ -209,10 +189,10 @@ async function resolverTurnoComStatus({
   // continuam liberados) — já coberto por `controle.bloqueadas` acima,
   // então nenhum check adicional é necessário aqui.
 
-  // 3) Efeitos "Self" configurados no poder usado — aplicam sempre que
+  // 2) Efeitos "Self" configurados no poder usado — aplicam sempre que
   // a Power é de fato usada, dano ou não (não existe "esquivar do
   // próprio buff"). Os de alvo "Enemy" só entram depois, se o golpe
-  // acertar (passo 5).
+  // acertar (passo 4).
   let efeitosNoInimigo = [];
   if (acao.tipo === "power" && acao.power) {
     const configurados = await resolverEfeitosDoUso({
@@ -229,7 +209,7 @@ async function resolverTurnoComStatus({
     }
   }
 
-  // 4) Resolve a ação em si — Cegueira do atacante afeta o acerto,
+  // 3) Resolve a ação em si — Cegueira do atacante afeta o acerto,
   // Enfraquecimento do atacante reduz o dano de saída.
   const blindDoAtacante = listaAtacante.find((s) => s.key === "BLIND");
   const resultado = aplicarAcao({
@@ -246,7 +226,7 @@ async function resolverTurnoComStatus({
     log.push(`Cego, ${nomeAtacante} errou o golpe contra ${nomeDefensor}!`);
   }
 
-  // 5) Dano DIRETO quebra Freeze existente no defensor (antes de
+  // 4) Dano DIRETO quebra Freeze existente no defensor (antes de
   // qualquer efeito novo deste mesmo golpe) e libera os efeitos de
   // status configurados (poder alvo Enemy + proc de arma em ataque
   // básico), só quando o golpe de fato acerta e causa dano.
@@ -277,11 +257,31 @@ async function resolverTurnoComStatus({
     }
   }
 
-  // 6) Fim do turno do atacante — decrementa a duração do que ele
-  // carrega (nunca a do defensor, que ainda não jogou esta rodada).
+  // 5) Fim do turno do atacante — Burn/Bleed/Poison que ele carrega
+  // ticam AGORA, depois da própria ação (bug reportado: o tick
+  // acontecia no início do turno, antes de agir, e ficava grudado
+  // visualmente no golpe anterior do oponente). Duração decrementa
+  // logo em seguida (nunca a do defensor, que ainda não jogou esta
+  // rodada) — sempre depois do tick, pra um status no seu último turno
+  // ainda ticar uma vez antes de expirar.
+  const vidaAntesDoTick = atacante.vida_atual;
+  atacante.vida_atual = statusEffectService.processarTicksDeInicio({
+    vidaAtual: atacante.vida_atual,
+    defensor: atacante,
+    lista: listaAtacante,
+    log,
+    nomeAlvo: nomeAtacante,
+  });
+  const morteAoFimDoTurno = vidaAntesDoTick > 0 && atacante.vida_atual <= 0;
   listaAtacante = statusEffectService.decrementarDuracoes(listaAtacante);
 
-  return { ...resultado, statusAtacante: listaAtacante, statusDefensor: listaDefensor, log };
+  return {
+    ...resultado,
+    morteAoFimDoTurno,
+    statusAtacante: listaAtacante,
+    statusDefensor: listaDefensor,
+    log,
+  };
 }
 
 module.exports = { aplicarAcao, resolverTurnoComStatus };

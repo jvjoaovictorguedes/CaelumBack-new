@@ -99,7 +99,7 @@ function estadoLutador(personagem, base, vidaMax, manaMax) {
 // Silence): mesmo formato de um resultado normal (dano=0), pra quem
 // consome a resposta (socket/REST) nunca precisar de um branch a mais
 // só pra esse caso.
-function montarResultadoSemAcao({ evento, personagem, vidaMax, manaMax, morreuAntesDeAgir = false, bloqueado = false, motivoBloqueio, actionSeq, cooldowns = {} }) {
+function montarResultadoSemAcao({ evento, personagem, vidaMax, manaMax, bloqueado = false, motivoBloqueio, actionSeq, cooldowns = {} }) {
   const hpAtual = Math.max(0, Number(evento.hp_current));
   return {
     nomeAcao: null,
@@ -109,7 +109,6 @@ function montarResultadoSemAcao({ evento, personagem, vidaMax, manaMax, morreuAn
     manaCurada: 0,
     golpeFinal: false,
     proezasConquistadas: [],
-    morreuAntesDeAgir,
     bloqueado,
     motivoBloqueio: bloqueado ? motivoBloqueio : undefined,
     action_seq: actionSeq,
@@ -291,31 +290,13 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
     let listaJogador = sessao.state?.status ?? [];
     let cooldownsJogador = sessao.state?.cooldowns ?? {};
 
-    // 1) DoT de início de turno (§23 passo 1, mesmo critério do PvP/PvE)
-    // — pode matar antes do jogador conseguir agir.
-    const vidaAntesDoDot = atacanteEstado.vida_atual;
-    atacanteEstado.vida_atual = statusEffectService.processarTicksDeInicio({
-      vidaAtual: atacanteEstado.vida_atual,
-      defensor: atacanteEstado,
-      lista: listaJogador,
-      log: [],
-      nomeAlvo: personagem.nome,
-    });
-    personagem.vida_atual = Math.max(0, Math.min(Math.round(atacanteEstado.vida_atual), vidaMax));
-
-    if (personagem.vida_atual <= 0 && vidaAntesDoDot > 0) {
-      await personagem.save({ transaction });
-      sessao.status = COMBAT_SESSION_STATUS.DERROTADO;
-      sessao.derrotado_at = new Date();
-      cooldownsJogador = cooldownService.decrementarCooldowns(cooldownsJogador);
-      sessao.state = { ...(sessao.state ?? {}), status: statusEffectService.decrementarDuracoes(listaJogador), cooldowns: cooldownsJogador };
-      await sessao.save({ transaction });
-      return montarResultadoSemAcao({ evento, personagem, vidaMax, manaMax, morreuAntesDeAgir: true, actionSeq: sessao.action_seq, cooldowns: cooldownsJogador });
-    }
-
-    // 2) Política central de bloqueio de ação (Stun/Freeze/Paralyze
+    // 1) Política central de bloqueio de ação (Stun/Freeze/Paralyze
     // bloqueiam tudo; Silence só Power) — resolvida uma vez, ANTES de
-    // decidir o que a ação pedida faz.
+    // decidir o que a ação pedida faz. DoT (Burn/Bleed/Poison) NÃO tica
+    // mais aqui — bug reportado (mesmo caso do PvP/PvE): o tick
+    // acontecia antes da ação do jogador, grudado visualmente na ação
+    // anterior. Agora tica no FIM do turno dele, depois de agir (ver
+    // bloco logo antes de persistir vida/mana, mais abaixo).
     const controleJogador = statusEffectService.resolverAcoesBloqueadasDoTurno(listaJogador, turnoJogador);
     listaJogador = controleJogador.lista;
 
@@ -420,6 +401,21 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
       }
     }
 
+    // Fim do turno do jogador — DoT (Burn/Bleed/Poison) tica AGORA,
+    // depois da ação já ter sido resolvida contra o Boss (mesmo
+    // raciocínio do PvP/PvE: o dano deste turno já foi decidido acima,
+    // um DoT que só ia terminar de aplicar DEPOIS nunca cancela nem
+    // reverte a ação que já aconteceu).
+    const vidaAntesDoTick = atacanteEstado.vida_atual;
+    atacanteEstado.vida_atual = statusEffectService.processarTicksDeInicio({
+      vidaAtual: atacanteEstado.vida_atual,
+      defensor: atacanteEstado,
+      lista: listaJogador,
+      log: [],
+      nomeAlvo: personagem.nome,
+    });
+    const morreuNoTick = vidaAntesDoTick > 0 && atacanteEstado.vida_atual <= 0;
+
     personagem.vida_atual = Math.max(0, Math.min(Math.round(atacanteEstado.vida_atual), vidaMax));
     personagem.mana_atual = Math.max(0, Math.min(Math.round(atacanteEstado.mana_atual), manaMax));
     await personagem.save({ transaction });
@@ -507,6 +503,14 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
         },
         { transaction, characterId, sourceEventId: `worldboss:${evento.id}:${characterId}` },
       );
+    } else if (morreuNoTick) {
+      // DoT no fim do turno matou o jogador DEPOIS da ação dele já ter
+      // sido creditada contra o Boss (dano/contribuição acima ficam
+      // valendo) — só a sessão individual encerra por derrota, igual o
+      // caminho antigo de "morreu antes de agir", só que agora depois.
+      sessao.status = COMBAT_SESSION_STATUS.DERROTADO;
+      sessao.derrotado_at = new Date();
+      await sessao.save({ transaction });
     }
 
     return {
@@ -516,6 +520,7 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
       cura: resultado.cura,
       manaCurada: resultado.manaCurada,
       golpeFinal,
+      morreuAoFimDoTurno: morreuNoTick,
       proezasConquistadas: proezasConquistadas.map((p) => ({ key: p.feat.key, nome: p.feat.nome })),
       // Ameaça Mundial V2 §17.2 — server_action_seq do ACK autenticado
       // (worldBossSocket, Etapa 4): sequência da SESSÃO do jogador

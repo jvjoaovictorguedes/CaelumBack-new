@@ -566,17 +566,18 @@ async function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
   // Motor de Status (Evolução do Motor de Status) — mesma engrenagem do
   // PvE (combatController.js), agora também no duelo ao vivo (casual,
   // ranqueado e torneio, que reaproveitam esta mesma função): ticks de
-  // DoT no início do turno do atacante, bloqueio de ação por controle
-  // duro, Enfraquecimento/Cegueira, proc de arma/poder no alvo. `turno`
-  // reaproveita duelo.acoes (já monotônico e único por chamada) — não
-  // precisa de outro contador só pra dedupe de rolagem de Paralyze.
+  // DoT no FIM do turno do atacante (depois da ação dele), bloqueio de
+  // ação por controle duro, Enfraquecimento/Cegueira, proc de arma/
+  // poder no alvo. `turno` reaproveita duelo.acoes (já monotônico e
+  // único por chamada) — não precisa de outro contador só pra dedupe
+  // de rolagem de Paralyze.
   const {
     nomeAcao,
     dano,
     cura,
     manaCurada,
     esquivou,
-    morteAntesDeAgir,
+    morteAoFimDoTurno,
     bloqueado,
     statusAtacante,
     statusDefensor,
@@ -607,7 +608,7 @@ async function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
   const payloadTurno = {
     duelId,
     atacante: chave,
-    nomeAcao: bloqueado || morteAntesDeAgir ? nomeAcao : foiAutomatico ? `${nomeAcao} (tempo esgotado)` : nomeAcao,
+    nomeAcao: bloqueado ? nomeAcao : foiAutomatico ? `${nomeAcao} (tempo esgotado)` : nomeAcao,
     dano,
     cura,
     manaCurada,
@@ -622,19 +623,23 @@ async function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
     manaB: duelo.b.estado.mana_atual,
   };
 
-  // DoT pode matar o próprio atacante antes de ele conseguir agir
-  // (§23 passo 2 do PvE, mesmo caso aqui) — quem "venceu" nesse caso é
-  // sempre o defensor, sem entrar na lógica normal de "quem causou
-  // dano nesta ação" (não houve ação nenhuma).
-  const acabouPorAutoDerrota = morteAntesDeAgir && atacanteInfo.estado.vida_atual <= 0;
-  const acabou = acabouPorAutoDerrota || defensorInfo.estado.vida_atual <= 0 || duelo.acoes >= MAX_ACOES;
+  // DoT (Burn/Bleed/Poison que o próprio atacante carrega) pode matá-lo
+  // no FIM do turno dele, depois da ação — mesmo caso do PvE. Prioridade:
+  // se a ação do atacante já derrubou o defensor, a vitória é dele
+  // mesmo que também tenha morrido de DoT logo em seguida (dano direto
+  // desta mesma ação decide antes do tick que só vem depois — nunca o
+  // contrário, senão um "double KO" virava derrota pra quem acabou de
+  // vencer).
+  const derrotouDefensor = defensorInfo.estado.vida_atual <= 0;
+  const acabouPorAutoDerrota = !derrotouDefensor && morteAoFimDoTurno && atacanteInfo.estado.vida_atual <= 0;
+  const acabou = derrotouDefensor || acabouPorAutoDerrota || duelo.acoes >= MAX_ACOES;
 
   if (acabou) {
     let vencedorChave;
-    if (acabouPorAutoDerrota) {
-      vencedorChave = outraChave;
-    } else if (defensorInfo.estado.vida_atual <= 0) {
+    if (derrotouDefensor) {
       vencedorChave = chave;
+    } else if (acabouPorAutoDerrota) {
+      vencedorChave = outraChave;
     } else {
       // Bug real reportado: duelo batia no limite de 80 ações e quem só
       // ficou curando (nunca chegou perto de derrubar o oponente)
