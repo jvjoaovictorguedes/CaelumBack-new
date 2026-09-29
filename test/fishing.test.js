@@ -215,14 +215,66 @@ test("fishingEngine.resolverPassoDeReel é determinístico pelo mesmo seed+seque
   assert.ok(algumaDivergiu, "variar sequence deveria produzir pelo menos um resultado diferente");
 });
 
-test("fatorDificuldade: 1 e 1000 permanecem dentro dos limites previstos (rebalanceamento v3 §3.1/§16.1)", () => {
+test("fatorDificuldade: 1 e 1000 permanecem dentro dos limites previstos (fix vara-fraca-demais §3.1/§16.1)", () => {
   const perto = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} deveria ser ~${b}`);
-  perto(fishingConfig.fatorDificuldade(1), 0.8004);
-  perto(fishingConfig.fatorDificuldade(500), 1.0);
-  perto(fishingConfig.fatorDificuldade(1000), 1.2);
+  // Faixa alargada de 0,8x-1,2x pra 0,5x-2,0x — bug real: a faixa antiga
+  // só afetava a arrancada, então uma vara com atributo 1 em tudo ainda
+  // tinha >60% de chance de capturar um peixe de dificuldade 700 (o
+  // ritmo base de progresso/tensão do puxão normal não dependia dela).
+  perto(fishingConfig.fatorDificuldade(1), 0.5015);
+  perto(fishingConfig.fatorDificuldade(500), 1.25);
+  perto(fishingConfig.fatorDificuldade(1000), 2.0);
   // Fora da faixa 1..1000 continua clampado, nunca explode.
   assert.equal(fishingConfig.fatorDificuldade(-50), fishingConfig.fatorDificuldade(1));
   assert.equal(fishingConfig.fatorDificuldade(5000), fishingConfig.fatorDificuldade(1000));
+});
+
+test("Monte Carlo puro: vara com atributo 1 em tudo praticamente nunca captura peixe de dificuldade 700 (bug real reportado)", () => {
+  // Reproduz exatamente o cenário relatado: "mesmo deixando 1 em todos
+  // os atributos dela, ela ainda tem mais de 60% de chance de pescar um
+  // peixe com 700 de dificuldade". Roda o MESMO fishingEngine de
+  // produção (nunca uma cópia) com a mesma heurística de recolher
+  // dentro/soltar fora da zona ideal usada pelo simulador de admin
+  // (fishingBalanceSimulatorService), pra travar essa regressão sem
+  // precisar de banco.
+  const varaMinima = { forca_linha: 1, controle: 1, recolhimento: 1, precisao: 1, estabilidade: 1 };
+
+  function simularUmaLuta(comportamentoKey) {
+    const seed = Math.floor(Math.random() * 2 ** 31);
+    let tensao = 0;
+    let progresso = 0;
+    for (let passo = 1; passo <= 300; passo += 1) {
+      const active = tensao <= fishingConfig.ZONA_IDEAL_MAX;
+      const resultado = fishingEngine.resolverPassoDeReel({
+        behaviorKey: comportamentoKey,
+        seed,
+        sequence: passo,
+        tensaoAtual: tensao,
+        progressoAtual: progresso,
+        rod: varaMinima,
+        active,
+        dificuldadeBase: 700,
+      });
+      tensao = resultado.tensao;
+      progresso = resultado.progresso;
+      if (tensao >= fishingConfig.TENSAO_MAXIMA) return false;
+      if (progresso >= fishingConfig.PROGRESSO_PARA_CAPTURA) return true;
+    }
+    return false;
+  }
+
+  for (const comportamentoKey of fishingConfig.COMPORTAMENTO_KEYS) {
+    let capturas = 0;
+    const simulacoes = 300;
+    for (let i = 0; i < simulacoes; i += 1) {
+      if (simularUmaLuta(comportamentoKey)) capturas += 1;
+    }
+    const taxaCaptura = capturas / simulacoes;
+    assert.ok(
+      taxaCaptura < 0.15,
+      `${comportamentoKey}: vara com atributo 1 capturou ${(taxaCaptura * 100).toFixed(1)}% das vezes contra dificuldade 700 — deveria ser praticamente impossível`,
+    );
+  }
 });
 
 test("dificuldade_base modula a intensidade do comportamento do peixe (rebalanceamento v3 §3.1)", () => {

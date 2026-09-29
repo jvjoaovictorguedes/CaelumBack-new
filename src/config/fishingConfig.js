@@ -130,12 +130,20 @@ function metaComportamento(key) {
   return COMPORTAMENTO_META[key] ?? COMPORTAMENTO_META.CALM;
 }
 
-// dificuldade_base (1..1000) passa a modular a força mecânica do peixe
-// (Pesca v3 §3.1) em vez de só influenciar XP — multiplicador limitado
-// pra evitar explosões de valor (80 -> 0,832x .. 1000 -> 1,200x).
+// dificuldade_base (1..1000) modula a força mecânica do peixe (Pesca
+// v3 §3.1). Bug real reportado: com a faixa antiga (0,8x-1,2x) só
+// afetando a arrancada, uma vara com TODOS os atributos no mínimo (1)
+// ainda tinha mais de 60% de chance de capturar um peixe de
+// dificuldade 700 — o ritmo BASE de progresso/tensão (fora da
+// arrancada) praticamente não dependia da vara nem da dificuldade, só
+// o pico ocasional. Faixa alargada pra 0,5x-2,0x e agora aplicada
+// também ao ganho de progresso e ao ganho/alívio de tensão do próprio
+// recolhimento em resolverPassoDeReel (fishingEngine.js) — não só à
+// arrancada — pra dificuldade_base realmente pesar peixe a peixe, e
+// pra vara ruim genuinamente perder pra peixe difícil.
 function fatorDificuldade(dificuldadeBase) {
   const db = Math.max(1, Math.min(1000, Number(dificuldadeBase) || 1));
-  return 0.8 + 0.4 * (db / 1000);
+  return 0.5 + 1.5 * (db / 1000);
 }
 
 function rotuloDificuldade(dificuldadeBase) {

@@ -68,14 +68,28 @@ function resolverPassoDeReel({ behaviorKey, seed, sequence, tensaoAtual, progres
   let evento = "calmo";
 
   if (active) {
-    // REEL ON — aumenta progresso e tensão (spec §14.4).
-    let ganhoProgresso = 18 + Math.round((recolhimento / 1000) * 28);
+    // REEL ON — aumenta progresso e tensão (spec §14.4). Bug real
+    // reportado: o "chão" de progresso (antes 18, quase independente
+    // de recolhimento) e o ganho de tensão (antes só levemente
+    // reduzido por forca_linha) praticamente não dependiam da vara —
+    // uma vara com atributo 1 rendia quase o mesmo de uma vara mínima
+    // "de verdade". Chão bem mais baixo (6) com teto mais alto (60) —
+    // recolhimento agora É o que decide se o progresso avança —, e
+    // `fator` (dificuldade da espécie) divide o progresso e multiplica
+    // o ganho de tensão: peixe difícil rende menos por puxão E estica
+    // mais a linha, não só nas arrancadas ocasionais.
+    let ganhoProgresso = Math.round((6 + (recolhimento / 1000) * 54) / fator);
     if (naZonaIdealAntes) ganhoProgresso = Math.round(ganhoProgresso * (1 + ZONA_IDEAL_BONUS_PCT));
-    progresso += ganhoProgresso;
-    tensao += 22 - Math.round((forcaLinha / 1000) * 14);
+    progresso += Math.max(1, ganhoProgresso);
+    const ganhoTensaoBase = 16 + Math.round((1 - forcaLinha / 1000) * 26);
+    tensao += Math.round(ganhoTensaoBase * fator);
   } else {
     // REEL OFF — reduz tensão, mas o peixe pode recuperar distância.
-    tensao -= 20 + Math.round((controle / 1000) * 18);
+    // Mesmo raciocínio: `fator` divide o alívio (peixe difícil resiste
+    // mais a acalmar), controle decide o quanto a vara consegue
+    // aliviar apesar disso.
+    const reducaoTensaoBase = 16 + Math.round((controle / 1000) * 34);
+    tensao -= Math.round(reducaoTensaoBase / fator);
   }
 
   // Comportamento do peixe: chance de "arrancada" (pico de tensão), com
