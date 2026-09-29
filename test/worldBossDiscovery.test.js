@@ -2340,3 +2340,69 @@ testeComBanco("recompensas: sem top_damage_character_id (nenhum dano real regist
   const grants = await WorldBossRewardGrant.count({ where: { event_id: evento.id, reward_kind: REWARD_KIND.TOP_DAMAGE } });
   assert.equal(grants, 0, "sem vencedor oficial (top_damage_character_id nulo), nenhum grant TOP_DAMAGE pode existir");
 });
+
+// Ameaça Mundial V2 — Etapa 10: Status público + Guilda (§12).
+
+testeComBanco("status público: inclui zona_descoberta (§12.1) quando o evento tem discovery_zone_id", async () => {
+  const zona = await criarZona();
+  const { personagem: descobridor } = await criarPersonagem();
+
+  const evento = await criarEventoAtivo();
+  evento.status = EVENT_STATUS.DISCOVERED;
+  evento.discoverer_character_id = descobridor.id;
+  evento.discovery_zone_id = zona.id;
+  evento.discovered_at = new Date();
+  await evento.save();
+
+  const status = await worldBossStatusService.obterStatusPublico();
+  assert.equal(status.event_id, evento.id);
+  assert.equal(status.zona_descoberta.id, zona.id);
+  assert.equal(status.zona_descoberta.nome, zona.nome);
+  assert.equal(status.descobridor.id, descobridor.id);
+});
+
+testeComBanco("status público: maior_dano_por só aparece depois de DEFEATED — enquanto ACTIVE fica null mesmo com dano registrado", async () => {
+  const { personagem } = await criarPersonagem();
+  const evento = await criarEventoAtivo();
+  await WorldBossContribution.create({ event_id: evento.id, character_id: personagem.id, damage_total: 500, last_damage_at: new Date() });
+
+  const statusAtivo = await worldBossStatusService.obterStatusPublico();
+  assert.equal(statusAtivo.maior_dano_por, null, "top_damage_character_id só existe congelado no Golpe Final — nunca antes");
+
+  evento.status = EVENT_STATUS.DEFEATED;
+  evento.top_damage_character_id = personagem.id;
+  evento.top_damage_total = 500;
+  evento.defeated_at = new Date();
+  await evento.save();
+
+  const statusDerrotado = await worldBossStatusService.obterStatusPublico();
+  assert.equal(statusDerrotado.maior_dano_por.id, personagem.id);
+  assert.equal(statusDerrotado.maior_dano_por.damage_total, 500);
+});
+
+testeComBanco("histórico: obterHistoricoRecente lista só eventos DEFEATED, mais recentes primeiro, nunca CANCELLED", async () => {
+  const configA = await criarConfig();
+  const { personagem: golpeFinalPor } = await criarPersonagem();
+  const eventoAntigo = await criarEvento({
+    config: configA,
+    status: EVENT_STATUS.DEFEATED,
+    overrides: { final_blow_character_id: golpeFinalPor.id, defeated_at: new Date(Date.now() - 60_000) },
+  });
+  const eventoRecente = await criarEvento({
+    config: configA,
+    status: EVENT_STATUS.DEFEATED,
+    overrides: { final_blow_character_id: golpeFinalPor.id, defeated_at: new Date() },
+  });
+  const eventoCancelado = await criarEvento({ config: configA, status: EVENT_STATUS.CANCELLED, overrides: { defeated_at: null } });
+  void eventoCancelado;
+
+  const historico = await worldBossStatusService.obterHistoricoRecente({ limit: 10 });
+  const idsNoHistorico = historico.map((h) => h.event_id);
+  assert.ok(idsNoHistorico.includes(eventoRecente.id));
+  assert.ok(idsNoHistorico.includes(eventoAntigo.id));
+  assert.ok(!idsNoHistorico.includes(eventoCancelado.id), "CANCELLED nunca aparece no histórico — não é uma 'aparição' de verdade");
+  assert.ok(idsNoHistorico.indexOf(eventoRecente.id) < idsNoHistorico.indexOf(eventoAntigo.id), "mais recente primeiro");
+
+  const linhaRecente = historico.find((h) => h.event_id === eventoRecente.id);
+  assert.equal(linhaRecente.golpe_final_por.id, golpeFinalPor.id);
+});

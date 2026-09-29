@@ -24,6 +24,20 @@ exports.obterRanking = async (req, res) => {
   }
 };
 
+// GET /api/world-boss/history?limit=5 (§12.4/§17.4) — últimas Ameaças
+// Mundiais finalizadas, pra Guilda dos Aventureiros mostrar como
+// histórico consultivo (nunca sobrescreve o catálogo).
+exports.obterHistorico = async (req, res) => {
+  try {
+    const limit = req.query.limit ? Number(req.query.limit) : 5;
+    const historico = await worldBossStatusService.obterHistoricoRecente({ limit });
+    res.status(200).json({ status: "success", data: historico });
+  } catch (error) {
+    console.error("Erro ao obter histórico da Ameaça Mundial:", error);
+    res.status(500).json({ status: "error", message: "Não foi possível obter o histórico da Ameaça Mundial." });
+  }
+};
+
 // GET /api/world-boss/ranking/me — posição do personagem autenticado,
 // mesmo fora do Top N (§10.2 — nunca esconder a própria posição).
 exports.obterMinhaPosicaoNoRanking = async (req, res) => {

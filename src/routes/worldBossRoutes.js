@@ -10,6 +10,7 @@ router.use(authMiddleware);
 
 router.get("/status", worldBossController.obterStatus);
 router.get("/ranking", worldBossController.obterRanking);
+router.get("/history", worldBossController.obterHistorico);
 
 router.use(carregarPersonagemAtual);
 router.get("/ranking/me", worldBossController.obterMinhaPosicaoNoRanking);
