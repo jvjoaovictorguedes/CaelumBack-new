@@ -24,11 +24,15 @@ const COMBAT_SESSION_STATUS = { ATIVO: "Ativo", ENCERRADA: "Encerrada" };
 
 const PARTICIPATION_REWARDS_STATUS = { PENDING: "Pending", PROCESSING: "Processing", DONE: "Done" };
 
+// TOP_DAMAGE (Ameaça Mundial V2 §11.1/§11.2) — vencedor oficial do
+// ranking final, pago pelo mesmo pipeline idempotente de
+// WorldBossRewardGrant (Etapa 9). Era OPTIONAL_TOP na V1 (nunca usado
+// por nenhum service — grep confirmado); renomeado, não duplicado.
 const REWARD_KIND = {
   DISCOVERY: "DISCOVERY",
   PARTICIPATION: "PARTICIPATION",
   FINAL_BLOW: "FINAL_BLOW",
-  OPTIONAL_TOP: "OPTIONAL_TOP",
+  TOP_DAMAGE: "TOP_DAMAGE",
 };
 
 const REWARD_GRANT_STATUS = { PENDING: "Pending", GRANTED: "Granted", FAILED: "Failed" };

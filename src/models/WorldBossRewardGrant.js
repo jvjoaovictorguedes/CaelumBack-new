@@ -10,8 +10,11 @@ const WorldBossRewardGrant = sequelize.define(
     id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
     event_id: { type: DataTypes.INTEGER, allowNull: false },
     character_id: { type: DataTypes.INTEGER, allowNull: false },
+    // TOP_DAMAGE (Ameaça Mundial V2 §11.2) — era OPTIONAL_TOP na V1,
+    // reservado pra essa mesma ideia mas nunca usado; renomeado pela
+    // migration world-boss-v2-fundacao, nunca um terceiro nome novo.
     reward_kind: {
-      type: DataTypes.ENUM("DISCOVERY", "PARTICIPATION", "FINAL_BLOW", "OPTIONAL_TOP"),
+      type: DataTypes.ENUM("DISCOVERY", "PARTICIPATION", "FINAL_BLOW", "TOP_DAMAGE"),
       allowNull: false,
     },
     payload_snapshot: { type: DataTypes.JSONB, allowNull: true },

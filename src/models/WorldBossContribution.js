@@ -16,6 +16,11 @@ const WorldBossContribution = sequelize.define(
     last_action_seq: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
     first_joined_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
     last_action_at: { type: DataTypes.DATE, allowNull: true },
+    // Ameaça Mundial V2 §10.5 — desempate determinístico do ranking.
+    // Atualizar APENAS quando dano EFETIVO > 0 (nunca em esquiva/ação
+    // sem dano, ao contrário de last_action_at — por isso nunca usar
+    // last_action_at como critério de desempate).
+    last_damage_at: { type: DataTypes.DATE, allowNull: true },
   },
   { tableName: "world_boss_contributions", createdAt: false, updatedAt: false },
 );

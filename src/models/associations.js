@@ -525,6 +525,12 @@ const WorldBossEvent = require("./WorldBossEvent");
 const WorldBossContribution = require("./WorldBossContribution");
 const WorldBossCombatSession = require("./WorldBossCombatSession");
 const WorldBossRewardGrant = require("./WorldBossRewardGrant");
+// Ameaça Mundial V2 — habilidades, resistência a status e recompensas
+// por colocação no ranking (Etapa 1: só schema/associations; lógica nas
+// próximas etapas).
+const WorldBossAbility = require("./WorldBossAbility");
+const WorldBossStatusResistance = require("./WorldBossStatusResistance");
+const WorldBossRankingReward = require("./WorldBossRankingReward");
 
 WorldBossConfig.hasMany(WorldBossConfigZone, { foreignKey: "id_world_boss_config", as: "zonas" });
 WorldBossConfigZone.belongsTo(WorldBossConfig, { foreignKey: "id_world_boss_config" });
@@ -553,6 +559,19 @@ WorldBossEvent.hasMany(WorldBossRewardGrant, { foreignKey: "event_id", as: "prem
 WorldBossRewardGrant.belongsTo(WorldBossEvent, { foreignKey: "event_id" });
 Character.hasMany(WorldBossRewardGrant, { foreignKey: "character_id" });
 WorldBossRewardGrant.belongsTo(Character, { foreignKey: "character_id" });
+
+WorldBossEvent.belongsTo(Character, { foreignKey: "top_damage_character_id", as: "liderDeDano" });
+
+WorldBossConfig.hasMany(WorldBossAbility, { foreignKey: "id_world_boss_config", as: "habilidades" });
+WorldBossAbility.belongsTo(WorldBossConfig, { foreignKey: "id_world_boss_config" });
+WorldBossAbility.belongsTo(Power, { foreignKey: "id_power" });
+
+WorldBossConfig.hasMany(WorldBossStatusResistance, { foreignKey: "id_world_boss_config", as: "resistenciasStatus" });
+WorldBossStatusResistance.belongsTo(WorldBossConfig, { foreignKey: "id_world_boss_config" });
+
+WorldBossConfig.hasMany(WorldBossRankingReward, { foreignKey: "id_world_boss_config", as: "recompensasRanking" });
+WorldBossRankingReward.belongsTo(WorldBossConfig, { foreignKey: "id_world_boss_config" });
+WorldBossRankingReward.belongsTo(Item, { foreignKey: "id_item" });
 
 // Sistema de Proezas Únicas (Caelum_Proezas_Unicas_Claude.docx) —
 // UniqueFeat é a autoridade mecânica; Achievement/Title continuam só

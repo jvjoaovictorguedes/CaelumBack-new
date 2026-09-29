@@ -25,6 +25,24 @@ const WorldBossConfig = sequelize.define(
     gold_participacao: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
     xp_participacao: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
     min_dano_participacao: { type: DataTypes.BIGINT, allowNull: true },
+    // Ameaça Mundial V2 §4.1 — atributos de combate do Boss, compatíveis
+    // com as mesmas fórmulas de PvE/PvP (combatFormulas.js). vida_base
+    // continua o HP GLOBAL explícito (nunca derivado de vitalidade).
+    nivel: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1, validate: { min: 1 } },
+    forca: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, validate: { min: 0 } },
+    vitalidade: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, validate: { min: 0 } },
+    agilidade: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, validate: { min: 0 } },
+    inteligencia: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, validate: { min: 0 } },
+    velocidade: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, validate: { min: 0 } },
+    mana_maxima: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, validate: { min: 0 } },
+    regeneracao_mana_por_acao: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, validate: { min: 0 } },
+    // §3.2 — intervalo base do relógio global do Boss (ms); fases podem
+    // sobrescrever via WorldBossPhase.intervalo_acao_ms.
+    intervalo_acao_ms: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 3000, validate: { min: 1 } },
+    // §8.2 — reentrada configurável; primeira entrega pode manter false
+    // (mais seguro) sem exigir migration nova pra ligar depois.
+    reentrada_permitida: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    cooldown_reentrada_segundos: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, validate: { min: 0 } },
   },
   { tableName: "world_boss_configs" },
 );

@@ -35,6 +35,21 @@ const WorldBossEvent = sequelize.define(
       allowNull: false,
       defaultValue: "Pending",
     },
+    // Ameaça Mundial V2 §9.1 — runtime persistente do relógio global do
+    // Boss. NUNCA só em memória/setTimeout (§9.2/§23.2) — um restart
+    // precisa retomar exatamente daqui.
+    mana_current: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    boss_action_seq: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    phase_action_seq: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    furia_current_pct: { type: DataTypes.DECIMAL(6, 2), allowNull: false, defaultValue: 0 },
+    next_action_at: { type: DataTypes.DATE, allowNull: true },
+    // Cooldowns/status ativos/cast em andamento (§6.6/§9.1) — formato
+    // definido pelas Etapas 5/6.
+    runtime_state: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
+    // §10.7 — vencedor oficial e dano final CONGELADOS na conclusão do
+    // evento; depois disso o ranking final não muda mais.
+    top_damage_character_id: { type: DataTypes.INTEGER, allowNull: true },
+    top_damage_total: { type: DataTypes.BIGINT, allowNull: true },
   },
   { tableName: "world_boss_events" },
 );
