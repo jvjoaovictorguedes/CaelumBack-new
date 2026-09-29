@@ -37,6 +37,10 @@ const WorldBossActivityMetric = require("../src/models/WorldBossActivityMetric")
 const WorldBossCombatSession = require("../src/models/WorldBossCombatSession");
 const WorldBossContribution = require("../src/models/WorldBossContribution");
 const WorldBossRewardGrant = require("../src/models/WorldBossRewardGrant");
+const WorldBossAbility = require("../src/models/WorldBossAbility");
+const WorldBossStatusResistance = require("../src/models/WorldBossStatusResistance");
+const WorldBossRankingReward = require("../src/models/WorldBossRankingReward");
+const Power = require("../src/models/Power");
 const CharacterInventory = require("../src/models/CharacterInventory");
 const worldBossDiscoveryService = require("../src/services/worldBossDiscoveryService");
 const worldBossLifecycleService = require("../src/services/worldBossLifecycleService");
@@ -69,6 +73,7 @@ const itensCriados = [];
 const zonasCriadas = [];
 const configsCriados = [];
 const eventosCriados = [];
+const powersCriados = [];
 
 // Tudo que participa do índice único parcial (eventos) OU da roleta de
 // seleção de config (worldBossLifecycleService.selecionarConfig lê
@@ -86,10 +91,17 @@ test.afterEach(async () => {
     eventosCriados.length = 0;
   }
   if (configsCriados.length > 0) {
+    await WorldBossRankingReward.destroy({ where: { id_world_boss_config: configsCriados } });
+    await WorldBossStatusResistance.destroy({ where: { id_world_boss_config: configsCriados } });
+    await WorldBossAbility.destroy({ where: { id_world_boss_config: configsCriados } });
     await WorldBossConfigZone.destroy({ where: { id_world_boss_config: configsCriados } });
     await WorldBossPhase.destroy({ where: { id_world_boss_config: configsCriados } });
     await WorldBossConfig.destroy({ where: { id: configsCriados } });
     configsCriados.length = 0;
+  }
+  if (powersCriados.length > 0) {
+    await Power.destroy({ where: { id: powersCriados } });
+    powersCriados.length = 0;
   }
   if (itensCriados.length > 0) {
     // Sem ON DELETE CASCADE em character_inventory.id_item (migration
@@ -352,6 +364,104 @@ testeComBanco("sem evento DORMANT aberto, encontro elegível não faz nada (mas 
 // ---------------------------------------------------------------------
 // Fase 2/3 — lifecycle (COOLDOWN -> DORMANT) e scheduler
 // ---------------------------------------------------------------------
+
+// ---------------------------------------------------------------------
+// Ameaça Mundial V2 §9.3/§18/§19/§23.1 — snapshot profundo: nunca só
+// id_power, sempre os valores efetivos. Editar o catálogo depois nunca
+// muda um evento já criado.
+// ---------------------------------------------------------------------
+
+testeComBanco("snapshot profundo: agendarProximoCiclo congela atributos/fases/habilidades/resistências/ranking rewards (spec V2 §9.3)", async () => {
+  const config = await criarConfig();
+  await WorldBossConfig.update(
+    { nivel: 50, forca: 120, vitalidade: 100, mana_maxima: 500, intervalo_acao_ms: 3500, reentrada_permitida: true },
+    { where: { id: config.id } },
+  );
+  await config.reload();
+
+  const fase = await WorldBossPhase.create({
+    id_world_boss_config: config.id,
+    ordem: 1,
+    nome_fase: "Cataclismo",
+    hp_percentual_max: 30,
+    dano_min: 170,
+    dano_max: 220,
+    furia_por_acao_pct: 3,
+    limite_furia_pct: null,
+  });
+
+  const power = await Power.create({
+    nome: `Chamas do Cataclismo ${sufixo()}`,
+    descricao: "x",
+    tipo_poder: "Ativo",
+    escala_atributo: "Inteligencia",
+    dano_base: 180,
+    custo_mana: 80,
+    cooldown: 4,
+  });
+  powersCriados.push(power.id);
+  const ability = await WorldBossAbility.create({
+    id_world_boss_config: config.id,
+    id_power: power.id,
+    peso_uso: 30,
+    prioridade: 10,
+    tipo_alvo: "N_ALEATORIOS",
+    quantidade_alvos: 3,
+    escala_com_furia: true,
+  });
+
+  await WorldBossStatusResistance.create({ id_world_boss_config: config.id, status_key: "STUN", imune: true, resistencia_pct: 100 });
+
+  const premioItem = await criarItemGolpeFinal();
+  await WorldBossRankingReward.create({ id_world_boss_config: config.id, posicao_inicio: 1, posicao_fim: 1, id_item: premioItem.id, quantidade: 1, gold: 500 });
+
+  let evento;
+  await sequelize.transaction(async (t) => {
+    evento = await worldBossLifecycleService.agendarProximoCiclo(t, { apartirDe: new Date() });
+  });
+  eventosCriados.push(evento.id);
+
+  const snapshot = evento.config_snapshot;
+  assert.equal(snapshot.schema_version, worldBossLifecycleService.SNAPSHOT_SCHEMA_VERSION);
+  assert.equal(snapshot.nivel, 50);
+  assert.equal(snapshot.forca, 120);
+  assert.equal(snapshot.mana_maxima, 500);
+  assert.equal(snapshot.intervalo_acao_ms, 3500);
+  assert.equal(snapshot.reentrada_permitida, true);
+
+  const faseSnapshot = snapshot.fases.find((f) => f.nome_fase === "Cataclismo");
+  assert.ok(faseSnapshot);
+  assert.equal(faseSnapshot.dano_min, 170);
+  assert.equal(faseSnapshot.dano_max, 220);
+  assert.equal(faseSnapshot.furia_por_acao_pct, 3);
+  assert.equal(faseSnapshot.limite_furia_pct, null);
+
+  assert.equal(snapshot.abilities.length, 1);
+  const habilidadeSnapshot = snapshot.abilities[0];
+  assert.equal(habilidadeSnapshot.power_snapshot.nome, power.nome);
+  assert.equal(habilidadeSnapshot.power_snapshot.dano_base, 180);
+  assert.equal(habilidadeSnapshot.power_snapshot.custo_mana, 80);
+  assert.equal(habilidadeSnapshot.tipo_alvo, "N_ALEATORIOS");
+  assert.equal(habilidadeSnapshot.quantidade_alvos, 3);
+
+  assert.equal(snapshot.status_resistances.length, 1);
+  assert.equal(snapshot.status_resistances[0].status_key, "STUN");
+  assert.equal(snapshot.status_resistances[0].imune, true);
+
+  assert.equal(snapshot.ranking_rewards.length, 1);
+  assert.equal(snapshot.ranking_rewards[0].posicao_inicio, 1);
+  assert.equal(snapshot.ranking_rewards[0].gold, 500);
+
+  // Editar o catálogo DEPOIS do evento criado nunca pode mudar o
+  // snapshot já congelado (regra central da V1, preservada na V2).
+  await WorldBossConfig.update({ forca: 999 }, { where: { id: config.id } });
+  await Power.update({ dano_base: 999 }, { where: { id: power.id } });
+  await WorldBossAbility.update({ peso_uso: 999 }, { where: { id: ability.id } });
+  await evento.reload();
+  assert.equal(evento.config_snapshot.forca, 120, "editar o catálogo depois não pode mudar um evento já criado");
+  assert.equal(evento.config_snapshot.abilities[0].power_snapshot.dano_base, 180);
+  assert.equal(evento.config_snapshot.abilities[0].peso_uso, 30);
+});
 
 testeComBanco("lifecycle: agendarProximoCiclo cria evento COOLDOWN e não duplica se já existe um aberto/em espera", async () => {
   const zona = await criarZona();

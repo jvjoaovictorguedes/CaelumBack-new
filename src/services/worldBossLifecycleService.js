@@ -7,8 +7,18 @@ const WorldBossConfig = require("../models/WorldBossConfig");
 const WorldBossPhase = require("../models/WorldBossPhase");
 const WorldBossConfigZone = require("../models/WorldBossConfigZone");
 const WorldBossEvent = require("../models/WorldBossEvent");
+const WorldBossAbility = require("../models/WorldBossAbility");
+const WorldBossStatusResistance = require("../models/WorldBossStatusResistance");
+const WorldBossRankingReward = require("../models/WorldBossRankingReward");
+const Power = require("../models/Power");
 const gameSettingCache = require("./gameSettingCache");
 const { EVENT_STATUS, EVENT_STATUS_ABERTOS, GAME_SETTINGS_DEFAULT } = require("../config/worldBossConfig");
+
+// Versão do formato do snapshot (Ameaça Mundial V2 §9.3/Anexo A) — usada
+// só pra diagnóstico/telemetria; a leitura do snapshot NUNCA deve travar
+// num schema_version específico, porque eventos antigos (V1, sem essa
+// chave) continuam existindo no banco e precisam continuar legíveis.
+const SNAPSHOT_SCHEMA_VERSION = 2;
 
 async function existeEventoAberto(transaction) {
   const evento = await WorldBossEvent.findOne({ where: { status: EVENT_STATUS_ABERTOS }, transaction });
@@ -31,8 +41,47 @@ async function selecionarConfig(transaction) {
   return configs[configs.length - 1];
 }
 
-// §18/§19 — snapshot congelado no início do ciclo. Editar o catálogo
-// depois NUNCA muda um evento já em andamento.
+// §9.3/§23.1 — snapshot PROFUNDO: nunca salvar só id_power (uma edição
+// de Power no meio da raid mudaria o evento ativo). Todo valor efetivo
+// usado pelo runtime da Etapa 3+ (dano/cura base, custo, cooldown,
+// escala) é copiado pro snapshot aqui, junto da config específica de
+// raid (peso/prioridade/alvo/cast/overrides).
+async function montarSnapshotHabilidades(idConfig, transaction) {
+  const habilidades = await WorldBossAbility.findAll({
+    where: { id_world_boss_config: idConfig, ativo: true },
+    include: [{ model: Power }],
+    order: [["prioridade", "DESC"]],
+    transaction,
+  });
+  return habilidades.map((hab) => ({
+    id_ability: hab.id,
+    power_snapshot: hab.Power
+      ? {
+          id: hab.Power.id,
+          nome: hab.Power.nome,
+          imagem_url: hab.Power.imagem_url,
+          dano_base: hab.Power.dano_base,
+          cura_base: hab.Power.cura_base,
+          custo_mana: hab.Power.custo_mana,
+          cooldown: hab.Power.cooldown,
+          escala_atributo: hab.Power.escala_atributo,
+          valor_escala: hab.Power.valor_escala,
+        }
+      : null,
+    peso_uso: hab.peso_uso,
+    prioridade: hab.prioridade,
+    fases_permitidas: hab.fases_permitidas,
+    tipo_alvo: hab.tipo_alvo,
+    quantidade_alvos: hab.quantidade_alvos,
+    tempo_conjuracao_ms: hab.tempo_conjuracao_ms,
+    cooldown_override: hab.cooldown_override,
+    custo_mana_override: hab.custo_mana_override,
+    escala_com_furia: hab.escala_com_furia,
+  }));
+}
+
+// §18/§19/§9.3 — snapshot congelado no início do ciclo. Editar o
+// catálogo depois NUNCA muda um evento já em andamento.
 async function montarSnapshot(config, transaction) {
   const fases = await WorldBossPhase.findAll({
     where: { id_world_boss_config: config.id },
@@ -40,13 +89,37 @@ async function montarSnapshot(config, transaction) {
     transaction,
   });
   const zonas = await WorldBossConfigZone.findAll({ where: { id_world_boss_config: config.id }, transaction });
+  const resistencias = await WorldBossStatusResistance.findAll({
+    where: { id_world_boss_config: config.id, ativo: true },
+    transaction,
+  });
+  const recompensasRanking = await WorldBossRankingReward.findAll({
+    where: { id_world_boss_config: config.id, ativo: true },
+    order: [["posicao_inicio", "ASC"]],
+    transaction,
+  });
+  const habilidades = await montarSnapshotHabilidades(config.id, transaction);
+
   return {
+    schema_version: SNAPSHOT_SCHEMA_VERSION,
     nome: config.nome,
     descricao: config.descricao,
     lore: config.lore,
     imagem_url: config.imagem_url,
     vida_base: Number(config.vida_base),
     defesa: config.defesa,
+    // §4.1 — atributos de combate/raid do Boss.
+    nivel: config.nivel,
+    forca: config.forca,
+    vitalidade: config.vitalidade,
+    agilidade: config.agilidade,
+    inteligencia: config.inteligencia,
+    velocidade: config.velocidade,
+    mana_maxima: config.mana_maxima,
+    regeneracao_mana_por_acao: config.regeneracao_mana_por_acao,
+    intervalo_acao_ms: config.intervalo_acao_ms,
+    reentrada_permitida: config.reentrada_permitida,
+    cooldown_reentrada_segundos: config.cooldown_reentrada_segundos,
     mensagem_descoberta: config.mensagem_descoberta,
     mensagem_convocacao: config.mensagem_convocacao,
     mensagem_fase_final: config.mensagem_fase_final,
@@ -66,8 +139,34 @@ async function montarSnapshot(config, transaction) {
       hp_percentual_max: fase.hp_percentual_max,
       modificador_dano_percentual: fase.modificador_dano_percentual,
       texto_alerta: fase.texto_alerta,
+      // §5.1 — modelo híbrido dano min/max + curva de Fúria por fase.
+      dano_min: fase.dano_min,
+      dano_max: fase.dano_max,
+      furia_por_acao_pct: Number(fase.furia_por_acao_pct),
+      limite_furia_pct: fase.limite_furia_pct !== null ? Number(fase.limite_furia_pct) : null,
+      intervalo_acao_ms: fase.intervalo_acao_ms,
+      mana_ao_entrar: fase.mana_ao_entrar,
     })),
     zonas: zonas.map((zona) => zona.id_zone),
+    // §6.2/§9.3 — valores EFETIVOS congelados, não só id_power.
+    abilities: habilidades,
+    // §7.1 — resistência/imunidade a status, reaproveitando o motor
+    // existente; a camada de World Boss só decide se entra e com que
+    // resistência.
+    status_resistances: resistencias.map((r) => ({
+      status_key: r.status_key,
+      imune: r.imune,
+      resistencia_pct: r.resistencia_pct,
+    })),
+    // §11.3 — faixas de recompensa por colocação no ranking final.
+    ranking_rewards: recompensasRanking.map((r) => ({
+      posicao_inicio: r.posicao_inicio,
+      posicao_fim: r.posicao_fim,
+      id_item: r.id_item,
+      quantidade: r.quantidade,
+      gold: r.gold,
+      xp: r.xp,
+    })),
   };
 }
 
@@ -138,4 +237,11 @@ async function ativarSeElegivel(transaction) {
   return evento;
 }
 
-module.exports = { existeEventoAberto, selecionarConfig, agendarProximoCiclo, ativarSeElegivel };
+module.exports = {
+  existeEventoAberto,
+  selecionarConfig,
+  agendarProximoCiclo,
+  ativarSeElegivel,
+  montarSnapshot,
+  SNAPSHOT_SCHEMA_VERSION,
+};
