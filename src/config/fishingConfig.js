@@ -60,7 +60,14 @@ function xpPorCaptura(dificuldadeBase, quality) {
 const TENSAO_MAXIMA = 1000; // 0..1000 — rompimento de linha em >= TENSAO_MAXIMA
 const ZONA_IDEAL_MIN = 350;
 const ZONA_IDEAL_MAX = 650;
-const PROGRESSO_PARA_CAPTURA = 1000; // recolhimento acumulado necessário
+// Recolher DENTRO da zona ideal concede +15% de progresso naquele passo
+// (rebalanceamento Pesca v3 §3.3) — dá função mecânica real à faixa, não
+// só um indicador visual.
+const ZONA_IDEAL_BONUS_PCT = 0.15;
+// 1000 -> 800: reduz repetição de ações ON/OFF por captura sem tirar
+// habilidade (rebalanceamento v3 §3.4) — meta de ~15-30s por luta comum
+// com vara adequada.
+const PROGRESSO_PARA_CAPTURA = 800; // recolhimento acumulado necessário
 
 const JANELA_MORDIDA_BASE_MS = 2500; // tempo que o jogador tem pra fisgar após a mordida
 const ESPERA_MORDIDA_MIN_MS = 1500;
@@ -71,16 +78,99 @@ const SESSAO_EXPIRACAO_MS = 3 * 60_000; // sessão inteira expira em 3 minutos s
 // Comportamentos de espécie (spec §14.5) — whitelist fechada, resolvida
 // em fishingEngine.js. Cada chave define como a "força do peixe" evolui
 // a cada ação de reel (puxão de tensão extra / recuperação de
-// progresso).
+// progresso). Valores rebalanceados (Pesca v3 §3.2): pico de força mais
+// próximo entre perfis pra nenhum ficar punitivo demais com vara
+// apropriada — o multiplicador de dificuldade_base (fatorDificuldade)
+// modula a intensidade final por espécie em cima destes valores base.
 const COMPORTAMENTOS = {
-  CALM: { picoChance: 0.08, picoForca: 60, recuperacaoProgresso: 0.02 },
-  BURST: { picoChance: 0.28, picoForca: 160, recuperacaoProgresso: 0.05 },
-  ERRATIC: { picoChance: 0.4, picoForca: 110, recuperacaoProgresso: 0.08 },
-  ENDURANCE: { picoChance: 0.15, picoForca: 90, recuperacaoProgresso: 0.12 },
-  DEEP_DIVE: { picoChance: 0.12, picoForca: 220, recuperacaoProgresso: 0.18 },
+  CALM: { picoChance: 0.08, picoForca: 50, recuperacaoProgresso: 0.02 },
+  BURST: { picoChance: 0.18, picoForca: 90, recuperacaoProgresso: 0.03 },
+  ERRATIC: { picoChance: 0.25, picoForca: 65, recuperacaoProgresso: 0.05 },
+  ENDURANCE: { picoChance: 0.12, picoForca: 75, recuperacaoProgresso: 0.08 },
+  DEEP_DIVE: { picoChance: 0.08, picoForca: 130, recuperacaoProgresso: 0.12 },
 };
 
 const COMPORTAMENTO_KEYS = Object.keys(COMPORTAMENTOS);
+
+// Metadados públicos de apresentação (Pesca v3 §6/§6.1) — fonte de
+// verdade única pro nome/descrição/dica em português de cada
+// comportamento. As keys internas (COMPORTAMENTO_KEYS acima) continuam
+// em inglês pra não exigir migration; só a apresentação muda. Frontend
+// (FishingAlmanaque, FishingClient, AdminFishingClient) consome isso
+// pronto, nunca traduz na mão.
+const COMPORTAMENTO_META = {
+  CALM: {
+    nome: "Calmo",
+    descricao: "Poucas arrancadas e ritmo previsível.",
+    dica: "Use a faixa ideal para recolher com segurança.",
+  },
+  BURST: {
+    nome: "Explosivo",
+    descricao: "Arrancadas curtas e fortes.",
+    dica: "Alivie a linha quando a tensão subir rapidamente.",
+  },
+  ERRATIC: {
+    nome: "Imprevisível",
+    descricao: "Muda de ritmo e arranca com frequência.",
+    dica: "Evite manter recolhimento contínuo por muito tempo.",
+  },
+  ENDURANCE: {
+    nome: "Resistente",
+    descricao: "Prolonga a disputa e recupera distância.",
+    dica: "Mantenha pressão quando a tensão estiver segura.",
+  },
+  DEEP_DIVE: {
+    nome: "Mergulhador",
+    descricao: "Poucos mergulhos, mas muito intensos.",
+    dica: "Reserve margem de tensão para reagir aos mergulhos.",
+  },
+};
+
+function metaComportamento(key) {
+  return COMPORTAMENTO_META[key] ?? COMPORTAMENTO_META.CALM;
+}
+
+// dificuldade_base (1..1000) passa a modular a força mecânica do peixe
+// (Pesca v3 §3.1) em vez de só influenciar XP — multiplicador limitado
+// pra evitar explosões de valor (80 -> 0,832x .. 1000 -> 1,200x).
+function fatorDificuldade(dificuldadeBase) {
+  const db = Math.max(1, Math.min(1000, Number(dificuldadeBase) || 1));
+  return 0.8 + 0.4 * (db / 1000);
+}
+
+function rotuloDificuldade(dificuldadeBase) {
+  const db = Number(dificuldadeBase) || 0;
+  if (db <= 250) return "Fácil";
+  if (db <= 500) return "Moderada";
+  if (db <= 750) return "Difícil";
+  return "Muito difícil";
+}
+
+// Proficiência de Nível de Pesca (Pesca v3 §4) — aplicada sobre os
+// atributos efetivos da vara (já com raridade/refinamento), ANTES de
+// buffs temporários (ex.: Taverna). Bônus por nível acima de 1; o teto
+// natural é NIVEL_MAXIMO_PESCA (25), então não precisa de cap adicional
+// — controle/precisão/estabilidade chegam a ~+18%, força/recolhimento a
+// ~+9,6% no nível máximo.
+const PROFICIENCIA_PCT_POR_NIVEL = {
+  controle: 0.0075,
+  precisao: 0.0075,
+  estabilidade: 0.0075,
+  forca_linha: 0.004,
+  recolhimento: 0.004,
+};
+
+function aplicarProficienciaPesca(statsVara, nivelPesca) {
+  if (!statsVara) return statsVara;
+  const nivel = Math.max(1, Math.min(NIVEL_MAXIMO_PESCA, Number(nivelPesca) || 1));
+  const niveisAcima = nivel - 1;
+  const resultado = { ...statsVara };
+  for (const [campo, pctPorNivel] of Object.entries(PROFICIENCIA_PCT_POR_NIVEL)) {
+    if (typeof resultado[campo] !== "number") continue;
+    resultado[campo] = Math.round(resultado[campo] * (1 + pctPorNivel * niveisAcima));
+  }
+  return resultado;
+}
 
 // Perfis de peso (spec §8.1 perfil_peso) — curva server-side de onde
 // dentro de [min,max] o peso tende a cair. LIGHT puxa pra baixo, HEAVY
@@ -111,6 +201,7 @@ module.exports = {
   TENSAO_MAXIMA,
   ZONA_IDEAL_MIN,
   ZONA_IDEAL_MAX,
+  ZONA_IDEAL_BONUS_PCT,
   PROGRESSO_PARA_CAPTURA,
   JANELA_MORDIDA_BASE_MS,
   ESPERA_MORDIDA_MIN_MS,
@@ -118,6 +209,11 @@ module.exports = {
   SESSAO_EXPIRACAO_MS,
   COMPORTAMENTOS,
   COMPORTAMENTO_KEYS,
+  COMPORTAMENTO_META,
+  metaComportamento,
+  fatorDificuldade,
+  rotuloDificuldade,
+  aplicarProficienciaPesca,
   PERFIS_PESO,
   sortearPesoGramas,
   qualidadeEspecime,

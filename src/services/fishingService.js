@@ -30,6 +30,7 @@ const { propriedadesEfetivasVara } = require("./equipmentRefinementService");
 const { sortearEspecie } = require("./fishingEncounterService");
 const { resolverPassoDeReel } = require("./fishingEngine");
 const { aplicarGanhoDeXp, garantirProgresso } = require("./fishingProgressionService");
+const { aplicarProficienciaPesca } = require("../config/fishingConfig");
 // Sistema de Taverna §6.1/§13 — FISHING_CONTROL_PCT só na pesca NORMAL
 // (este arquivo), NUNCA no Torneio de Pesca (fishingTournamentService.js
 // não importa isso e não deve). Soma por cima do `controle` efetivo da
@@ -221,7 +222,10 @@ async function lancar(characterId, sessionId) {
     }
 
     const rodInfo = await buscarRodEfetivo(characterId, session.id_instancia_vara, transaction);
-    const precisao = rodInfo?.efetivo?.precisao ?? 0;
+    // Proficiência do Nível de Pesca (Pesca v3 §4) — mesma composição
+    // (base/refinamento -> proficiência -> buffs) usada em recolher().
+    const statsComProficiencia = aplicarProficienciaPesca(rodInfo?.efetivo, progresso.nivel);
+    const precisao = statsComProficiencia?.precisao ?? 0;
     const janelaMs = JANELA_MORDIDA_BASE_MS + Math.round((precisao / 1000) * 1200);
     const esperaMs = ESPERA_MORDIDA_MIN_MS + Math.random() * (ESPERA_MORDIDA_MAX_MS - ESPERA_MORDIDA_MIN_MS);
 
@@ -383,9 +387,13 @@ async function recolher(characterId, sessionId, active) {
 
     const especie = await require("../models/FishingSpecies").findByPk(session.id_species, { transaction });
     const rodInfo = await buscarRodEfetivo(characterId, session.id_instancia_vara, transaction);
+    const progresso = await garantirProgresso(characterId, transaction);
 
+    // Ordem de composição dos stats efetivos (Pesca v3 §4.1/§12.4): base
+    // + refinamento (buscarRodEfetivo) -> proficiência do Nível de Pesca
+    // -> buffs temporários (Taverna).
+    let rodEfetiva = aplicarProficienciaPesca(rodInfo?.efetivo, progresso.nivel);
     const bonusTaverna = await bonusesTavernaAtivosPara(characterId, "Pesca", transaction);
-    let rodEfetiva = rodInfo?.efetivo ?? null;
     if (rodEfetiva && bonusTaverna.FISHING_CONTROL_PCT) {
       rodEfetiva = {
         ...rodEfetiva,
@@ -402,6 +410,7 @@ async function recolher(characterId, sessionId, active) {
       progressoAtual: session.progresso,
       rod: rodEfetiva,
       active: Boolean(active),
+      dificuldadeBase: especie.dificuldade_base,
     });
     session.tensao = passo.tensao;
     session.progresso = passo.progresso;

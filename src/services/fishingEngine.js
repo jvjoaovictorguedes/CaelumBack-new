@@ -5,7 +5,14 @@
 // behavior_seed + sequence da sessão, nunca Math.random() direto — dá
 // pra escrever teste de "comportamento determinístico por seed"
 // (spec §35.1) chamando a mesma função duas vezes com o mesmo seed.
-const { COMPORTAMENTOS, TENSAO_MAXIMA, ZONA_IDEAL_MIN, ZONA_IDEAL_MAX } = require("../config/fishingConfig");
+const {
+  COMPORTAMENTOS,
+  TENSAO_MAXIMA,
+  ZONA_IDEAL_MIN,
+  ZONA_IDEAL_MAX,
+  ZONA_IDEAL_BONUS_PCT,
+  fatorDificuldade,
+} = require("../config/fishingConfig");
 
 // PRNG determinístico simples e rápido — suficiente pro minigame (não é
 // criptográfico, não precisa ser).
@@ -33,9 +40,14 @@ function comportamentoDe(key) {
 // tensão/progresso por conta própria (autoridade do servidor, spec §15).
 //
 // rod: { forca_linha, controle, recolhimento, precisao, estabilidade }
-// (0..1000, já com refinamento aplicado — ver fishingRodService).
-function resolverPassoDeReel({ behaviorKey, seed, sequence, tensaoAtual, progressoAtual, rod, active }) {
+// (0..1000, já com refinamento + proficiência de Nível de Pesca + buffs
+// aplicados — ver fishingService.js/fishingConfig.aplicarProficienciaPesca).
+// dificuldadeBase: FishingSpecies.dificuldade_base (1..1000) — modula a
+// intensidade do comportamento do peixe (Pesca v3 §3.1), não altera a
+// vara.
+function resolverPassoDeReel({ behaviorKey, seed, sequence, tensaoAtual, progressoAtual, rod, active, dificuldadeBase }) {
   const comportamento = comportamentoDe(behaviorKey);
+  const fator = fatorDificuldade(dificuldadeBase);
   const rng = rngParaPasso(seed, sequence);
   const r = rng();
 
@@ -44,13 +56,22 @@ function resolverPassoDeReel({ behaviorKey, seed, sequence, tensaoAtual, progres
   const recolhimento = rod?.recolhimento ?? 100;
   const estabilidade = rod?.estabilidade ?? 100;
 
+  // Zona ideal (spec §3.3): recolher enquanto a tensão JÁ ESTÁ na faixa
+  // 350-650 concede +15% de progresso nesse passo — vira mecânica de
+  // habilidade real, não só um indicador visual. Calculado sobre a
+  // tensão ANTES do passo (recompensa manter-se na faixa, não só cair
+  // nela por acaso no meio do cálculo).
+  const naZonaIdealAntes = tensaoAtual >= ZONA_IDEAL_MIN && tensaoAtual <= ZONA_IDEAL_MAX;
+
   let tensao = tensaoAtual;
   let progresso = progressoAtual;
   let evento = "calmo";
 
   if (active) {
     // REEL ON — aumenta progresso e tensão (spec §14.4).
-    progresso += 18 + Math.round((recolhimento / 1000) * 28);
+    let ganhoProgresso = 18 + Math.round((recolhimento / 1000) * 28);
+    if (naZonaIdealAntes) ganhoProgresso = Math.round(ganhoProgresso * (1 + ZONA_IDEAL_BONUS_PCT));
+    progresso += ganhoProgresso;
     tensao += 22 - Math.round((forcaLinha / 1000) * 14);
   } else {
     // REEL OFF — reduz tensão, mas o peixe pode recuperar distância.
@@ -59,15 +80,17 @@ function resolverPassoDeReel({ behaviorKey, seed, sequence, tensaoAtual, progres
 
   // Comportamento do peixe: chance de "arrancada" (pico de tensão), com
   // estabilidade da vara suavizando o impacto (spec §14.4: "Estabilidade
-  // suaviza arrancadas/oscilações").
+  // suaviza arrancadas/oscilações"). dificuldade_base modula a força da
+  // arrancada e a recuperação de progresso do peixe (spec §3.1).
   if (r < comportamento.picoChance) {
     evento = "arrancada";
     const suavizacao = 1 - (estabilidade / 1000) * 0.5;
-    tensao += Math.round(comportamento.picoForca * suavizacao);
+    tensao += Math.round(comportamento.picoForca * fator * suavizacao);
     if (!active) {
       // Peixe recupera parte da distância só quando o jogador NÃO está
       // recolhendo — mesma regra da barra ASCII da spec.
-      progresso -= Math.round(progresso * comportamento.recuperacaoProgresso);
+      const recuperacao = Math.min(1, comportamento.recuperacaoProgresso * fator);
+      progresso -= Math.round(progresso * recuperacao);
     }
   }
 

@@ -215,6 +215,69 @@ test("fishingEngine.resolverPassoDeReel é determinístico pelo mesmo seed+seque
   assert.ok(algumaDivergiu, "variar sequence deveria produzir pelo menos um resultado diferente");
 });
 
+test("fatorDificuldade: 1 e 1000 permanecem dentro dos limites previstos (rebalanceamento v3 §3.1/§16.1)", () => {
+  const perto = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} deveria ser ~${b}`);
+  perto(fishingConfig.fatorDificuldade(1), 0.8004);
+  perto(fishingConfig.fatorDificuldade(500), 1.0);
+  perto(fishingConfig.fatorDificuldade(1000), 1.2);
+  // Fora da faixa 1..1000 continua clampado, nunca explode.
+  assert.equal(fishingConfig.fatorDificuldade(-50), fishingConfig.fatorDificuldade(1));
+  assert.equal(fishingConfig.fatorDificuldade(5000), fishingConfig.fatorDificuldade(1000));
+});
+
+test("dificuldade_base modula a intensidade do comportamento do peixe (rebalanceamento v3 §3.1)", () => {
+  const paramsBase = {
+    behaviorKey: "DEEP_DIVE",
+    seed: 999,
+    sequence: 20, // sequence fixa escolhida por bater arrancada (r < picoChance) nesse PRNG
+    tensaoAtual: 500,
+    progressoAtual: 0,
+    rod: { forca_linha: 300, controle: 300, recolhimento: 300, precisao: 300, estabilidade: 300 },
+    active: false,
+  };
+  const facil = fishingEngine.resolverPassoDeReel({ ...paramsBase, dificuldadeBase: 1 });
+  const dificil = fishingEngine.resolverPassoDeReel({ ...paramsBase, dificuldadeBase: 1000 });
+  assert.equal(facil.evento, "arrancada", "cenário precisa cair numa arrancada pra comparar intensidade");
+  assert.equal(dificil.evento, "arrancada");
+  assert.ok(dificil.tensao > facil.tensao, "dificuldade_base maior deveria gerar arrancada mais forte");
+});
+
+test("aplicarProficienciaPesca cresce monotonicamente com o nível e respeita o cap do nível máximo (spec §4/§16.1)", () => {
+  const stats = { forca_linha: 100, controle: 100, recolhimento: 100, precisao: 100, estabilidade: 100 };
+  let anterior = fishingConfig.aplicarProficienciaPesca(stats, 1);
+  assert.deepEqual(anterior, stats, "nível 1 não aplica nenhum bônus");
+  for (let nivel = 2; nivel <= fishingConfig.NIVEL_MAXIMO_PESCA; nivel += 1) {
+    const atual = fishingConfig.aplicarProficienciaPesca(stats, nivel);
+    for (const campo of Object.keys(stats)) {
+      assert.ok(atual[campo] >= anterior[campo], `${campo} deveria crescer ou manter ao subir nível`);
+    }
+    anterior = atual;
+  }
+  // Nível acima do máximo não deveria produzir bônus maior que o teto.
+  const noTeto = fishingConfig.aplicarProficienciaPesca(stats, fishingConfig.NIVEL_MAXIMO_PESCA);
+  const acimaDoTeto = fishingConfig.aplicarProficienciaPesca(stats, fishingConfig.NIVEL_MAXIMO_PESCA + 50);
+  assert.deepEqual(acimaDoTeto, noTeto, "nível acima do máximo precisa ser clampado");
+});
+
+test("Zona ideal concede exatamente o bônus definido de progresso (rebalanceamento v3 §3.3)", () => {
+  const params = {
+    behaviorKey: "CALM",
+    seed: 42,
+    sequence: 100, // sem arrancada nesse passo, só o cálculo de progresso puro
+    progressoAtual: 0,
+    rod: { forca_linha: 100, controle: 100, recolhimento: 100, precisao: 100, estabilidade: 100 },
+    active: true,
+    dificuldadeBase: 500,
+  };
+  const foraDaZona = fishingEngine.resolverPassoDeReel({ ...params, tensaoAtual: 0 });
+  const naZona = fishingEngine.resolverPassoDeReel({ ...params, tensaoAtual: 500 });
+  assert.equal(foraDaZona.evento, "calmo");
+  assert.equal(naZona.evento, "calmo");
+  const ganhoBase = foraDaZona.progresso;
+  const ganhoComBonus = naZona.progresso;
+  assert.equal(ganhoComBonus, Math.round(ganhoBase * (1 + fishingConfig.ZONA_IDEAL_BONUS_PCT)));
+});
+
 test("propriedadesEfetivasVara: +10 sempre igual ou maior que +0, nunca some a outros atributos", () => {
   const base = { forca_linha: 100, controle: 100, recolhimento: 100, precisao: 100, estabilidade: 100 };
   const efetivo0 = equipmentRefinementService.propriedadesEfetivasVara(base, 0);
@@ -380,11 +443,14 @@ testeComBanco("Falha (linha arrebentada) não concede Item nem XP (spec §35.2)"
   const { especie, item: itemPeixe } = await criarEspecie({ comportamento_key: "BURST" });
   const zona = await criarZonaComEspecie(especie);
   await posicionarPersonagemNaZona(personagem.id, zona.id);
-  // Vara fraca de propósito (força de linha baixa) pra estourar a
-  // tensão rápido e forçar BROKEN_LINE de forma confiável.
+  // Vara fraca de propósito em TODOS os atributos — força de linha 0
+  // deixa a tensão subir sem mitigação a cada ON, e recolhimento 0
+  // garante que o progresso nunca alcança a captura antes disso (uma
+  // vara com recolhimento alto isoladamente pode capturar rápido mesmo
+  // com força zero — não é o que este teste quer verificar).
   const item = await criarItemFerramenta("Vara Fraca de Teste");
   await FishingRodProperties.create({
-    id_item: item.id, forca_linha: 0, controle: 0, recolhimento: 1000, precisao: 0, estabilidade: 0, nivel_pesca_minimo: 1,
+    id_item: item.id, forca_linha: 0, controle: 0, recolhimento: 0, precisao: 0, estabilidade: 0, nivel_pesca_minimo: 1,
   });
   const instancia = await equipmentInstanceService.create({ idPersonagem: personagem.id, idItem: item.id, raridade: "Comum" }, null);
 
