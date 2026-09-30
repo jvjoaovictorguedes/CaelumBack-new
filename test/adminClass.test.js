@@ -343,6 +343,40 @@ testeComBanco("excluirCaminho force=true desfaz a evolução do personagem (hist
   await User.destroy({ where: { id: personagem.id_usuario } });
 });
 
+testeComBanco("excluirHabilidade: revoga o poder já concedido de quem está no caminho, sem tocar em quem aprendeu por outra via (bug real: poder ficava vinculado depois de excluir a evolução)", async () => {
+  const classe = await criarClasseTeste();
+  const caminho = await adminClassService.criarCaminho(classe.id, { slug: `hab-excl-${sufixoSlug()}`, nome: "Caminho de Teste", descricao: "x", estagio: 1 }, ctx);
+  const power = await criarPowerTeste();
+  const habilidade = await adminClassService.criarHabilidade(caminho.id, { id_power: power.id }, ctx);
+
+  const { personagem } = await criarPersonagem({ nivel: 40 });
+  await Character.update({ id_classe: classe.id, dinheiro: 1000 }, { where: { id: personagem.id } });
+  const evolucao = reqRes({ id: String(personagem.id) }, { id_caminho: caminho.id });
+  await characterController.evolveClass(evolucao.req, evolucao.res);
+  assert.equal(evolucao.resultado().statusCode, 200);
+
+  // Outro personagem aprendeu o MESMO Power por outra via (nunca por
+  // esta evolução) — excluir o vínculo não pode tocar nele.
+  const { personagem: outro } = await criarPersonagem({ nivel: 40 });
+  await CharacterAbilities.create({ id_personagem: outro.id, id_power: power.id, is_active: true, nivel_habilidade: 1 });
+
+  await adminClassService.excluirHabilidade(habilidade.id, ctx);
+
+  assert.equal(await ClassEvolutionAbility.findByPk(habilidade.id), null);
+
+  const habilidadeDoEvoluido = await CharacterAbilities.findOne({ where: { id_personagem: personagem.id, id_power: power.id } });
+  assert.equal(habilidadeDoEvoluido, null, "poder concedido só por essa evolução devia ter sido revogado");
+
+  const habilidadeDoOutro = await CharacterAbilities.findOne({ where: { id_personagem: outro.id, id_power: power.id } });
+  assert.ok(habilidadeDoOutro, "poder aprendido por outra via nunca pode ser revogado por essa exclusão");
+
+  await personagem.destroy();
+  await User.destroy({ where: { id: personagem.id_usuario } });
+  await CharacterAbilities.destroy({ where: { id_personagem: outro.id } });
+  await outro.destroy();
+  await User.destroy({ where: { id: outro.id_usuario } });
+});
+
 testeComBanco("validarIntegridade: roda sem quebrar e sinaliza classe sem papel/slug", async () => {
   const classe = await criarClasseTeste();
   await Class.update({ disponivel_criacao: true }, { where: { id: classe.id } });
