@@ -6,10 +6,12 @@
 // Cobre só o que é visível pro jogador dentre tudo que acabou de ir de
 // `dev` pra `main`: a Ameaça Mundial V2 (anunciada em 1.0 como "banco
 // de dados pronto, nada jogável ainda" — agora está completamente
-// jogável, com combate ao vivo) e um punhado de fixes/QoL menores.
-// Ficou de fora TUDO que é só ferramenta de admin (painel de Aventura,
-// painel de Classes, simulador/editor/métricas da Ameaça Mundial,
-// rota marítima) — nada disso é visível pro jogador comum.
+// jogável, com combate ao vivo), a nova profissão de Ferreiro, a Wiki
+// do Jogo, e um punhado de fixes/QoL menores. Ficou de fora TUDO que é
+// só ferramenta de admin (painel de Aventura, painel de Classes,
+// simulador/editor/métricas da Ameaça Mundial, painel de Guilda,
+// painel da Wiki, criação de item, rota marítima) — nada disso é
+// visível pro jogador comum.
 module.exports = {
   async up(queryInterface) {
     const [existente] = await queryInterface.sequelize.query(
@@ -27,9 +29,9 @@ module.exports = {
       {
         feature: "Caelum",
         titulo: "A luta começou de verdade.",
-        resumo: "A Ameaça Mundial finalmente pode ser enfrentada — e mais uma leva de ajustes chegou em Caelum.",
+        resumo: "A Ameaça Mundial finalmente pode ser enfrentada, chegou a profissão de Ferreiro, e uma Wiki do Jogo pra tirar qualquer dúvida.",
         descricao:
-          "A Ameaça Mundial anunciada antes agora está completamente jogável, com combate ao vivo contra o servidor inteiro. Confira abaixo o que mudou de verdade dentro do jogo.",
+          "A Ameaça Mundial anunciada antes agora está completamente jogável, com combate ao vivo contra o servidor inteiro. Chegou também a profissão de Ferreiro e uma Wiki do Jogo com referência de todos os sistemas. Confira abaixo o que mudou de verdade dentro do jogo.",
         imagem_url: "/patch-notes/1.4/ameaca-mundial.webp",
         destaque: true,
       },
@@ -39,6 +41,22 @@ module.exports = {
         descricao:
           "A Ameaça Mundial deixou de ser só uma descoberta: agora, quando ela desperta, qualquer aventureiro pode entrar na luta e atacar em tempo real, vendo a vida do chefe, sua própria vida/mana e o ranking ao vivo de quem mais causou dano. A aba \"Ameaça Mundial\" na Guilda dos Aventureiros mostra tudo isso, e um aviso aparece no topo da tela assim que uma ameaça é descoberta ou desperta.",
         imagem_url: "/patch-notes/1.4/ameaca-mundial.webp",
+        destaque: false,
+      },
+      {
+        feature: "Ferreiro",
+        titulo: "Nova profissão: Ferreiro",
+        descricao:
+          "Funda fragmentos da Expedição em barras, fabrique equipamentos a partir delas e refine o que já tem — tudo dentro da Forja, num posto de trabalho próprio (Fundição, Fabricação, Refinamento e Caldeirão). O Ferreiro sobe de nível como qualquer profissão, com Ferraria (ferramentas que melhoram sua produção), Habilidades de Ferreiro e um Livro de Receitas que registra tudo que você já aprendeu a fabricar.",
+        imagem_url: "/patch-notes/1.4/ferreiro.webp",
+        destaque: false,
+      },
+      {
+        feature: "Wiki do Jogo",
+        titulo: "Referência de todos os sistemas, sem sair do jogo",
+        descricao:
+          "Uma Wiki completa chegou ao menu lateral, com artigos organizados por sistema — Aventura, Expedição, Forja, Guildas, Pesca, PvP, Ameaça Mundial e muito mais — pra tirar dúvida na hora, sem precisar caçar em fórum ou Discord.",
+        imagem_url: "/patch-notes/1.4/wiki.webp",
         destaque: false,
       },
       {
