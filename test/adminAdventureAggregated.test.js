@@ -219,7 +219,12 @@ testeComBanco("sincronizarLootMonstro: cria drops novos", async () => {
   assert.equal(loot.length, 2);
 });
 
-testeComBanco("sincronizarLootMonstro: atualiza por id e desativa ausente do payload (nunca deleta)", async () => {
+testeComBanco("sincronizarLootMonstro: atualiza por id e DELETA drop ausente do payload", async () => {
+  // Mesmo bug do roster de zona: "Remover" no MonsterEditor tirava a
+  // linha da lista local, mas salvar só marcava ativo:false — o drop
+  // "removido" reaparecia (desmarcado) toda vez que o admin reabria o
+  // monstro. Nada referencia uma linha de AdventureMonsterLoot (é
+  // folha), então remover do payload agora apaga de vez.
   const monstro = await criarMonstroDeTeste();
   const item1 = await criarItemDeTeste();
   const item2 = await criarItemDeTeste();
@@ -245,9 +250,7 @@ testeComBanco("sincronizarLootMonstro: atualiza por id e desativa ausente do pay
   assert.equal(linha1.ativo, true);
 
   const todasAsLinhas = await AdventureMonsterLoot.findAll({ where: { id_monstro: monstro.id } });
-  assert.equal(todasAsLinhas.length, 2, "linha do item2 não pode ser deletada");
-  const linha2 = todasAsLinhas.find((l) => l.id_item === item2.id);
-  assert.equal(linha2.ativo, false);
+  assert.equal(todasAsLinhas.length, 1, "drop do item2 precisa ser removido do monstro, não só desativado");
 });
 
 testeComBanco("sincronizarLootMonstro: chance_ppm fora de 1..1.000.000 é rejeitado sem write parcial", async () => {

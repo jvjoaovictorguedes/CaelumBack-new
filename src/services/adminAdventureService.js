@@ -720,8 +720,17 @@ async function sincronizarLootMonstro(idMonstro, lootPayload, { idAdmin, req }) 
         idsMantidos.add(nova.id);
       }
     }
-    for (const linha of linhasAtuais) {
-      if (!idsMantidos.has(linha.id) && linha.ativo) await linha.update({ ativo: false }, { transaction });
+    // Mesmo bug do roster de zona (sincronizarRosterZona): uma linha
+    // ausente do payload só virava ativo:false — como a listagem de
+    // edição devolve toda linha, o drop "removido" no MonsterEditor
+    // reaparecia (desmarcado) sempre que o admin reabria o monstro,
+    // dando a impressão de que "Remover" não salvava nada. Nada
+    // referencia uma linha de AdventureMonsterLoot (é folha — mesmo
+    // raciocínio de deleteAdminMonsterLoot acima), então é seguro apagar
+    // de vez em vez de só desativar.
+    const idsParaRemover = linhasAtuais.filter((linha) => !idsMantidos.has(linha.id)).map((linha) => linha.id);
+    if (idsParaRemover.length) {
+      await AdventureMonsterLoot.destroy({ where: { id: idsParaRemover }, transaction });
     }
 
     const depois = await AdventureMonsterLoot.findAll({
