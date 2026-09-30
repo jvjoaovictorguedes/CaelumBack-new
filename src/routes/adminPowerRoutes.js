@@ -22,6 +22,8 @@ powersRouter.put("/:id/links/class", adminPowerController.vincularClasse);
 powersRouter.delete("/:id/links/class/:idClasse", adminPowerController.desvincularClasse);
 powersRouter.put("/:id/links/race", adminPowerController.vincularRaca);
 powersRouter.delete("/:id/links/race/:idRaca", adminPowerController.desvincularRaca);
+powersRouter.put("/:id/links/nature", adminPowerController.vincularNatureza);
+powersRouter.delete("/:id/links/nature/:naturezaMagica", adminPowerController.desvincularNatureza);
 
 powersRouter.post("/:id/status-effects", adminPowerController.adicionarStatusEffect);
 powersRouter.patch("/status-effects/:idEfeito", adminPowerController.atualizarStatusEffect);
