@@ -333,7 +333,13 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       const zona = sessaoAtiva.area;
       const todosVinculosDaZona = await AdventureZoneMonster.findAll({
         where: { id_area: zona.id, ativo: true },
-        include: [{ model: AdventureMonster, as: "monstro" }],
+        // ativo:true no vínculo não basta — o admin também pode
+        // desativar o MONSTRO em si (MonstersTab "Desativar"), pra
+        // tirá-lo de circulação em toda zona de uma vez sem precisar
+        // desvincular linha por linha. Sem esse `where` aqui, um
+        // monstro desativado continuava sendo sorteado normalmente
+        // (bug reportado: "desativar" não tirava o monstro do jogo).
+        include: [{ model: AdventureMonster, as: "monstro", where: { ativo: true }, required: true }],
         transaction,
       });
       if (todosVinculosDaZona.length === 0) {

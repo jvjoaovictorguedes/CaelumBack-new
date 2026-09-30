@@ -62,7 +62,9 @@ async function obterRegiao(idPersonagem, idZona) {
 
   const vinculos = await AdventureZoneMonster.findAll({
     where: { id_area: idZona, ativo: true },
-    include: [{ model: AdventureMonster, as: "monstro" }],
+    // Mesmo fix de combatController.js — não lista monstro desativado
+    // globalmente no Bestiário da zona.
+    include: [{ model: AdventureMonster, as: "monstro", where: { ativo: true }, required: true }],
   });
 
   const nomes = vinculos.map((v) => v.monstro.nome);
