@@ -211,18 +211,13 @@ async function agendarProximoCiclo(transaction, { apartirDe = new Date() } = {})
   );
 }
 
-// Transição COOLDOWN -> DORMANT quando next_eligible_at já passou —
-// sorteia o discovery_threshold AQUI (§5.3, fallback simples), nunca
-// antes: o valor secreto não pode existir mais tempo do que precisa.
-async function ativarSeElegivel(transaction) {
-  const evento = await WorldBossEvent.findOne({
-    where: { status: EVENT_STATUS.COOLDOWN },
-    transaction,
-    lock: transaction.LOCK.UPDATE,
-  });
-  if (!evento) return null;
-  if (evento.next_eligible_at && new Date(evento.next_eligible_at).getTime() > Date.now()) return null;
-
+// Transição COOLDOWN -> DORMANT em si — sorteia o discovery_threshold
+// AQUI (§5.3, fallback simples), nunca antes: o valor secreto não pode
+// existir mais tempo do que precisa. Extraído de ativarSeElegivel pra
+// o Admin (adminWorldBossEventService.forcarDescoberta) poder reusar a
+// MESMA regra de sorteio ao pular o cooldown pra teste de
+// balanceamento, em vez de duplicar o cálculo do threshold.
+async function ativarEvento(evento, transaction) {
   const min = gameSettingCache.obter(
     "worldboss.discovery_threshold_min",
     GAME_SETTINGS_DEFAULT["worldboss.discovery_threshold_min"],
@@ -242,10 +237,26 @@ async function ativarSeElegivel(transaction) {
   return evento;
 }
 
+// Transição COOLDOWN -> DORMANT quando next_eligible_at já passou —
+// chamada periodicamente pelo scheduler (nunca pelo Admin, que usa
+// ativarEvento direto pra pular a espera).
+async function ativarSeElegivel(transaction) {
+  const evento = await WorldBossEvent.findOne({
+    where: { status: EVENT_STATUS.COOLDOWN },
+    transaction,
+    lock: transaction.LOCK.UPDATE,
+  });
+  if (!evento) return null;
+  if (evento.next_eligible_at && new Date(evento.next_eligible_at).getTime() > Date.now()) return null;
+
+  return ativarEvento(evento, transaction);
+}
+
 module.exports = {
   existeEventoAberto,
   selecionarConfig,
   agendarProximoCiclo,
+  ativarEvento,
   ativarSeElegivel,
   montarSnapshot,
   SNAPSHOT_SCHEMA_VERSION,

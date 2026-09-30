@@ -1103,7 +1103,7 @@ testeComBanco("admin catálogo: updateAdminWorldBossSettings rejeita discovery_t
   );
 });
 
-testeComBanco("admin evento atual: força DORMANT->DISCOVERED, depois DISCOVERED->ACTIVE, com motivo obrigatório", async () => {
+testeComBanco("admin evento atual: forçar pula DORMANT->DISCOVERED->ACTIVE de uma vez (teste de balanceamento), com motivo obrigatório", async () => {
   const { usuario } = await criarPersonagem();
   const { personagem } = await criarPersonagem();
   const evento = await criarEventoDormant({
@@ -1116,18 +1116,37 @@ testeComBanco("admin evento atual: força DORMANT->DISCOVERED, depois DISCOVERED
     /motivo é obrigatório/,
   );
 
-  const descoberto = await adminWorldBossEventService.forcarDescoberta({
+  const forcado = await adminWorldBossEventService.forcarDescoberta({
     characterId: personagem.id,
     motivo: "demonstração",
     idAdmin: usuario.id,
   });
-  assert.equal(descoberto.status, EVENT_STATUS.DISCOVERED);
-  assert.equal(descoberto.discoverer_character_id, personagem.id);
+  assert.equal(forcado.id, evento.id);
+  assert.equal(forcado.status, EVENT_STATUS.ACTIVE);
+  assert.equal(forcado.discoverer_character_id, personagem.id);
+  assert.ok(forcado.activated_at);
 
-  const despertado = await adminWorldBossEventService.despertarManualmente({ motivo: "demonstração", idAdmin: usuario.id });
-  assert.equal(despertado.id, evento.id);
-  assert.equal(despertado.status, EVENT_STATUS.ACTIVE);
-  assert.ok(despertado.activated_at);
+  // Já está ACTIVE — forçar de novo por cima é rejeitado (precisa
+  // cancelar o ciclo atual antes de forçar um novo).
+  await assert.rejects(
+    () => adminWorldBossEventService.forcarDescoberta({ motivo: "de novo", idAdmin: usuario.id }),
+    /Já existe uma Ameaça Mundial em ACTIVE/,
+  );
+});
+
+testeComBanco("admin evento atual: forçar cria o ciclo do zero (COOLDOWN) quando não existe nenhum evento ainda", async () => {
+  const { usuario } = await criarPersonagem();
+  await criarConfig();
+
+  const forcado = await adminWorldBossEventService.forcarDescoberta({ motivo: "teste de balanceamento sem ciclo prévio", idAdmin: usuario.id });
+  // forcarDescoberta cria a linha por dentro de worldBossLifecycleService
+  // .agendarProximoCiclo, nunca pelos helpers criarEventoDormant/
+  // criarEventoAtivo deste arquivo — sem registrar aqui, a linha
+  // escapa do afterEach e viola o índice único "só um evento aberto
+  // por vez" em TODOS os testes seguintes deste arquivo.
+  eventosCriados.push(forcado.id);
+  assert.equal(forcado.status, EVENT_STATUS.ACTIVE);
+  assert.equal(forcado.discoverer_character_id, null);
 });
 
 testeComBanco("admin evento atual: cancelarCicloAtual cancela o evento aberto e getStatusOperacional reflete", async () => {
