@@ -43,6 +43,43 @@ function multiplicadorDeClasse(atacante) {
   return atacante.multiplicador_dano_fisico ?? 1;
 }
 
+// Precisão (Velocidade do atacante) — dá um uso de combate de verdade
+// pra Velocidade, que antes só decidia quem começa o turno no PvP
+// (pvpController/pvpLiveSocket) e não influenciava dano/acerto em
+// nenhum outro modo (Aventura, Boss Mundial, Boss da Guilda). Duas
+// coisas de uma vez, as duas fazendo Velocidade "contrapor" Agilidade:
+//   1) reduz a chance de ESQUIVA do alvo (ver probabilidadeDeEsquiva,
+//      abaixo) — hoje só a Agilidade do atacante fazia isso;
+//   2) abre chance de CRÍTICO no mesmo golpe (ataque básico ou poder),
+//      multiplicando o dano rolado — mecânica que não existia.
+// Pesos menores que o de Agilidade (0.01/ponto na esquiva) DE
+// PROPÓSITO: Velocidade já vale iniciativa no PvP; se pesasse o mesmo
+// aqui, um build de Velocidade pura ficaria acima de Agilidade/Força
+// pra combate ofensivo, o que não é a intenção (dar uso, não trocar
+// qual atributo é o "certo" pra investir).
+const FATOR_PRECISAO_POR_VELOCIDADE = 0.5; // pontos de Agilidade equivalentes, por ponto de Velocidade do atacante
+const CHANCE_CRITICO_BASE = 0.05;
+const FATOR_CHANCE_CRITICO_POR_VELOCIDADE = 0.004; // +0,4pp de chance de crítico por ponto de Velocidade
+const CHANCE_CRITICO_MAXIMA = 0.4;
+const MULTIPLICADOR_DANO_CRITICO = 1.5;
+
+function precisaoDe(atacante) {
+  return (atacante.velocidade || 0) * FATOR_PRECISAO_POR_VELOCIDADE;
+}
+
+// Só a PROBABILIDADE (sem rolar dado) — mesmo motivo de
+// probabilidadeDeEsquiva existir separada de chanceDeEsquiva: o Editor
+// de Balanceamento (Admin Aventura/Boss) precisa mostrar "chance de
+// crítico estimada" sem depender de RNG.
+function probabilidadeDeCritico(atacante) {
+  const chance = CHANCE_CRITICO_BASE + (atacante.velocidade || 0) * FATOR_CHANCE_CRITICO_POR_VELOCIDADE;
+  return Math.min(chance, CHANCE_CRITICO_MAXIMA);
+}
+
+function rolarCritico(atacante) {
+  return Math.random() < probabilidadeDeCritico(atacante);
+}
+
 // Dano esperado (sem aleatoriedade) — usado só pra calibrar a vida/dano
 // do inimigo em combatController.gerarInimigo, nunca pra dano real de
 // combate (isso é calcularDanoBasico, abaixo).
@@ -77,17 +114,22 @@ function calcularDanoBasico(atacante) {
   // cima do resultado já rolado.
   const multiplicador = multiplicadorDeClasse(atacante);
   const bonusNivel = bonusPorNivel(atacante, DANO_FISICO_BASE_POR_NIVEL);
+  // Crítico (Velocidade, ver comentário acima de precisaoDe) — mais uma
+  // rolagem de variação por cima das outras, exatamente como a
+  // variação de arma/base já é: quem chama só vê o dano final, nunca
+  // sabe se foi crítico ou não (nenhum call site depende disso hoje).
+  const multiplicadorCritico = rolarCritico(atacante) ? MULTIPLICADOR_DANO_CRITICO : 1;
 
   if (atacante.arma_equipada) {
     const { dano_min, dano_max } = atacante.arma_equipada;
     const rolagemArma = dano_min + Math.random() * Math.max(0, dano_max - dano_min);
     const bonusForca = (atacante.forca || 0) * 0.5;
-    return Math.max(1, Math.round((rolagemArma + bonusForca + bonusNivel) * multiplicador));
+    return Math.max(1, Math.round((rolagemArma + bonusForca + bonusNivel) * multiplicador * multiplicadorCritico));
   }
 
   const base = 4 + atacante.forca * 0.9 + bonusNivel;
   const variacao = 0.85 + Math.random() * 0.3;
-  return Math.max(1, Math.round(base * variacao * multiplicador));
+  return Math.max(1, Math.round(base * variacao * multiplicador * multiplicadorCritico));
 }
 
 // Classes V2 §4 — o multiplicador de classe aplicado ao DANO de um poder
@@ -125,13 +167,19 @@ function calcularEfeitoPoder(power, personagem, nivelHabilidade = 1) {
   const bonusNivel = bonusPorNivel(personagem, DANO_MAGICO_BASE_POR_NIVEL);
   const multiplicadorNivelHabilidade = multiplicadorEfeitoPorNivelHabilidade(nivelHabilidade);
   const multiplicadorClassePorPoder = multiplicadorDeClassePorTipoDano(power, personagem);
+  // Crítico só no DANO — nunca na cura (ver precisaoDe): um poder de
+  // cura crítico dependeria de sorte pra curar mais, e isso não é a
+  // intenção do pedido ("crítico nos ataques/habilidades" é sobre
+  // dano, não sobre amplificar cura por acaso).
+  const multiplicadorCritico = power.dano_base && rolarCritico(personagem) ? MULTIPLICADOR_DANO_CRITICO : 1;
 
   const dano = power.dano_base
     ? Math.round(
         (power.dano_base + valorAtributo * power.valor_escala + bonusNivel) *
           variacao *
           multiplicadorClassePorPoder *
-          multiplicadorNivelHabilidade,
+          multiplicadorNivelHabilidade *
+          multiplicadorCritico,
       )
     : 0;
 
@@ -214,7 +262,7 @@ function aplicarMitigacaoDeDefesa(dano, defensor) {
 // Mesma fórmula, mesmo piso/teto reais (5%/35%) — nunca duplicar isso
 // em outro lugar (frontend inclusive).
 function probabilidadeDeEsquiva(defensor, atacante) {
-  const diferenca = (defensor.agilidade || 0) - (atacante.agilidade || 0);
+  const diferenca = (defensor.agilidade || 0) - (atacante.agilidade || 0) - precisaoDe(atacante);
   const chanceBase = 0.05;
   const chance = chanceBase + Math.max(0, diferenca) * 0.01;
   return Math.min(chance, 0.35);
@@ -291,6 +339,10 @@ module.exports = {
   aplicarMitigacaoDeDefesa,
   chanceDeEsquiva,
   probabilidadeDeEsquiva,
+  precisaoDe,
+  probabilidadeDeCritico,
+  rolarCritico,
+  MULTIPLICADOR_DANO_CRITICO,
   resolverResultadoDeAcerto,
   vidaMaximaDe,
   manaMaximaDe,
