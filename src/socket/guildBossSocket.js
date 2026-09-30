@@ -37,12 +37,16 @@
 const { sequelize } = require("../config/database");
 const Character = require("../models/Character");
 const Class = require("../models/Class");
+const Power = require("../models/Power");
 const GuildMember = require("../models/GuildMember");
 const GuildBossAttempt = require("../models/GuildBossAttempt");
 const GuildBossConfig = require("../models/GuildBossConfig");
+const GuildBossAbility = require("../models/GuildBossAbility");
 const GuildLog = require("../models/GuildLog");
 const { aplicarAcao } = require("../services/duelEngine");
 const { custoManaEfetivo } = require("../services/combatFormulas");
+const cooldownService = require("../services/cooldownService");
+const { habilidadesElegiveis, escolherHabilidade } = require("../services/bossAbilityAiService");
 const { atacarBossAoVivo, expirarSeNecessario, tempoRestanteCooldown } = require("../services/guildBossService");
 // Lido via guildConfig.<chave> (nunca desestruturado) de propósito — são
 // primitivos que o Painel Administrativo pode sobrescrever em tempo real
@@ -205,6 +209,39 @@ module.exports = function registerGuildBossHandlers(io) {
         const chefe = await GuildBossConfig.findByPk(tentativa.id_guild_boss_config);
         if (!chefe) return socket.emit("guildboss:erro", { mensagem: "Configuração do Boss não encontrada." });
 
+        // Igual ao World Boss (montarSnapshotHabilidades) — congela os
+        // valores efetivos do Power NO INÍCIO da luta, nunca só id_power
+        // (editar o Power no meio da luta não pode mudar o que já está
+        // rolando). Sem fases/mana/escala_com_furia — Boss da Guilda não
+        // tem esses conceitos.
+        const habilidadesRaw = await GuildBossAbility.findAll({
+          where: { id_guild_boss_config: chefe.id, ativo: true },
+          include: [{ model: Power }],
+          order: [["prioridade", "DESC"]],
+        });
+        const habilidadesChefe = habilidadesRaw
+          .filter((h) => h.Power)
+          .map((h) => ({
+            id_ability: h.id,
+            power_snapshot: {
+              id: h.Power.id,
+              nome: h.Power.nome,
+              imagem_url: h.Power.imagem_url,
+              dano_base: h.Power.dano_base,
+              cura_base: h.Power.cura_base,
+              custo_mana: h.Power.custo_mana,
+              cooldown: h.Power.cooldown,
+              escala_atributo: h.Power.escala_atributo,
+              valor_escala: h.Power.valor_escala,
+              tipo_dano: h.Power.tipo_dano,
+            },
+            peso_uso: h.peso_uso,
+            prioridade: h.prioridade,
+            tipo_alvo: h.tipo_alvo,
+            tempo_conjuracao_ms: h.tempo_conjuracao_ms,
+            cooldown_override: h.cooldown_rodadas_override,
+          }));
+
         // Proezas Únicas §11 — Guild Boss é PERMITIDO pra Legado (a
         // menos que o UniquePowerEffect específico diga o contrário via
         // allow_guild_boss), então passa o contexto certo em vez de
@@ -227,12 +264,18 @@ module.exports = function registerGuildBossHandlers(io) {
           vidaTotal: Number(tentativa.vida_total),
           vidaRestante: Number(tentativa.vida_restante),
           ordem: lobby.ordem.slice(),
-          membros: new Map(membros.map((m) => [chaveOnline(m.id), m])),
+          // cooldowns por membro (turnos, cooldownService — mesmo motor
+          // genérico já usado em PvE/World Boss) some junto com a
+          // batalha (§ nunca persistido, mesmo critério de
+          // cooldownService.js: "acaba a luta, os cooldowns somem").
+          membros: new Map(membros.map((m) => [chaveOnline(m.id), { ...m, cooldowns: {} }])),
           turnoIndex: 0,
           fase: "aliados", // "aliados" (percorrendo a ordem) | "chefe"
           rodada: 1,
           timer: null,
           processandoAcao: false,
+          habilidadesChefe,
+          cooldownsChefe: {},
         };
         batalhas.set(battleId, batalha);
         for (const id of lobby.ordem) {
@@ -305,6 +348,14 @@ module.exports = function registerGuildBossHandlers(io) {
         if (power.tipo_poder !== "Ativo") {
           return socket.emit("guildboss:erro", { mensagem: "Este poder não pode ser usado manualmente em combate." });
         }
+        // Cooldown real de Powers (mesmo motor genérico de PvE/World
+        // Boss, cooldownService.js) — antes disso, o jogador podia
+        // recastar o mesmo Power a cada turno seu, sem limite nenhum.
+        if (!cooldownService.podeUsar(atacante.cooldowns, power.id)) {
+          return socket.emit("guildboss:erro", {
+            mensagem: `Esta habilidade ainda está em cooldown (${cooldownService.turnosRestantes(atacante.cooldowns, power.id)} turno(s)).`,
+          });
+        }
         if (custoManaEfetivo(power, power.nivel_habilidade ?? 1) > atacante.estado.mana_atual) {
           return socket.emit("guildboss:erro", { mensagem: "Mana insuficiente para esse poder." });
         }
@@ -356,6 +407,16 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
 
   try {
     const atacante = batalha.membros.get(characterId);
+
+    // Cooldown do Power usado ENTRA já neste turno (mesma semântica de
+    // cooldownService.js/combatController.js — "não decrementa no
+    // próprio turno em que foi aplicado"); o decremento de todos os
+    // outros cooldowns ativos deste ator só acontece no fim do turno,
+    // logo abaixo.
+    if (acao.tipo === "power") {
+      atacante.cooldowns = cooldownService.iniciarCooldown(atacante.cooldowns, acao.power.id, acao.power.cooldown);
+    }
+
     const chefeEstado = { defesa: batalha.defesaChefe, agilidade: 0, vida_atual: batalha.vidaRestante };
     const { nomeAcao, dano, cura, manaCurada, esquivou } = aplicarAcao({
       atacante: atacante.estado,
@@ -364,6 +425,9 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
       vidaMaxAtacante: atacante.vidaMax,
       manaMaxAtacante: atacante.manaMax,
     });
+
+    const chaveAplicadaAgora = acao.tipo === "power" ? new Set([cooldownService.chaveDoPoder(acao.power.id)]) : new Set();
+    atacante.cooldowns = cooldownService.decrementarCooldowns(atacante.cooldowns, chaveAplicadaAgora);
 
     let vidaRestanteAtual = batalha.vidaRestante;
     let derrotado = false;
@@ -391,6 +455,7 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
       vidaChefe: batalha.vidaRestante,
       vidaAliado: atacante.estado.vida_atual,
       manaAliado: atacante.estado.mana_atual,
+      cooldownsAtacante: cooldownsPublicos(atacante.cooldowns),
       rodada: batalha.rodada,
     });
 
@@ -485,38 +550,119 @@ function forcaChefeParaRodada(batalha) {
   return Math.max(1, Math.round((danoAlvo - 4) / 0.9));
 }
 
+// MENOR_VIDA foca quem tem menos HP atual; qualquer outro tipo_alvo (ou
+// nenhuma habilidade escolhida — ataque básico) cai no aleatório de
+// sempre. TODOS é tratado direto em executarTurnoChefe (atinge a lista
+// inteira de vivos, não um "alvo único").
+function escolherAlvoUnico(vivos, tipoAlvo) {
+  if (tipoAlvo === "MENOR_VIDA") {
+    return vivos.reduce((menor, m) => (m.estado.vida_atual < menor.estado.vida_atual ? m : menor), vivos[0]);
+  }
+  return vivos[Math.floor(Math.random() * vivos.length)];
+}
+
+function cooldownsPublicos(cooldowns) {
+  const saida = {};
+  for (const [chave, restante] of Object.entries(cooldowns || {})) {
+    if (restante > 0) saida[Number(chave.replace("power:", ""))] = restante;
+  }
+  return saida;
+}
+
+// Decide SE o chefe usa uma habilidade (mesma IA de cooldown/prioridade/
+// peso do World Boss, via bossAbilityAiService — nunca uma segunda
+// cópia dessa regra) e, se ela tiver telegraph (tempo_conjuracao_ms),
+// avisa a sala e só resolve depois — igual ao "cast_pendente" do World
+// Boss. `batalha.fase` vira "chefe" AQUI e só volta pra "aliados" no
+// fim de resolverAcaoDoChefe: entre a decisão e a resolução (inclusive
+// durante o telegraph) nenhuma ação de jogador é aceita (ver guildboss:
+// acao, que checa fase === "aliados").
 function executarTurnoChefe(io, battleId) {
   const batalha = batalhas.get(battleId);
   if (!batalha) return;
+  batalha.fase = "chefe";
 
-  const vivos = batalha.ordem
-    .map((id) => batalha.membros.get(id))
-    .filter((m) => m && m.estado.vida_atual > 0);
-
+  const vivos = batalha.ordem.map((id) => batalha.membros.get(id)).filter((m) => m && m.estado.vida_atual > 0);
   if (vivos.length === 0) {
     return finalizarBatalha(io, battleId, false, null, "grupo_derrotado");
   }
 
-  const alvo = vivos[Math.floor(Math.random() * vivos.length)];
-  const chefeAtacante = { forca: forcaChefeParaRodada(batalha), nivel: 1, agilidade: 0 };
-  const { nomeAcao, dano, esquivou } = aplicarAcao({
-    atacante: chefeAtacante,
-    defensor: alvo.estado,
-    acao: { tipo: "attack" },
-    vidaMaxAtacante: undefined,
+  const elegiveis = habilidadesElegiveis(batalha.habilidadesChefe, {
+    faseId: null,
+    manaAtual: Infinity,
+    cooldowns: batalha.cooldownsChefe,
+    sequenciaDaAcao: batalha.rodada,
   });
+  const abilityEscolhida = escolherHabilidade(elegiveis);
 
-  io.to(batalha.sala).emit("guildboss:turno-resultado", {
-    battleId,
-    origem: "chefe",
-    idAlvo: alvo.id,
-    nomeAcao,
-    dano,
-    esquivou,
-    vidaAliado: alvo.estado.vida_atual,
-    vidaChefe: batalha.vidaRestante,
-    rodada: batalha.rodada,
-  });
+  if (abilityEscolhida && abilityEscolhida.tempo_conjuracao_ms > 0) {
+    io.to(batalha.sala).emit("guildboss:cast-start", {
+      battleId,
+      nomePoder: abilityEscolhida.power_snapshot.nome,
+      imagemUrl: abilityEscolhida.power_snapshot.imagem_url,
+      tempoConjuracaoMs: abilityEscolhida.tempo_conjuracao_ms,
+      rodada: batalha.rodada,
+    });
+    clearTimeout(batalha.timer);
+    batalha.timer = setTimeout(() => resolverAcaoDoChefe(io, battleId, abilityEscolhida), abilityEscolhida.tempo_conjuracao_ms);
+    return;
+  }
+
+  resolverAcaoDoChefe(io, battleId, abilityEscolhida);
+}
+
+function resolverAcaoDoChefe(io, battleId, abilityEscolhida) {
+  const batalha = batalhas.get(battleId);
+  if (!batalha) return;
+
+  const vivos = batalha.ordem.map((id) => batalha.membros.get(id)).filter((m) => m && m.estado.vida_atual > 0);
+  if (vivos.length === 0) {
+    return finalizarBatalha(io, battleId, false, null, "grupo_derrotado");
+  }
+
+  // GuildBossConfig não tem atributos próprios (Inteligencia/
+  // Vitalidade/etc, só defesa/dano_base_ataque) — mesmo objeto sintético
+  // que o ataque básico já usava. Habilidades do chefe escalando por um
+  // atributo diferente de Força só recebem o dano_base do Power (sem
+  // bônus de atributo, sem multiplicador de classe) — combatFormulas já
+  // trata isso com `?? 1`/`|| 0`, nunca quebra; escolher escala_atributo
+  // "Nenhum" ou "Forca" no admin é o esperado pra habilidade de chefe.
+  const chefeAtacante = { forca: forcaChefeParaRodada(batalha), nivel: 1, agilidade: 0 };
+  // Habilidade do chefe reaproveita a MESMA resolução de Power que o
+  // jogador já usa (aplicarAcao com acao.tipo "power") — nunca uma
+  // fórmula de dano própria pro boss usar habilidade.
+  const acao = abilityEscolhida ? { tipo: "power", power: abilityEscolhida.power_snapshot } : { tipo: "attack" };
+  const alvos = abilityEscolhida?.tipo_alvo === "TODOS" ? vivos : [escolherAlvoUnico(vivos, abilityEscolhida?.tipo_alvo)];
+
+  for (const alvo of alvos) {
+    const { nomeAcao, dano, esquivou } = aplicarAcao({
+      atacante: chefeAtacante,
+      defensor: alvo.estado,
+      acao,
+      vidaMaxAtacante: undefined,
+    });
+    io.to(batalha.sala).emit("guildboss:turno-resultado", {
+      battleId,
+      origem: "chefe",
+      idAlvo: alvo.id,
+      nomeAcao,
+      dano,
+      esquivou,
+      vidaAliado: alvo.estado.vida_atual,
+      vidaChefe: batalha.vidaRestante,
+      rodada: batalha.rodada,
+    });
+  }
+
+  if (abilityEscolhida) {
+    const cooldownEmRodadas = abilityEscolhida.cooldown_override ?? abilityEscolhida.power_snapshot?.cooldown ?? 0;
+    if (cooldownEmRodadas > 0) {
+      batalha.cooldownsChefe = {
+        ...batalha.cooldownsChefe,
+        [String(abilityEscolhida.id_ability)]: batalha.rodada + cooldownEmRodadas + 1,
+      };
+    }
+  }
 
   const alguemVivo = batalha.ordem.some((id) => batalha.membros.get(id)?.estado.vida_atual > 0);
   if (!alguemVivo) {

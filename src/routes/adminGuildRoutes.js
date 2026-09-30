@@ -19,4 +19,9 @@ router.get("/bosses", adminGuildController.listarBosses);
 router.post("/bosses", adminGuildController.criarBoss);
 router.patch("/bosses/:id", adminGuildController.atualizarBoss);
 
+router.get("/bosses/:id/abilities", adminGuildController.listarHabilidadesBoss);
+router.post("/bosses/:id/abilities", adminGuildController.criarHabilidadeBoss);
+router.patch("/bosses/abilities/:idHabilidade", adminGuildController.atualizarHabilidadeBoss);
+router.delete("/bosses/abilities/:idHabilidade", adminGuildController.excluirHabilidadeBoss);
+
 module.exports = router;
