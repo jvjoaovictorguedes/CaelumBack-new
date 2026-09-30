@@ -31,4 +31,15 @@ router.post("/refine", authMiddleware, carregarPersonagemAtual, forgeController.
 router.get("/forge-queue", authMiddleware, carregarPersonagemAtual, forgeController.getForgeQueue);
 router.post("/forge-collect", authMiddleware, carregarPersonagemAtual, forgeController.postForgeCollect);
 
+// Profissão de Ferreiro §12 — Livro de Receitas e Habilidades de
+// Ferreiro. "/recipe-book" porque "/recipes" já é da Forja v2 legada
+// acima.
+router.get("/recipe-book", authMiddleware, carregarPersonagemAtual, forgeController.getRecipeBook);
+router.post("/recipe-book/:itemId/learn", authMiddleware, carregarPersonagemAtual, forgeController.postLearnRecipe);
+router.get("/blacksmith/stats", authMiddleware, carregarPersonagemAtual, forgeController.getBlacksmithStats);
+router.get("/chance-preview", authMiddleware, carregarPersonagemAtual, forgeController.getChancePreview);
+router.get("/tools", authMiddleware, carregarPersonagemAtual, forgeController.getTools);
+router.post("/tools/:instanceId/equip", authMiddleware, carregarPersonagemAtual, forgeController.postEquipTool);
+router.post("/tools/:slot/unequip", authMiddleware, carregarPersonagemAtual, forgeController.postUnequipTool);
+
 module.exports = router;

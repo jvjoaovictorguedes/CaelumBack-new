@@ -35,6 +35,7 @@ const DEFAULTS_ORIGINAIS = {
     ),
     XP_FABRICACAO_POR_QUALIDADE_EQUIPAMENTO: { ...forgeConfig.XP_FABRICACAO_POR_QUALIDADE_EQUIPAMENTO },
     TEMPO_BASE_FABRICACAO_MS_POR_QUALIDADE: { ...forgeConfig.TEMPO_BASE_FABRICACAO_MS_POR_QUALIDADE },
+    NIVEL_FORJA_ESPERADO_POR_QUALIDADE: { ...forgeConfig.NIVEL_FORJA_ESPERADO_POR_QUALIDADE },
   },
   "forge.refinement": {
     CHANCE_BASE_REFINAMENTO_PPM_POR_ALVO: { ...forgeConfig.CHANCE_BASE_REFINAMENTO_PPM_POR_ALVO },
@@ -47,7 +48,7 @@ const DEFAULTS_ORIGINAIS = {
     OURO_BASE_REFINAMENTO_POR_QUALIDADE: { ...forgeConfig.OURO_BASE_REFINAMENTO_POR_QUALIDADE },
     XP_REFINAMENTO_POR_ALVO: { ...forgeConfig.XP_REFINAMENTO_POR_ALVO },
     CAP_CHANCE_REFINAMENTO_PPM: forgeConfig.CAP_CHANCE_REFINAMENTO_PPM,
-    FATOR_XP_REFINAMENTO_FALHA: forgeConfig.FATOR_XP_REFINAMENTO_FALHA,
+    NIVEL_FORJA_ESPERADO_POR_ALVO_REFINAMENTO: { ...forgeConfig.NIVEL_FORJA_ESPERADO_POR_ALVO_REFINAMENTO },
   },
   "forge.progression": {
     XP_NECESSARIO_POR_ETAPA: { ...forgeConfig.XP_NECESSARIO_POR_ETAPA },
@@ -77,6 +78,7 @@ function getSnapshotAtual(grupo) {
         ),
         XP_FABRICACAO_POR_QUALIDADE_EQUIPAMENTO: { ...forgeConfig.XP_FABRICACAO_POR_QUALIDADE_EQUIPAMENTO },
         TEMPO_BASE_FABRICACAO_MS_POR_QUALIDADE: { ...forgeConfig.TEMPO_BASE_FABRICACAO_MS_POR_QUALIDADE },
+        NIVEL_FORJA_ESPERADO_POR_QUALIDADE: { ...forgeConfig.NIVEL_FORJA_ESPERADO_POR_QUALIDADE },
       };
     case "forge.refinement":
       return {
@@ -90,7 +92,7 @@ function getSnapshotAtual(grupo) {
         OURO_BASE_REFINAMENTO_POR_QUALIDADE: { ...forgeConfig.OURO_BASE_REFINAMENTO_POR_QUALIDADE },
         XP_REFINAMENTO_POR_ALVO: { ...forgeConfig.XP_REFINAMENTO_POR_ALVO },
         CAP_CHANCE_REFINAMENTO_PPM: forgeConfig.CAP_CHANCE_REFINAMENTO_PPM,
-        FATOR_XP_REFINAMENTO_FALHA: forgeConfig.FATOR_XP_REFINAMENTO_FALHA,
+        NIVEL_FORJA_ESPERADO_POR_ALVO_REFINAMENTO: { ...forgeConfig.NIVEL_FORJA_ESPERADO_POR_ALVO_REFINAMENTO },
       };
     case "forge.progression":
       return {
@@ -182,6 +184,13 @@ function validarGrupo(grupo, valores) {
     }
     if (valores.XP_FABRICACAO_POR_QUALIDADE_EQUIPAMENTO) validarTabelaInteiraNaoNegativa("XP_FABRICACAO_POR_QUALIDADE_EQUIPAMENTO", valores.XP_FABRICACAO_POR_QUALIDADE_EQUIPAMENTO);
     if (valores.TEMPO_BASE_FABRICACAO_MS_POR_QUALIDADE) validarTabelaInteiraNaoNegativa("TEMPO_BASE_FABRICACAO_MS_POR_QUALIDADE", valores.TEMPO_BASE_FABRICACAO_MS_POR_QUALIDADE);
+    if (valores.NIVEL_FORJA_ESPERADO_POR_QUALIDADE) {
+      for (const [qualidade, nivel] of Object.entries(valores.NIVEL_FORJA_ESPERADO_POR_QUALIDADE)) {
+        if (!Number.isInteger(nivel) || nivel < 1 || nivel > forgeConfig.NIVEL_MAXIMO) {
+          throw erro(`NIVEL_FORJA_ESPERADO_POR_QUALIDADE[${qualidade}] precisa ser um inteiro entre 1 e ${forgeConfig.NIVEL_MAXIMO}.`);
+        }
+      }
+    }
     return;
   }
 
@@ -217,9 +226,12 @@ function validarGrupo(grupo, valores) {
       const cap = valores.CAP_CHANCE_REFINAMENTO_PPM;
       if (!Number.isInteger(cap) || cap < 0 || cap > 1_000_000) throw erro("CAP_CHANCE_REFINAMENTO_PPM precisa estar entre 0 e 1.000.000 PPM.");
     }
-    if (valores.FATOR_XP_REFINAMENTO_FALHA !== undefined) {
-      const fator = valores.FATOR_XP_REFINAMENTO_FALHA;
-      if (typeof fator !== "number" || fator < 0 || fator > 1) throw erro("FATOR_XP_REFINAMENTO_FALHA precisa estar entre 0 e 1 (fração, ex.: 0.25 = 25%).");
+    if (valores.NIVEL_FORJA_ESPERADO_POR_ALVO_REFINAMENTO) {
+      for (const [alvo, nivel] of Object.entries(valores.NIVEL_FORJA_ESPERADO_POR_ALVO_REFINAMENTO)) {
+        if (!Number.isInteger(nivel) || nivel < 1 || nivel > forgeConfig.NIVEL_MAXIMO) {
+          throw erro(`NIVEL_FORJA_ESPERADO_POR_ALVO_REFINAMENTO[${alvo}] precisa ser um inteiro entre 1 e ${forgeConfig.NIVEL_MAXIMO}.`);
+        }
+      }
     }
     return;
   }

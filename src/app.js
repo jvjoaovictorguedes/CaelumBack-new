@@ -55,6 +55,7 @@ const shopRoutes = require("./routes/shopRoutes");
 const craftingRoutes = require("./routes/craftingRoutes");
 const expeditionRoutes = require("./routes/expeditionRoutes");
 const patchNotesRoutes = require("./routes/patchNotesRoutes");
+const wikiRoutes = require("./routes/wikiRoutes");
 const characterUseItemRoutes = require("./routes/characterItemRoutes");
 const attributeRoutes = require("./routes/attributeRoutes");
 const characterEquipmentRoutes = require("./routes/CharacterEquipmentRoutes");
@@ -105,6 +106,8 @@ const worldBossRoutes = require("./routes/worldBossRoutes");
 const adminGuildJournalRoutes = require("./routes/adminGuildJournalRoutes");
 const guildJournalRoutes = require("./routes/guildJournalRoutes");
 const adminFishingRoutes = require("./routes/adminFishingRoutes");
+const adminGuildRoutes = require("./routes/adminGuildRoutes");
+const adminWikiRoutes = require("./routes/adminWikiRoutes");
 const adminAlchemyRoutes = require("./routes/adminAlchemyRoutes");
 const adminClassRoutes = require("./routes/adminClassRoutes");
 const adminPlayerRoutes = require("./routes/adminPlayerRoutes");
@@ -137,6 +140,7 @@ connectDB()
       .catch((error) => console.error("[forgeSettingsService] falha ao aplicar overrides persistidos no boot:", error)),
   )
   .then(() => require("./services/expeditionSettingsService").iniciarSincronizacaoPeriodica())
+  .then(() => require("./services/guildSettingsService").iniciarSincronizacaoPeriodica())
   .catch((error) => {
     console.error(
       "Erro fatal e inesperado ao conectar ao banco de dados:",
@@ -239,6 +243,7 @@ app.use("/api/tavern", tavernRoutes);
 app.use("/api/world-boss", worldBossRoutes);
 app.use("/api/expeditions", expeditionRoutes);
 app.use("/api/patch-notes", patchNotesRoutes);
+app.use("/api/wiki", wikiRoutes);
 app.use("/api/guild-journal", guildJournalRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/races", raceRoutes);
@@ -305,6 +310,8 @@ app.use("/api/admin/expedition", adminExpeditionRoutes);
 app.use("/api/admin/world-boss", adminWorldBossRoutes);
 app.use("/api/admin/guild-journal", adminGuildJournalRoutes);
 app.use("/api/admin/fishing", adminFishingRoutes);
+app.use("/api/admin/guild", adminGuildRoutes);
+app.use("/api/admin/wiki", adminWikiRoutes);
 app.use("/api/admin/alchemy", adminAlchemyRoutes);
 app.use("/api/admin/classes", adminClassRoutes);
 app.use("/api/admin/players", adminPlayerRoutes);

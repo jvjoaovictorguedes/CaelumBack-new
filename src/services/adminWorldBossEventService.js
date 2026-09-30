@@ -12,6 +12,7 @@ const Character = require("../models/Character");
 const { registrarAcao } = require("./adminAuditService");
 const worldBossStatusService = require("./worldBossStatusService");
 const worldBossRankingService = require("./worldBossRankingService");
+const worldBossLifecycleService = require("./worldBossLifecycleService");
 const { emitGlobal } = require("../socket/worldBossSocket");
 const { EVENT_STATUS, EVENT_STATUS_ABERTOS, COMBAT_SESSION_STATUS, GAME_SETTINGS_DEFAULT } = require("../config/worldBossConfig");
 const gameSettingCache = require("./gameSettingCache");
@@ -118,37 +119,66 @@ async function emitirStatusAtualizado() {
   emitGlobal("worldboss:status", status);
 }
 
-// Força a passagem DORMANT -> DISCOVERED sem esperar o threshold real
-// ser batido em combate — pra teste/demonstração/evento especial.
-// characterId é opcional: sem ele, a Ameaça aparece "descoberta" sem
-// um descobridor específico (discoverer_character_id null — nenhuma
-// recompensa de descoberta é concedida nesse caso, já que ela é
-// sempre por personagem).
+// Força a Ameaça Mundial a ficar ATIVA (lutável) AGORA, pulando tanto
+// o cooldown (next_eligible_at) quanto o threshold real de descoberta
+// em combate — botão único de teste de balanceamento (pedido do dono
+// do projeto: "esse botão vai forçar a criação dele mas só pra testar
+// o balanceamento"). Nunca duplica a máquina de estados: reaproveita
+// agendarProximoCiclo (cria em COOLDOWN se não existir NENHUM evento
+// ainda) e ativarEvento (COOLDOWN -> DORMANT, mesmo sorteio de
+// threshold do ciclo natural) antes de fazer o mesmo salto pra
+// DISCOVERED que já existia aqui, e então pra ACTIVE (mesma transição
+// de despertarManualmente). characterId é opcional: sem ele, a Ameaça
+// aparece "descoberta" sem um descobridor específico (nenhuma
+// recompensa de descoberta é concedida nesse caso, já que ela é sempre
+// por personagem).
 async function forcarDescoberta({ characterId, motivo, idAdmin, req }) {
   exigirMotivo(motivo);
   const evento = await sequelize.transaction(async (transaction) => {
-    const linha = await WorldBossEvent.findOne({
-      where: { status: EVENT_STATUS.DORMANT },
+    // DISCOVERED/ACTIVE já são "a Ameaça está rolando de verdade" —
+    // forçar de novo por cima não faz sentido (cancele o ciclo atual
+    // primeiro). COOLDOWN/DORMANT, por outro lado, são exatamente os
+    // dois estados que "forçar" existe pra pular.
+    let linha = await WorldBossEvent.findOne({
+      where: { status: [EVENT_STATUS.COOLDOWN, EVENT_STATUS.DORMANT, EVENT_STATUS.DISCOVERED, EVENT_STATUS.ACTIVE] },
+      order: [["id", "DESC"]],
       transaction,
       lock: transaction.LOCK.UPDATE,
     });
-    if (!linha) throw erro("Não há nenhuma Ameaça Mundial em DORMANT pra forçar a descoberta.");
+    if (linha && [EVENT_STATUS.DISCOVERED, EVENT_STATUS.ACTIVE].includes(linha.status)) {
+      throw erro(`Já existe uma Ameaça Mundial em ${linha.status} — cancele o ciclo atual antes de forçar uma nova.`);
+    }
+
+    if (!linha) {
+      linha = await worldBossLifecycleService.agendarProximoCiclo(transaction);
+      if (!linha) throw erro("Nenhuma configuração de Ameaça Mundial ativa — cadastre uma antes de forçar.");
+    }
 
     if (characterId) {
       const personagem = await Character.findByPk(characterId, { transaction });
       if (!personagem) throw erro("Personagem não encontrado.", 404);
     }
 
+    const antes = linha.toJSON();
+
+    await worldBossLifecycleService.ativarEvento(linha, transaction);
+
     const segundos = gameSettingCache.obter(
       "worldboss.discovery_auto_awaken_seconds",
       GAME_SETTINGS_DEFAULT["worldboss.discovery_auto_awaken_seconds"],
     );
-    const antes = linha.toJSON();
     const agora = new Date();
     linha.status = EVENT_STATUS.DISCOVERED;
     linha.discoverer_character_id = characterId ?? null;
     linha.discovered_at = agora;
     linha.auto_awaken_at = new Date(agora.getTime() + segundos * 1000);
+    await linha.save({ transaction });
+
+    // Teste de balanceamento precisa lutar com o boss de verdade — não
+    // faz sentido parar em DISCOVERED (ainda não spawnado) e obrigar
+    // uma segunda ação admin só pra chegar em ACTIVE.
+    linha.status = EVENT_STATUS.ACTIVE;
+    linha.activated_at = agora;
     await linha.save({ transaction });
 
     await registrarAcao({

@@ -13,6 +13,9 @@ const ArmorProperties = require("../models/ArmorProperties");
 const ItemRarityAttributeOverride = require("../models/ItemRarityAttributeOverride");
 const CharacterEquipmentInstance = require("../models/CharacterEquipmentInstance");
 const CharacterForgeProgress = require("../models/CharacterForgeProgress");
+const CharacterForgeRecipeUnlock = require("../models/CharacterForgeRecipeUnlock");
+const ForgeRecipe = require("../models/ForgeRecipe");
+const CharacterForgeStats = require("../models/CharacterForgeStats");
 const CharacterProfession = require("../models/CharacterProfession");
 const CharacterAdventureGuildProgress = require("../models/CharacterAdventureGuildProgress");
 const CharacterAdventureGuildContract = require("../models/CharacterAdventureGuildContract");
@@ -27,6 +30,11 @@ const CharacterMonsterKill = require("../models/CharacterMonsterKill");
 
 const { formatarEquipado } = require("./equipmentInstanceService");
 const { nivelPorXpTotal: nivelExpedicaoPorXp } = require("./expeditionProgressionService");
+const {
+  nivelPorXpTotal: nivelForjaPorXp,
+  xpParaProximoNivel: xpForjaParaProximoNivel,
+  tituloPorNivel: tituloFerreiroPorNivel,
+} = require("./forgeProgressionService");
 const bestiaryService = require("./bestiaryService");
 const achievementService = require("./achievementService");
 const combatPowerService = require("./combatPowerService");
@@ -130,15 +138,30 @@ async function montarEquipamentosPublicos(idPersonagem) {
 // CharacterAdventureGuildProgress.missoes_concluidas_no_rank, que zera
 // a cada promoção).
 async function montarProgressao(idPersonagem, character) {
-  const [forja, profissoes, progressoAventureiro, contratosConcluidos, progressoCacador] = await Promise.all([
-    CharacterForgeProgress.findOne({ where: { id_personagem: idPersonagem } }),
-    CharacterProfession.findAll({ where: { id_personagem: idPersonagem } }),
-    CharacterAdventureGuildProgress.findOne({ where: { id_personagem: idPersonagem } }),
-    CharacterAdventureGuildContract.count({
-      where: { id_personagem: idPersonagem, status: ["Concluido", "Resgatado"] },
-    }),
-    CharacterHunterProgress.findOne({ where: { id_personagem: idPersonagem } }),
-  ]);
+  const [forja, profissoes, progressoAventureiro, contratosConcluidos, progressoCacador, receitasConhecidas, statsForja] =
+    await Promise.all([
+      CharacterForgeProgress.findOne({ where: { id_personagem: idPersonagem } }),
+      CharacterProfession.findAll({ where: { id_personagem: idPersonagem } }),
+      CharacterAdventureGuildProgress.findOne({ where: { id_personagem: idPersonagem } }),
+      CharacterAdventureGuildContract.count({
+        where: { id_personagem: idPersonagem, status: ["Concluido", "Resgatado"] },
+      }),
+      CharacterHunterProgress.findOne({ where: { id_personagem: idPersonagem } }),
+      // Profissão de Ferreiro §8 — receitas conhecidas/lendárias no
+      // perfil público, sem expor o Livro de Receitas inteiro.
+      CharacterForgeRecipeUnlock.findAll({
+        where: { id_personagem: idPersonagem },
+        include: [
+          {
+            model: require("../models/ForgeBlueprint"),
+            as: "blueprint",
+            required: false,
+            include: [{ model: ForgeRecipe, as: "receita", required: false }],
+          },
+        ],
+      }),
+      CharacterForgeStats.findOne({ where: { id_personagem: idPersonagem } }),
+    ]);
 
   const profissaoPorTipo = {};
   for (const p of profissoes) {
@@ -170,7 +193,22 @@ async function montarProgressao(idPersonagem, character) {
       titulo: reputacaoCacador.title,
       cacadas_concluidas: progressoCacador?.hunts_completed_total ?? 0,
     },
-    forja: { nivel: forja?.nivel ?? 1 },
+    // Profissão de Ferreiro §8 — Nível de Ferreiro como 4º indicador,
+    // com título + XP/próximo-nível (frontend decide o quanto mostra em
+    // público vs. próprio) + resumo de Receitas conhecidas/lendárias.
+    forja: (() => {
+      const nivelForja = nivelForjaPorXp(forja?.experiencia ?? 0);
+      const lendarias = receitasConhecidas.filter((u) => u.blueprint?.receita?.raridade_receita === "Lendario").length;
+      return {
+        nivel: nivelForja,
+        titulo: tituloFerreiroPorNivel(nivelForja),
+        experiencia: forja?.experiencia ?? 0,
+        xp_proximo_nivel: xpForjaParaProximoNivel(nivelForja),
+        receitas_conhecidas: receitasConhecidas.length,
+        receitas_lendarias: lendarias,
+        equipamentos_fabricados: statsForja?.equipamentos_fabricados ?? 0,
+      };
+    })(),
     expedicao: {
       mineracao: profissaoPorTipo.Mineracao ?? 1,
       silvicultura: profissaoPorTipo.Silvicultura ?? 1,

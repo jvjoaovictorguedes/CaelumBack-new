@@ -9,6 +9,10 @@ const forgeService = require("../services/forgeService");
 const forgeSmeltingService = require("../services/forgeSmeltingService");
 const forgeCraftingService = require("../services/forgeCraftingService");
 const forgeRefinementService = require("../services/forgeRefinementService");
+const forgeRecipeService = require("../services/forgeRecipeService");
+const forgeStatsService = require("../services/forgeStatsService");
+const forgeToolService = require("../services/forgeToolService");
+const forgeChancePreviewService = require("../services/forgeChancePreviewService");
 
 function tratarErro(res, error, mensagemPadrao) {
   const statusCode = error.statusCode || 500;
@@ -174,5 +178,94 @@ exports.postForgeCollect = async (req, res) => {
     res.status(200).json({ status: "success", data: resultado });
   } catch (error) {
     tratarErro(res, error, "Erro interno do servidor ao coletar da Forja.");
+  }
+};
+
+// Profissão de Ferreiro §12 — "recipe-book" em vez de "/recipes" porque
+// esse path já é ocupado pela Forja v2 legada (craftingController.getReceitas,
+// mantida intacta em /api/crafting/recipes por compatibilidade — ver
+// craftingRoutes.js).
+
+// GET /api/crafting/recipe-book — Livro de Receitas (spec §7.2/§7.3/§12).
+exports.getRecipeBook = async (req, res) => {
+  try {
+    const livro = await forgeRecipeService.listarLivroReceitas(req.personagemAtual.id);
+    res.status(200).json({ status: "success", data: livro });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao buscar Livro de Receitas.");
+  }
+};
+
+// POST /api/crafting/recipe-book/:itemId/learn — aprender Receita física.
+exports.postLearnRecipe = async (req, res) => {
+  try {
+    const resultado = await forgeRecipeService.aprenderReceita(req.personagemAtual.id, Number(req.params.itemId));
+    res.status(200).json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao aprender Receita.");
+  }
+};
+
+// GET /api/crafting/tools — Ferraria (spec §12).
+exports.getTools = async (req, res) => {
+  try {
+    const ferramentas = await forgeToolService.listarFerramentas(req.personagemAtual.id);
+    res.status(200).json({ status: "success", data: { ferramentas } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao buscar ferramentas de Ferraria.");
+  }
+};
+
+// POST /api/crafting/tools/:instanceId/equip
+exports.postEquipTool = async (req, res) => {
+  try {
+    const resultado = await forgeToolService.equiparFerramenta(req.personagemAtual.id, Number(req.params.instanceId));
+    res.status(200).json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao equipar ferramenta.");
+  }
+};
+
+// POST /api/crafting/tools/:slot/unequip
+exports.postUnequipTool = async (req, res) => {
+  try {
+    await forgeToolService.desequiparFerramenta(req.personagemAtual.id, req.params.slot);
+    res.status(200).json({ status: "success" });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao desequipar ferramenta.");
+  }
+};
+
+// GET /api/crafting/chance-preview?area=Fundicao|Fabricacao&qualidade=X
+// (spec §12) — breakdown server-side de Fundição/Fabricação. Refinamento
+// já tem breakdown próprio em GET /crafting/refine/preview (precisa de
+// id_instancia).
+exports.getChancePreview = async (req, res) => {
+  try {
+    const { area, qualidade } = req.query;
+    if (area === "Fundicao") {
+      const resultado = await forgeChancePreviewService.previewFundicao(req.personagemAtual.id);
+      return res.status(200).json({ status: "success", data: resultado });
+    }
+    if (area === "Fabricacao") {
+      const resultado = await forgeChancePreviewService.previewFabricacao(req.personagemAtual.id, qualidade);
+      return res.status(200).json({ status: "success", data: resultado });
+    }
+    res.status(400).json({ message: "área inválida — use Fundicao ou Fabricacao (Refinamento usa /crafting/refine/preview)." });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao calcular prévia de chance.");
+  }
+};
+
+// GET /api/crafting/blacksmith/stats — Habilidades de Ferreiro (spec §7.1).
+exports.getBlacksmithStats = async (req, res) => {
+  try {
+    const [progresso, stats] = await Promise.all([
+      forgeService.listarProgresso(req.personagemAtual.id),
+      forgeStatsService.obterResumo(req.personagemAtual.id),
+    ]);
+    res.status(200).json({ status: "success", data: { progresso, stats } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao buscar estatísticas de Ferreiro.");
   }
 };

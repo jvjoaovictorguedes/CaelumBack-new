@@ -9,11 +9,21 @@ const WeaponProperties = require("../models/WeaponProperties");
 const ArmorProperties = require("../models/ArmorProperties");
 const ConsumableProperties = require("../models/ConsumableProperties");
 const FishingRodProperties = require("../models/FishingRodProperties");
+const ForgeToolProperties = require("../models/ForgeToolProperties");
+const ForgeToolEffect = require("../models/ForgeToolEffect");
 const { registrarAcao } = require("./adminAuditService");
+const { validarFerramentaPayload } = require("./adminForgeService");
 
 const TIPOS_ARMA = ["Arma"];
 const TIPOS_ARMADURA = ["Armadura", "Capacete", "Escudo", "Acessorio1", "Acessorio2"];
 const TIPOS_CONSUMIVEL = ["Consumivel"];
+// tipo_item "Ferramenta" é compartilhado por dois SUBTIPOS mutuamente
+// exclusivos — Vara de Pesca (FishingRodProperties) e Ferramenta de
+// Ferraria (ForgeToolProperties) — mesma distinção que
+// criarFerramentaAdmin já impõe (um Item nunca pode ser as duas
+// coisas). O admin escolhe qual delas preencher (payload.fishingRod OU
+// payload.forgeTool, nunca as duas) já na criação do Item, em vez de
+// ficar preso ao fluxo antigo que só permitia vara de pesca.
 const TIPOS_FERRAMENTA = ["Ferramenta"];
 // EQUIPAMENTOS TIER — Melhoria: mesma regra que já valia pra Blueprint
 // da Forja (forgeAdminValidationService exige tier_equipamento pra
@@ -50,6 +60,51 @@ const CAMPOS_ARMOR = [
 ];
 const CAMPOS_CONSUMABLE = ["efeito_vida", "efeito_mana", "efeito_atributo", "valor_atributo", "duracao_efeito"];
 const CAMPOS_FISHING_ROD = ["forca_linha", "controle", "recolhimento", "precisao", "estabilidade", "nivel_pesca_minimo"];
+const CAMPOS_FORGE_TOOL = ["slot", "nivel_ferreiro_minimo"];
+
+// Cria ForgeToolProperties + efeitos (ForgeToolEffect) pro Item recém
+// criado — reaproveita a MESMA validação de criarFerramentaAdmin
+// (adminForgeService.validarFerramentaPayload), nunca uma cópia dela,
+// pra nunca deixar as duas telas (Itens x Forja) aceitarem regras
+// diferentes pra slot/nivel_ferreiro_minimo/efeitos.
+async function criarForgeToolProperties(idItem, dadosForgeTool, transaction) {
+  await ForgeToolProperties.create(
+    { id_item: idItem, ...somenteCampos(dadosForgeTool, CAMPOS_FORGE_TOOL), ativo: true },
+    { transaction },
+  );
+  const efeitos = dadosForgeTool.efeitos ?? [];
+  if (efeitos.length > 0) {
+    await ForgeToolEffect.bulkCreate(
+      efeitos.map((e) => ({ id_item: idItem, effect_key: e.effect_key, valor_ppm: e.valor_ppm })),
+      { transaction },
+    );
+  }
+}
+
+// tipo_item "Ferramenta" exige o admin escolher exatamente um dos dois
+// subtipos mutuamente exclusivos (fishingRod XOR forgeTool) — nunca os
+// dois, nunca nenhum. `exigirEscolha` só é true na criação; na edição
+// o admin pode mandar nem um nem outro (só está editando outros campos
+// do Item) sem precisar re-enviar as propriedades da ferramenta.
+function validarSubtipoFerramenta(tipoItem, payload, { exigirEscolha }) {
+  if (!TIPOS_FERRAMENTA.includes(tipoItem)) return [];
+  const temVara = Boolean(payload.fishingRod);
+  const temForja = Boolean(payload.forgeTool);
+  if (temVara && temForja) {
+    return ['Item do tipo "Ferramenta" não pode ser Vara de Pesca e Ferramenta de Ferraria ao mesmo tempo — escolha só uma.'];
+  }
+  if (exigirEscolha && !temVara && !temForja) {
+    return ['Item do tipo "Ferramenta" exige escolher "Vara de Pesca" (fishingRod) ou "Ferramenta de Ferraria" (forgeTool) e preencher as propriedades correspondentes.'];
+  }
+  if (temForja) {
+    try {
+      validarFerramentaPayload(payload.forgeTool, { parcial: !exigirEscolha });
+    } catch (erroValidacao) {
+      return [erroValidacao.message];
+    }
+  }
+  return [];
+}
 
 // Poção de cura e bônus de atributo nunca podem coexistir no mesmo item
 // (bug real: "Poção de Vida Pequena dando +2 Vitalidade") — quem
@@ -149,10 +204,14 @@ async function criarPropriedadesDoTipo(item, payload, transaction) {
       { transaction },
     );
   } else if (TIPOS_FERRAMENTA.includes(item.tipo_item)) {
-    await FishingRodProperties.create(
-      { id_item: item.id, ...somenteCampos(payload.fishingRod, CAMPOS_FISHING_ROD) },
-      { transaction },
-    );
+    if (payload.fishingRod) {
+      await FishingRodProperties.create(
+        { id_item: item.id, ...somenteCampos(payload.fishingRod, CAMPOS_FISHING_ROD) },
+        { transaction },
+      );
+    } else if (payload.forgeTool) {
+      await criarForgeToolProperties(item.id, payload.forgeTool, transaction);
+    }
   }
 }
 
@@ -164,7 +223,7 @@ async function createAdminItem(payload, { idAdmin, req } = {}) {
   if (TIPOS_ARMA.includes(dadosItem.tipo_item) && !payload.weapon) erros.push('Item do tipo "Arma" exige propriedades de arma.');
   if (TIPOS_ARMADURA.includes(dadosItem.tipo_item) && !payload.armor) erros.push(`Item do tipo "${dadosItem.tipo_item}" exige propriedades de armadura.`);
   if (TIPOS_CONSUMIVEL.includes(dadosItem.tipo_item) && !payload.consumable) erros.push('Item do tipo "Consumivel" exige propriedades de efeito.');
-  if (TIPOS_FERRAMENTA.includes(dadosItem.tipo_item) && !payload.fishingRod) erros.push('Item do tipo "Ferramenta" exige propriedades de vara de pesca.');
+  erros.push(...validarSubtipoFerramenta(dadosItem.tipo_item, payload, { exigirEscolha: true }));
   erros.push(...validarTierEquipamento(dadosItem.tipo_item, dadosItem, { exigirPresenca: true }));
 
   if (erros.length > 0) throw erroDeValidacao(erros);
@@ -219,6 +278,8 @@ async function updateAdminItem(idItem, payload, { idAdmin, req } = {}) {
     }
     const errosTier = validarTierEquipamento(item.tipo_item, dadosItem, { exigirPresenca: false });
     if (errosTier.length > 0) throw erroDeValidacao(errosTier);
+    const errosFerramenta = validarSubtipoFerramenta(item.tipo_item, payload, { exigirEscolha: false });
+    if (errosFerramenta.length > 0) throw erroDeValidacao(errosFerramenta);
 
     await item.reload({
       transaction,
@@ -227,6 +288,7 @@ async function updateAdminItem(idItem, payload, { idAdmin, req } = {}) {
         { model: ArmorProperties, as: "armorProperties" },
         { model: ConsumableProperties, as: "consumableProperties" },
         { model: FishingRodProperties, as: "fishingRodProperties" },
+        { model: ForgeToolProperties, as: "forgeToolProperties", include: [{ model: ForgeToolEffect, as: "efeitos" }] },
       ],
     });
 
@@ -252,6 +314,19 @@ async function updateAdminItem(idItem, payload, { idAdmin, req } = {}) {
       const camposFishingRod = somenteCampos(payload.fishingRod, CAMPOS_FISHING_ROD);
       if (item.fishingRodProperties) await item.fishingRodProperties.update(camposFishingRod, { transaction });
       else await FishingRodProperties.create({ id_item: item.id, ...camposFishingRod }, { transaction });
+    } else if (TIPOS_FERRAMENTA.includes(item.tipo_item) && payload.forgeTool) {
+      const camposForgeTool = somenteCampos(payload.forgeTool, CAMPOS_FORGE_TOOL);
+      if (item.forgeToolProperties) await item.forgeToolProperties.update(camposForgeTool, { transaction });
+      else await ForgeToolProperties.create({ id_item: item.id, ...camposForgeTool, ativo: true }, { transaction });
+      if (payload.forgeTool.efeitos !== undefined) {
+        await ForgeToolEffect.destroy({ where: { id_item: item.id }, transaction });
+        if (payload.forgeTool.efeitos.length > 0) {
+          await ForgeToolEffect.bulkCreate(
+            payload.forgeTool.efeitos.map((e) => ({ id_item: item.id, effect_key: e.effect_key, valor_ppm: e.valor_ppm })),
+            { transaction },
+          );
+        }
+      }
     }
 
     // As três ramificações acima criam a propriedade direto pelo Model
@@ -266,6 +341,7 @@ async function updateAdminItem(idItem, payload, { idAdmin, req } = {}) {
         { model: ArmorProperties, as: "armorProperties" },
         { model: ConsumableProperties, as: "consumableProperties" },
         { model: FishingRodProperties, as: "fishingRodProperties" },
+        { model: ForgeToolProperties, as: "forgeToolProperties", include: [{ model: ForgeToolEffect, as: "efeitos" }] },
       ],
     });
 
@@ -358,6 +434,7 @@ async function duplicateAdminItem(idItem, { idAdmin, req } = {}) {
         { model: ArmorProperties, as: "armorProperties" },
         { model: ConsumableProperties, as: "consumableProperties" },
         { model: FishingRodProperties, as: "fishingRodProperties" },
+        { model: ForgeToolProperties, as: "forgeToolProperties", include: [{ model: ForgeToolEffect, as: "efeitos" }] },
       ],
     });
     if (!original) {
@@ -379,6 +456,12 @@ async function duplicateAdminItem(idItem, { idAdmin, req } = {}) {
       armor: original.armorProperties ? { ...original.armorProperties.toJSON() } : undefined,
       consumable: original.consumableProperties ? { ...original.consumableProperties.toJSON() } : undefined,
       fishingRod: original.fishingRodProperties ? { ...original.fishingRodProperties.toJSON() } : undefined,
+      forgeTool: original.forgeToolProperties
+        ? {
+            ...original.forgeToolProperties.toJSON(),
+            efeitos: (original.forgeToolProperties.efeitos ?? []).map((e) => ({ effect_key: e.effect_key, valor_ppm: e.valor_ppm })),
+          }
+        : undefined,
     };
     await criarPropriedadesDoTipo(copia, payload, transaction);
 

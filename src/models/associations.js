@@ -50,6 +50,11 @@ const ForgeBarItem = require("./ForgeBarItem");
 const ForgeScroll = require("./ForgeScroll");
 const ForgeScrollIngredient = require("./ForgeScrollIngredient");
 const CharacterForgeQueue = require("./CharacterForgeQueue");
+const ForgeRecipe = require("./ForgeRecipe");
+const CharacterForgeRecipeUnlock = require("./CharacterForgeRecipeUnlock");
+const ForgeToolProperties = require("./ForgeToolProperties");
+const ForgeToolEffect = require("./ForgeToolEffect");
+const CharacterForgeToolLoadout = require("./CharacterForgeToolLoadout");
 const AdventureZone = require("./AdventureZone");
 const AdventureMonster = require("./AdventureMonster");
 const AdventureZoneMonster = require("./AdventureZoneMonster");
@@ -173,6 +178,21 @@ ForgeBlueprintResult.belongsTo(Item, { foreignKey: "id_item", as: "item" });
 // Reformulação V2 — o Item canônico do blueprint (ver comentário no
 // model ForgeBlueprint). Ainda não usado em runtime nesta fase Expand.
 ForgeBlueprint.belongsTo(Item, { foreignKey: "id_item_resultado", as: "itemResultado" });
+
+// Profissão de Ferreiro §4/§9 — camada de Receitas sobre o Blueprint
+// existente (nunca duplica ingredientes/resultado, ver ForgeRecipe.js).
+ForgeBlueprint.hasOne(ForgeRecipe, { foreignKey: "id_blueprint", as: "receita" });
+ForgeRecipe.belongsTo(ForgeBlueprint, { foreignKey: "id_blueprint", as: "blueprint" });
+ForgeRecipe.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+Item.hasOne(ForgeRecipe, { foreignKey: "id_item", as: "forgeRecipe" });
+ForgeBlueprint.hasMany(CharacterForgeRecipeUnlock, { foreignKey: "id_blueprint" });
+CharacterForgeRecipeUnlock.belongsTo(ForgeBlueprint, { foreignKey: "id_blueprint", as: "blueprint" });
+
+// Profissão de Ferreiro §6 — Ferraria (ferramentas profissionais).
+Item.hasOne(ForgeToolProperties, { foreignKey: "id_item", as: "forgeToolProperties" });
+ForgeToolProperties.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+ForgeToolProperties.hasMany(ForgeToolEffect, { foreignKey: "id_item", as: "efeitos" });
+ForgeToolEffect.belongsTo(ForgeToolProperties, { foreignKey: "id_item" });
 
 ForgeBarItem.belongsTo(ExpeditionResource, { foreignKey: "id_recurso", as: "recurso" });
 ForgeBarItem.belongsTo(Item, { foreignKey: "id_item", as: "item" });

@@ -305,3 +305,72 @@ exports.obterMetricas = async (req, res) => {
     tratarErro(res, error, "Erro interno do servidor ao carregar as métricas.");
   }
 };
+
+// Profissão de Ferreiro §14.1 — Receitas
+exports.listarReceitas = async (req, res) => {
+  try {
+    const resultado = await adminForgeService.listarReceitasAdmin({ raridade: req.query.raridade });
+    res.status(200).json({ status: "success", data: { itens: resultado } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao listar Receitas.");
+  }
+};
+
+exports.criarReceita = async (req, res) => {
+  try {
+    const receita = await adminForgeService.criarReceitaAdmin(req.body ?? {}, { idAdmin: req.user.id, req });
+    res.status(201).json({ status: "success", data: { receita } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao criar a Receita.");
+  }
+};
+
+exports.atualizarReceita = async (req, res) => {
+  try {
+    const receita = await adminForgeService.atualizarReceitaAdmin(Number(req.params.id), req.body ?? {}, { idAdmin: req.user.id, req });
+    res.status(200).json({ status: "success", data: { receita } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao atualizar a Receita.");
+  }
+};
+
+exports.setModoDesbloqueioBlueprint = async (req, res) => {
+  try {
+    const resultado = await adminForgeService.setModoDesbloqueioBlueprintAdmin(
+      Number(req.params.id),
+      req.body?.modo_desbloqueio,
+      { idAdmin: req.user.id, req, grandfatherElegiveis: Boolean(req.body?.grandfather_elegiveis) },
+    );
+    res.status(200).json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao mudar o modo de desbloqueio do Blueprint.");
+  }
+};
+
+// Profissão de Ferreiro §14 — Ferramentas (Ferraria)
+exports.listarFerramentas = async (req, res) => {
+  try {
+    const resultado = await adminForgeService.listarFerramentasAdmin({ ativo: req.query.ativo });
+    res.status(200).json({ status: "success", data: { itens: resultado } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao listar ferramentas de Ferraria.");
+  }
+};
+
+exports.criarFerramenta = async (req, res) => {
+  try {
+    const ferramenta = await adminForgeService.criarFerramentaAdmin(req.body ?? {}, { idAdmin: req.user.id, req });
+    res.status(201).json({ status: "success", data: { ferramenta } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao criar a ferramenta.");
+  }
+};
+
+exports.atualizarFerramenta = async (req, res) => {
+  try {
+    const ferramenta = await adminForgeService.atualizarFerramentaAdmin(Number(req.params.itemId), req.body ?? {}, { idAdmin: req.user.id, req });
+    res.status(200).json({ status: "success", data: { ferramenta } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao atualizar a ferramenta.");
+  }
+};
