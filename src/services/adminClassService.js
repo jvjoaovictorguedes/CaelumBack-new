@@ -475,8 +475,29 @@ async function excluirHabilidade(id, { idAdmin, req }) {
   return sequelize.transaction(async (transaction) => {
     const habilidade = await ClassEvolutionAbility.findByPk(id, { transaction });
     if (!habilidade) throw erro("Vínculo de habilidade não encontrado.", 404);
+    const antes = habilidade.toJSON();
+
+    // Bug reportado: excluir o vínculo só apagava a "receita" (esta
+    // linha), nunca o Power que já tinha sido concedido de verdade a
+    // quem evoluiu pra este caminho — o personagem ficava com uma
+    // habilidade vinculada que não existe mais em canto nenhum do
+    // catálogo. Mesmo critério de limpeza de excluirCaminho (force=true):
+    // só revoga de quem está atualmente NESTE caminho, nunca de quem
+    // aprendeu o mesmo Power por outra via (classe base, outra evolução).
+    const personagensNoCaminho = await Character.findAll({
+      where: { id_evolucao_classe: habilidade.id_evolucao },
+      attributes: ["id"],
+      transaction,
+    });
+    if (personagensNoCaminho.length > 0) {
+      await CharacterAbilities.destroy({
+        where: { id_personagem: personagensNoCaminho.map((p) => p.id), id_power: habilidade.id_power },
+        transaction,
+      });
+    }
+
     await habilidade.destroy({ transaction });
-    await registrarAcao({ idAdmin, acao: "excluir", entidade: "ClassEvolutionAbility", idEntidade: id, dadosAntes: habilidade.toJSON(), req, transaction });
+    await registrarAcao({ idAdmin, acao: "excluir", entidade: "ClassEvolutionAbility", idEntidade: id, dadosAntes: antes, req, transaction });
     return { id: Number(id) };
   });
 }
