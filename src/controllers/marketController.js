@@ -65,6 +65,17 @@ const INCLUDE_ITEM_COM_PROPRIEDADES = {
   ],
 };
 
+// GET /api/market/config — taxa e limites do Mercado (spec §8/§15), pra
+// o frontend mostrar ao vendedor, no momento de anunciar, quanto ele
+// vai perder de taxa e quanto vai receber de fato. Nunca hardcoded no
+// front: se TAXA_MERCADO mudar aqui, a tela de Vender já reflete.
+exports.obterConfig = (req, res) => {
+  return res.status(200).json({
+    status: "success",
+    data: { taxa_mercado: TAXA_MERCADO, preco_minimo_unitario: PRECO_MINIMO_UNITARIO, preco_maximo_unitario: PRECO_MAXIMO_UNITARIO },
+  });
+};
+
 exports.criarAnuncio = async (req, res) => {
   const id_personagem = req.personagemAtual.id;
   const { id_item, quantidade, preco_unitario, id_instancia } = req.body;

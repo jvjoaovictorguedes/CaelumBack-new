@@ -7,6 +7,8 @@ const router = express.Router();
 
 // Precisa vir antes de "/listings/:id" — senão "mine" seria lido como
 // um :id.
+router.route("/config").get(authMiddleware, marketController.obterConfig);
+
 router
   .route("/listings/mine")
   .get(authMiddleware, carregarPersonagemAtual, marketController.meusAnuncios);

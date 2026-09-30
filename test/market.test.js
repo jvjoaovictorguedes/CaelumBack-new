@@ -167,3 +167,19 @@ testeComBanco("mercado: listarAnuncios devolve consumableProperties pra um consu
   assert.ok(encontrado.item.consumableProperties, "item.consumableProperties precisa vir preenchido pra mostrar o efeito no Mercado");
   assert.equal(encontrado.item.consumableProperties.efeito_vida, 30);
 });
+
+// obterConfig não toca banco — a taxa precisa ficar visível pro vendedor
+// no momento de anunciar (spec pedida pelo usuário: "mostrar quanto ele
+// vai perder com a taxa"), nunca hardcoded no frontend.
+test("mercado: obterConfig expõe taxa_mercado (mesma constante usada em comprarAnuncio)", async () => {
+  const { TAXA_MERCADO, PRECO_MINIMO_UNITARIO, PRECO_MAXIMO_UNITARIO } = require("../src/config/marketConfig");
+
+  const req = {};
+  const res = fakeRes();
+  marketController.obterConfig(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.data.taxa_mercado, TAXA_MERCADO);
+  assert.equal(res.body.data.preco_minimo_unitario, PRECO_MINIMO_UNITARIO);
+  assert.equal(res.body.data.preco_maximo_unitario, PRECO_MAXIMO_UNITARIO);
+});
