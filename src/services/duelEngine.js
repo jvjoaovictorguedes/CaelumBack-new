@@ -43,14 +43,22 @@ function aplicarAcao({
   let esquivou = false;
   let motivoEsquiva = null;
   let nomeAcao = "Ataque básico";
+  // Precisão/Crítico (Velocidade) — mesmo `contexto` opcional de
+  // combatFormulas.calcularDanoBasico/calcularEfeitoPoder, pra quem
+  // chama (resolverTurnoComStatus, abaixo, e por tabela pvpController/
+  // pvpLiveSocket) saber se ESTE golpe saiu crítico e mostrar "ACERTO
+  // CRÍTICO!" pro jogador.
+  let critico = false;
 
   if (acao.tipo === "power" && acao.power) {
     const nivelHabilidade = acao.power.nivel_habilidade ?? 1;
     nomeAcao = acao.power.nome;
     atacante.mana_atual -= custoManaEfetivo(acao.power, nivelHabilidade);
-    const efeito = calcularEfeitoPoder(acao.power, atacante, nivelHabilidade);
+    const contextoCritico = {};
+    const efeito = calcularEfeitoPoder(acao.power, atacante, nivelHabilidade, contextoCritico);
     dano = Math.round(efeito.dano * multiplicadorDano);
     cura = efeito.cura;
+    critico = Boolean(contextoCritico.critico);
   } else if (acao.tipo === "item" && acao.efeito) {
     // Consumível como ação de duelo — consome o turno igual um ataque ou
     // poder (o oponente ainda age depois) e usa a MESMA fórmula percentual
@@ -76,6 +84,12 @@ function aplicarAcao({
       esquivou = true;
       motivoEsquiva = resultadoAcerto.reason;
       dano = 0;
+      // Um golpe que a esquiva/cegueira já barrou nunca é "crítico" —
+      // mesmo quando o crítico do poder foi rolado ANTES desta checagem
+      // (calcularEfeitoPoder acima, por causa de dano/cura virem juntos
+      // no mesmo retorno), zera aqui pra nunca reportar "ACERTO
+      // CRÍTICO!" sobre um ataque que não acertou.
+      critico = false;
     } else if (acao.tipo === "attack") {
       // Mitigação pela defesa do alvo — sem isso, equipar armadura não
       // tinha efeito nenhum no dano recebido (a defesa era somada em
@@ -83,7 +97,9 @@ function aplicarAcao({
       // combate). Aplica tanto no ataque básico quanto em poder que causa
       // dano (branch abaixo), já que o jogo só tem um stat de defesa
       // (sem resistência mágica separada).
-      const danoBase = Math.round(calcularDanoBasico(atacante) * multiplicadorDano);
+      const contextoCritico = {};
+      const danoBase = Math.round(calcularDanoBasico(atacante, contextoCritico) * multiplicadorDano);
+      critico = Boolean(contextoCritico.critico);
       dano = aplicarMitigacaoDeDefesa(danoBase, defensor);
       defensor.vida_atual = Math.max(0, defensor.vida_atual - dano);
     } else {
@@ -107,7 +123,7 @@ function aplicarAcao({
     atacante.mana_atual = Math.min(tetoMana, atacante.mana_atual + manaCurada);
   }
 
-  return { nomeAcao, dano, cura, manaCurada, esquivou, motivoEsquiva };
+  return { nomeAcao, dano, cura, manaCurada, esquivou, motivoEsquiva, critico };
 }
 
 // Envolve aplicarAcao com o Motor de Status inteiro (Evolução do Motor

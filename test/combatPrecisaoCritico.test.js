@@ -16,6 +16,50 @@ const {
   MULTIPLICADOR_DANO_CRITICO,
 } = require("../src/services/combatFormulas");
 
+// `contexto` (usado por combatController/duelEngine/worldBossRuntimeService
+// pra saber se ESTE golpe foi crítico e devolver a flag pro frontend) é um
+// efeito colateral OPCIONAL — precisa bater com o multiplicador de fato
+// aplicado no dano, e nunca quebrar quem chama sem passar nada.
+test("calcularDanoBasico: contexto.critico reflete de verdade se o multiplicador foi aplicado", () => {
+  const rapido = { forca: 10, velocidade: 9999 }; // 40% de chance, mas sempre determinável pelo contexto
+  const AMOSTRAS = 300;
+  let viuCritico = false;
+  let viuNaoCritico = false;
+  for (let i = 0; i < AMOSTRAS; i++) {
+    const contexto = {};
+    const dano = calcularDanoBasico(rapido, contexto);
+    assert.equal(typeof contexto.critico, "boolean");
+    if (contexto.critico) {
+      viuCritico = true;
+      // Sem arma, base = 4 + 10*0.9 = 13; variação 0.85-1.15; crítico
+      // multiplica por 1.5 por cima disso. Sem crítico, o teto seria
+      // round(13 * 1.15) = 15. Com crítico, o piso passa a ser bem
+      // acima disso (round(13 * 0.85 * 1.5) ~= 17).
+      assert.ok(dano >= 16, `dano crítico esperado bem acima do teto não-crítico (obtido ${dano})`);
+    } else {
+      viuNaoCritico = true;
+    }
+  }
+  assert.ok(viuCritico, "esperava ver ao menos um crítico em 300 rolagens com 40% de chance");
+  assert.ok(viuNaoCritico, "esperava ver ao menos um não-crítico em 300 rolagens com 40% de chance");
+});
+
+test("calcularDanoBasico: sem contexto continua funcionando exatamente como antes (retorna só o número)", () => {
+  const atacante = { forca: 10, velocidade: 5 };
+  const dano = calcularDanoBasico(atacante);
+  assert.equal(typeof dano, "number");
+});
+
+test("calcularEfeitoPoder: contexto.critico nunca fica true pra poder sem dano_base (só cura)", () => {
+  const powerCura = { dano_base: 0, cura_base: 50, valor_escala: 0, escala_atributo: "Vitalidade" };
+  const rapido = { vitalidade: 0, velocidade: 9999 };
+  for (let i = 0; i < 50; i++) {
+    const contexto = {};
+    calcularEfeitoPoder(powerCura, rapido, 1, contexto);
+    assert.equal(contexto.critico, false);
+  }
+});
+
 test("precisaoDe: escala linear com Velocidade, zero sem Velocidade", () => {
   assert.equal(precisaoDe({ velocidade: 0 }), 0);
   assert.equal(precisaoDe({}), 0);
