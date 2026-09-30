@@ -260,6 +260,16 @@ exports.listarProdutosAlquimia = async (req, res) => {
   }
 };
 
+// Espólios (auxiliar de seleção — ingrediente Espolio)
+exports.listarEspolios = async (req, res) => {
+  try {
+    const resultado = await adminForgeService.listarEspoliosParaForjaAdmin();
+    res.status(200).json({ status: "success", data: { espolios: resultado } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao listar espólios.");
+  }
+};
+
 // Balanceamento
 exports.obterBalanceamento = async (req, res) => {
   try {

@@ -56,6 +56,9 @@ router.get("/resources", podeGerenciarConteudo, adminForgeController.listarRecur
 // Produtos do Caldeirão elegíveis como ingrediente ProdutoAlquimia
 // (Forja-Materiais) — mesmo critério de permissão do seletor acima.
 router.get("/alchemy-products", podeGerenciarConteudo, adminForgeController.listarProdutosAlquimia);
+// Espólios elegíveis como ingrediente Espolio (Forja-Materiais) — mesmo
+// critério de permissão dos dois seletores acima.
+router.get("/espolios", podeGerenciarConteudo, adminForgeController.listarEspolios);
 
 // Profissão de Ferreiro §14.1 — Receitas
 router.get("/recipes", podeGerenciarConteudo, adminForgeController.listarReceitas);

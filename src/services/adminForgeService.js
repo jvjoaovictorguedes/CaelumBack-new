@@ -848,6 +848,21 @@ async function listarProdutosAlquimiaAdmin() {
   });
 }
 
+// Espólios elegíveis como ingrediente Espolio (Forja-Materiais — pedido
+// "usar espólios também" na fabricação) — só Itens ATIVOS de
+// tipo_item="Espolio", mesmo critério de "nunca deixar o admin escolher
+// algo desativado como material novo" de listarProdutosAlquimiaAdmin.
+// Aqui id_recurso do ingrediente É o próprio Item.id (sem catálogo
+// intermediário — ver forgeMaterialsService.resolverIdItemDoInsumo).
+async function listarEspoliosParaForjaAdmin() {
+  const itens = await Item.findAll({
+    where: { tipo_item: "Espolio", ativo: true },
+    attributes: ["id", "nome", "imagem_url", "raridade"],
+    order: [["nome", "ASC"]],
+  });
+  return itens.map((i) => ({ id: i.id, nome: i.nome, imagem_url: i.imagem_url, raridade: i.raridade }));
+}
+
 // -----------------------------------------------------------------
 // BALANCEAMENTO (§9/§10) — delega tudo pro forgeSettingsService.
 // -----------------------------------------------------------------
@@ -1311,6 +1326,7 @@ module.exports = {
   setAtivoScrollAdmin,
   listarRecursosAdmin,
   listarProdutosAlquimiaAdmin,
+  listarEspoliosParaForjaAdmin,
   getBalanceamentoAdmin,
   updateBalanceamentoAdmin,
   previewRefinamentoAdmin,

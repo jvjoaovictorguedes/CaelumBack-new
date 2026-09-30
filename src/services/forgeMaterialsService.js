@@ -6,6 +6,7 @@ const ForgeBarItem = require("../models/ForgeBarItem");
 const ExpeditionResourceItem = require("../models/ExpeditionResourceItem");
 const ExpeditionResource = require("../models/ExpeditionResource");
 const AlchemyRecipe = require("../models/AlchemyRecipe");
+const Item = require("../models/Item");
 
 async function resolverIdItemDoInsumo({ tipo_insumo, id_recurso, qualidade }, transaction) {
   if (tipo_insumo === "Barra") {
@@ -19,6 +20,17 @@ async function resolverIdItemDoInsumo({ tipo_insumo, id_recurso, qualidade }, tr
     // aqui de propósito, nunca lido).
     const receita = await AlchemyRecipe.findByPk(id_recurso, { transaction });
     return receita?.id_item_resultado ?? null;
+  }
+  if (tipo_insumo === "Espolio") {
+    // Espólio (pedido: "Forja também pode usar espólios como
+    // ingrediente") é o próprio Item concreto do inventário — sem
+    // catálogo de recurso intermediário nem variante de qualidade
+    // (mesmo racional de ProdutoAlquimia): id_recurso JÁ É o id_item.
+    // Só confirma que ainda é um Espólio ativo antes de resolver —
+    // nunca deixa um blueprint fabricar com um id_recurso que virou
+    // outra coisa (item excluído/tipo trocado) sem dar "Ausente".
+    const item = await Item.findByPk(id_recurso, { transaction });
+    return item && item.tipo_item === "Espolio" && item.ativo ? item.id : null;
   }
   const vinculo = await ExpeditionResourceItem.findOne({ where: { id_recurso, qualidade }, transaction });
   return vinculo?.id_item ?? null;
@@ -38,6 +50,10 @@ async function resolverNomeRecursoDoInsumo({ tipo_insumo, id_recurso }, transact
   if (tipo_insumo === "ProdutoAlquimia") {
     const receita = await AlchemyRecipe.findByPk(id_recurso, { transaction });
     return receita?.nome ?? null;
+  }
+  if (tipo_insumo === "Espolio") {
+    const item = await Item.findByPk(id_recurso, { transaction });
+    return item?.nome ?? null;
   }
   const recurso = await ExpeditionResource.findByPk(id_recurso, { transaction });
   return recurso?.nome ?? null;
