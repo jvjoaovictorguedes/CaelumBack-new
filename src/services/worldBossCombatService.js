@@ -517,6 +517,11 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
       nomeAcao: resultado.nomeAcao,
       dano: danoEfetivo,
       esquivou: resultado.esquivou,
+      // Precisão/Crítico (Velocidade) — vem pronto de aplicarAcao
+      // (duelEngine.js), reaproveitado aqui igual o resto do dano/cura
+      // (ver decisão de arquitetura no topo do arquivo: nunca uma conta
+      // paralela só pro Boss Global).
+      critico: Boolean(resultado.critico),
       cura: resultado.cura,
       manaCurada: resultado.manaCurada,
       golpeFinal,

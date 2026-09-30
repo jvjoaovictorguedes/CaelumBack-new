@@ -29,6 +29,8 @@ const {
   manaMaximaDe,
   danoBasicoEsperado,
   comMultiplicadoresDeClasse,
+  rolarCritico,
+  MULTIPLICADOR_DANO_CRITICO,
 } = require("../services/combatFormulas");
 const {
   buscarBonusDeAtributos,
@@ -697,6 +699,15 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     let poderUsado = null;
     let nivelHabilidadeUsada = 1;
 
+    // Precisão/Crítico (Velocidade) — flags do TURNO INTEIRO (nunca
+    // "por ação", já que só uma das duas coisas acontece por turno: ou
+    // o jogador acerta um golpe crítico, ou o inimigo acerta um golpe
+    // crítico no contra-ataque dele — nunca os dois na mesma flag).
+    // Devolvidas em `data` nas 3 respostas deste turno (vitória, derrota
+    // e turno normal) pro frontend mostrar "ACERTO CRÍTICO!".
+    let criticoJogador = false;
+    let criticoInimigo = false;
+
     if (!jogadorBloqueadoNesteTurno) {
 
     if (action.type === "power") {
@@ -818,11 +829,13 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       cooldowns.player = cooldownService.iniciarCooldown(cooldowns.player, poderUsado.id, poderUsado.cooldown);
       cooldownsPlayerAplicadosNesteTurno.add(cooldownService.chaveDoPoder(poderUsado.id));
 
+      const contextoCriticoPoder = {};
       const { dano: danoBase, cura } =
         calcularEfeitoPoder(
           poderUsado,
           personagemAtual,
-          nivelHabilidadeUsada
+          nivelHabilidadeUsada,
+          contextoCriticoPoder,
         );
       // Enfraquecimento (§45) reduz o dano de SAÍDA de quem está com o
       // status, antes de qualquer mitigação do alvo. PVE_DAMAGE_PCT da
@@ -875,6 +888,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
               : `${inimigoAtual.nome} esquivou de ${poderUsado.nome}!`,
           );
         } else {
+          if (contextoCriticoPoder.critico) criticoJogador = true;
           const danoMitigado = aplicarMitigacaoDeDefesa(dano, inimigoAtual);
           inimigoAtual.vida_atual = Math.max(
             0,
@@ -882,7 +896,9 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           );
 
           log.push(
-            `Você usou ${poderUsado.nome} e causou ${danoMitigado} de dano em ${inimigoAtual.nome}.`
+            contextoCriticoPoder.critico
+              ? `Você usou ${poderUsado.nome} e causou ${danoMitigado} de dano em ${inimigoAtual.nome}. ACERTO CRÍTICO!`
+              : `Você usou ${poderUsado.nome} e causou ${danoMitigado} de dano em ${inimigoAtual.nome}.`
           );
 
           // Freeze existente quebra por ESTE dano direto antes de
@@ -986,11 +1002,13 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
             : `${inimigoAtual.nome} esquivou do seu ataque!`,
         );
       } else {
+        const contextoCriticoAtaque = {};
         const danoBasicoEnfraquecido = Math.round(
-          calcularDanoBasico(personagemAtual) *
+          calcularDanoBasico(personagemAtual, contextoCriticoAtaque) *
             statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.player) *
             multiplicadorDanoTaverna,
         );
+        if (contextoCriticoAtaque.critico) criticoJogador = true;
         const dano = aplicarMitigacaoDeDefesa(
           danoBasicoEnfraquecido,
           inimigoAtual,
@@ -1002,7 +1020,9 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         );
 
         log.push(
-          `Você atacou e causou ${dano} de dano em ${inimigoAtual.nome}.`
+          contextoCriticoAtaque.critico
+            ? `Você atacou e causou ${dano} de dano em ${inimigoAtual.nome}. ACERTO CRÍTICO!`
+            : `Você atacou e causou ${dano} de dano em ${inimigoAtual.nome}.`
         );
 
         // Freeze existente no inimigo quebra por ESTE dano direto,
@@ -1320,6 +1340,8 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           bestiarioCompletoAgora,
           huntUpdate,
           worldBoss,
+          criticoJogador,
+          criticoInimigo,
         },
       });
     }
@@ -1384,6 +1406,8 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           },
           enemy: inimigoAtual,
           statusEffects,
+          criticoJogador,
+          criticoInimigo,
         },
       });
     }
@@ -1431,6 +1455,20 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         const danoRecebidoEnfraquecido = Math.round(
           Math.max(1, danoBrutoInimigo) * statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.enemy),
         );
+        // Precisão/Crítico (Velocidade) — o ataque do MONSTRO não passa
+        // por calcularDanoBasico (a rolagem dele é o próprio intervalo
+        // dano_min..dano_max cadastrado, não a fórmula de força do
+        // personagem), então o crítico é rolado aqui manualmente com o
+        // mesmo `rolarCritico`/MULTIPLICADOR_DANO_CRITICO que
+        // calcularDanoBasico usa por baixo — o monstro já reduz a
+        // esquiva do jogador com a Velocidade dele (ver
+        // probabilidadeDeEsquiva) desde a mudança em combatFormulas.js;
+        // sem isto o crítico ficaria só do lado do jogador. Aplicado
+        // ANTES da mitigação de defesa, igual em todo outro lugar.
+        if (rolarCritico(inimigoAtual)) criticoInimigo = true;
+        const danoComCriticoInimigo = criticoInimigo
+          ? Math.round(danoRecebidoEnfraquecido * MULTIPLICADOR_DANO_CRITICO)
+          : danoRecebidoEnfraquecido;
         // PVE_DEFENSE_PCT da Taverna (§13) é uma mitigação A MAIS, por
         // cima da mitigação de defesa "crua" do equipamento — nunca
         // embutida em aplicarMitigacaoDeDefesa (que também mitiga PvP/
@@ -1440,7 +1478,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         const danoRecebido = Math.max(
           1,
           Math.round(
-            aplicarMitigacaoDeDefesa(danoRecebidoEnfraquecido, personagemAtual) * multiplicadorDefesaTaverna,
+            aplicarMitigacaoDeDefesa(danoComCriticoInimigo, personagemAtual) * multiplicadorDefesaTaverna,
           ),
         );
 
@@ -1452,7 +1490,9 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           );
 
         log.push(
-          `${inimigoAtual.nome} atacou e causou ${danoRecebido} de dano em você.`
+          criticoInimigo
+            ? `${inimigoAtual.nome} atacou e causou ${danoRecebido} de dano em você. ACERTO CRÍTICO!`
+            : `${inimigoAtual.nome} atacou e causou ${danoRecebido} de dano em você.`
         );
 
         // Freeze existente no jogador quebra por ESTE dano direto (§18).
@@ -1501,6 +1541,8 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           enemy: inimigoAtual,
           statusEffects: { player: [], enemy: [] },
           cooldowns: { player: {}, enemy: {} },
+          criticoJogador,
+          criticoInimigo,
         },
       });
     }
@@ -1557,6 +1599,8 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         enemy: inimigoAtual,
         statusEffects,
         cooldowns: { player: cooldowns.player },
+        criticoJogador,
+        criticoInimigo,
       },
     });
 }

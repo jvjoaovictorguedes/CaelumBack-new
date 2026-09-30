@@ -105,7 +105,15 @@ function danoBasicoEsperado(atacante) {
   return Math.max(fisico, potencialViaPoder);
 }
 
-function calcularDanoBasico(atacante) {
+// `contexto`, se passado, recebe `contexto.critico` (true/false) escrito
+// como efeito colateral depois da rolagem — forma OPCIONAL de quem
+// chama saber se ESTE golpe específico saiu crítico, pra poder logar
+// "ACERTO CRÍTICO!"/marcar o payload de resposta pro frontend (feedback
+// visual pedido junto do sistema de Precisão/Crítico). Sem `contexto`
+// (a maioria dos callers — ex.: danoBasicoEsperado, calibração de
+// inimigo) o retorno continua sendo só o número, comportamento idêntico
+// a antes.
+function calcularDanoBasico(atacante, contexto) {
   // Com arma equipada, o dano_min/dano_max dela é o que manda — a força
   // só soma em cima, nunca deixa o resultado cair abaixo do dano_min da
   // arma (antes o ataque básico ignorava esses campos e só olhava a
@@ -116,9 +124,10 @@ function calcularDanoBasico(atacante) {
   const bonusNivel = bonusPorNivel(atacante, DANO_FISICO_BASE_POR_NIVEL);
   // Crítico (Velocidade, ver comentário acima de precisaoDe) — mais uma
   // rolagem de variação por cima das outras, exatamente como a
-  // variação de arma/base já é: quem chama só vê o dano final, nunca
-  // sabe se foi crítico ou não (nenhum call site depende disso hoje).
-  const multiplicadorCritico = rolarCritico(atacante) ? MULTIPLICADOR_DANO_CRITICO : 1;
+  // variação de arma/base já é.
+  const critico = rolarCritico(atacante);
+  if (contexto) contexto.critico = critico;
+  const multiplicadorCritico = critico ? MULTIPLICADOR_DANO_CRITICO : 1;
 
   if (atacante.arma_equipada) {
     const { dano_min, dano_max } = atacante.arma_equipada;
@@ -160,7 +169,9 @@ function multiplicadorDeClassePorTipoDano(power, personagem) {
 // ex.: inimigo de PvE, que não tem CharacterAbilities) vem de
 // abilityLevelService.js: cada nível investido multiplica dano/cura por
 // cima de tudo (atributo, bônus de nível de personagem, classe).
-function calcularEfeitoPoder(power, personagem, nivelHabilidade = 1) {
+// `contexto` — mesmo efeito colateral opcional de calcularDanoBasico
+// (ver comentário lá): se passado, recebe `contexto.critico`.
+function calcularEfeitoPoder(power, personagem, nivelHabilidade = 1, contexto) {
   const campoAtributo = ATRIBUTO_PARA_CAMPO[power.escala_atributo] || "forca";
   const valorAtributo = personagem[campoAtributo] || 0;
   const variacao = 0.9 + Math.random() * 0.2;
@@ -171,7 +182,9 @@ function calcularEfeitoPoder(power, personagem, nivelHabilidade = 1) {
   // cura crítico dependeria de sorte pra curar mais, e isso não é a
   // intenção do pedido ("crítico nos ataques/habilidades" é sobre
   // dano, não sobre amplificar cura por acaso).
-  const multiplicadorCritico = power.dano_base && rolarCritico(personagem) ? MULTIPLICADOR_DANO_CRITICO : 1;
+  const critico = Boolean(power.dano_base) && rolarCritico(personagem);
+  if (contexto) contexto.critico = critico;
+  const multiplicadorCritico = critico ? MULTIPLICADOR_DANO_CRITICO : 1;
 
   const dano = power.dano_base
     ? Math.round(

@@ -65,6 +65,8 @@ const {
   comMultiplicadoresDeClasse,
   resolverResultadoDeAcerto,
   aplicarMitigacaoDeDefesa,
+  rolarCritico,
+  MULTIPLICADOR_DANO_CRITICO,
 } = require("./combatFormulas");
 const { aplicarAcao } = require("./duelEngine");
 const { escolherAcaoIA } = require("./rankedAiService");
@@ -166,7 +168,15 @@ function simularUmCombateSolo(personagem, monsterState, calcularDanoBrutoInimigo
 
     const acertouMonstro = resolverResultadoDeAcerto({ atacante: monsterState, defensor: characterState });
     if (acertouMonstro.hit) {
-      const danoBruto = calcularDanoBrutoInimigo(monsterState);
+      // Precisão/Crítico (Velocidade) — mesmo princípio do ataque do
+      // monstro em combatController.js (calcularDanoBrutoInimigo aqui é
+      // o mesmo tipo de RNG bruto dano_min..dano_max/dano_base, sem
+      // passar por calcularDanoBasico): rolado manualmente pra o
+      // simulador do Admin nunca ficar OTIMISTA sobre a taxa de vitória
+      // real (o combate de verdade já rola crítico pro monstro desde a
+      // mudança em combatController.js).
+      const danoBrutoBase = calcularDanoBrutoInimigo(monsterState);
+      const danoBruto = rolarCritico(monsterState) ? Math.round(danoBrutoBase * MULTIPLICADOR_DANO_CRITICO) : danoBrutoBase;
       const danoFinal = aplicarMitigacaoDeDefesa(danoBruto, characterState);
       characterState.vida_atual = Math.max(0, characterState.vida_atual - danoFinal);
       danoRecebidoTotal += danoFinal;

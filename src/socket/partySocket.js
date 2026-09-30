@@ -667,7 +667,7 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
   clearTimeout(batalha.timer);
 
   const atacante = batalha.membros.get(characterId);
-  const { nomeAcao, dano, cura, manaCurada, esquivou } = aplicarAcao({
+  const { nomeAcao, dano, cura, manaCurada, esquivou, critico } = aplicarAcao({
     atacante: atacante.estado,
     defensor: batalha.inimigo,
     acao,
@@ -684,6 +684,7 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
     cura,
     manaCurada,
     esquivou,
+    critico: Boolean(critico),
     vidaInimigo: batalha.inimigo.vida_atual,
     vidaAliado: atacante.estado.vida_atual,
     manaAliado: atacante.estado.mana_atual,
@@ -782,7 +783,7 @@ function executarTurnoMonstro(io, battleId) {
   }
 
   const alvo = vivos[Math.floor(Math.random() * vivos.length)];
-  const { nomeAcao, dano, esquivou } = aplicarAcao({
+  const { nomeAcao, dano, esquivou, critico } = aplicarAcao({
     atacante: batalha.inimigo,
     defensor: alvo.estado,
     acao: { tipo: "attack" },
@@ -796,6 +797,7 @@ function executarTurnoMonstro(io, battleId) {
     nomeAcao,
     dano,
     esquivou,
+    critico: Boolean(critico),
     vidaAliado: alvo.estado.vida_atual,
     rodada: batalha.rodada,
   });

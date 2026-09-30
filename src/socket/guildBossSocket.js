@@ -450,7 +450,7 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
     const atacante = batalha.membros.get(characterId);
 
     const chefeEstado = { defesa: batalha.defesaChefe, agilidade: 0, vida_atual: batalha.vidaRestante };
-    const { nomeAcao, dano, cura, manaCurada, esquivou } = aplicarAcao({
+    const { nomeAcao, dano, cura, manaCurada, esquivou, critico } = aplicarAcao({
       atacante: atacante.estado,
       defensor: chefeEstado,
       acao,
@@ -489,6 +489,7 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
       cura,
       manaCurada,
       esquivou,
+      critico: Boolean(critico),
       vidaChefe: batalha.vidaRestante,
       vidaAliado: atacante.estado.vida_atual,
       manaAliado: atacante.estado.mana_atual,
@@ -677,7 +678,7 @@ function resolverAcaoDoChefe(io, battleId, abilityEscolhida) {
   const alvos = abilityEscolhida?.tipo_alvo === "TODOS" ? vivos : [escolherAlvoUnico(vivos, abilityEscolhida?.tipo_alvo)];
 
   for (const alvo of alvos) {
-    const { nomeAcao, dano, esquivou } = aplicarAcao({
+    const { nomeAcao, dano, esquivou, critico } = aplicarAcao({
       atacante: chefeAtacante,
       defensor: alvo.estado,
       acao,
@@ -690,6 +691,7 @@ function resolverAcaoDoChefe(io, battleId, abilityEscolhida) {
       nomeAcao,
       dano,
       esquivou,
+      critico: Boolean(critico),
       vidaAliado: alvo.estado.vida_atual,
       vidaChefe: batalha.vidaRestante,
       rodada: batalha.rodada,

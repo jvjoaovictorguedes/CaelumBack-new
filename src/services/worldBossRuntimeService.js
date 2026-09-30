@@ -118,19 +118,26 @@ function resolverDanoBasico({ snapshot, fase, furiaPct, alvoBase, alvoDefesa }) 
   const atacante = {
     forca: snapshot.forca,
     agilidade: snapshot.agilidade,
+    // Velocidade (Precisão/Crítico) — faltava aqui (só o ataque de
+    // HABILIDADE, resolverEfeitoDeHabilidade abaixo, já levava isso em
+    // conta), então o ataque básico do Boss corria com Precisão/chance
+    // de crítico sempre no piso (5% base), nunca escalando com a
+    // Velocidade de verdade cadastrada no snapshot dele.
+    velocidade: snapshot.velocidade,
     arma_equipada: { dano_min: fase.dano_min, dano_max: fase.dano_max },
   };
   const defensor = { agilidade: alvoBase.agilidade || 0 };
 
   const resultadoAcerto = resolverResultadoDeAcerto({ atacante, defensor });
-  if (!resultadoAcerto.hit) return { dano: 0, esquivou: true };
+  if (!resultadoAcerto.hit) return { dano: 0, esquivou: true, critico: false };
 
-  const danoBase = calcularDanoBasico(atacante);
+  const contextoCritico = {};
+  const danoBase = calcularDanoBasico(atacante, contextoCritico);
   const danoFase = danoBase * (1 + Number(fase.modificador_dano_percentual || 0) / 100);
   const danoComFuria = danoFase * (1 + furiaPct / 100);
   const danoFinal = aplicarMitigacaoDeDefesa(Math.round(danoComFuria), { defesa: alvoDefesa });
 
-  return { dano: danoFinal, esquivou: false };
+  return { dano: danoFinal, esquivou: false, critico: Boolean(contextoCritico.critico) };
 }
 
 // --- Ameaça Mundial V2 — Etapa 5: Habilidades do Boss + IA (§6) ---
@@ -241,9 +248,10 @@ function resolverEfeitoDeHabilidade({ snapshot, fase, furiaPct, ability, alvoBas
   const defensor = { agilidade: alvoBase?.agilidade || 0 };
 
   const resultadoAcerto = resolverResultadoDeAcerto({ atacante, defensor });
-  if (!resultadoAcerto.hit) return { dano: 0, cura: 0, esquivou: true };
+  if (!resultadoAcerto.hit) return { dano: 0, cura: 0, esquivou: true, critico: false };
 
-  const efeito = calcularEfeitoPoder(ability.power_snapshot, atacante, 1);
+  const contextoCritico = {};
+  const efeito = calcularEfeitoPoder(ability.power_snapshot, atacante, 1, contextoCritico);
   const modificadorFase = 1 + Number(fase.modificador_dano_percentual || 0) / 100;
   const escalaFuria = ability.escala_com_furia ? 1 + furiaPct / 100 : 1;
 
@@ -252,7 +260,7 @@ function resolverEfeitoDeHabilidade({ snapshot, fase, furiaPct, ability, alvoBas
       ? aplicarMitigacaoDeDefesa(Math.round(efeito.dano * modificadorFase * escalaFuria), { defesa: alvoDefesa })
       : 0;
 
-  return { dano: danoFinal, cura: efeito.cura, esquivou: false };
+  return { dano: danoFinal, cura: efeito.cura, esquivou: false, critico: Boolean(contextoCritico.critico) };
 }
 
 // Cura/buff SELF (§6.4) — o Boss nunca esquiva de si mesmo, e cura
@@ -352,6 +360,7 @@ async function aplicarEfeitoDeHabilidadeEmAlvos({ characterIds, snapshot, fase, 
       nome: personagem.nome,
       dano: efeito.dano,
       esquivou: efeito.esquivou,
+      critico: Boolean(efeito.critico),
       vida_atual: personagem.vida_atual,
       vida_max: vidaMax,
       derrotado,
@@ -638,7 +647,16 @@ async function processarProximaAcao() {
 
           resultado = {
             ...(resultado ?? {}),
-            alvo: { character_id: alvoBasico.character_id, nome: personagem.nome, dano: danoInfo.dano, esquivou: danoInfo.esquivou, vida_atual: personagem.vida_atual, vida_max: vidaMax, derrotado: alvoDerrotado },
+            alvo: {
+              character_id: alvoBasico.character_id,
+              nome: personagem.nome,
+              dano: danoInfo.dano,
+              esquivou: danoInfo.esquivou,
+              critico: Boolean(danoInfo.critico),
+              vida_atual: personagem.vida_atual,
+              vida_max: vidaMax,
+              derrotado: alvoDerrotado,
+            },
           };
         }
       }
