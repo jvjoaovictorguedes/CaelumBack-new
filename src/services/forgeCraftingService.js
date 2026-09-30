@@ -200,13 +200,19 @@ function propriedadesDoResultado(item, raridade) {
 // de seção da tela de Fabricação mostrarem "N receita(s)" com a seção
 // ainda FECHADA, antes do jogador pedir os dados completos daquela
 // categoria (ver listarBlueprints com `categoria`).
-async function listarResumoPorCategoria() {
+// Precisa do MESMO filtro de Receita não aprendida que listarBlueprints
+// aplica (um blueprint modo_desbloqueio="Receita" é invisível até o
+// personagem aprender — nunca só "bloqueado") — sem characterId aqui, o
+// cabeçalho contava blueprints secretos que a lista completa escondia.
+async function listarResumoPorCategoria(characterId) {
   const blueprints = await ForgeBlueprint.findAll({
     where: { ativo: true },
-    attributes: ["categoria_equipamento"],
+    attributes: ["id", "categoria_equipamento", "modo_desbloqueio"],
   });
+  const idsDesbloqueados = characterId ? await idsBlueprintDesbloqueados(characterId) : new Set();
   const contagem = new Map();
   for (const b of blueprints) {
+    if (b.modo_desbloqueio === "Receita" && !idsDesbloqueados.has(b.id)) continue;
     contagem.set(b.categoria_equipamento, (contagem.get(b.categoria_equipamento) ?? 0) + 1);
   }
   return [...contagem.entries()].map(([categoria_equipamento, total]) => ({ categoria_equipamento, total }));
