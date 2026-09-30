@@ -184,6 +184,7 @@ ForgeBlueprint.belongsTo(Item, { foreignKey: "id_item_resultado", as: "itemResul
 ForgeBlueprint.hasOne(ForgeRecipe, { foreignKey: "id_blueprint", as: "receita" });
 ForgeRecipe.belongsTo(ForgeBlueprint, { foreignKey: "id_blueprint", as: "blueprint" });
 ForgeRecipe.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+Item.hasOne(ForgeRecipe, { foreignKey: "id_item", as: "forgeRecipe" });
 ForgeBlueprint.hasMany(CharacterForgeRecipeUnlock, { foreignKey: "id_blueprint" });
 CharacterForgeRecipeUnlock.belongsTo(ForgeBlueprint, { foreignKey: "id_blueprint", as: "blueprint" });
 

@@ -1,7 +1,8 @@
 // Painel Administrativo §10-13 — controller fino: valida input HTTP e
 // delega a regra pra adminItemService. Nunca passa req.body inteiro pro
 // service; o próprio service já faz allowlist, mas o controller decide
-// o shape aceito no payload (item/weapon/armor/consumable).
+// o shape aceito no payload (item/weapon/armor/consumable/fishingRod/
+// forgeTool).
 const adminItemService = require("../services/adminItemService");
 
 function tratarErro(res, error, mensagemPadrao) {
@@ -48,9 +49,9 @@ exports.listarParaSelecao = async (req, res) => {
 
 exports.criar = async (req, res) => {
   try {
-    const { item, weapon, armor, consumable, fishingRod } = req.body ?? {};
+    const { item, weapon, armor, consumable, fishingRod, forgeTool } = req.body ?? {};
     const criado = await adminItemService.createAdminItem(
-      { ...item, weapon, armor, consumable, fishingRod },
+      { ...item, weapon, armor, consumable, fishingRod, forgeTool },
       { idAdmin: req.user.id, req },
     );
     res.status(201).json({ status: "success", data: { item: criado } });
@@ -61,10 +62,10 @@ exports.criar = async (req, res) => {
 
 exports.atualizar = async (req, res) => {
   try {
-    const { item, weapon, armor, consumable, fishingRod } = req.body ?? {};
+    const { item, weapon, armor, consumable, fishingRod, forgeTool } = req.body ?? {};
     const atualizado = await adminItemService.updateAdminItem(
       req.params.id,
-      { ...item, weapon, armor, consumable, fishingRod },
+      { ...item, weapon, armor, consumable, fishingRod, forgeTool },
       { idAdmin: req.user.id, req },
     );
     res.status(200).json({ status: "success", data: { item: atualizado } });

@@ -30,7 +30,8 @@ const Item = sequelize.define("Item", {
       "QuestItem",
       "Currencia",
       "Espolio",
-      "Ferramenta"
+      "Ferramenta",
+      "Receita"
     ),
     allowNull: false,
   },

@@ -1323,4 +1323,5 @@ module.exports = {
   listarFerramentasAdmin,
   criarFerramentaAdmin,
   atualizarFerramentaAdmin,
+  validarFerramentaPayload,
 };
