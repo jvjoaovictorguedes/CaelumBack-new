@@ -56,11 +56,12 @@ exports.duplicar = async (req, res) => {
 // Vínculos
 exports.listarVinculos = async (req, res) => {
   try {
-    const [classes, racas] = await Promise.all([
+    const [classes, racas, naturezas] = await Promise.all([
       adminPowerService.listAdminClassAbilities(req.params.id),
       adminPowerService.listAdminRaceAbilities(req.params.id),
+      adminPowerService.listAdminNatureAbilities(req.params.id),
     ]);
-    res.status(200).json({ status: "success", data: { classes, racas } });
+    res.status(200).json({ status: "success", data: { classes, racas, naturezas } });
   } catch (error) {
     tratarErro(res, error, "Erro interno do servidor ao listar vínculos.");
   }
@@ -99,6 +100,24 @@ exports.desvincularRaca = async (req, res) => {
     res.status(200).json({ status: "success", data: resultado });
   } catch (error) {
     tratarErro(res, error, "Erro interno do servidor ao desvincular raça.");
+  }
+};
+
+exports.vincularNatureza = async (req, res) => {
+  try {
+    const vinculo = await adminPowerService.upsertAdminNatureAbility(req.params.id, req.body ?? {}, { idAdmin: req.user.id, req });
+    res.status(200).json({ status: "success", data: { vinculo } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao vincular natureza.");
+  }
+};
+
+exports.desvincularNatureza = async (req, res) => {
+  try {
+    const resultado = await adminPowerService.removeAdminNatureAbility(req.params.id, req.params.naturezaMagica, { idAdmin: req.user.id, req });
+    res.status(200).json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao desvincular natureza.");
   }
 };
 

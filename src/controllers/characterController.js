@@ -13,6 +13,7 @@ const CharacterInventory = require("../models/CharacterInventory");
 const CharacterEquipment = require("../models/CharacterEquipment");
 const ClassAbilities = require("../models/ClassAbilities");
 const RaceAbilities = require("../models/RaceAbilities");
+const NatureAbilities = require("../models/NatureAbilities");
 const CharacterAbilities = require("../models/CharacterAbilities");
 const Evolution = require("../models/Evolution");
 const CharacterEvolution = require("../models/CharacterEvolution");
@@ -84,6 +85,7 @@ CharacterEquipment.belongsTo(Item, { foreignKey: "id_item", as: "item" });
 const Power = require("../models/Power");
 ClassAbilities.belongsTo(Power, { foreignKey: "id_poder" });
 RaceAbilities.belongsTo(Power, { foreignKey: "id_power" });
+NatureAbilities.belongsTo(Power, { foreignKey: "id_poder" });
 Evolution.belongsTo(Power, { foreignKey: "id_power_concedido", as: "poderConcedido" });
 
 const CHARACTER_INCLUDES = [
@@ -108,7 +110,7 @@ const CHARACTER_INCLUDES = [
 // e ficava restrito a ataque básico pra sempre, a menos que alguém
 // chamasse POST /character-abilities manualmente.
 async function concederPoderesIniciais(character) {
-  const [poderesClasse, poderesRaca, aprendidos] = await Promise.all([
+  const [poderesClasse, poderesRaca, poderesNatureza, aprendidos] = await Promise.all([
     ClassAbilities.findAll({
       where: {
         id_classe: character.id_classe,
@@ -122,6 +124,13 @@ async function concederPoderesIniciais(character) {
       where: {
         id_raca: character.id_raca,
         nivel_aprendizado: { [Op.lte]: character.nivel },
+        custo_ouro: { [Op.is]: null },
+      },
+    }),
+    NatureAbilities.findAll({
+      where: {
+        natureza_magica: character.natureza_magica,
+        nivel_aprendizagem: { [Op.lte]: character.nivel },
         custo_ouro: { [Op.is]: null },
       },
     }),
@@ -145,6 +154,7 @@ async function concederPoderesIniciais(character) {
   const candidatos = [
     ...poderesClasse.map((poder) => ({ id_power: poder.id_poder, level_learned: poder.nivel_aprendizagem })),
     ...poderesRaca.map((poder) => ({ id_power: poder.id_power, level_learned: poder.nivel_aprendizado })),
+    ...poderesNatureza.map((poder) => ({ id_power: poder.id_poder, level_learned: poder.nivel_aprendizagem })),
   ].filter((candidato) => !idsJaAprendidos.has(candidato.id_power));
 
   const linhas = candidatos.map((candidato) => {
@@ -765,7 +775,7 @@ exports.definirSlotConsumivelCombate = async (req, res) => {
 exports.getPoderesDisponiveis = async (req, res) => {
   try {
     const character = await Character.findByPk(req.params.id, {
-      attributes: ["id", "id_classe", "id_raca", "nivel", "dinheiro"],
+      attributes: ["id", "id_classe", "id_raca", "natureza_magica", "nivel", "dinheiro"],
     });
     if (!character) {
       return res.status(404).json({ message: "Personagem não encontrado." });
@@ -777,13 +787,17 @@ exports.getPoderesDisponiveis = async (req, res) => {
     // carregado desde subir de nível.
     await concederPoderesIniciais(character);
 
-    const [poderesClasse, poderesRaca, aprendidos, itemFragmento] = await Promise.all([
+    const [poderesClasse, poderesRaca, poderesNatureza, aprendidos, itemFragmento] = await Promise.all([
       ClassAbilities.findAll({
         where: { id_classe: character.id_classe },
         include: [{ model: Power }],
       }),
       RaceAbilities.findAll({
         where: { id_raca: character.id_raca },
+        include: [{ model: Power }],
+      }),
+      NatureAbilities.findAll({
+        where: { natureza_magica: character.natureza_magica },
         include: [{ model: Power }],
       }),
       CharacterAbilities.findAll({
@@ -857,6 +871,7 @@ exports.getPoderesDisponiveis = async (req, res) => {
     const idsJaListados = new Set([
       ...poderesClasse.map((linha) => linha.id_poder),
       ...poderesRaca.map((linha) => linha.id_power),
+      ...poderesNatureza.map((linha) => linha.id_poder),
     ]);
     // Qualquer poder já aprendido (CharacterAbilities) que não veio de
     // ClassAbilities/RaceAbilities entra aqui — não só Legado Único
@@ -878,6 +893,9 @@ exports.getPoderesDisponiveis = async (req, res) => {
       ),
       ...poderesRaca.map((linha) =>
         montarEntrada(linha.Power, linha.nivel_aprendizado, "raca", linha.custo_ouro),
+      ),
+      ...poderesNatureza.map((linha) =>
+        montarEntrada(linha.Power, linha.nivel_aprendizagem, "natureza", linha.custo_ouro),
       ),
       ...poderesExtras
         .filter((poder) => !idsJaListados.has(poder.id))
@@ -924,7 +942,7 @@ exports.comprarPoder = async (req, res) => {
         throw Object.assign(new Error("Personagem não encontrado."), { statusCode: 404 });
       }
 
-      const [vinculoClasse, vinculoRaca] = await Promise.all([
+      const [vinculoClasse, vinculoRaca, vinculoNatureza] = await Promise.all([
         ClassAbilities.findOne({
           where: { id_classe: character.id_classe, id_poder: idPower },
           transaction,
@@ -933,16 +951,24 @@ exports.comprarPoder = async (req, res) => {
           where: { id_raca: character.id_raca, id_power: idPower },
           transaction,
         }),
+        NatureAbilities.findOne({
+          where: { natureza_magica: character.natureza_magica, id_poder: idPower },
+          transaction,
+        }),
       ]);
-      const vinculo = vinculoClasse ?? vinculoRaca;
+      const vinculo = vinculoClasse ?? vinculoRaca ?? vinculoNatureza;
       if (!vinculo) {
         throw Object.assign(
-          new Error("Esse poder não pertence à classe/raça deste personagem."),
+          new Error("Esse poder não pertence à classe/raça/natureza mágica deste personagem."),
           { statusCode: 404 },
         );
       }
 
-      const nivelNecessario = vinculoClasse ? vinculo.nivel_aprendizagem : vinculo.nivel_aprendizado;
+      const nivelNecessario = vinculoClasse
+        ? vinculo.nivel_aprendizagem
+        : vinculoRaca
+          ? vinculo.nivel_aprendizado
+          : vinculo.nivel_aprendizagem;
       const custoOuro = vinculo.custo_ouro;
       if (!custoOuro) {
         throw Object.assign(

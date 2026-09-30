@@ -9,6 +9,7 @@ const { sequelize } = require("../config/database");
 const Power = require("../models/Power");
 const ClassAbilities = require("../models/ClassAbilities");
 const RaceAbilities = require("../models/RaceAbilities");
+const NatureAbilities = require("../models/NatureAbilities");
 const PowerStatusEffect = require("../models/PowerStatusEffect");
 const WeaponStatusEffect = require("../models/WeaponStatusEffect");
 const CharacterAbilities = require("../models/CharacterAbilities");
@@ -47,6 +48,7 @@ function somenteCampos(objeto, campos) {
 }
 
 const ATRIBUTOS_VALIDOS = ["Forca", "Vitalidade", "Agilidade", "Inteligencia", "Velocidade"];
+const NATUREZAS_MAGICAS_VALIDAS = ["Fogo", "Agua", "Terra", "Ar", "Luz", "Escuridao", "Raio", "Yin&Yang"];
 const TARGETS_VALIDOS = ["Self", "Enemy"];
 const TRIGGERS_SUPORTADOS = ["BASIC_ATTACK_HIT"]; // único suportado pelo motor hoje (§15)
 
@@ -172,6 +174,34 @@ async function removeAdminRaceAbility(idPower, idRaca, { idAdmin, req }) {
     const removido = await RaceAbilities.destroy({ where: { id_power: idPower, id_raca: idRaca }, transaction });
     if (!removido) throw erro("Vínculo não encontrado.", 404);
     await registrarAcao({ idAdmin, acao: "desvincular", entidade: "RaceAbilities", idEntidade: null, dadosAntes: { id_power: idPower, id_raca: idRaca }, req, transaction });
+    return { removido: true };
+  });
+}
+
+// ----------------------------------------------------- VÍNCULOS DE NATUREZA MÁGICA
+async function listAdminNatureAbilities(idPower) {
+  return NatureAbilities.findAll({ where: { id_poder: idPower } });
+}
+
+async function upsertAdminNatureAbility(idPower, { natureza_magica, nivel_aprendizagem, custo_ouro }, { idAdmin, req }) {
+  if (!natureza_magica || !nivel_aprendizagem) throw erro("natureza_magica e nivel_aprendizagem são obrigatórios.");
+  if (!NATUREZAS_MAGICAS_VALIDAS.includes(natureza_magica)) {
+    throw erro(`natureza_magica precisa ser um de: ${NATUREZAS_MAGICAS_VALIDAS.join(", ")}.`);
+  }
+  return sequelize.transaction(async (transaction) => {
+    const [vinculo] = await NatureAbilities.upsert(
+      { natureza_magica, id_poder: idPower, nivel_aprendizagem, custo_ouro: custo_ouro ?? null },
+      { transaction, returning: true },
+    );
+    await registrarAcao({ idAdmin, acao: "vincular", entidade: "NatureAbilities", idEntidade: null, dadosDepois: vinculo.toJSON(), req, transaction });
+    return vinculo;
+  });
+}
+async function removeAdminNatureAbility(idPower, naturezaMagica, { idAdmin, req }) {
+  return sequelize.transaction(async (transaction) => {
+    const removido = await NatureAbilities.destroy({ where: { id_poder: idPower, natureza_magica: naturezaMagica }, transaction });
+    if (!removido) throw erro("Vínculo não encontrado.", 404);
+    await registrarAcao({ idAdmin, acao: "desvincular", entidade: "NatureAbilities", idEntidade: null, dadosAntes: { id_poder: idPower, natureza_magica: naturezaMagica }, req, transaction });
     return { removido: true };
   });
 }
@@ -354,10 +384,13 @@ module.exports = {
   countPlayersAffectedByPower,
   listAdminClassAbilities,
   listAdminRaceAbilities,
+  listAdminNatureAbilities,
   upsertAdminClassAbility,
   removeAdminClassAbility,
   upsertAdminRaceAbility,
   removeAdminRaceAbility,
+  upsertAdminNatureAbility,
+  removeAdminNatureAbility,
   addAdminPowerStatusEffect,
   updateAdminPowerStatusEffect,
   removeAdminPowerStatusEffect,
