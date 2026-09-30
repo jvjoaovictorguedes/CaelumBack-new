@@ -200,8 +200,47 @@ function qualidadeEspecime(pesoG, pesoMinG, pesoMaxG) {
   return Math.max(0, Math.min(1, q));
 }
 
+// ---------------------------------------------------------------------
+// PAINEL ADMINISTRATIVO — hot-reload de balanceamento (mesmo padrão de
+// forgeConfig.aplicarOverridesBalanceamento). Aplica overrides já
+// VALIDADOS (fishingSettingsService, nunca chamado direto por um
+// controller) por cima destes defaults, SEMPRE por mutação em-lugar dos
+// mesmos objetos já exportados acima — nunca reatribuindo o binding do
+// módulo — porque fishingProgressionService/fishingRodService já
+// desestruturaram essas tabelas no load.
+//
+// NIVEL_MAXIMO_PESCA NUNCA é editável aqui (mesma trava documentada em
+// forgeConfig.js: mudar o teto exigiria reestruturar XP_TOTAL_PARA_NIVEL_PESCA
+// inteiro e a faixa de PROFICIENCIA_PCT_POR_NIVEL, que assume esse teto) —
+// só o CUSTO de XP por nível (etapa 1..24) é editável.
+function aplicarOverridesBalanceamento(grupo, valores) {
+  if (!valores || typeof valores !== "object") return;
+  switch (grupo) {
+    case "fishing.progression": {
+      if (valores.XP_NECESSARIO_POR_ETAPA_PESCA) {
+        Object.assign(XP_NECESSARIO_POR_ETAPA_PESCA, valores.XP_NECESSARIO_POR_ETAPA_PESCA);
+        let acumulado = 0;
+        for (let nivel = 2; nivel <= NIVEL_MAXIMO_PESCA; nivel += 1) {
+          acumulado += XP_NECESSARIO_POR_ETAPA_PESCA[nivel - 1];
+          XP_TOTAL_PARA_NIVEL_PESCA[nivel] = acumulado;
+        }
+      }
+      break;
+    }
+    case "fishing.proficiency": {
+      if (valores.PROFICIENCIA_PCT_POR_NIVEL) {
+        Object.assign(PROFICIENCIA_PCT_POR_NIVEL, valores.PROFICIENCIA_PCT_POR_NIVEL);
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
+
 module.exports = {
   NIVEL_MAXIMO_PESCA,
+  XP_NECESSARIO_POR_ETAPA_PESCA,
   XP_TOTAL_PARA_NIVEL_PESCA,
   nivelPescaPorXpTotal,
   xpParaProximoNivelPesca,
@@ -221,8 +260,10 @@ module.exports = {
   metaComportamento,
   fatorDificuldade,
   rotuloDificuldade,
+  PROFICIENCIA_PCT_POR_NIVEL,
   aplicarProficienciaPesca,
   PERFIS_PESO,
   sortearPesoGramas,
   qualidadeEspecime,
+  aplicarOverridesBalanceamento,
 };

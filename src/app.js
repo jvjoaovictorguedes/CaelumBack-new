@@ -141,6 +141,11 @@ connectDB()
   )
   .then(() => require("./services/expeditionSettingsService").iniciarSincronizacaoPeriodica())
   .then(() => require("./services/guildSettingsService").iniciarSincronizacaoPeriodica())
+  .then(() =>
+    require("./services/fishingSettingsService")
+      .aplicarPersistidosNoBoot()
+      .catch((error) => console.error("[fishingSettingsService] falha ao aplicar overrides persistidos no boot:", error)),
+  )
   .catch((error) => {
     console.error(
       "Erro fatal e inesperado ao conectar ao banco de dados:",
