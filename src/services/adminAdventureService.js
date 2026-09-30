@@ -637,8 +637,16 @@ async function sincronizarRosterZona(idZona, monstrosPayload, { idAdmin, req }) 
       if (linha) await linha.update(dados, { transaction });
       else await AdventureZoneMonster.create({ id_area: idZona, id_monstro: m.id_monstro, ...dados }, { transaction });
     }
-    for (const linha of linhasAtuais) {
-      if (!idsNoPayload.has(linha.id_monstro) && linha.ativo) await linha.update({ ativo: false }, { transaction });
+    // Bug reportado: tirar um monstro da lista local (botão "Remover" do
+    // ZoneEditor) e salvar só marcava `ativo:false` — como a listagem de
+    // edição (listAdminZoneMonsters/GET aparições) devolve TODAS as
+    // linhas, o monstro "removido" voltava a aparecer (desativado) toda
+    // vez que o admin reabria a zona, e nunca saía de verdade do
+    // roster. Uma linha ausente do payload é intenção explícita de
+    // remoção — apaga de verdade, não só desativa.
+    const idsParaRemover = linhasAtuais.filter((linha) => !idsNoPayload.has(linha.id_monstro)).map((linha) => linha.id);
+    if (idsParaRemover.length) {
+      await AdventureZoneMonster.destroy({ where: { id: idsParaRemover }, transaction });
     }
 
     const depois = await AdventureZoneMonster.findAll({
