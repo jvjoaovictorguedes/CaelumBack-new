@@ -570,17 +570,20 @@ exports.getMeuPersonagem = async (req, res) => {
     const character = await Character.findByPk(req.personagemAtual.id, {
       include: CHARACTER_INCLUDES,
     });
-    if (!character) {
-      return res.status(404).json({ message: "Você ainda não tem um personagem." });
-    }
 
     // isAdmin só aqui (leitura do PRÓPRIO personagem), nunca em
     // CHARACTER_INCLUDES — esse include é reaproveitado por leituras de
     // personagens de OUTRAS contas (ex.: alvo de PvP), e vazar se o dono
-    // de outro personagem é admin não é o objetivo aqui. Usado hoje só
-    // pra decidir se o frontend mostra o link de administração de
-    // Torneios (a checagem de verdade continua sendo o adminMiddleware
-    // em cada rota administrativa).
+    // de outro personagem é admin não é o objetivo aqui. Usado hoje pra
+    // decidir se o frontend mostra o link de administração de Torneios
+    // e, desde o Modo Manutenção, se isCurrentUserAdmin() reconhece um
+    // admin que AINDA não tem personagem (a checagem de verdade
+    // continua sendo o adminMiddleware em cada rota administrativa).
+    // Lida ANTES do "!character" de propósito — bug real: um admin
+    // sem personagem tomava 404 sem isAdmin nenhum no corpo, e
+    // isCurrentUserAdmin() (que só lê esse campo) nunca tinha como
+    // saber que era admin, ficando preso na tela de manutenção igual
+    // um jogador comum.
     const usuario = await User.findByPk(req.user.id, { attributes: ["isAdmin"] });
 
     // Permissões granulares (Painel Administrativo §6/§8) — só
@@ -597,6 +600,13 @@ exports.getMeuPersonagem = async (req, res) => {
         { replacements: { idUser: req.user.id } },
       );
       adminPermissions = linhas.map((l) => l.chave);
+    }
+
+    if (!character) {
+      return res.status(404).json({
+        message: "Você ainda não tem um personagem.",
+        data: { isAdmin: Boolean(usuario?.isAdmin), adminPermissions },
+      });
     }
 
     res.status(200).json({
