@@ -154,6 +154,7 @@ async function simularDuelo({ desafiante, desafiado, poderesDesafiante, poderesD
       dano,
       cura,
       esquivou,
+      critico,
       statusAtacante,
       statusDefensor,
       log: logStatus,
@@ -184,7 +185,11 @@ async function simularDuelo({ desafiante, desafiado, poderesDesafiante, poderesD
     if (esquivou) {
       log.push(`${nomeDefensor} esquivou de ${nomeAcao} de ${nomeAtacante}!`);
     } else if (dano > 0) {
-      log.push(`${nomeAtacante} usou ${nomeAcao} e causou ${dano} de dano em ${nomeDefensor}.`);
+      log.push(
+        critico
+          ? `${nomeAtacante} usou ${nomeAcao} e causou ${dano} de dano em ${nomeDefensor}. ACERTO CRÍTICO!`
+          : `${nomeAtacante} usou ${nomeAcao} e causou ${dano} de dano em ${nomeDefensor}.`,
+      );
       if (chave === "A") danoTotalA += dano;
       else danoTotalB += dano;
     } else if (cura > 0) {
@@ -197,6 +202,7 @@ async function simularDuelo({ desafiante, desafiado, poderesDesafiante, poderesD
       dano,
       cura,
       esquivou,
+      critico: Boolean(critico),
       vidaA: estadoA.vida_atual,
       vidaB: estadoB.vida_atual,
       manaA: estadoA.mana_atual,
