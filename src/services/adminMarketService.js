@@ -109,7 +109,14 @@ async function listAdminMarketTransactions({ pagina = 1, porPagina = 20, idItem,
     offset,
   });
 
-  return { total: count, pagina: paginaAtual, porPagina: limite, itens: rows };
+  // Bug reportado: a taxa de cada venda é gravada certinho por linha
+  // (marketController já debita do vendedor e grava em `taxa`), mas o
+  // admin não tinha como ver o total arrecadado — só linha por linha,
+  // página por página. Soma sobre TODO o filtro atual (não só a página
+  // exibida), com o mesmo `where` da listagem.
+  const taxaTotal = await MarketTransaction.sum("taxa", { where });
+
+  return { total: count, pagina: paginaAtual, porPagina: limite, itens: rows, taxaTotal: taxaTotal || 0 };
 }
 
 module.exports = {

@@ -17,7 +17,20 @@ const DURACAO_REGEN_MANA_MS = DURACAO_REGEN_TOTAL_MS;
 function sincronizarRegeneracao(character, personagemEfetivo, { campoAtual, campoTimestamp, maximoDe, duracaoMs }) {
   const maximo = maximoDe(personagemEfetivo);
 
-  if (character[campoAtual] >= maximo) {
+  // Vida/mana atual pode ficar ACIMA do máximo quando o máximo cai depois
+  // de já ter sido gravado cheio (perda de bônus de atributo, equipamento
+  // desequipado, evolução revertida) — sem esse clamp, o valor antigo
+  // ficava preso pra sempre (essa função só sabia fazer crescer, nunca
+  // encolher), e a Sidebar (Math.max(maximo, atual)) escondia o
+  // descompasso mostrando o atual congelado como se fosse o novo máximo.
+  if (character[campoAtual] > maximo) {
+    character[campoAtual] = maximo;
+    character[campoTimestamp] = new Date();
+    personagemEfetivo[campoAtual] = maximo;
+    return true;
+  }
+
+  if (character[campoAtual] === maximo) {
     return false;
   }
 

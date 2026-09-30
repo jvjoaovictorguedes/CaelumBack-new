@@ -15,6 +15,8 @@ const ClassEvolutionRequirement = require("../models/ClassEvolutionRequirement")
 const ClassEvolutionAbility = require("../models/ClassEvolutionAbility");
 const ClassEvolutionEffect = require("../models/ClassEvolutionEffect");
 const CharacterClassEvolution = require("../models/CharacterClassEvolution");
+const Character = require("../models/Character");
+const CharacterAbilities = require("../models/CharacterAbilities");
 const Power = require("../models/Power");
 const Achievement = require("../models/Achievement");
 const AdventureMonster = require("../models/AdventureMonster");
@@ -298,15 +300,51 @@ async function atualizarCaminho(id, payload, { idAdmin, req }) {
   });
 }
 
-async function excluirCaminho(id, { idAdmin, req }) {
+// force=true desfaz a vinculação de qualquer personagem que já tenha
+// evoluído pra este caminho antes de excluir (histórico
+// CharacterClassEvolution, ponteiro legado Character.id_evolucao_classe
+// e os poderes que vieram só daqui via ClassEvolutionAbility) — usado
+// pra limpar caminhos de teste sem deixar personagem "preso" numa
+// evolução que não existe mais. Sem force, mantém a proteção original
+// (bloqueia com mensagem pra desativar em vez de excluir). Um caminho
+// filho de estágio 2 ainda bloqueia a exclusão mesmo com force — isso
+// exige apagar a linhagem de baixo pra cima, de propósito.
+async function excluirCaminho(id, { idAdmin, req, force = false } = {}) {
   return sequelize.transaction(async (transaction) => {
     const caminho = await ClassEvolutionPath.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
     if (!caminho) throw erro("Caminho não encontrado.", 404);
     const antes = caminho.toJSON();
 
+    let personagensDesvinculados = 0;
+    if (force) {
+      const evolucoes = await CharacterClassEvolution.findAll({
+        where: { id_evolucao: id },
+        transaction,
+      });
+      if (evolucoes.length > 0) {
+        const idsPersonagens = evolucoes.map((e) => e.id_personagem);
+        const idsPoderesDoCaminho = (
+          await ClassEvolutionAbility.findAll({ where: { id_evolucao: id }, transaction })
+        ).map((v) => v.id_power);
+
+        if (idsPoderesDoCaminho.length > 0) {
+          await CharacterAbilities.destroy({
+            where: { id_personagem: idsPersonagens, id_power: idsPoderesDoCaminho },
+            transaction,
+          });
+        }
+        await Character.update(
+          { id_evolucao_classe: null },
+          { where: { id: idsPersonagens, id_evolucao_classe: id }, transaction },
+        );
+        await CharacterClassEvolution.destroy({ where: { id_evolucao: id }, transaction });
+        personagensDesvinculados = idsPersonagens.length;
+      }
+    }
+
     await comTraducaoDeFk(
       () => caminho.destroy({ transaction }),
-      "Esse caminho não pode ser excluído: ainda é referenciado por personagens que já evoluíram (ou por um caminho filho de estágio 2). Desative-o em vez de excluir.",
+      "Esse caminho não pode ser excluído: ainda é referenciado por um caminho filho de estágio 2 (exclua o filho primeiro) — ou, se for por personagem já evoluído, marque a opção de forçar exclusão.",
     );
 
     await registrarAcao({
@@ -315,10 +353,11 @@ async function excluirCaminho(id, { idAdmin, req }) {
       entidade: "ClassEvolutionPath",
       idEntidade: id,
       dadosAntes: antes,
+      dadosDepois: force ? { personagensDesvinculados } : undefined,
       req,
       transaction,
     });
-    return { id: Number(id) };
+    return { id: Number(id), personagensDesvinculados };
   });
 }
 

@@ -6,7 +6,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { bancoDisponivel, sufixo, sequelize } = require("./helpers/db");
+const { bancoDisponivel, sufixo, sequelize, criarPersonagem } = require("./helpers/db");
 // slug só aceita [a-z0-9-] — sufixo() traz "_" (pid_timestamp_contador),
 // então os testes usam esta variante pra montar slugs válidos.
 function sufixoSlug() {
@@ -21,7 +21,28 @@ const ClassEvolutionPath = require("../src/models/ClassEvolutionPath");
 const ClassEvolutionRequirement = require("../src/models/ClassEvolutionRequirement");
 const ClassEvolutionAbility = require("../src/models/ClassEvolutionAbility");
 const ClassEvolutionEffect = require("../src/models/ClassEvolutionEffect");
+const CharacterClassEvolution = require("../src/models/CharacterClassEvolution");
+const CharacterAbilities = require("../src/models/CharacterAbilities");
+const Character = require("../src/models/Character");
 const adminClassService = require("../src/services/adminClassService");
+const characterController = require("../src/controllers/characterController");
+
+function reqRes(params, body) {
+  let statusCode = null;
+  let corpo = null;
+  const req = { params, body };
+  const res = {
+    status(codigo) {
+      statusCode = codigo;
+      return this;
+    },
+    json(payload) {
+      corpo = payload;
+      return this;
+    },
+  };
+  return { req, res, resultado: () => ({ statusCode, corpo }) };
+}
 
 let temBanco = false;
 let ctx = null;
@@ -253,6 +274,73 @@ testeComBanco("excluirCaminho: FK protege caminho com filho ou já adquirido por
   await adminClassService.excluirCaminho(caminho1.id, ctx);
   const restante = await ClassEvolutionPath.findByPk(caminho1.id);
   assert.equal(restante, null);
+});
+
+testeComBanco("evoluir de classe concede o poder de ClassEvolutionAbility e ele aparece em getPoderesDisponiveis (bug real: poder gravado mas invisível na aba Habilidades)", async () => {
+  const classe = await criarClasseTeste();
+  const caminho = await adminClassService.criarCaminho(classe.id, { slug: `hab-jog-${sufixoSlug()}`, nome: "Caminho com Poder", descricao: "x", estagio: 1 }, ctx);
+  const power = await criarPowerTeste();
+  await adminClassService.criarHabilidade(caminho.id, { id_power: power.id }, ctx);
+
+  const { personagem } = await criarPersonagem({ nivel: 40 });
+  await Character.update({ id_classe: classe.id, dinheiro: 1000 }, { where: { id: personagem.id } });
+
+  const evolucao = reqRes({ id: String(personagem.id) }, { id_caminho: caminho.id });
+  await characterController.evolveClass(evolucao.req, evolucao.res);
+  assert.equal(evolucao.resultado().statusCode, 200, JSON.stringify(evolucao.resultado().corpo));
+
+  const habilidades = reqRes({ id: String(personagem.id) }, {});
+  await characterController.getPoderesDisponiveis(habilidades.req, habilidades.res);
+  const { statusCode, corpo } = habilidades.resultado();
+  assert.equal(statusCode, 200);
+
+  const entrada = corpo.data.poderes.find((p) => p.id_power === power.id);
+  assert.ok(entrada, "poder concedido pela evolução de classe devia aparecer em GET .../powers");
+  assert.equal(entrada.origem, "evolucao");
+  assert.equal(entrada.aprendido, true);
+
+  // Sem isso, o teste deixa um Character apontando (id_evolucao_classe)
+  // pro caminho criado aqui — o cleanup global (test.after) tenta
+  // apagar os caminhos de classesCriadas direto e estoura FK. Apagar o
+  // personagem primeiro é suficiente (CASCADE cuida de
+  // CharacterClassEvolution).
+  await personagem.destroy();
+  await User.destroy({ where: { id: personagem.id_usuario } });
+});
+
+testeComBanco("excluirCaminho force=true desfaz a evolução do personagem (histórico + poder concedido) antes de excluir", async () => {
+  const classe = await criarClasseTeste();
+  const caminho = await adminClassService.criarCaminho(classe.id, { slug: `force-del-${sufixoSlug()}`, nome: "Caminho de Teste", descricao: "x", estagio: 1 }, ctx);
+  const power = await criarPowerTeste();
+  await adminClassService.criarHabilidade(caminho.id, { id_power: power.id }, ctx);
+
+  const { personagem } = await criarPersonagem({ nivel: 40 });
+  await Character.update({ id_classe: classe.id, dinheiro: 1000 }, { where: { id: personagem.id } });
+  const evolucao = reqRes({ id: String(personagem.id) }, { id_caminho: caminho.id });
+  await characterController.evolveClass(evolucao.req, evolucao.res);
+  assert.equal(evolucao.resultado().statusCode, 200);
+
+  // Sem force, continua bloqueado (comportamento original preservado).
+  await assert.rejects(
+    () => adminClassService.excluirCaminho(caminho.id, ctx),
+    (err) => err.statusCode === 409,
+  );
+
+  const resultado = await adminClassService.excluirCaminho(caminho.id, { ...ctx, force: true });
+  assert.equal(resultado.personagensDesvinculados, 1);
+  assert.equal(await ClassEvolutionPath.findByPk(caminho.id), null);
+
+  const evolucaoRestante = await CharacterClassEvolution.findOne({ where: { id_personagem: personagem.id } });
+  assert.equal(evolucaoRestante, null, "histórico de evolução do personagem devia ter sido removido");
+
+  const personagemAtualizado = await Character.findByPk(personagem.id);
+  assert.equal(personagemAtualizado.id_evolucao_classe, null, "ponteiro legado devia ter sido limpo");
+
+  const habilidade = await CharacterAbilities.findOne({ where: { id_personagem: personagem.id, id_power: power.id } });
+  assert.equal(habilidade, null, "poder concedido só por essa evolução devia ter sido removido junto");
+
+  await personagem.destroy();
+  await User.destroy({ where: { id: personagem.id_usuario } });
 });
 
 testeComBanco("validarIntegridade: roda sem quebrar e sinaliza classe sem papel/slug", async () => {

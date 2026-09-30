@@ -45,6 +45,11 @@ const GuildBossAbility = require("../models/GuildBossAbility");
 const GuildLog = require("../models/GuildLog");
 const { aplicarAcao } = require("../services/duelEngine");
 const { custoManaEfetivo } = require("../services/combatFormulas");
+// Cooldown real de Powers dentro da luta ao vivo — MESMO motor que o
+// Boss Mundial usa (worldBossCombatService.js) e o combate solo da
+// Aventura (combatController.js), nunca um paralelo: "cooldown 3"
+// bloqueia exatamente os 3 PRÓXIMOS turnos DESTE ator (não da rodada
+// inteira), documentado em cooldownService.js.
 const cooldownService = require("../services/cooldownService");
 const { habilidadesElegiveis, escolherHabilidade } = require("../services/bossAbilityAiService");
 const { atacarBossAoVivo, expirarSeNecessario, tempoRestanteCooldown } = require("../services/guildBossService");
@@ -117,6 +122,35 @@ function removerDaLobby(io, characterId) {
   } else {
     emitirLobbyAtualizada(io, lobby);
   }
+}
+
+// Duas funções PURAS (sem I/O, testadas isoladamente em
+// test/guildBossCooldown.test.js) que envelopam cooldownService pro
+// formato desta batalha — `atacante.cooldowns` é o MESMO formato
+// `{ "power:<id>": turnosRestantes }` de sessao.state.cooldowns no Boss
+// Mundial (worldBossCombatService.executarAcao) e de cooldowns.player
+// no combate solo (combatController.js).
+function podeUsarPoderNaBatalha(atacante, power) {
+  return cooldownService.podeUsar(atacante.cooldowns ?? {}, power.id);
+}
+
+// Chamada UMA VEZ por turno do ator, depois que a ação JÁ foi validada
+// (Mana/turno/cooldown) e resolvida contra o chefe — nunca antes disso
+// (mesmo contrato de cooldownService.iniciarCooldown). Ataque básico só
+// decrementa os cooldowns já ativos de turnos anteriores; Power inicia
+// o próprio cooldown e decrementa os DEMAIS, exatamente como
+// worldBossCombatService/combatController fazem (`chaveRecemAplicada`
+// nunca decrementa no turno em que foi usada).
+function registrarUsoDePoder(atacante, acao) {
+  const atuais = atacante.cooldowns ?? {};
+  if (acao.tipo !== "power") {
+    atacante.cooldowns = cooldownService.decrementarCooldowns(atuais);
+    return;
+  }
+  const comCooldownIniciado =
+    acao.power.cooldown > 0 ? cooldownService.iniciarCooldown(atuais, acao.power.id, acao.power.cooldown) : atuais;
+  const chaveRecemAplicada = new Set([cooldownService.chaveDoPoder(acao.power.id)]);
+  atacante.cooldowns = cooldownService.decrementarCooldowns(comCooldownIniciado, chaveRecemAplicada);
 }
 
 async function tentativaAtivaDaGuild(idGuild) {
@@ -250,6 +284,9 @@ module.exports = function registerGuildBossHandlers(io) {
         if (membros.some((m) => !m)) {
           return socket.emit("guildboss:erro", { mensagem: "Não foi possível carregar todos os personagens da sala." });
         }
+        // Cooldown de Powers por ATOR (não por batalha) — cada membro
+        // entra com o mapa vazio, igual toda sessão nova do Boss Mundial.
+        for (const membro of membros) membro.cooldowns = {};
 
         const battleId = proximaBatalhaId++;
         const sala = salaBatalha(battleId);
@@ -359,6 +396,10 @@ module.exports = function registerGuildBossHandlers(io) {
         if (custoManaEfetivo(power, power.nivel_habilidade ?? 1) > atacante.estado.mana_atual) {
           return socket.emit("guildboss:erro", { mensagem: "Mana insuficiente para esse poder." });
         }
+        if (!podeUsarPoderNaBatalha(atacante, power)) {
+          const restante = cooldownService.turnosRestantes(atacante.cooldowns ?? {}, power.id);
+          return socket.emit("guildboss:erro", { mensagem: `Essa habilidade ainda está em cooldown (${restante} turno(s)).` });
+        }
         acao = { tipo: "power", power };
       } else if (tipo !== "attack") {
         return socket.emit("guildboss:erro", { mensagem: "Ação inválida — consumíveis não podem ser usados contra o Boss da Guilda." });
@@ -408,15 +449,6 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
   try {
     const atacante = batalha.membros.get(characterId);
 
-    // Cooldown do Power usado ENTRA já neste turno (mesma semântica de
-    // cooldownService.js/combatController.js — "não decrementa no
-    // próprio turno em que foi aplicado"); o decremento de todos os
-    // outros cooldowns ativos deste ator só acontece no fim do turno,
-    // logo abaixo.
-    if (acao.tipo === "power") {
-      atacante.cooldowns = cooldownService.iniciarCooldown(atacante.cooldowns, acao.power.id, acao.power.cooldown);
-    }
-
     const chefeEstado = { defesa: batalha.defesaChefe, agilidade: 0, vida_atual: batalha.vidaRestante };
     const { nomeAcao, dano, cura, manaCurada, esquivou } = aplicarAcao({
       atacante: atacante.estado,
@@ -426,8 +458,13 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
       manaMaxAtacante: atacante.manaMax,
     });
 
-    const chaveAplicadaAgora = acao.tipo === "power" ? new Set([cooldownService.chaveDoPoder(acao.power.id)]) : new Set();
-    atacante.cooldowns = cooldownService.decrementarCooldowns(atacante.cooldowns, chaveAplicadaAgora);
+    // Fim do "turno" deste ator (§ mesma semântica do Boss Mundial):
+    // ação já validada/consumida acima (Mana/turno/cooldown checados
+    // antes de chegar aqui) — Power recém-usado inicia o próprio
+    // cooldown, e TODOS os cooldowns ativos do ator decrementam agora,
+    // dano ou não (esquiva também consome o cooldown, igual em
+    // worldBossCombatService/combatController).
+    registrarUsoDePoder(atacante, acao);
 
     let vidaRestanteAtual = batalha.vidaRestante;
     let derrotado = false;
@@ -457,6 +494,11 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
       manaAliado: atacante.estado.mana_atual,
       cooldownsAtacante: cooldownsPublicos(atacante.cooldowns),
       rodada: batalha.rodada,
+      // Cooldowns ATUAIS do próprio ator (formato "power:<id>" ->
+      // turnos restantes, igual ao Boss Mundial) — só quem agiu
+      // interessa aqui; o frontend usa isto pra desenhar a mesma
+      // barra/badge de cooldown que WorldBossArena.tsx já desenha.
+      cooldowns: atacante.cooldowns ?? {},
     });
 
     if (derrotado || batalha.vidaRestante <= 0) {
@@ -708,3 +750,8 @@ function finalizarBatalha(io, battleId, vitoria, recompensas, motivo = vitoria ?
     io.sockets.sockets.get(socketId)?.leave(batalha.sala);
   }
 }
+
+// Exportadas só pra teste unitário puro (test/guildBossCooldown.test.js)
+// — nunca chamadas de fora deste arquivo em produção.
+module.exports.podeUsarPoderNaBatalha = podeUsarPoderNaBatalha;
+module.exports.registrarUsoDePoder = registrarUsoDePoder;

@@ -396,7 +396,10 @@ module.exports = function registerPartyHandlers(io) {
         }
         const monstrosDaZona = await AdventureZoneMonster.findAll({
           where: { id_area: zona.id, ativo: true },
-          include: [{ model: AdventureMonster, as: "monstro" }],
+          // Mesmo fix de combatController.js — ativo:true só no vínculo
+          // não impede um monstro DESATIVADO globalmente de continuar
+          // sendo sorteado pra batalha em grupo.
+          include: [{ model: AdventureMonster, as: "monstro", where: { ativo: true }, required: true }],
         });
         if (monstrosDaZona.length === 0) {
           return socket.emit("party:erro", { mensagem: "Área de Caça sem monstros configurados." });

@@ -858,12 +858,18 @@ exports.getPoderesDisponiveis = async (req, res) => {
       ...poderesClasse.map((linha) => linha.id_poder),
       ...poderesRaca.map((linha) => linha.id_power),
     ]);
+    // Qualquer poder já aprendido (CharacterAbilities) que não veio de
+    // ClassAbilities/RaceAbilities entra aqui — não só Legado Único
+    // (UNIQUE_FEAT). Sem isso, poder concedido por Evolução de Classe
+    // (ClassEvolutionAbility) ou por Evolução de Natureza Mágica
+    // (Evolution.id_power_concedido) ficava gravado certinho em
+    // CharacterAbilities mas NUNCA aparecia na aba Habilidades — o
+    // jogador via a evolução dizer "concede tal poder" e o poder
+    // simplesmente não existia pra ele na prática.
     const idsAprendidos = aprendidos.map((linha) => linha.id_power);
-    const poderesLegado =
+    const poderesExtras =
       idsAprendidos.length > 0
-        ? await Power.findAll({
-            where: { id: idsAprendidos, acquisition_scope: "UNIQUE_FEAT" },
-          })
+        ? await Power.findAll({ where: { id: idsAprendidos } })
         : [];
 
     const poderes = [
@@ -873,9 +879,11 @@ exports.getPoderesDisponiveis = async (req, res) => {
       ...poderesRaca.map((linha) =>
         montarEntrada(linha.Power, linha.nivel_aprendizado, "raca", linha.custo_ouro),
       ),
-      ...poderesLegado
+      ...poderesExtras
         .filter((poder) => !idsJaListados.has(poder.id))
-        .map((poder) => montarEntrada(poder, null, "legado", null)),
+        .map((poder) =>
+          montarEntrada(poder, null, poder.acquisition_scope === "UNIQUE_FEAT" ? "legado" : "evolucao", null),
+        ),
     ];
 
     res.status(200).json({

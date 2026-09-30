@@ -239,7 +239,11 @@ testeComBanco("mercado admin: listAdminMarketTransactions filtra por item/vended
   const porVendedor = await adminMarketService.listAdminMarketTransactions({ vendedorId: vendedor.id });
   assert.equal(porVendedor.total, 1);
   assert.equal(porVendedor.itens[0].comprador.nome, comprador.nome);
+  // Bug reportado: a taxa por linha já era gravada certinho, mas o
+  // admin não tinha como ver o total arrecadado — só linha por linha.
+  assert.equal(porVendedor.taxaTotal, 3, "taxaTotal precisa somar a taxa de todas as vendas do filtro atual");
 
   const porComprador = await adminMarketService.listAdminMarketTransactions({ compradorId: comprador.id });
   assert.equal(porComprador.total, 1);
+  assert.equal(porComprador.taxaTotal, 3);
 });

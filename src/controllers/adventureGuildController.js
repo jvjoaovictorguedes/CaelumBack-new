@@ -8,6 +8,7 @@ const {
   aceitarOferta,
   entregarItens,
   resgatarRecompensaContrato,
+  abandonarContrato,
   listarContratosAtivos,
   buscarStatusPorOferta,
   expirarContratosVencidos,
@@ -244,6 +245,21 @@ exports.resgatarContrato = async (req, res) => {
   } catch (error) {
     const statusCode = error.statusCode || 500;
     if (statusCode === 500) console.error("Erro ao resgatar contrato:", error);
+    res.status(statusCode).json({ message: error.statusCode ? error.message : "Erro interno do servidor." });
+  }
+};
+
+// POST /api/adventure-guild/contracts/:contractId/abandon
+exports.abandonarContratoDeRank = async (req, res) => {
+  try {
+    const idPersonagem = req.personagemAtual.id;
+    await sequelize.transaction((transaction) =>
+      abandonarContrato(idPersonagem, Number.parseInt(req.params.contractId, 10), transaction),
+    );
+    res.status(200).json({ status: "success" });
+  } catch (error) {
+    const statusCode = error.statusCode || 500;
+    if (statusCode === 500) console.error("Erro ao abandonar contrato de Rank:", error);
     res.status(statusCode).json({ message: error.statusCode ? error.message : "Erro interno do servidor." });
   }
 };

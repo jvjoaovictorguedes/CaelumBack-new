@@ -55,7 +55,8 @@ exports.atualizarCaminho = async (req, res) => {
 
 exports.excluirCaminho = async (req, res) => {
   try {
-    const resultado = await adminClassService.excluirCaminho(req.params.id, { idAdmin: req.user.id, req });
+    const force = req.query.force === "true" || req.body?.force === true;
+    const resultado = await adminClassService.excluirCaminho(req.params.id, { idAdmin: req.user.id, req, force });
     res.status(200).json({ status: "success", data: resultado });
   } catch (error) {
     tratarErro(res, error, "Erro interno do servidor ao excluir caminho de evolução.");

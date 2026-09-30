@@ -37,6 +37,20 @@ function foiEnviado(dados, campo) {
   return Object.prototype.hasOwnProperty.call(dados, campo);
 }
 
+// Mesmo padrão de adminClassService.comTraducaoDeFk — traduz uma violação
+// de FK (Postgres bloqueando a exclusão porque outra tabela ainda
+// referencia a linha) numa mensagem legível, em vez do erro cru do banco.
+async function comTraducaoDeFk(fn, mensagemConflito) {
+  try {
+    return await fn();
+  } catch (e) {
+    if (e.name === "SequelizeForeignKeyConstraintError") {
+      throw erro(mensagemConflito, 409);
+    }
+    throw e;
+  }
+}
+
 // Valor final que vai ser persistido pra um campo, considerando PATCH
 // parcial: usa o que veio no payload quando enviado, senão cai pro
 // valor atualmente salvo (`atual` é a instância/registro do banco).
@@ -278,6 +292,41 @@ async function duplicateAdminMonster(id, { idAdmin, req }) {
   });
 }
 
+// Exclusão de verdade (não é o "ativo:false" do toggle "Desativar") — só
+// possível quando nada de histórico real referencia esse monstro (Caçadas
+// da Guilda dos Aventureiros, contrato de Caçador, etc: CharacterAdventureHunt/
+// CharacterHunterProgress têm FK pra AdventureMonsters). Nesses casos o
+// Postgres recusa com FK violation, e a gente traduz isso numa mensagem
+// pedindo pra desativar em vez de excluir (mesmo padrão de
+// adminClassService.excluirCaminho). Drop/vínculo de zona são CONFIGURAÇÃO
+// própria do monstro (não histórico de ninguém) — sempre apagados junto,
+// nunca bloqueiam a exclusão.
+async function deleteAdminMonster(id, { idAdmin, req }) {
+  return sequelize.transaction(async (transaction) => {
+    const monstro = await AdventureMonster.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!monstro) throw erro("Monstro não encontrado.", 404);
+
+    const antes = monstro.toJSON();
+    await AdventureMonsterLoot.destroy({ where: { id_monstro: id }, transaction });
+    await AdventureZoneMonster.destroy({ where: { id_monstro: id }, transaction });
+    await comTraducaoDeFk(
+      () => monstro.destroy({ transaction }),
+      "Esse monstro não pode ser excluído: já existe histórico de jogador vinculado a ele (Caçada, contrato de Caçador etc.). Desative-o em vez de excluir.",
+    );
+
+    await registrarAcao({
+      idAdmin,
+      acao: "excluir",
+      entidade: "AdventureMonster",
+      idEntidade: Number(id),
+      dadosAntes: antes,
+      req,
+      transaction,
+    });
+    return { id: Number(id) };
+  });
+}
+
 // ------------------------------------------------------------ APARIÇÕES
 // Reformulação V2 (§4/§9.4) — o vínculo diz só ONDE o monstro aparece
 // e com que frequência/tipo; nivel_min_override/nivel_max_override
@@ -500,6 +549,33 @@ async function updateAdminMonsterLoot(id, payload, { idAdmin, req }) {
   });
 }
 
+// Exclusão de verdade de um drop — diferente do "ativo:false" que o
+// sincronizarLootMonstro grava quando uma linha some do payload de Salvar
+// (isso é só "pausar", pra poder reativar depois sem perder chance/
+// quantidade configuradas). Nada no banco referencia uma linha de
+// AdventureMonsterLoot (é folha), então sempre é seguro apagar de vez —
+// sem o mesmo risco de excluir um Monstro (que pode ter histórico de
+// Caçada/Caçador vinculado).
+async function deleteAdminMonsterLoot(id, { idAdmin, req }) {
+  return sequelize.transaction(async (transaction) => {
+    const loot = await AdventureMonsterLoot.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!loot) throw erro("Drop não encontrado.", 404);
+
+    const antes = loot.toJSON();
+    await loot.destroy({ transaction });
+    await registrarAcao({
+      idAdmin,
+      acao: "excluir",
+      entidade: "AdventureMonsterLoot",
+      idEntidade: Number(id),
+      dadosAntes: antes,
+      req,
+      transaction,
+    });
+    return { id: Number(id) };
+  });
+}
+
 // Só leitura, pro Simulador de Balanceamento (modo "expedicao") montar
 // o dropdown de região sem duplicar o catálogo que expeditionController
 // já expõe pro jogador comum — nenhuma tabela/rota de escrita nova.
@@ -561,8 +637,16 @@ async function sincronizarRosterZona(idZona, monstrosPayload, { idAdmin, req }) 
       if (linha) await linha.update(dados, { transaction });
       else await AdventureZoneMonster.create({ id_area: idZona, id_monstro: m.id_monstro, ...dados }, { transaction });
     }
-    for (const linha of linhasAtuais) {
-      if (!idsNoPayload.has(linha.id_monstro) && linha.ativo) await linha.update({ ativo: false }, { transaction });
+    // Bug reportado: tirar um monstro da lista local (botão "Remover" do
+    // ZoneEditor) e salvar só marcava `ativo:false` — como a listagem de
+    // edição (listAdminZoneMonsters/GET aparições) devolve TODAS as
+    // linhas, o monstro "removido" voltava a aparecer (desativado) toda
+    // vez que o admin reabria a zona, e nunca saía de verdade do
+    // roster. Uma linha ausente do payload é intenção explícita de
+    // remoção — apaga de verdade, não só desativa.
+    const idsParaRemover = linhasAtuais.filter((linha) => !idsNoPayload.has(linha.id_monstro)).map((linha) => linha.id);
+    if (idsParaRemover.length) {
+      await AdventureZoneMonster.destroy({ where: { id: idsParaRemover }, transaction });
     }
 
     const depois = await AdventureZoneMonster.findAll({
@@ -636,8 +720,17 @@ async function sincronizarLootMonstro(idMonstro, lootPayload, { idAdmin, req }) 
         idsMantidos.add(nova.id);
       }
     }
-    for (const linha of linhasAtuais) {
-      if (!idsMantidos.has(linha.id) && linha.ativo) await linha.update({ ativo: false }, { transaction });
+    // Mesmo bug do roster de zona (sincronizarRosterZona): uma linha
+    // ausente do payload só virava ativo:false — como a listagem de
+    // edição devolve toda linha, o drop "removido" no MonsterEditor
+    // reaparecia (desmarcado) sempre que o admin reabria o monstro,
+    // dando a impressão de que "Remover" não salvava nada. Nada
+    // referencia uma linha de AdventureMonsterLoot (é folha — mesmo
+    // raciocínio de deleteAdminMonsterLoot acima), então é seguro apagar
+    // de vez em vez de só desativar.
+    const idsParaRemover = linhasAtuais.filter((linha) => !idsMantidos.has(linha.id)).map((linha) => linha.id);
+    if (idsParaRemover.length) {
+      await AdventureMonsterLoot.destroy({ where: { id: idsParaRemover }, transaction });
     }
 
     const depois = await AdventureMonsterLoot.findAll({
@@ -704,12 +797,14 @@ module.exports = {
   createAdminMonster,
   updateAdminMonster,
   duplicateAdminMonster,
+  deleteAdminMonster,
   listAdminZoneMonsters,
   createAdminZoneMonster,
   updateAdminZoneMonster,
   listAdminMonsterLoot,
   createAdminMonsterLoot,
   updateAdminMonsterLoot,
+  deleteAdminMonsterLoot,
   listExpeditionRegions,
   sincronizarRosterZona,
   sincronizarLootMonstro,

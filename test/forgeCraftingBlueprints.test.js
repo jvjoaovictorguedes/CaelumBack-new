@@ -29,7 +29,7 @@ function testeComBanco(nome, fn) {
 testeComBanco("listarResumoPorCategoria: contagem bate com listarBlueprints sem filtro", async () => {
   const { personagem } = await criarPersonagem();
   const [resumo, tudo] = await Promise.all([
-    forgeCraftingService.listarResumoPorCategoria(),
+    forgeCraftingService.listarResumoPorCategoria(personagem.id),
     forgeCraftingService.listarBlueprints(personagem.id),
   ]);
 
@@ -44,7 +44,7 @@ testeComBanco("listarResumoPorCategoria: contagem bate com listarBlueprints sem 
 
 testeComBanco("listarBlueprints(categoria): só devolve blueprints daquela categoria", async () => {
   const { personagem } = await criarPersonagem();
-  const resumo = await forgeCraftingService.listarResumoPorCategoria();
+  const resumo = await forgeCraftingService.listarResumoPorCategoria(personagem.id);
   if (resumo.length === 0) return; // catálogo vazio nesse ambiente — nada a verificar
 
   const { categoria_equipamento: categoria, total } = resumo[0];
@@ -56,7 +56,7 @@ testeComBanco("listarBlueprints(categoria): só devolve blueprints daquela categ
 
 testeComBanco("listarBlueprints(categoria): dados de cada blueprint batem com a listagem sem filtro", async () => {
   const { personagem } = await criarPersonagem();
-  const resumo = await forgeCraftingService.listarResumoPorCategoria();
+  const resumo = await forgeCraftingService.listarResumoPorCategoria(personagem.id);
   if (resumo.length === 0) return;
 
   const categoria = resumo[0].categoria_equipamento;

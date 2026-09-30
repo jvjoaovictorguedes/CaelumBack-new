@@ -43,7 +43,9 @@ async function listarZonas(nivelPersonagem) {
 async function monstrosDaZona(idArea, transaction) {
   const vinculos = await AdventureZoneMonster.findAll({
     where: { id_area: idArea, ativo: true },
-    include: [{ model: AdventureMonster, as: "monstro" }],
+    // Mesmo fix de combatController.js — não lista monstro desativado
+    // globalmente no progresso do Bestiário da zona.
+    include: [{ model: AdventureMonster, as: "monstro", where: { ativo: true }, required: true }],
     transaction,
   });
   return vinculos.map((v) => ({ nome: v.monstro.nome, tipo_aparicao: v.tipo_aparicao }));

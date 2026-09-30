@@ -185,6 +185,26 @@ async function resgatarRecompensaContrato(idPersonagem, idContrato, transaction)
   return { dinheiro, xp, nivel: resultadoXP?.nivel ?? character.nivel, itens: itensConcedidos };
 }
 
+// Abandonar um contrato Ativo — libera a vaga (limite de
+// CONTRATOS_ATIVOS_MAX) sem esperar expirar. Reaproveita o status
+// "Falhou" do ENUM (só usado até aqui pela Provação) em vez de criar
+// um novo valor: contrato normal abandonado nunca conta pra
+// "CompletarContratosGuilda" nem concede nada, exatamente como Falhou.
+async function abandonarContrato(idPersonagem, idContrato, transaction) {
+  const contrato = await CharacterAdventureGuildContract.findOne({
+    where: { id: idContrato, id_personagem: idPersonagem, eh_provacao: false },
+    transaction,
+    lock: transaction.LOCK.UPDATE,
+  });
+  if (!contrato) throw erroGuilda(404, "Contrato não encontrado.");
+  if (contrato.status !== "Ativo") throw erroGuilda(400, "Só é possível abandonar um contrato ativo.");
+
+  contrato.status = "Falhou";
+  await contrato.save({ transaction });
+
+  return contrato;
+}
+
 // Bug reportado: depois de resgatar a recompensa (status "Resgatado"),
 // a oferta correspondente voltava a aparecer com "Aceitar" disponível —
 // listarContratosAtivos (usada pra montar ja_aceita) só enxerga
@@ -251,6 +271,7 @@ module.exports = {
   aceitarOferta,
   entregarItens,
   resgatarRecompensaContrato,
+  abandonarContrato,
   listarContratosAtivos,
   buscarStatusPorOferta,
   expirarContratosVencidos,

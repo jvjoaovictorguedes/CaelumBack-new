@@ -106,7 +106,15 @@ testeComBanco("sincronizarRosterZona: cria vínculos novos", async () => {
   assert.equal(vinculos.length, 2);
 });
 
-testeComBanco("sincronizarRosterZona: atualiza vínculo existente e desativa o que sumiu do payload", async () => {
+testeComBanco("sincronizarRosterZona: atualiza vínculo existente e DELETA o que sumiu do payload", async () => {
+  // Bug reportado pelo usuário: tirar um monstro da lista no ZoneEditor
+  // (botão "Remover") e salvar não tirava o monstro da zona — a
+  // sincronização só desativava o vínculo, e como a listagem de edição
+  // devolve toda linha (ativa ou não), o monstro "removido" reaparecia
+  // (desmarcado) na próxima vez que o admin abria a zona. A intenção de
+  // "Remover" é mesmo tirar o monstro da zona, não deletar a espécie
+  // (AdventureMonster) nem só escondê-lo — uma linha ausente do payload
+  // precisa sumir de verdade.
   const zona = await criarZonaDeTeste();
   const m1 = await criarMonstroDeTeste();
   const m2 = await criarMonstroDeTeste();
@@ -121,7 +129,7 @@ testeComBanco("sincronizarRosterZona: atualiza vínculo existente e desativa o q
   );
 
   // Segunda sincronização: m1 muda de peso, m2 sai do payload — precisa
-  // virar ativo=false, NUNCA ser deletado (§2.4 passo 5).
+  // ser removido da zona de verdade.
   await adminAdventureService.sincronizarRosterZona(
     zona.id,
     [{ id_monstro: m1.id, peso_aparicao: 999, tipo_aparicao: "Raro" }],
@@ -134,23 +142,25 @@ testeComBanco("sincronizarRosterZona: atualiza vínculo existente e desativa o q
   assert.equal(linhaM1.ativo, true);
 
   const linhaM2 = await AdventureZoneMonster.findOne({ where: { id_area: zona.id, id_monstro: m2.id } });
-  assert.ok(linhaM2, "vínculo do m2 não pode ser deletado, só desativado");
-  assert.equal(linhaM2.ativo, false);
+  assert.equal(linhaM2, null, "vínculo do m2 precisa ser removido da zona, não só desativado");
+
+  // A espécie em si (AdventureMonster) nunca é tocada por essa sincronização.
+  assert.ok(await AdventureMonster.findByPk(m2.id), "remover da zona não pode apagar a espécie de monstro");
 });
 
-testeComBanco("sincronizarRosterZona: readicionar monstro previamente inativo REATIVA a linha existente (não cria segunda)", async () => {
+testeComBanco("sincronizarRosterZona: readicionar monstro removido cria um vínculo novo (o antigo já foi deletado)", async () => {
   const zona = await criarZonaDeTeste();
   const m1 = await criarMonstroDeTeste();
 
   await adminAdventureService.sincronizarRosterZona(zona.id, [{ id_monstro: m1.id, peso_aparicao: 100 }], ADMIN_FAKE);
-  await adminAdventureService.sincronizarRosterZona(zona.id, [], ADMIN_FAKE); // desativa
-  const inativo = await AdventureZoneMonster.findOne({ where: { id_area: zona.id, id_monstro: m1.id } });
-  assert.equal(inativo.ativo, false);
+  await adminAdventureService.sincronizarRosterZona(zona.id, [], ADMIN_FAKE); // remove da zona
+  const removido = await AdventureZoneMonster.findOne({ where: { id_area: zona.id, id_monstro: m1.id } });
+  assert.equal(removido, null);
 
   await adminAdventureService.sincronizarRosterZona(zona.id, [{ id_monstro: m1.id, peso_aparicao: 200 }], ADMIN_FAKE);
 
   const linhas = await AdventureZoneMonster.findAll({ where: { id_area: zona.id, id_monstro: m1.id } });
-  assert.equal(linhas.length, 1, "readicionar precisa reaproveitar a linha existente, não criar outra (unique constraint)");
+  assert.equal(linhas.length, 1, "readicionar precisa criar um vínculo novo, já que o anterior foi removido");
   assert.equal(linhas[0].ativo, true);
   assert.equal(linhas[0].peso_aparicao, 200);
 });
@@ -209,7 +219,12 @@ testeComBanco("sincronizarLootMonstro: cria drops novos", async () => {
   assert.equal(loot.length, 2);
 });
 
-testeComBanco("sincronizarLootMonstro: atualiza por id e desativa ausente do payload (nunca deleta)", async () => {
+testeComBanco("sincronizarLootMonstro: atualiza por id e DELETA drop ausente do payload", async () => {
+  // Mesmo bug do roster de zona: "Remover" no MonsterEditor tirava a
+  // linha da lista local, mas salvar só marcava ativo:false — o drop
+  // "removido" reaparecia (desmarcado) toda vez que o admin reabria o
+  // monstro. Nada referencia uma linha de AdventureMonsterLoot (é
+  // folha), então remover do payload agora apaga de vez.
   const monstro = await criarMonstroDeTeste();
   const item1 = await criarItemDeTeste();
   const item2 = await criarItemDeTeste();
@@ -235,9 +250,7 @@ testeComBanco("sincronizarLootMonstro: atualiza por id e desativa ausente do pay
   assert.equal(linha1.ativo, true);
 
   const todasAsLinhas = await AdventureMonsterLoot.findAll({ where: { id_monstro: monstro.id } });
-  assert.equal(todasAsLinhas.length, 2, "linha do item2 não pode ser deletada");
-  const linha2 = todasAsLinhas.find((l) => l.id_item === item2.id);
-  assert.equal(linha2.ativo, false);
+  assert.equal(todasAsLinhas.length, 1, "drop do item2 precisa ser removido do monstro, não só desativado");
 });
 
 testeComBanco("sincronizarLootMonstro: chance_ppm fora de 1..1.000.000 é rejeitado sem write parcial", async () => {

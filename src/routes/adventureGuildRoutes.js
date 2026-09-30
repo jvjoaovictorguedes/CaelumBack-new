@@ -20,6 +20,7 @@ router.get("/rank", controller.obterQuadroDeRank);
 router.post("/rank/offers/:offerId/accept", controller.aceitarOfertaDeRank);
 router.post("/contracts/:contractId/deliver", controller.entregarItensDoContrato);
 router.post("/contracts/:contractId/claim", controller.resgatarContrato);
+router.post("/contracts/:contractId/abandon", controller.abandonarContratoDeRank);
 
 router.get("/trial", controller.obterProvacao);
 router.post("/trial/start", controller.iniciarProvacaoDoRank);

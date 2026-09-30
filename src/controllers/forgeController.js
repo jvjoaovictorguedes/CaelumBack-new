@@ -76,7 +76,7 @@ exports.getBlueprints = async (req, res) => {
 // seção ainda FECHADOS antes do jogador pedir os dados completos.
 exports.getBlueprintsSummary = async (req, res) => {
   try {
-    const resumo = await forgeCraftingService.listarResumoPorCategoria();
+    const resumo = await forgeCraftingService.listarResumoPorCategoria(req.personagemAtual.id);
     res.status(200).json({ status: "success", data: { categorias: resumo } });
   } catch (error) {
     tratarErro(res, error, "Erro interno do servidor ao buscar resumo de blueprints.");
