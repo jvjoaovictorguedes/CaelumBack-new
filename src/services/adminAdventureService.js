@@ -37,6 +37,20 @@ function foiEnviado(dados, campo) {
   return Object.prototype.hasOwnProperty.call(dados, campo);
 }
 
+// Mesmo padrão de adminClassService.comTraducaoDeFk — traduz uma violação
+// de FK (Postgres bloqueando a exclusão porque outra tabela ainda
+// referencia a linha) numa mensagem legível, em vez do erro cru do banco.
+async function comTraducaoDeFk(fn, mensagemConflito) {
+  try {
+    return await fn();
+  } catch (e) {
+    if (e.name === "SequelizeForeignKeyConstraintError") {
+      throw erro(mensagemConflito, 409);
+    }
+    throw e;
+  }
+}
+
 // Valor final que vai ser persistido pra um campo, considerando PATCH
 // parcial: usa o que veio no payload quando enviado, senão cai pro
 // valor atualmente salvo (`atual` é a instância/registro do banco).
@@ -278,6 +292,41 @@ async function duplicateAdminMonster(id, { idAdmin, req }) {
   });
 }
 
+// Exclusão de verdade (não é o "ativo:false" do toggle "Desativar") — só
+// possível quando nada de histórico real referencia esse monstro (Caçadas
+// da Guilda dos Aventureiros, contrato de Caçador, etc: CharacterAdventureHunt/
+// CharacterHunterProgress têm FK pra AdventureMonsters). Nesses casos o
+// Postgres recusa com FK violation, e a gente traduz isso numa mensagem
+// pedindo pra desativar em vez de excluir (mesmo padrão de
+// adminClassService.excluirCaminho). Drop/vínculo de zona são CONFIGURAÇÃO
+// própria do monstro (não histórico de ninguém) — sempre apagados junto,
+// nunca bloqueiam a exclusão.
+async function deleteAdminMonster(id, { idAdmin, req }) {
+  return sequelize.transaction(async (transaction) => {
+    const monstro = await AdventureMonster.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!monstro) throw erro("Monstro não encontrado.", 404);
+
+    const antes = monstro.toJSON();
+    await AdventureMonsterLoot.destroy({ where: { id_monstro: id }, transaction });
+    await AdventureZoneMonster.destroy({ where: { id_monstro: id }, transaction });
+    await comTraducaoDeFk(
+      () => monstro.destroy({ transaction }),
+      "Esse monstro não pode ser excluído: já existe histórico de jogador vinculado a ele (Caçada, contrato de Caçador etc.). Desative-o em vez de excluir.",
+    );
+
+    await registrarAcao({
+      idAdmin,
+      acao: "excluir",
+      entidade: "AdventureMonster",
+      idEntidade: Number(id),
+      dadosAntes: antes,
+      req,
+      transaction,
+    });
+    return { id: Number(id) };
+  });
+}
+
 // ------------------------------------------------------------ APARIÇÕES
 // Reformulação V2 (§4/§9.4) — o vínculo diz só ONDE o monstro aparece
 // e com que frequência/tipo; nivel_min_override/nivel_max_override
@@ -500,6 +549,33 @@ async function updateAdminMonsterLoot(id, payload, { idAdmin, req }) {
   });
 }
 
+// Exclusão de verdade de um drop — diferente do "ativo:false" que o
+// sincronizarLootMonstro grava quando uma linha some do payload de Salvar
+// (isso é só "pausar", pra poder reativar depois sem perder chance/
+// quantidade configuradas). Nada no banco referencia uma linha de
+// AdventureMonsterLoot (é folha), então sempre é seguro apagar de vez —
+// sem o mesmo risco de excluir um Monstro (que pode ter histórico de
+// Caçada/Caçador vinculado).
+async function deleteAdminMonsterLoot(id, { idAdmin, req }) {
+  return sequelize.transaction(async (transaction) => {
+    const loot = await AdventureMonsterLoot.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!loot) throw erro("Drop não encontrado.", 404);
+
+    const antes = loot.toJSON();
+    await loot.destroy({ transaction });
+    await registrarAcao({
+      idAdmin,
+      acao: "excluir",
+      entidade: "AdventureMonsterLoot",
+      idEntidade: Number(id),
+      dadosAntes: antes,
+      req,
+      transaction,
+    });
+    return { id: Number(id) };
+  });
+}
+
 // Só leitura, pro Simulador de Balanceamento (modo "expedicao") montar
 // o dropdown de região sem duplicar o catálogo que expeditionController
 // já expõe pro jogador comum — nenhuma tabela/rota de escrita nova.
@@ -704,12 +780,14 @@ module.exports = {
   createAdminMonster,
   updateAdminMonster,
   duplicateAdminMonster,
+  deleteAdminMonster,
   listAdminZoneMonsters,
   createAdminZoneMonster,
   updateAdminZoneMonster,
   listAdminMonsterLoot,
   createAdminMonsterLoot,
   updateAdminMonsterLoot,
+  deleteAdminMonsterLoot,
   listExpeditionRegions,
   sincronizarRosterZona,
   sincronizarLootMonstro,

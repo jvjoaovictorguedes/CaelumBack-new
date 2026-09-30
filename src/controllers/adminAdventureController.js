@@ -83,6 +83,18 @@ exports.duplicarMonstro = async (req, res) => {
   }
 };
 
+exports.excluirMonstro = async (req, res) => {
+  try {
+    const resultado = await adminAdventureService.deleteAdminMonster(req.params.id, {
+      idAdmin: req.user.id,
+      req,
+    });
+    res.status(200).json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao excluir monstro.");
+  }
+};
+
 // Aparições (zona <-> monstro)
 exports.listarAparicoes = async (req, res) => {
   try {
@@ -155,6 +167,18 @@ exports.atualizarLoot = async (req, res) => {
     res.status(200).json({ status: "success", data: { loot } });
   } catch (error) {
     tratarErro(res, error, "Erro interno do servidor ao atualizar drop.");
+  }
+};
+
+exports.excluirLoot = async (req, res) => {
+  try {
+    const resultado = await adminAdventureService.deleteAdminMonsterLoot(req.params.id, {
+      idAdmin: req.user.id,
+      req,
+    });
+    res.status(200).json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao excluir drop.");
   }
 };
 

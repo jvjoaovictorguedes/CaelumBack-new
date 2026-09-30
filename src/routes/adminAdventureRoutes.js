@@ -36,6 +36,7 @@ router.post("/monsters", adminAdventureController.criarMonstro);
 router.get("/monsters/:id", adminAdventureController.detalheMonstro);
 router.patch("/monsters/:id", adminAdventureController.atualizarMonstro);
 router.post("/monsters/:id/duplicate", adminAdventureController.duplicarMonstro);
+router.delete("/monsters/:id", adminAdventureController.excluirMonstro);
 router.put("/monsters/:id/loot", adminAdventureController.sincronizarLootMonstro);
 
 router.get("/zone-monsters", adminAdventureController.listarAparicoes);
@@ -45,6 +46,7 @@ router.patch("/zone-monsters/:id", adminAdventureController.atualizarAparicao);
 router.get("/loot", adminAdventureController.listarLoot);
 router.post("/loot", adminAdventureController.criarLoot);
 router.patch("/loot/:id", adminAdventureController.atualizarLoot);
+router.delete("/loot/:id", adminAdventureController.excluirLoot);
 
 router.post("/balance/simulate", adminAdventureController.simularBalanceamento);
 router.get("/expedition-regions", adminAdventureController.listarRegioesExpedicao);
