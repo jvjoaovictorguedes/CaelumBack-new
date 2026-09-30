@@ -26,6 +26,8 @@ router.get("/rods", adminFishingController.listarVaras);
 
 router.post("/balance/simulate", adminFishingController.simularBalanceamento);
 router.get("/balance/matrix", adminFishingController.simularMatrizPorVara);
+router.get("/balance/settings", adminFishingController.obterBalanceamento);
+router.put("/balance/settings/:group", adminFishingController.atualizarBalanceamento);
 
 router.get("/ports", adminFishingController.listarPortos);
 router.post("/ports", adminFishingController.criarPorto);
