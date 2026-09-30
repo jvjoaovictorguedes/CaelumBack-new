@@ -295,7 +295,7 @@ testeComBanco("Receita: duplicata já conhecida nunca é consumida de novo", asy
   assert.equal(unlocks, 1, "nunca cria um segundo unlock pro mesmo blueprint");
 });
 
-testeComBanco("Blueprint em modo Receita continua bloqueado pra fabricar sem o unlock", async () => {
+testeComBanco("Blueprint em modo Receita continua bloqueado pra fabricar sem o unlock, e fica INVISÍVEL na listagem (não é um card bloqueado, o jogador nem deve saber que existe)", async () => {
   const { personagem } = await criarPersonagem();
   await definirNivelForja(personagem.id, 10); // nível de sobra — só falta a Receita
   const { blueprint, idItemBarra } = await criarReceita({ nivelForjaMinimo: 1 });
@@ -306,26 +306,43 @@ testeComBanco("Blueprint em modo Receita continua bloqueado pra fabricar sem o u
     /Receita/,
   );
 
-  const listagem = await forgeCraftingService.listarBlueprints(personagem.id, "Arma");
-  const linha = listagem.find((b) => b.id === blueprint.id);
-  assert.equal(linha.requires_recipe, true);
-  assert.equal(linha.recipe_learned, false);
-  assert.equal(linha.can_craft, false);
-  assert.equal(linha.block_reason, "RECIPE_NOT_LEARNED");
+  const listagemAntes = await forgeCraftingService.listarBlueprints(personagem.id, "Arma");
+  assert.equal(
+    listagemAntes.find((b) => b.id === blueprint.id),
+    undefined,
+    "sem o unlock, o blueprint nem aparece na listagem — spoiler de item secreto",
+  );
 
   await CharacterForgeRecipeUnlock.create({ id_personagem: personagem.id, id_blueprint: blueprint.id, source_type: "OTHER" });
   const resultado = await forgeCraftingService.iniciarFabricacao(personagem.id, { id_blueprint: blueprint.id, qualidade: "Comum" });
   assert.ok(resultado.pronto_em, "com o unlock, a fabricação precisa funcionar normalmente");
+
+  const listagemDepois = await forgeCraftingService.listarBlueprints(personagem.id, "Arma");
+  const linha = listagemDepois.find((b) => b.id === blueprint.id);
+  assert.ok(linha, "com o unlock, o blueprint passa a aparecer na listagem");
+  assert.equal(linha.requires_recipe, true);
+  assert.equal(linha.recipe_learned, true);
+  assert.equal(linha.can_craft, true);
+  assert.equal(linha.block_reason, null);
 });
 
-testeComBanco("listarBlueprints diferencia bloqueio por Nível (LEVEL_TOO_LOW) de bloqueio por Receita (RECIPE_NOT_LEARNED)", async () => {
+testeComBanco("listarBlueprints: Receita não aprendida fica invisível mesmo com nível de sobra; nível insuficiente some junto até aprender a Receita", async () => {
   const { personagem } = await criarPersonagem();
   await definirNivelForja(personagem.id, 1);
   const { blueprint } = await criarReceita({ nivelForjaMinimo: 8 });
 
-  const listagem = await forgeCraftingService.listarBlueprints(personagem.id, "Arma");
-  const linha = listagem.find((b) => b.id === blueprint.id);
-  assert.equal(linha.block_reason, "LEVEL_TOO_LOW", "nível insuficiente reporta LEVEL_TOO_LOW mesmo faltando também a Receita");
+  const listagemSemUnlock = await forgeCraftingService.listarBlueprints(personagem.id, "Arma");
+  assert.equal(
+    listagemSemUnlock.find((b) => b.id === blueprint.id),
+    undefined,
+    "Receita não aprendida esconde o blueprint mesmo faltando também o nível",
+  );
+
+  await CharacterForgeRecipeUnlock.create({ id_personagem: personagem.id, id_blueprint: blueprint.id, source_type: "OTHER" });
+  const listagemComUnlock = await forgeCraftingService.listarBlueprints(personagem.id, "Arma");
+  const linha = listagemComUnlock.find((b) => b.id === blueprint.id);
+  assert.ok(linha, "depois do unlock, o blueprint aparece (mesmo ainda bloqueado por nível)");
+  assert.equal(linha.block_reason, "LEVEL_TOO_LOW", "com a Receita já aprendida, volta a valer o bloqueio normal de nível");
 });
 
 // ---------------------------------------------------------------------

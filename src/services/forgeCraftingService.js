@@ -288,10 +288,17 @@ async function listarBlueprints(characterId, categoria = null) {
     // blueprint (nunca por variante: Receita é do blueprint inteiro).
     const requiresRecipe = blueprint.modo_desbloqueio === "Receita";
     const recipeLearned = requiresRecipe && idsDesbloqueados.has(blueprint.id);
+    // Diferente de nível insuficiente (meta visível, "suba de nível pra
+    // desbloquear") — um blueprint que exige Receita é secreto: o
+    // jogador só pode nem saber que ele existe até achar/aprender a
+    // Receita. Mostrar o card (nome, imagem, nível mínimo) mesmo
+    // "bloqueado" entregava de graça a existência e a aparência do item
+    // pra quem nunca dropou a Receita. Pula o blueprint inteiro da lista
+    // até aprender — não é "bloqueado na tela", é invisível.
+    if (requiresRecipe && !recipeLearned) continue;
     const nivelSuficiente = nivelForja >= blueprint.nivel_forja_minimo;
     let blockReason = null;
     if (!nivelSuficiente) blockReason = "LEVEL_TOO_LOW";
-    else if (requiresRecipe && !recipeLearned) blockReason = "RECIPE_NOT_LEARNED";
     const variantes = [];
     for (const qualidade of ORDEM_QUALIDADE) {
       const ingredientesResolvidos = resolverIngredientesResolvidosEmLote(blueprint, qualidade, resolvedor, itensPorId);
