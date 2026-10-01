@@ -1,12 +1,14 @@
-// Sistema de Referral — no registro, o jogador pode informar o username
-// de quem o indicou (userController.registerUser, campo "indicado_por");
+// Sistema de Referral — no registro, o jogador pode informar o NOME DO
+// PERSONAGEM de quem o indicou (userController.registerUser, campo
+// "indicado_por" — resolvido via Character.nome, não User.username,
+// porque o jogador conhece o personagem de quem o indicou, não a conta);
 // o painel admin (adminReferralService, permissão "referrals.view")
 // mostra quem foi indicado, por quem, e quantas indicações no total
 // aquele indicador já tem.
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { bancoDisponivel, sufixo, sequelize } = require("./helpers/db");
+const { bancoDisponivel, sufixo, sequelize, criarPersonagem } = require("./helpers/db");
 require("../src/models/associations");
 
 const User = require("../src/models/User");
@@ -68,17 +70,14 @@ testeComBanco("registerUser sem indicado_por: conta criada normalmente, id_indic
 
 testeComBanco("registerUser com indicado_por válido (case-insensitive): vincula id_indicado_por certo", async () => {
   const chave = sufixo();
-  const indicador = await User.create({
-    username: `Indicador_${chave}`,
-    email: `indicador_${chave}@teste.local`,
-    passwordHash: "hash-de-teste",
-  });
+  const { usuario: indicador, personagem } = await criarPersonagem();
 
-  // Digitado em minúsculo, diferente do cadastro (case-insensitive tem que casar mesmo assim).
+  // Digitado em minúsculo, diferente do nome cadastrado do personagem
+  // (case-insensitive tem que casar mesmo assim).
   const { statusCode } = await registrar({
     username: `indicado_${chave}`,
     email: `indicado_${chave}@teste.local`,
-    indicadoPor: `indicador_${chave}`,
+    indicadoPor: personagem.nome.toLowerCase(),
   });
   assert.equal(statusCode, 201);
 
