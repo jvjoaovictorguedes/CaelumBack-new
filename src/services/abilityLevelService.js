@@ -11,7 +11,7 @@
 // aceleram — nível 5 e 10 são marcos de verdade (reduzem o custo de mana
 // da habilidade, não só o dano/cura), não só mais um número.
 
-const NOME_ITEM_FRAGMENTO = "Fragmento da Alma";
+const NOME_ITEM_FRAGMENTO = "Fragmento de Alma";
 const NIVEL_MAXIMO_HABILIDADE = 10;
 
 // Quantas habilidades ATIVAS um personagem pode ter marcadas pro combate
