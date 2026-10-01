@@ -16,6 +16,7 @@ const {
 const statusEffectService = require("./statusEffectService");
 const { resolverEfeitosDoUso } = require("./combatEffectResolver");
 const { resolverEfeitosDeArmaNoHit } = require("./weaponEffectResolver");
+const { resolverEfeitosDeMonstroNoHit } = require("./monsterEffectResolver");
 const { definicaoDoStatus, ACTION_TYPE } = require("../config/statusEffectConfig");
 
 // acao: { tipo: "attack" }, { tipo: "power", power: <Power> } ou
@@ -158,6 +159,13 @@ async function resolverTurnoComStatus({
   casterActorId,
   armaEfeitosAtacante,
   itemIdArmaAtacante,
+  // Config de MonsterStatusEffect do atacante (Aventura em Grupo — único
+  // chamador que passa isto hoje) — mesmo gatilho/formato do proc de
+  // arma acima (ataque básico com dano>0), só que a fonte é o catálogo
+  // do monstro em vez da arma equipada; nunca os dois ao mesmo tempo
+  // (atacante é OU o monstro OU um personagem armado). PvP/duelo nunca
+  // passam isto, então o comportamento deles fica idêntico a antes.
+  efeitosDeStatusAtacante,
   nomeAtacante,
   nomeDefensor,
 }) {
@@ -268,6 +276,23 @@ async function resolverTurnoComStatus({
         listaDefensor = statusEffectService.aplicarStatus(listaDefensor, efeito);
         log.push(
           `A arma de ${nomeAtacante} aplicou ${definicaoDoStatus(efeito.key).nomeUi} em ${nomeDefensor} por ${efeito.remainingTurns} turno(s)!`,
+        );
+      }
+    }
+
+    // Mesmo gatilho do proc de arma acima, só que pra quando o ATACANTE é
+    // um monstro com status configurado no admin (Aventura em Grupo —
+    // mesmo princípio já usado no PvE solo em combatController.js, agora
+    // generalizado pra cá em vez de duplicar a lógica lá).
+    if (acao.tipo === "attack" && efeitosDeStatusAtacante?.length > 0) {
+      const novosEfeitosDeMonstro = resolverEfeitosDeMonstroNoHit({
+        efeitosDeStatus: efeitosDeStatusAtacante,
+        turno,
+      });
+      for (const efeito of novosEfeitosDeMonstro) {
+        listaDefensor = statusEffectService.aplicarStatus(listaDefensor, efeito);
+        log.push(
+          `${nomeAtacante} aplicou ${definicaoDoStatus(efeito.key).nomeUi} em ${nomeDefensor} por ${efeito.remainingTurns} turno(s)!`,
         );
       }
     }
