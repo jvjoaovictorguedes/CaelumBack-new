@@ -58,11 +58,13 @@ const statusEffectService = require("../services/statusEffectService");
 const cooldownService = require("../services/cooldownService");
 const { resolverEfeitosDoUso } = require("../services/combatEffectResolver");
 const { resolverEfeitosDeArmaNoHit } = require("../services/weaponEffectResolver");
+const { resolverEfeitosDeMonstroNoHit } = require("../services/monsterEffectResolver");
 const { definicaoDoStatus, ACTION_TYPE } = require("../config/statusEffectConfig");
 const { calcularMaestriaDaRegiao } = require("../services/masteryService");
 const AdventureZone = require("../models/AdventureZone");
 const { BONUS_POR_NIVEL } = require("../config/bestiaryConfig");
 const WeaponStatusEffect = require("../models/WeaponStatusEffect");
+const MonsterStatusEffect = require("../models/MonsterStatusEffect");
 const { resolverModificadorParaEncontro, registrarMorteDaCacada } = require("../services/adventureHuntCombatService");
 const uniqueFeatService = require("../services/uniqueFeatService");
 const uniqueFeatPublicService = require("../services/uniqueFeatPublicService");
@@ -441,6 +443,23 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       // não existe sprite_key dedicado (monstro sem arte animada).
       inimigo.sprite_key = monstro?.sprite_key ?? null;
       inimigo.imagem_url = monstro?.imagem_url ?? null;
+
+      // Ideia #3 da fila de melhorias — captura os efeitos de status do
+      // monstro UMA vez, no início do encontro (mesmo princípio já usado
+      // pra armaEquipadaEfeitos do jogador), pra executarTurno nunca
+      // consultar o banco a cada hit. Monstro sem nenhuma linha
+      // configurada = monstro normal (opt-in).
+      const efeitosDeStatusDoMonstro = await MonsterStatusEffect.findAll({
+        where: { id_monstro: escolhido.id_monstro, ativo: true },
+        transaction,
+      });
+      inimigo.efeitosDeStatus = efeitosDeStatusDoMonstro.map((e) => ({
+        status_key: e.status_key,
+        chance_ppm: e.chance_ppm,
+        duration_turns: e.duration_turns,
+        potency_base: e.potency_base,
+        ativo: e.ativo,
+      }));
 
       // Caçadas §6 — compõe um SEGUNDO multiplicador por cima do perfil
       // normal, só no snapshot deste encontro e só se o alvo sorteado
@@ -1499,6 +1518,23 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         const quebraFreeze = statusEffectService.removerFreezeAoReceberDanoDireto(statusEffects.player, danoRecebido);
         statusEffects.player = quebraFreeze.lista;
         if (quebraFreeze.quebrou) log.push("Você descongelou com o impacto!");
+
+        // Ideia #3 da fila de melhorias — monstro também pode aplicar
+        // status no jogador ao acertar, simétrico ao proc de arma do
+        // jogador logo acima. efeitosDeStatus já veio pré-carregado no
+        // início do encontro (zero N+1 por hit).
+        const efeitosDoMonstro = inimigoAtual.efeitosDeStatus ?? [];
+        if (efeitosDoMonstro.length > 0) {
+          const novosEfeitosDoMonstro = resolverEfeitosDeMonstroNoHit({
+            efeitosDeStatus: efeitosDoMonstro,
+            turno: combatTurn,
+          });
+          for (const efeito of novosEfeitosDoMonstro) {
+            statusEffects.player = statusEffectService.aplicarStatus(statusEffects.player, efeito);
+            const def = definicaoDoStatus(efeito.key);
+            log.push(`${inimigoAtual.nome} aplicou ${def.nomeUi} em você por ${efeito.remainingTurns} turno(s)!`);
+          }
+        }
       }
     }
 

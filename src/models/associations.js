@@ -408,6 +408,12 @@ EquipmentSet.hasMany(EquipmentSetBonus, { foreignKey: "equipment_set_id", as: "b
 WeaponProperties.hasMany(WeaponStatusEffect, { foreignKey: "id_item", as: "statusEffects" });
 WeaponStatusEffect.belongsTo(WeaponProperties, { foreignKey: "id_item", as: "arma" });
 
+// Ideia #3 da fila de melhorias — monstro causando status effect no
+// jogador, mesmo princípio de WeaponStatusEffect acima.
+const MonsterStatusEffect = require("./MonsterStatusEffect");
+AdventureMonster.hasMany(MonsterStatusEffect, { foreignKey: "id_monstro", as: "efeitosDeStatus" });
+MonsterStatusEffect.belongsTo(AdventureMonster, { foreignKey: "id_monstro", as: "monstro" });
+
 // Painel Administrativo (§6/§7) — permissões granulares por role;
 // User<->AdminRole é N:N via UserAdminRole (um usuário pode acumular
 // mais de uma role, ex.: Conteúdo + Eventos).
