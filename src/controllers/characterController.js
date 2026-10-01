@@ -110,7 +110,7 @@ const CHARACTER_INCLUDES = [
 // e ficava restrito a ataque básico pra sempre, a menos que alguém
 // chamasse POST /character-abilities manualmente.
 async function concederPoderesIniciais(character) {
-  const [poderesClasse, poderesRaca, poderesNatureza, aprendidos] = await Promise.all([
+  const [poderesClasse, poderesRaca, poderesNatureza, aprendidos, evolucoesComPoder, evolucoesAdquiridas] = await Promise.all([
     ClassAbilities.findAll({
       where: {
         id_classe: character.id_classe,
@@ -135,7 +135,25 @@ async function concederPoderesIniciais(character) {
       },
     }),
     CharacterAbilities.findAll({ where: { id_personagem: character.id } }),
+    // Bug reportado: um poder de NatureAbilities que também é o
+    // id_power_concedido de um nó da Árvore de Evolução daquela natureza
+    // liberava de graça só por bater o nível, sem nunca precisar ter
+    // adquirido a evolução — deixando a evolução opcional pro poder que
+    // deveria ser o prêmio dela. Mesmo requisito aplicado em
+    // getPoderesDisponiveis abaixo (pra quando custo_ouro NÃO é nulo).
+    Evolution.findAll({
+      where: { natureza_magica: character.natureza_magica, id_power_concedido: { [Op.ne]: null } },
+      attributes: ["id", "id_power_concedido"],
+    }),
+    CharacterEvolution.findAll({ where: { id_personagem: character.id }, attributes: ["id_evolucao"] }),
   ]);
+
+  const idEvolucaoPorPoder = new Map(evolucoesComPoder.map((e) => [e.id_power_concedido, e.id]));
+  const idsEvolucoesAdquiridas = new Set(evolucoesAdquiridas.map((e) => e.id_evolucao));
+  const poderesNaturezaLiberados = poderesNatureza.filter((poder) => {
+    const idEvolucaoNecessaria = idEvolucaoPorPoder.get(poder.id_poder);
+    return !idEvolucaoNecessaria || idsEvolucoesAdquiridas.has(idEvolucaoNecessaria);
+  });
 
   // Concedidos de graça por nível são sempre "Ativo" (custo_ouro NULL
   // filtra os Passivos fora daqui) — sem esse limite, um personagem que
@@ -154,7 +172,7 @@ async function concederPoderesIniciais(character) {
   const candidatos = [
     ...poderesClasse.map((poder) => ({ id_power: poder.id_poder, level_learned: poder.nivel_aprendizagem })),
     ...poderesRaca.map((poder) => ({ id_power: poder.id_power, level_learned: poder.nivel_aprendizado })),
-    ...poderesNatureza.map((poder) => ({ id_power: poder.id_poder, level_learned: poder.nivel_aprendizagem })),
+    ...poderesNaturezaLiberados.map((poder) => ({ id_power: poder.id_poder, level_learned: poder.nivel_aprendizagem })),
   ].filter((candidato) => !idsJaAprendidos.has(candidato.id_power));
 
   const linhas = candidatos.map((candidato) => {
@@ -797,7 +815,7 @@ exports.getPoderesDisponiveis = async (req, res) => {
     // carregado desde subir de nível.
     await concederPoderesIniciais(character);
 
-    const [poderesClasse, poderesRaca, poderesNatureza, aprendidos, itemFragmento] = await Promise.all([
+    const [poderesClasse, poderesRaca, poderesNatureza, aprendidos, itemFragmento, evolucoesComPoder, evolucoesAdquiridas] = await Promise.all([
       ClassAbilities.findAll({
         where: { id_classe: character.id_classe },
         include: [{ model: Power }],
@@ -814,7 +832,30 @@ exports.getPoderesDisponiveis = async (req, res) => {
         where: { id_personagem: character.id },
       }),
       Item.findOne({ where: { nome: NOME_ITEM_FRAGMENTO } }),
+      // Bug reportado: um poder vinculado via NatureAbilities (admin
+      // "vínculo Habilidade <-> Natureza Mágica") aparecia liberado pra
+      // compra só por bater o nível — mesmo quando esse MESMO poder é o
+      // id_power_concedido de um nó da Árvore de Evolução daquela
+      // natureza, o que deixava completamente opcional (e fora de
+      // ordem) uma habilidade que deveria ser o prêmio de evoluir.
+      // Busca toda Evolution da natureza do personagem que concede
+      // algum poder, pra casar com NatureAbilities abaixo.
+      Evolution.findAll({
+        where: { natureza_magica: character.natureza_magica, id_power_concedido: { [Op.ne]: null } },
+        attributes: ["id", "nome", "id_power_concedido"],
+      }),
+      CharacterEvolution.findAll({
+        where: { id_personagem: character.id },
+        attributes: ["id_evolucao"],
+      }),
     ]);
+
+    // Mapa poder -> evolução que o concede (só considera a PRIMEIRA
+    // evolução encontrada pra esse poder nessa natureza — na prática
+    // nunca existe mais de uma, já que cada Evolution.id_power_concedido
+    // é o "prêmio" de um nó específico).
+    const evolucaoPorPoder = new Map(evolucoesComPoder.map((e) => [e.id_power_concedido, e]));
+    const idsEvolucoesAdquiridas = new Set(evolucoesAdquiridas.map((e) => e.id_evolucao));
 
     const fragmentosDisponiveis = itemFragmento
       ? (
@@ -828,8 +869,9 @@ exports.getPoderesDisponiveis = async (req, res) => {
       aprendidos.map((linha) => [linha.id_power, linha]),
     );
 
-    function montarEntrada(poder, nivelNecessario, origem, custoOuro) {
+    function montarEntrada(poder, nivelNecessario, origem, custoOuro, evolucaoRequerida) {
       const linhaAprendida = aprendidoPorPoder.get(poder.id);
+      const evolucaoNaoAdquirida = Boolean(evolucaoRequerida) && !idsEvolucoesAdquiridas.has(evolucaoRequerida.id);
       const nivelHabilidade = linhaAprendida?.nivel_habilidade ?? 1;
       // Mostra o valor JÁ COM o multiplicador do nível da habilidade
       // aplicado (mesmo multiplicadorEfeito/multiplicadorCustoMana que
@@ -860,10 +902,20 @@ exports.getPoderesDisponiveis = async (req, res) => {
         ativo: linhaAprendida?.is_active ?? false,
         id_character_ability: linhaAprendida?.id ?? null,
         // custo_ouro = precisa comprar (não libera de graça por nível) —
-        // pode_comprar só fica true quando falta comprar E o nível já foi
-        // alcançado, pra aba de Habilidades saber quando mostrar o botão.
+        // pode_comprar só fica true quando falta comprar, o nível já foi
+        // alcançado E (se houver) a evolução que concede esse mesmo
+        // poder já foi adquirida, pra aba de Habilidades saber quando
+        // mostrar o botão.
         custo_ouro: custoOuro ?? null,
-        pode_comprar: !linhaAprendida && Boolean(custoOuro) && character.nivel >= nivelNecessario,
+        pode_comprar: !linhaAprendida && Boolean(custoOuro) && character.nivel >= nivelNecessario && !evolucaoNaoAdquirida,
+        // Bug reportado: um poder vinculado à Natureza Mágica (admin)
+        // que também é o prêmio de um nó da Árvore de Evolução daquela
+        // natureza aparecia comprável só por nível, mesmo sem o
+        // jogador ter adquirido a evolução — esses dois campos deixam a
+        // aba de Habilidades mostrar a habilidade BLOQUEADA (não
+        // escondida) com o nome da evolução que precisa adquirir antes.
+        bloqueado_por_evolucao: evolucaoNaoAdquirida,
+        evolucao_necessaria: evolucaoNaoAdquirida ? evolucaoRequerida.nome : null,
         // Nível 1-10 da habilidade em si (ver abilityLevelService.js) —
         // só faz sentido pra quem já aprendeu o poder.
         nivel_habilidade: linhaAprendida ? nivelHabilidade : null,
@@ -905,7 +957,7 @@ exports.getPoderesDisponiveis = async (req, res) => {
         montarEntrada(linha.Power, linha.nivel_aprendizado, "raca", linha.custo_ouro),
       ),
       ...poderesNatureza.map((linha) =>
-        montarEntrada(linha.Power, linha.nivel_aprendizagem, "natureza", linha.custo_ouro),
+        montarEntrada(linha.Power, linha.nivel_aprendizagem, "natureza", linha.custo_ouro, evolucaoPorPoder.get(linha.id_poder)),
       ),
       ...poderesExtras
         .filter((poder) => !idsJaListados.has(poder.id))
@@ -990,6 +1042,31 @@ exports.comprarPoder = async (req, res) => {
         throw Object.assign(new Error(`Esse poder exige nível ${nivelNecessario}.`), {
           statusCode: 400,
         });
+      }
+
+      // Mesma trava de getPoderesDisponiveis (onde isso vira
+      // bloqueado_por_evolucao na resposta) — aqui no servidor é o que
+      // IMPEDE de verdade comprar um poder vinculado à Natureza Mágica
+      // que também é o prêmio de um nó da Árvore de Evolução, sem antes
+      // ter adquirido essa evolução.
+      if (vinculoNatureza) {
+        const evolucaoQueConcede = await Evolution.findOne({
+          where: { natureza_magica: character.natureza_magica, id_power_concedido: idPower },
+          attributes: ["id", "nome"],
+          transaction,
+        });
+        if (evolucaoQueConcede) {
+          const jaAdquiriu = await CharacterEvolution.findOne({
+            where: { id_personagem: character.id, id_evolucao: evolucaoQueConcede.id },
+            transaction,
+          });
+          if (!jaAdquiriu) {
+            throw Object.assign(
+              new Error(`Esse poder é concedido pela evolução "${evolucaoQueConcede.nome}" — adquira essa evolução primeiro.`),
+              { statusCode: 400 },
+            );
+          }
+        }
       }
 
       const jaAprendido = await CharacterAbilities.findOne({
