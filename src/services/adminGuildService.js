@@ -12,8 +12,6 @@
 const { sequelize } = require("../config/database");
 const GuildLevelConfig = require("../models/GuildLevelConfig");
 const GuildBossConfig = require("../models/GuildBossConfig");
-const GuildBossAbility = require("../models/GuildBossAbility");
-const Power = require("../models/Power");
 const guildConfig = require("../config/guildConfig");
 const { registrarAcao } = require("./adminAuditService");
 
@@ -160,134 +158,10 @@ async function atualizarBoss(id, payload, { idAdmin, req }) {
   });
 }
 
-// ---------------------------------------------- HABILIDADES DO BOSS DA GUILDA
-// Pedido do dono do projeto: "igual no boss mundial, a mesma criação do
-// boss mundial é para ser feita no boss da guilda" — mesmo padrão de
-// WorldBossAbility (vínculo Boss -> Power reutilizado, nunca duplica
-// dano/cura/custo/cooldown aqui). Sem fases_permitidas/escala_com_furia/
-// custo_mana_override (Boss da Guilda não tem fases nem mana) e sem
-// N_ALEATORIOS (grupo pequeno — TODOS já cobre o caso de AoE).
-const CAMPOS_HABILIDADE_BOSS = ["id_power", "peso_uso", "prioridade", "tipo_alvo", "tempo_conjuracao_ms", "cooldown_rodadas_override", "ativo"];
-const TIPOS_ALVO_HABILIDADE_BOSS = ["ALEATORIO", "MENOR_VIDA", "TODOS"];
-
-function validarHabilidadeBossPayload(dados, { parcial = false } = {}) {
-  if (!parcial || dados.id_power !== undefined) {
-    if (!Number.isInteger(dados.id_power)) throw erro("id_power é obrigatório.");
-  }
-  if (!parcial || dados.tipo_alvo !== undefined) {
-    if (!TIPOS_ALVO_HABILIDADE_BOSS.includes(dados.tipo_alvo)) {
-      throw erro(`tipo_alvo precisa ser um de: ${TIPOS_ALVO_HABILIDADE_BOSS.join(", ")}.`);
-    }
-  }
-  if (dados.peso_uso !== undefined && (!Number.isInteger(dados.peso_uso) || dados.peso_uso < 0)) {
-    throw erro("peso_uso precisa ser um inteiro >= 0.");
-  }
-  if (dados.prioridade !== undefined && !Number.isInteger(dados.prioridade)) {
-    throw erro("prioridade precisa ser um inteiro.");
-  }
-  if (dados.tempo_conjuracao_ms !== undefined && (!Number.isInteger(dados.tempo_conjuracao_ms) || dados.tempo_conjuracao_ms < 0)) {
-    throw erro("tempo_conjuracao_ms precisa ser um inteiro >= 0.");
-  }
-  if (dados.cooldown_rodadas_override !== undefined && dados.cooldown_rodadas_override !== null) {
-    if (!Number.isInteger(dados.cooldown_rodadas_override) || dados.cooldown_rodadas_override < 0) {
-      throw erro("cooldown_rodadas_override precisa ser um inteiro >= 0 (ou null pra usar o cooldown do Power).");
-    }
-  }
-}
-
-async function listarHabilidadesBoss(idGuildBossConfig) {
-  const where = {};
-  if (idGuildBossConfig) where.id_guild_boss_config = idGuildBossConfig;
-  return GuildBossAbility.findAll({
-    where,
-    include: [{ model: Power, attributes: ["id", "nome", "imagem_url", "tipo_dano", "dano_base", "cura_base", "custo_mana", "cooldown"] }],
-    order: [["prioridade", "DESC"]],
-  });
-}
-
-async function criarHabilidadeBoss(idGuildBossConfig, payload, { idAdmin, req }) {
-  const dados = somenteCampos(payload, CAMPOS_HABILIDADE_BOSS);
-  validarHabilidadeBossPayload(dados);
-
-  return sequelize.transaction(async (transaction) => {
-    const boss = await GuildBossConfig.findByPk(idGuildBossConfig, { transaction });
-    if (!boss) throw erro("Boss da Guilda não encontrado.", 404);
-    const power = await Power.findByPk(dados.id_power, { transaction });
-    if (!power) throw erro("Power não encontrado.", 404);
-
-    const habilidade = await GuildBossAbility.create(
-      { id_guild_boss_config: idGuildBossConfig, peso_uso: 1, prioridade: 0, tempo_conjuracao_ms: 0, ativo: true, ...dados },
-      { transaction },
-    );
-    await registrarAcao({
-      idAdmin,
-      acao: "criar",
-      entidade: "GuildBossAbility",
-      idEntidade: habilidade.id,
-      dadosAntes: null,
-      dadosDepois: habilidade.toJSON(),
-      req,
-      transaction,
-    });
-    return habilidade;
-  });
-}
-
-async function atualizarHabilidadeBoss(id, payload, { idAdmin, req }) {
-  const dados = somenteCampos(payload, CAMPOS_HABILIDADE_BOSS);
-  validarHabilidadeBossPayload(dados, { parcial: true });
-
-  return sequelize.transaction(async (transaction) => {
-    const habilidade = await GuildBossAbility.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
-    if (!habilidade) throw erro("Habilidade do Boss da Guilda não encontrada.", 404);
-    if (dados.id_power !== undefined) {
-      const power = await Power.findByPk(dados.id_power, { transaction });
-      if (!power) throw erro("Power não encontrado.", 404);
-    }
-    const dadosAntes = habilidade.toJSON();
-    await habilidade.update(dados, { transaction });
-    await registrarAcao({
-      idAdmin,
-      acao: "editar",
-      entidade: "GuildBossAbility",
-      idEntidade: habilidade.id,
-      dadosAntes,
-      dadosDepois: habilidade.toJSON(),
-      req,
-      transaction,
-    });
-    return habilidade;
-  });
-}
-
-async function excluirHabilidadeBoss(id, { idAdmin, req }) {
-  return sequelize.transaction(async (transaction) => {
-    const habilidade = await GuildBossAbility.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
-    if (!habilidade) throw erro("Habilidade do Boss da Guilda não encontrada.", 404);
-    const dadosAntes = habilidade.toJSON();
-    await habilidade.destroy({ transaction });
-    await registrarAcao({
-      idAdmin,
-      acao: "excluir",
-      entidade: "GuildBossAbility",
-      idEntidade: id,
-      dadosAntes,
-      dadosDepois: null,
-      req,
-      transaction,
-    });
-    return { id };
-  });
-}
-
 module.exports = {
   listarNiveis,
   upsertNivel,
   listarBosses,
   criarBoss,
   atualizarBoss,
-  listarHabilidadesBoss,
-  criarHabilidadeBoss,
-  atualizarHabilidadeBoss,
-  excluirHabilidadeBoss,
 };

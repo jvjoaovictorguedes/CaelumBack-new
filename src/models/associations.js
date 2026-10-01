@@ -82,7 +82,6 @@ const GuildMemberMissionProgress = require("./GuildMemberMissionProgress");
 const GuildBossConfig = require("./GuildBossConfig");
 const GuildBossAttempt = require("./GuildBossAttempt");
 const GuildBossContribution = require("./GuildBossContribution");
-const GuildBossAbility = require("./GuildBossAbility");
 const EquipmentSet = require("./EquipmentSet");
 const EquipmentSetPiece = require("./EquipmentSetPiece");
 const EquipmentSetBonus = require("./EquipmentSetBonus");
@@ -600,12 +599,6 @@ WorldBossEvent.belongsTo(Character, { foreignKey: "top_damage_character_id", as:
 WorldBossConfig.hasMany(WorldBossAbility, { foreignKey: "id_world_boss_config", as: "habilidades" });
 WorldBossAbility.belongsTo(WorldBossConfig, { foreignKey: "id_world_boss_config" });
 WorldBossAbility.belongsTo(Power, { foreignKey: "id_power" });
-
-// Boss da Guilda — habilidades (mesmo padrão de WorldBossAbility acima:
-// nunca duplica dano/cura/custo/cooldown, isso continua em Power).
-GuildBossConfig.hasMany(GuildBossAbility, { foreignKey: "id_guild_boss_config", as: "habilidades" });
-GuildBossAbility.belongsTo(GuildBossConfig, { foreignKey: "id_guild_boss_config" });
-GuildBossAbility.belongsTo(Power, { foreignKey: "id_power" });
 
 WorldBossConfig.hasMany(WorldBossStatusResistance, { foreignKey: "id_world_boss_config", as: "resistenciasStatus" });
 WorldBossStatusResistance.belongsTo(WorldBossConfig, { foreignKey: "id_world_boss_config" });
