@@ -30,6 +30,7 @@ const { concederOuro } = require("../services/goldService");
 const { rolarDropDeVitoria } = require("../services/dropService");
 const { sortearMonstroDaZona } = require("../services/adventureRollService");
 const { persistirEstadoFinalDoMembro, calcularPenalidadePowerLeveling } = require("../services/partyBattleService");
+const { registrarProgressoContrato } = require("../services/adventureGuildObjectiveService");
 const { custoManaEfetivo } = require("../services/combatFormulas");
 const {
   online,
@@ -496,6 +497,11 @@ module.exports = function registerPartyHandlers(io) {
         const danoMax = Math.max(danoMin, Math.round(monstro.dano_max * fatorDificuldadeGrupo.dano));
 
         const inimigo = {
+          // Guilda dos Aventureiros (§23/§45) — id do catálogo, preservado
+          // pra poder alimentar contrato de Rank "matar monstro
+          // específico"/"matar na região" na vitória (finalizarBatalha),
+          // mesmo critério do encontro solo (combatController.js).
+          id_monstro: monstro.id,
           nome: monstro.nome,
           nivel: monstro.nivel,
           forca: Math.max(1, Math.round((danoMin + danoMax) / 2)),
@@ -1016,6 +1022,21 @@ async function finalizarBatalha(io, battleId, vitoria, motivo = vitoria ? "comba
 
           const drop = await rolarDropDeVitoria(character, batalha.inimigo, transaction);
           if (drop) drops[id] = drop;
+
+          // Guilda dos Aventureiros (§23/§45) — bug reportado: vitória em
+          // grupo nunca alimentava contrato de Rank ativo nenhum (só
+          // existia no encontro solo, combatController.js). Mesmo evento
+          // real, mesmo par de chamadas, dentro da MESMA transaction por
+          // membro — cada aventureiro do grupo progride no SEU próprio
+          // contrato, igual uma vitória solo contaria.
+          await registrarProgressoContrato(
+            character,
+            "MatarInimigos",
+            1,
+            { id_monstro: batalha.inimigo.id_monstro, id_area: batalha.zona.id },
+            transaction,
+          );
+          await registrarProgressoContrato(character, "GanharOuro", ouro, {}, transaction);
 
           recompensas[id] = {
             experiencia: xpConcedida,
