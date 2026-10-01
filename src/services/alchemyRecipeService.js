@@ -35,8 +35,9 @@ async function receitaDesbloqueada(recipe, characterId, nivelAlquimia, transacti
 }
 
 // Lista o catálogo completo com estoque/bloqueio pro personagem (spec
-// §16 GET /api/alchemy/recipes, §24 preview). `soAtivas` sempre true
-// nesta rota — receita desativada nunca aparece pro jogador.
+// §16 GET /api/alchemy/recipes, §24 preview; também a fonte do Livro de
+// Fórmulas, spec §10 — nunca um dataset paralelo). `soAtivas` sempre
+// true nesta rota — receita desativada nunca aparece pro jogador.
 async function listarCatalogo(characterId, progresso) {
   const nivelAlquimia = nivelPorXpTotal(progresso?.experiencia ?? 0);
 
@@ -49,6 +50,7 @@ async function listarCatalogo(characterId, progresso) {
   const idsItens = new Set();
   for (const r of receitas) {
     idsItens.add(r.id_item_resultado);
+    if (r.id_item_receita) idsItens.add(r.id_item_receita);
     for (const ing of r.ingredientes) idsItens.add(ing.id_item);
   }
   const [itens, inventario] = await Promise.all([
@@ -87,25 +89,52 @@ async function listarCatalogo(characterId, progresso) {
           : "Receita ainda não descoberta.";
     }
 
+    // Livro de Fórmulas (spec §10) — DESCOBERTA ainda não conhecida
+    // nunca revela ingredientes/custo/XP/resultado exatos (só isso
+    // vazaria a receita inteira sem o jogador nunca ter aprendido
+    // nada); NIVEL segue mostrando tudo (nunca é "segredo", só
+    // progressão) e DESCOBERTA já conhecida mostra tudo igual a NIVEL.
+    const ehDescobertaOculta = recipe.modo_desbloqueio === "DESCOBERTA" && !desbloqueada;
+
+    const formulaFisica = recipe.id_item_receita
+      ? {
+          id_item: recipe.id_item_receita,
+          nome: itemPorId.get(recipe.id_item_receita)?.nome ?? null,
+          imagem_url: itemPorId.get(recipe.id_item_receita)?.imagem_url ?? null,
+          raridade_receita: recipe.raridade_receita,
+          negociavel: recipe.negociavel_receita,
+          consome_ao_aprender: recipe.consome_ao_aprender,
+          quantidade_possuida: quantidadePorItem.get(recipe.id_item_receita) ?? 0,
+          pode_aprender:
+            !desbloqueada &&
+            nivelAlquimia >= recipe.nivel_alquimia_minimo &&
+            (quantidadePorItem.get(recipe.id_item_receita) ?? 0) >= 1,
+        }
+      : null;
+
     resultado.push({
       id: recipe.id,
       key: recipe.key,
       nome: recipe.nome,
-      descricao: recipe.descricao,
+      descricao: ehDescobertaOculta ? null : recipe.descricao,
       categoria: recipe.categoria,
       nivel_alquimia_minimo: recipe.nivel_alquimia_minimo,
-      xp_alquimia: recipe.xp_alquimia,
-      custo_ouro: recipe.custo_ouro,
+      xp_alquimia: ehDescobertaOculta ? null : recipe.xp_alquimia,
+      custo_ouro: ehDescobertaOculta ? null : recipe.custo_ouro,
       modo_desbloqueio: recipe.modo_desbloqueio,
-      resultado: {
-        id_item: recipe.id_item_resultado,
-        nome: itemResultado?.nome ?? null,
-        imagem_url: itemResultado?.imagem_url ?? null,
-        raridade: itemResultado?.raridade ?? null,
-        negociavel_mercado: itemResultado?.negociavel_mercado ?? null,
-        quantidade: recipe.quantidade_resultado,
-      },
-      ingredientes: ingredientesComEstoque,
+      resultado: ehDescobertaOculta
+        ? null
+        : {
+            id_item: recipe.id_item_resultado,
+            nome: itemResultado?.nome ?? null,
+            imagem_url: itemResultado?.imagem_url ?? null,
+            raridade: itemResultado?.raridade ?? null,
+            negociavel_mercado: itemResultado?.negociavel_mercado ?? null,
+            quantidade: recipe.quantidade_resultado,
+          },
+      ingredientes: ehDescobertaOculta ? [] : ingredientesComEstoque,
+      pista_publica: recipe.pista_publica ?? null,
+      formula_fisica: formulaFisica,
       desbloqueada,
       motivo_bloqueio: motivoBloqueio,
       max_craftable: desbloqueada ? Math.max(0, maxCraftable) : 0,

@@ -9,6 +9,7 @@ router.get("/progress", authMiddleware, carregarPersonagemAtual, alchemyControll
 router.get("/recipes", authMiddleware, carregarPersonagemAtual, alchemyController.getReceitas);
 router.get("/recipes/:id", authMiddleware, carregarPersonagemAtual, alchemyController.getReceita);
 router.post("/recipes/:id/brew", authMiddleware, carregarPersonagemAtual, alchemyController.postBrew);
+router.post("/recipes/:id/learn", authMiddleware, carregarPersonagemAtual, alchemyController.postAprender);
 router.get("/discoveries", authMiddleware, carregarPersonagemAtual, alchemyController.getDescobertas);
 
 module.exports = router;

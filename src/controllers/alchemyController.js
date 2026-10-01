@@ -7,6 +7,7 @@
 // arbitrário do payload").
 const alchemyService = require("../services/alchemyService");
 const alchemyRecipeUnlockService = require("../services/alchemyRecipeUnlockService");
+const alchemyLearnService = require("../services/alchemyLearnService");
 
 function tratarErro(res, error, mensagemPadrao) {
   const statusCode = error.statusCode || 500;
@@ -65,5 +66,16 @@ exports.getDescobertas = async (req, res) => {
     res.status(200).json({ status: "success", data: { descobertas } });
   } catch (error) {
     tratarErro(res, error, "Erro interno do servidor ao listar descobertas de Alquimia.");
+  }
+};
+
+// POST /api/alchemy/recipes/:id/learn — aprender receita DESCOBERTA a
+// partir da fórmula física (Item tipo_item="Receita") no inventário.
+exports.postAprender = async (req, res) => {
+  try {
+    const resultado = await alchemyLearnService.aprenderReceitaFisica(req.personagemAtual.id, Number(req.params.id));
+    res.status(200).json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao aprender receita de Alquimia.");
   }
 };

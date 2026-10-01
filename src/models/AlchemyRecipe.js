@@ -24,6 +24,17 @@ const AlchemyRecipe = sequelize.define(
     modo_desbloqueio: { type: DataTypes.ENUM("NIVEL", "DESCOBERTA"), allowNull: false, defaultValue: "NIVEL" },
     ativo: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     ordem: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    // Alquimia V2 (spec §8.1) — metadados opcionais da fórmula física
+    // (pergaminho) quando modo_desbloqueio = DESCOBERTA. id_item_receita
+    // é FK simples SEM belongsTo/alias (mesmo critério de
+    // id_item_resultado/id_item neste domínio — nomes resolvidos em lote
+    // pelo serviço, nunca via include do Sequelize); precisa ser
+    // Item.tipo_item = "Receita" (validado em serviço).
+    id_item_receita: { type: DataTypes.INTEGER, allowNull: true, unique: true },
+    raridade_receita: { type: DataTypes.ENUM("Comum", "Raro", "Lendario"), allowNull: true },
+    negociavel_receita: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    consome_ao_aprender: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+    pista_publica: { type: DataTypes.STRING(240), allowNull: true },
   },
   { tableName: "alchemy_recipes" },
 );

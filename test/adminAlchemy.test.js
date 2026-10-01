@@ -57,6 +57,17 @@ async function criarItemMaterial(nome = "Ingrediente de Teste") {
   return item;
 }
 
+async function criarItemReceita(nome = "Pergaminho de Teste") {
+  const item = await Item.create({
+    nome: `${nome} ${sufixo()}`,
+    descricao: "Fórmula física de teste do admin de Alquimia.",
+    tipo_item: "Receita",
+    raridade: "Raro",
+  });
+  itensCriados.push(item.id);
+  return item;
+}
+
 testeComBanco("admin alchemy receitas: create exige item resultado do tipo Consumível", async () => {
   const itemNaoConsumivel = await criarItemMaterial();
 
@@ -193,4 +204,114 @@ testeComBanco("admin alchemy receitas: listagem inclui ingredientes e item resol
   assert.ok(encontrada, "receita recém-criada deveria aparecer na listagem");
   assert.equal(encontrada.item_resultado.id, itemResultado.id);
   assert.deepEqual(encontrada.ingredientes, []);
+});
+
+// ---------------------------------------------------------------------
+// Fórmula física (Alquimia V2 §8.1/§11.1/§11.3)
+// ---------------------------------------------------------------------
+
+testeComBanco("admin alchemy: DESCOBERTA sem id_item_receita continua válida (fórmula física é opcional)", async () => {
+  const itemResultado = await criarItemConsumivel();
+  const receita = await adminAlchemyService.createAdminAlchemyRecipe(
+    {
+      key: `receita_${sufixo()}`,
+      nome: "Receita Sem Pergaminho",
+      categoria: "ELIXIR",
+      id_item_resultado: itemResultado.id,
+      modo_desbloqueio: "DESCOBERTA",
+      ativo: true,
+      ingredientes: [],
+    },
+    { idAdmin: 1, req: {} },
+  );
+  receitasCriadas.push(receita.id);
+  assert.equal(receita.id_item_receita, null);
+});
+
+testeComBanco("admin alchemy: id_item_receita precisa ser um Item tipo Receita", async () => {
+  const itemResultado = await criarItemConsumivel();
+  const itemErrado = await criarItemMaterial();
+
+  await assert.rejects(
+    () =>
+      adminAlchemyService.createAdminAlchemyRecipe(
+        {
+          key: `receita_${sufixo()}`,
+          nome: "Receita Pergaminho Errado",
+          categoria: "ELIXIR",
+          id_item_resultado: itemResultado.id,
+          modo_desbloqueio: "DESCOBERTA",
+          id_item_receita: itemErrado.id,
+          ingredientes: [],
+        },
+        { idAdmin: 1, req: {} },
+      ),
+    /tipo Receita/i,
+  );
+});
+
+testeComBanco("admin alchemy: duas receitas não podem apontar pro mesmo id_item_receita", async () => {
+  const itemResultado1 = await criarItemConsumivel();
+  const itemResultado2 = await criarItemConsumivel();
+  const pergaminho = await criarItemReceita();
+
+  const primeira = await adminAlchemyService.createAdminAlchemyRecipe(
+    {
+      key: `receita_${sufixo()}`,
+      nome: "Primeira Dona do Pergaminho",
+      categoria: "ELIXIR",
+      id_item_resultado: itemResultado1.id,
+      modo_desbloqueio: "DESCOBERTA",
+      id_item_receita: pergaminho.id,
+      ingredientes: [],
+    },
+    { idAdmin: 1, req: {} },
+  );
+  receitasCriadas.push(primeira.id);
+
+  await assert.rejects(
+    () =>
+      adminAlchemyService.createAdminAlchemyRecipe(
+        {
+          key: `receita_${sufixo()}`,
+          nome: "Segunda Tentando Roubar",
+          categoria: "ELIXIR",
+          id_item_resultado: itemResultado2.id,
+          modo_desbloqueio: "DESCOBERTA",
+          id_item_receita: pergaminho.id,
+          ingredientes: [],
+        },
+        { idAdmin: 1, req: {} },
+      ),
+    (err) => err.statusCode === 409,
+  );
+
+  // Editar a PRÓPRIA receita mantendo o mesmo id_item_receita nunca deve
+  // ser bloqueado como "conflito consigo mesma".
+  const reeditada = await adminAlchemyService.updateAdminAlchemyRecipe(
+    primeira.id,
+    { nome: "Primeira Dona do Pergaminho (renomeada)" },
+    { idAdmin: 1, req: {} },
+  );
+  assert.equal(reeditada.id_item_receita, pergaminho.id);
+});
+
+testeComBanco("admin alchemy: raridade_receita fora do enum é rejeitada", async () => {
+  const itemResultado = await criarItemConsumivel();
+  await assert.rejects(
+    () =>
+      adminAlchemyService.createAdminAlchemyRecipe(
+        {
+          key: `receita_${sufixo()}`,
+          nome: "Receita Raridade Inválida",
+          categoria: "ELIXIR",
+          id_item_resultado: itemResultado.id,
+          modo_desbloqueio: "DESCOBERTA",
+          raridade_receita: "Epico",
+          ingredientes: [],
+        },
+        { idAdmin: 1, req: {} },
+      ),
+    /raridade_receita/i,
+  );
 });

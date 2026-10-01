@@ -56,6 +56,8 @@ const { EventEmitter } = require("node:events");
 const adminWorldBossService = require("../src/services/adminWorldBossService");
 const adminWorldBossEventService = require("../src/services/adminWorldBossEventService");
 const worldBossBalanceSimulationService = require("../src/services/worldBossBalanceSimulationService");
+const GameSetting = require("../src/models/GameSetting");
+const gameSettingCache = require("../src/services/gameSettingCache");
 const {
   EVENT_STATUS,
   COMBAT_SESSION_STATUS,
@@ -66,6 +68,16 @@ const {
 let temBanco = false;
 test.before(async () => {
   temBanco = await bancoDisponivel();
+  if (!temBanco) return;
+  // "Turno" pessoal contra a Ameaça Mundial (worldBossCombatService.
+  // executarAcao) — gate de ritmo pra jogador de verdade, irrelevante
+  // pros testes deste arquivo (chamam executarAcao várias vezes em
+  // sequência, sem esperar o relógio de verdade, pra exercitar OUTRAS
+  // regras: cooldown de Power, idempotência, métricas). Zera só aqui,
+  // mesmo mecanismo GameSetting+gameSettingCache já usado por
+  // expeditionCooldownGlobal.test.js.
+  await GameSetting.upsert({ chave: "worldboss.player_action_cooldown_ms", valor: 0, tipo: "number" });
+  await gameSettingCache.recarregar();
 });
 
 function testeComBanco(nome, fn) {
@@ -123,6 +135,8 @@ test.afterEach(async () => {
 test.after(async () => {
   if (!temBanco) return;
   await AdventureZone.destroy({ where: { id: zonasCriadas.length ? zonasCriadas : [-1] } });
+  await GameSetting.destroy({ where: { chave: "worldboss.player_action_cooldown_ms" } });
+  await gameSettingCache.recarregar();
   await sequelize.close();
 });
 
