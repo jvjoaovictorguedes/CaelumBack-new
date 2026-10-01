@@ -139,12 +139,6 @@ router.get(
   exigirMembroDaGuild("id"),
   guildController.extratoTesouro,
 );
-router.post(
-  "/:id/treasury/expenses",
-  authMiddleware,
-  carregarPersonagemAtual,
-  guildController.registrarGasto,
-);
 router.get(
   "/:id/contributions",
   authMiddleware,

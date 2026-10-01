@@ -892,54 +892,6 @@ exports.doar = async (req, res) => {
   }
 };
 
-exports.registrarGasto = async (req, res) => {
-  const idResponsavel = req.personagemAtual.id;
-  const { valor, motivo } = req.body;
-  const valorNumerico = Number(valor);
-  if (!Number.isInteger(valorNumerico) || valorNumerico <= 0) {
-    return res.status(400).json({ message: "Valor de gasto inválido." });
-  }
-  if (!motivo) return res.status(400).json({ message: "Informe o motivo do gasto." });
-
-  try {
-    const resultado = await sequelize.transaction(async (transaction) => {
-      const membro = await exigirPermissao(req.params.id, idResponsavel, "autorizar_gastos");
-      // Mesmo que "autorizar_gastos" seja reatribuível por cargo (editar_cargos),
-      // registrar gasto é uma ação só do líder — a matriz de permissão sozinha
-      // não basta porque um Fundador poderia delegar essa permissão a outro cargo.
-      if (membro.cargo !== "Fundador") {
-        throw erro("Só o líder da guilda pode registrar gastos.", 403);
-      }
-      const guild = await Guild.findByPk(req.params.id, { transaction, lock: transaction.LOCK.UPDATE });
-      if (guild.tesouro < valorNumerico) throw erro("O tesouro não tem saldo suficiente para esse gasto.", 400);
-
-      guild.tesouro -= valorNumerico;
-      await guild.save({ transaction });
-
-      await GuildTreasuryTransaction.create(
-        {
-          id_guild: guild.id,
-          tipo: "Gasto",
-          id_personagem: idResponsavel,
-          valor: valorNumerico,
-          saldo_resultante: guild.tesouro,
-          motivo,
-        },
-        { transaction },
-      );
-
-      await registrarLog(guild.id, "gasto", { responsavel: idResponsavel, detalhes: `${motivo} (${valorNumerico})`, transaction });
-      return { tesouro: guild.tesouro };
-    });
-    emitParaGuild(req.params.id, "guild:treasury:update", { tesouro: resultado.tesouro });
-    return res.status(200).json({ status: "success", data: resultado });
-  } catch (error) {
-    const statusCode = error.statusCode || 500;
-    if (statusCode === 500) console.error("Erro ao registrar gasto:", error);
-    return res.status(statusCode).json({ message: error.statusCode ? error.message : "Erro interno do servidor." });
-  }
-};
-
 exports.extratoTesouro = async (req, res) => {
   try {
     const transacoes = await GuildTreasuryTransaction.findAll({
