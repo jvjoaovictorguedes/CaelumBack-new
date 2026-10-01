@@ -18,6 +18,7 @@ const { vidaManaMaximaComTaverna } = require("../services/tavernBuffService");
 const { addStack } = require("../services/inventoryService");
 const { ehInstanciavel, create: criarInstancia } = require("../services/equipmentInstanceService");
 const { resetarAtributos } = require("../services/attributeService");
+const consumableEffectService = require("../services/consumableEffectService");
 
 // Sem essas associações, qualquer include: [{model: Character}, {model: Item}]
 // abaixo derruba a chamada com "CharacterInventory is not associated to X!".
@@ -163,18 +164,41 @@ exports.useItem = async (req, res) => {
       // depois do buff ficava presa no teto "cru" mesmo com o buff ativo.
       const { vidaMaxima, manaMaxima } = await vidaManaMaximaComTaverna(id_personagem, personagemEfetivo, transaction);
 
+      // Motor moderno primeiro (ConsumableEffect/registry — mesma regra
+      // de precedência do combate em combatController.js): um item com
+      // HEAL_HP_*/RESTORE_MANA_* moderno configurado nunca soma também o
+      // legado efeito_vida/efeito_mana abaixo. `quantidade` escala a
+      // cura igual o legado já fazia (usar várias poções de uma vez).
+      const efeitosModernos = await consumableEffectService.aplicarEfeitosDoItem({
+        idItem: id_item,
+        statusEffects: [],
+        vidaAtual: character.vida_atual,
+        vidaMaxima,
+        manaAtual: character.mana_atual,
+        manaMaxima,
+        quantidade,
+        nomeAlvo: "Você",
+        transaction,
+      });
+
       // efeito_vida/efeito_mana são percentuais (ex: 30 = 30% da vida/mana
       // máxima), não pontos fixos. Um valor fixo (tipo "cura 30 pontos")
       // vira inútil assim que a vida máxima escala com vitalidade/
       // equipamento/classe — e ainda mostrava um número na loja que na
       // prática não batia com o que curava perto do teto de vida.
-      if (efeito.efeito_vida) {
+      if (efeitosModernos.temEfeitoDeVida) {
+        character.vida_atual = efeitosModernos.vidaAtual;
+        character.ultima_atualizacao_vida = new Date();
+      } else if (efeito.efeito_vida) {
         const cura = Math.round(vidaMaxima * (efeito.efeito_vida / 100) * quantidade);
         character.vida_atual = Math.min(vidaMaxima, character.vida_atual + cura);
         character.ultima_atualizacao_vida = new Date();
       }
 
-      if (efeito.efeito_mana) {
+      if (efeitosModernos.temEfeitoDeMana) {
+        character.mana_atual = efeitosModernos.manaAtual;
+        character.ultima_atualizacao_mana = new Date();
+      } else if (efeito.efeito_mana) {
         const cura = Math.round(manaMaxima * (efeito.efeito_mana / 100) * quantidade);
         character.mana_atual = Math.min(manaMaxima, character.mana_atual + cura);
         character.ultima_atualizacao_mana = new Date();

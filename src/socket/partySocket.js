@@ -667,6 +667,7 @@ module.exports = function registerPartyHandlers(io) {
             tipo: "item",
             item: { nome: consumivel.nome },
             efeito: { efeito_vida: consumivel.efeito_vida, efeito_mana: consumivel.efeito_mana },
+            efeitosConsumiveisModernos: consumivel.efeitos_modernos ?? [],
           };
         } finally {
           batalha.processandoAcao = false;

@@ -17,6 +17,7 @@ const Class = require("../models/Class");
 const CharacterInventory = require("../models/CharacterInventory");
 const Item = require("../models/Item");
 const ConsumableProperties = require("../models/ConsumableProperties");
+const { listarEfeitosAtivos } = require("../services/consumableEffectService");
 const WeaponStatusEffect = require("../models/WeaponStatusEffect");
 const {
   vidaMaximaDe,
@@ -467,6 +468,10 @@ module.exports = function registerPvpLiveHandlers(io) {
           if (!efeito) {
             return socket.emit("pvp:erro", { mensagem: "Este item não possui efeito configurado." });
           }
+          // Motor moderno (ConsumableEffect/registry) — mesma precedência
+          // do PvE/Grupo: um HEAL_HP_*/RESTORE_MANA_* aqui faz
+          // duelEngine.js ignorar o efeito_vida/efeito_mana legado acima.
+          const efeitosConsumiveisModernos = await listarEfeitosAtivos(idItem);
 
           // Reconfirma que o duelo/turno continuam válidos depois do
           // await acima — o timer de turno (ataque automático por tempo
@@ -483,7 +488,16 @@ module.exports = function registerPvpLiveHandlers(io) {
             await inventoryEntry.save();
           }
 
-          acao = { tipo: "item", item, efeito };
+          acao = {
+            tipo: "item",
+            item,
+            efeito,
+            efeitosConsumiveisModernos: efeitosConsumiveisModernos.map((e) => ({
+              effect_key: e.effect_key,
+              magnitude: e.magnitude,
+              config: e.config,
+            })),
+          };
         } catch (error) {
           console.error("Erro ao usar item em duelo ao vivo:", error);
           return socket.emit("pvp:erro", { mensagem: "Não foi possível usar esse item agora." });

@@ -981,13 +981,37 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     // ==========================================================
 
     else if (efeitoConsumivel) {
+      // Motor moderno primeiro (ConsumableEffect/registry — spec
+      // Caldeirão §6.5/§12/§21): cleanse E cura de vida/mana (Poção de
+      // Vida/Mana migradas) passam por aqui. O legado
+      // ConsumableProperties.efeito_vida/efeito_mana só roda logo abaixo
+      // quando o item NÃO tem o respectivo HEAL_HP_*/RESTORE_MANA_*
+      // moderno configurado — nunca os dois juntos (double-apply).
+      const efeitosModernos = await consumableEffectService.aplicarEfeitosDoItem({
+        idItem: action.itemId,
+        statusEffects: statusEffects.player,
+        vidaAtual: personagemAtual.vida_atual,
+        vidaMaxima: vidaMaximaEfetiva,
+        manaAtual: personagemAtual.mana_atual,
+        manaMaxima: manaMaximaEfetiva,
+        nomeAlvo: "Você",
+        transaction,
+      });
+      statusEffects.player = efeitosModernos.statusEffects;
+      log.push(...efeitosModernos.log);
+
       // Mesma fórmula (percentual da vida/mana MÁXIMA, não pontos
       // fixos) do uso fora de combate em characterInventoryController.js
       // — usa vidaMaximaEfetiva/manaMaximaEfetiva (vidaMaximaDe/manaMaximaDe
       // já com MAX_HP_PCT/MAX_MANA_PCT da Taverna somado), pro valor
       // curado bater com o mesmo teto de vida/mana que o resto do
       // combate está usando.
-      if (efeitoConsumivel.efeito_vida) {
+      if (efeitosModernos.temEfeitoDeVida) {
+        personagemAtual.vida_atual = efeitosModernos.vidaAtual;
+        if (efeitosModernos.curaVida > 0) {
+          log.push(`Você usou ${itemConsumivel.nome} e recuperou ${efeitosModernos.curaVida} de vida.`);
+        }
+      } else if (efeitoConsumivel.efeito_vida) {
         const cura = Math.round(vidaMaximaEfetiva * (efeitoConsumivel.efeito_vida / 100));
         personagemAtual.vida_atual = Math.min(
           vidaMaximaEfetiva,
@@ -996,7 +1020,12 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         log.push(`Você usou ${itemConsumivel.nome} e recuperou ${cura} de vida.`);
       }
 
-      if (efeitoConsumivel.efeito_mana) {
+      if (efeitosModernos.temEfeitoDeMana) {
+        personagemAtual.mana_atual = efeitosModernos.manaAtual;
+        if (efeitosModernos.curaMana > 0) {
+          log.push(`Você usou ${itemConsumivel.nome} e recuperou ${efeitosModernos.curaMana} de mana.`);
+        }
+      } else if (efeitoConsumivel.efeito_mana) {
         const curaMana = Math.round(manaMaximaEfetiva * (efeitoConsumivel.efeito_mana / 100));
         personagemAtual.mana_atual = Math.min(
           manaMaximaEfetiva,
@@ -1004,21 +1033,6 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         );
         log.push(`Você usou ${itemConsumivel.nome} e recuperou ${curaMana} de mana.`);
       }
-
-      // Efeitos novos de Alquimia (Antídotos/cleanse — spec Caldeirão
-      // §12/§21): resolvidos via consumableEffectService/registry, que
-      // delega em statusEffectService — nunca duplica regra de status
-      // aqui. Self-target sempre (o jogador consome em si mesmo).
-      const { statusEffects: statusJogadorPosEfeito, log: logEfeitos } = await consumableEffectService.aplicarEfeitosDoItem(
-        {
-          idItem: action.itemId,
-          statusEffects: statusEffects.player,
-          nomeAlvo: "Você",
-          transaction,
-        },
-      );
-      statusEffects.player = statusJogadorPosEfeito;
-      log.push(...logEfeitos);
 
       inventoryEntry.quantidade -= 1;
       if (inventoryEntry.quantidade <= 0) {

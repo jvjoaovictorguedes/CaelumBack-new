@@ -18,12 +18,28 @@ const { resolverEfeitosDoUso } = require("./combatEffectResolver");
 const { resolverEfeitosDeArmaNoHit } = require("./weaponEffectResolver");
 const { resolverEfeitosDeMonstroNoHit } = require("./monsterEffectResolver");
 const { definicaoDoStatus, ACTION_TYPE } = require("../config/statusEffectConfig");
+const {
+  efeitoConhecido,
+  executarEfeito,
+  EFFECT_KEYS_DE_VIDA,
+  EFFECT_KEYS_DE_MANA,
+} = require("./consumableEffectRegistry");
 
 // acao: { tipo: "attack" }, { tipo: "power", power: <Power> } ou
-// { tipo: "item", item: <Item>, efeito: <ConsumableProperties> }. Quando
-// o poder vem de buscarPoderesDoPersonagem (pvpController.js) ele já
-// traz `power.nivel_habilidade` grudado — sem isso o duelo assíncrono e
-// o PVP ao vivo ignorariam totalmente o nível investido na habilidade.
+// { tipo: "item", item: <Item>, efeito: <ConsumableProperties>,
+// efeitosConsumiveisModernos?: <ConsumableEffect[]> }. Quando o poder
+// vem de buscarPoderesDoPersonagem (pvpController.js) ele já traz
+// `power.nivel_habilidade` grudado — sem isso o duelo assíncrono e o
+// PVP ao vivo ignorariam totalmente o nível investido na habilidade.
+//
+// `efeitosConsumiveisModernos` (spec Caldeirão §6.5) é a lista de
+// ConsumableEffect ATIVOS do item, já carregada do banco por quem monta
+// a ação (partySocket.js/pvpLiveSocket.js — este arquivo nunca faz
+// query nenhuma, aplicarAcao é síncrono/puro de propósito). Resolvida
+// aqui, sem passar por consumableEffectService.aplicarEfeitosDoItem
+// (que é async), com os MESMOS handlers do registry — garante que
+// HEAL_HP_*/RESTORE_MANA_* curem exatamente igual em PvE/PvP/Grupo/fora
+// de combate.
 //
 // `blindPotency`/`multiplicadorDano` vêm de quem chama (resolverTurnoComStatus,
 // abaixo) — esta função nunca lê status effect nenhum sozinha, pra não
@@ -67,10 +83,43 @@ function aplicarAcao({
     // combate (characterInventoryController.js): sempre % da vida/mana
     // MÁXIMA, nunca da atual.
     nomeAcao = acao.item?.nome ?? "Usar item";
-    if (acao.efeito.efeito_vida) {
+
+    // Motor moderno primeiro — mesma regra de precedência do PvE: um
+    // item com HEAL_HP_*/RESTORE_MANA_* moderno configurado nunca soma
+    // também o legado efeito_vida/efeito_mana (nunca os dois juntos).
+    let vidaSimulada = atacante.vida_atual;
+    let manaSimulada = atacante.mana_atual;
+    let temCuraModerna = false;
+    let temManaModerna = false;
+    for (const efeito of acao.efeitosConsumiveisModernos ?? []) {
+      if (!efeitoConhecido(efeito.effect_key)) continue;
+      const ehVida = EFFECT_KEYS_DE_VIDA.includes(efeito.effect_key);
+      const ehMana = EFFECT_KEYS_DE_MANA.includes(efeito.effect_key);
+      if (!ehVida && !ehMana) continue; // cleanse etc. não se aplicam em PvP/Grupo ainda
+      const resultado = executarEfeito(efeito.effect_key, {
+        config: efeito.config,
+        magnitude: efeito.magnitude,
+        vidaAtual: vidaSimulada,
+        vidaMaxima: vidaMaxAtacante ?? vidaSimulada,
+        manaAtual: manaSimulada,
+        manaMaxima: manaMaxAtacante ?? manaSimulada,
+      });
+      if (ehVida) {
+        temCuraModerna = true;
+        vidaSimulada = resultado.vidaAtual;
+        cura += resultado.curou ?? 0;
+      }
+      if (ehMana) {
+        temManaModerna = true;
+        manaSimulada = resultado.manaAtual;
+        manaCurada += resultado.curou ?? 0;
+      }
+    }
+
+    if (!temCuraModerna && acao.efeito.efeito_vida) {
       cura = Math.round((vidaMaxAtacante ?? atacante.vida_atual) * (acao.efeito.efeito_vida / 100));
     }
-    if (acao.efeito.efeito_mana) {
+    if (!temManaModerna && acao.efeito.efeito_mana) {
       manaCurada = Math.round((manaMaxAtacante ?? atacante.mana_atual) * (acao.efeito.efeito_mana / 100));
     }
   }
