@@ -62,6 +62,13 @@ function aplicarAcao({
   // RECEBIDO, nunca muda.
   buffsAtacante = [],
   buffsDefensor = [],
+  // Escudo ATUAL (GRANT_SHIELD — spec Caldeirão §13) de cada lado —
+  // `escudoAtacante` só é lido pra resolver um NOVO GRANT_SHIELD de
+  // item (devolvido em `novoEscudoAtacante`); `escudoDefensor` absorve
+  // o dano deste golpe ANTES da Vida (devolvido em
+  // `novoEscudoDefensor`, já descontado).
+  escudoAtacante = null,
+  escudoDefensor = null,
 }) {
   let dano = 0;
   let cura = 0;
@@ -70,6 +77,8 @@ function aplicarAcao({
   let motivoEsquiva = null;
   let nomeAcao = "Ataque básico";
   let novosBuffsAtacante = buffsAtacante;
+  let novoEscudoAtacante = escudoAtacante;
+  let novoEscudoDefensor = escudoDefensor;
   const bonusDefesaDefensor = combatBuffService.bonusDeDefesa(buffsDefensor);
   const defensorComBuffs = bonusDefesaDefensor
     ? { ...defensor, defesa: (defensor.defesa || 0) + bonusDefesaDefensor }
@@ -109,10 +118,15 @@ function aplicarAcao({
       if (!efeitoConhecido(efeito.effect_key)) continue;
       const ehVida = EFFECT_KEYS_DE_VIDA.includes(efeito.effect_key);
       const ehMana = EFFECT_KEYS_DE_MANA.includes(efeito.effect_key);
+      // APPLY_COMBAT_BUFF cobre DANO_SAIDA_PCT/DEFESA_FLAT/REGEN_HP_*/
+      // REGEN_MANA_*/STATUS_RESISTANCE_PCT — todos atributos da mesma
+      // lista, nenhum handler extra necessário (ver combatBuffService).
       const ehBuff = efeito.effect_key === "APPLY_COMBAT_BUFF";
-      if (!ehVida && !ehMana && !ehBuff) continue; // cleanse etc. não se aplicam em PvP/Grupo ainda
+      const ehEscudo = efeito.effect_key === "GRANT_SHIELD";
+      if (!ehVida && !ehMana && !ehBuff && !ehEscudo) continue; // cleanse etc. não se aplicam em PvP/Grupo ainda
       const resultado = executarEfeito(efeito.effect_key, {
         combatBuffs: novosBuffsAtacante,
+        escudoAtual: novoEscudoAtacante,
         config: efeito.config,
         magnitude: efeito.magnitude,
         duration_turns: efeito.duration_turns,
@@ -134,6 +148,9 @@ function aplicarAcao({
       }
       if (ehBuff) {
         novosBuffsAtacante = resultado.combatBuffs;
+      }
+      if (ehEscudo) {
+        novoEscudoAtacante = resultado.escudo;
       }
     }
 
@@ -172,10 +189,14 @@ function aplicarAcao({
       const danoBase = Math.round(calcularDanoBasico(atacante, contextoCritico) * multiplicadorDano);
       critico = Boolean(contextoCritico.critico);
       dano = aplicarMitigacaoDeDefesa(danoBase, defensorComBuffs);
-      defensor.vida_atual = Math.max(0, defensor.vida_atual - dano);
+      const absorcao1 = combatBuffService.absorverDano(novoEscudoDefensor, dano);
+      novoEscudoDefensor = absorcao1.escudo;
+      defensor.vida_atual = Math.max(0, defensor.vida_atual - absorcao1.danoResidual);
     } else {
       dano = aplicarMitigacaoDeDefesa(dano, defensorComBuffs);
-      defensor.vida_atual = Math.max(0, defensor.vida_atual - dano);
+      const absorcao2 = combatBuffService.absorverDano(novoEscudoDefensor, dano);
+      novoEscudoDefensor = absorcao2.escudo;
+      defensor.vida_atual = Math.max(0, defensor.vida_atual - absorcao2.danoResidual);
     }
   }
 
@@ -194,7 +215,18 @@ function aplicarAcao({
     atacante.mana_atual = Math.min(tetoMana, atacante.mana_atual + manaCurada);
   }
 
-  return { nomeAcao, dano, cura, manaCurada, esquivou, motivoEsquiva, critico, novosBuffsAtacante };
+  return {
+    nomeAcao,
+    dano,
+    cura,
+    manaCurada,
+    esquivou,
+    motivoEsquiva,
+    critico,
+    novosBuffsAtacante,
+    novoEscudoAtacante,
+    novoEscudoDefensor,
+  };
 }
 
 // Envolve aplicarAcao com o Motor de Status inteiro (Evolução do Motor
@@ -232,6 +264,10 @@ async function resolverTurnoComStatus({
   // isso ainda (ver partySocket.js/pvpLiveSocket.js).
   buffsAtacante = [],
   buffsDefensor = [],
+  // Escudo ATUAL (GRANT_SHIELD — spec Caldeirão §13) de cada lado,
+  // mesma convenção de buffsAtacante/buffsDefensor.
+  escudoAtacante = null,
+  escudoDefensor = null,
   turno,
   casterActorId,
   armaEfeitosAtacante,
@@ -329,8 +365,12 @@ async function resolverTurnoComStatus({
       combatBuffService.modificadorDeDanoSaida(buffsAtacante),
     buffsAtacante,
     buffsDefensor,
+    escudoAtacante,
+    escudoDefensor,
   });
   let listaBuffsAtacante = resultado.novosBuffsAtacante ?? buffsAtacante;
+  let escudoAtacanteAtual = resultado.novoEscudoAtacante ?? escudoAtacante;
+  const escudoDefensorAtual = resultado.novoEscudoDefensor ?? escudoDefensor;
 
   if (resultado.esquivou && resultado.motivoEsquiva === "BLIND_MISS") {
     log.push(`Cego, ${nomeAtacante} errou o golpe contra ${nomeDefensor}!`);
@@ -345,7 +385,14 @@ async function resolverTurnoComStatus({
     listaDefensor = quebraFreeze.lista;
     if (quebraFreeze.quebrou) log.push(`${nomeDefensor} descongelou com o impacto!`);
 
+    // STATUS_RESISTANCE (spec Caldeirão §13) — ponto central único de
+    // tentativa de status, igual ao PvE em combatController.js: resolve
+    // ANTES de aplicar, nunca depois.
     for (const efeito of efeitosNoInimigo) {
+      if (combatBuffService.resolverTentativaDeStatus(buffsDefensor).resistiu) {
+        log.push(`${nomeDefensor} resistiu a ${definicaoDoStatus(efeito.key).nomeUi}!`);
+        continue;
+      }
       listaDefensor = statusEffectService.aplicarStatus(listaDefensor, efeito);
       log.push(`${nomeDefensor} recebeu ${definicaoDoStatus(efeito.key).nomeUi} por ${efeito.remainingTurns} turno(s).`);
     }
@@ -359,6 +406,10 @@ async function resolverTurnoComStatus({
         turno,
       });
       for (const efeito of novosEfeitosDeArma) {
+        if (combatBuffService.resolverTentativaDeStatus(buffsDefensor).resistiu) {
+          log.push(`${nomeDefensor} resistiu ao efeito da arma de ${nomeAtacante}!`);
+          continue;
+        }
         listaDefensor = statusEffectService.aplicarStatus(listaDefensor, efeito);
         log.push(
           `A arma de ${nomeAtacante} aplicou ${definicaoDoStatus(efeito.key).nomeUi} em ${nomeDefensor} por ${efeito.remainingTurns} turno(s)!`,
@@ -376,6 +427,10 @@ async function resolverTurnoComStatus({
         turno,
       });
       for (const efeito of novosEfeitosDeMonstro) {
+        if (combatBuffService.resolverTentativaDeStatus(buffsDefensor).resistiu) {
+          log.push(`${nomeDefensor} resistiu ao efeito de ${nomeAtacante}!`);
+          continue;
+        }
         listaDefensor = statusEffectService.aplicarStatus(listaDefensor, efeito);
         log.push(
           `${nomeAtacante} aplicou ${definicaoDoStatus(efeito.key).nomeUi} em ${nomeDefensor} por ${efeito.remainingTurns} turno(s)!`,
@@ -400,8 +455,35 @@ async function resolverTurnoComStatus({
     nomeAlvo: nomeAtacante,
   });
   const morteAoFimDoTurno = vidaAntesDoTick > 0 && atacante.vida_atual <= 0;
+
+  // REGEN_HP/REGEN_MANA (ConsumableEffect APPLY_COMBAT_BUFF — spec
+  // Caldeirão §13) — mesmo ponto do tick de DoT acima (fim do PRÓPRIO
+  // turno do atacante), lido ANTES do decremento de listaBuffsAtacante
+  // logo abaixo.
+  if (!morteAoFimDoTurno) {
+    const regenVida = combatBuffService.regenDeVidaDoTurno(listaBuffsAtacante, vidaMaxAtacante ?? atacante.vida_atual);
+    if (regenVida > 0) {
+      const vidaAntesDoRegen = atacante.vida_atual;
+      const tetoVida = vidaMaxAtacante ?? atacante.vida_atual + regenVida;
+      atacante.vida_atual = Math.min(tetoVida, atacante.vida_atual + regenVida);
+      const curouDeFato = atacante.vida_atual - vidaAntesDoRegen;
+      // Só loga o que realmente curou — já no teto, um log de "regenerou
+      // 10" seria enganoso (mesmo critério de HEAL_HP_FLAT/PERCENT).
+      if (curouDeFato > 0) log.push(`${nomeAtacante} regenerou ${curouDeFato} de vida.`);
+    }
+    const regenMana = combatBuffService.regenDeManaDoTurno(listaBuffsAtacante, manaMaxAtacante ?? atacante.mana_atual);
+    if (regenMana > 0) {
+      const manaAntesDoRegen = atacante.mana_atual;
+      const tetoMana = manaMaxAtacante ?? atacante.mana_atual + regenMana;
+      atacante.mana_atual = Math.min(tetoMana, atacante.mana_atual + regenMana);
+      const curouDeFato = atacante.mana_atual - manaAntesDoRegen;
+      if (curouDeFato > 0) log.push(`${nomeAtacante} regenerou ${curouDeFato} de mana.`);
+    }
+  }
+
   listaAtacante = statusEffectService.decrementarDuracoes(listaAtacante);
   listaBuffsAtacante = combatBuffService.decrementarDuracoes(listaBuffsAtacante);
+  escudoAtacanteAtual = combatBuffService.decrementarDuracaoDoEscudo(escudoAtacanteAtual);
 
   return {
     ...resultado,
@@ -409,6 +491,8 @@ async function resolverTurnoComStatus({
     statusAtacante: listaAtacante,
     statusDefensor: listaDefensor,
     buffsAtacante: listaBuffsAtacante,
+    escudoAtacante: escudoAtacanteAtual,
+    escudoDefensor: escudoDefensorAtual,
     log,
   };
 }

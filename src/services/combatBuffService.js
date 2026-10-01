@@ -14,7 +14,32 @@
 // própria duração — igual a POISON/BLEED no motor de Status, só que sem
 // stack cap (não é um dano periódico, é um bônus/atributo).
 
-const ATRIBUTOS_BUFAVEIS = ["DANO_SAIDA_PCT", "DEFESA_FLAT"];
+const ATRIBUTOS_BUFAVEIS = [
+  "DANO_SAIDA_PCT",
+  "DEFESA_FLAT",
+  // REGEN_HP/MANA (spec Caldeirão §13) — cura/restaura no FIM do
+  // próprio turno de quem carrega (mesmo ponto do tick de DoT —
+  // Queimadura/Sangramento/Veneno — só que somando em vez de
+  // subtrair), antes do decremento de duração. _FLAT soma pontos
+  // fixos por turno; _PERCENT soma um percentual do máximo efetivo por
+  // turno (mesma convenção dos handlers HEAL_HP_*/RESTORE_MANA_*).
+  "REGEN_HP_FLAT",
+  "REGEN_HP_PERCENT",
+  "REGEN_MANA_FLAT",
+  "REGEN_MANA_PERCENT",
+  // STATUS_RESISTANCE (spec Caldeirão §13) — chance (pontos
+  // percentuais, 0-100) de uma TENTATIVA de status effect contra quem
+  // carrega simplesmente não acontecer. Resolvida no ponto central
+  // único de aplicação de status (ver resolverTentativaDeStatus
+  // abaixo) — nunca espalhada pelos vários lugares que hoje chamam
+  // statusEffectService.aplicarStatus.
+  "STATUS_RESISTANCE_PCT",
+];
+
+// Teto global de resistência a status (spec Caldeirão §13) — por mais
+// que empilhe, nunca fica impossível aplicar status NENHUM em alguém
+// (evitaria contra-jogo pra qualquer build baseada em status).
+const STATUS_RESISTANCE_MAXIMA = 75;
 
 function erro(mensagem) {
   return Object.assign(new Error(mensagem), { statusCode: 500 });
@@ -59,11 +84,86 @@ function bonusDeDefesa(lista) {
   return somaDeAtributo(lista, "DEFESA_FLAT");
 }
 
+// Regen de vida/mana do PRÓPRIO turno de quem carrega — chamado uma vez
+// por ator, no mesmo ponto em que o tick de DoT dele já acontece (nunca
+// duas vezes por engano: lido ANTES do decremento de duração, igual o
+// tick de DoT lê a lista antes de decrementar). `maximo` é
+// vidaMaxima/manaMaxima efetivos, pro _PERCENT bater com o mesmo teto
+// que o resto do combate usa.
+function regenDoTurno(lista, atributoFlat, atributoPercent, maximo) {
+  const flat = somaDeAtributo(lista, atributoFlat);
+  const percent = somaDeAtributo(lista, atributoPercent);
+  return Math.max(0, Math.round(flat + maximo * (percent / 100)));
+}
+
+function regenDeVidaDoTurno(lista, vidaMaxima) {
+  return regenDoTurno(lista, "REGEN_HP_FLAT", "REGEN_HP_PERCENT", vidaMaxima);
+}
+
+function regenDeManaDoTurno(lista, manaMaxima) {
+  return regenDoTurno(lista, "REGEN_MANA_FLAT", "REGEN_MANA_PERCENT", manaMaxima);
+}
+
+// Resolve UMA tentativa de aplicar status effect em quem carrega os
+// buffs — ponto central único (spec Caldeirão §13): todo lugar que hoje
+// chama statusEffectService.aplicarStatus num alvo precisa passar por
+// aqui ANTES, nunca checar resistência duplicado nem espalhado. Devolve
+// `resistiu: true` sem rodar RNG nenhuma quando a soma é 0 (nunca gasta
+// uma rolagem à toa pra quem não tem resistência configurada).
+function resolverTentativaDeStatus(lista) {
+  const chance = Math.min(STATUS_RESISTANCE_MAXIMA, somaDeAtributo(lista, "STATUS_RESISTANCE_PCT"));
+  if (chance <= 0) return { resistiu: false };
+  return { resistiu: Math.random() * 100 < chance };
+}
+
+// Escudo (GRANT_SHIELD — spec Caldeirão §13): absorve dano ANTES da
+// Vida, nunca altera Defesa (não é mitigação — é uma reserva separada
+// que esvazia conforme absorve). Vive fora da lista de buffs (não
+// empilha por soma — concederEscudo abaixo é "o maior prevalece", nunca
+// os dois somados) porque é estado MUTÁVEL que se esgota com o dano,
+// diferente de um multiplicador recalculado do zero a cada cálculo.
+// Instância: { valor, remainingTurns } | null.
+function concederEscudo(atual, novoValor, remainingTurns) {
+  if (!(novoValor > 0) || !(remainingTurns > 0)) {
+    throw Object.assign(new Error(`GRANT_SHIELD precisa de valor e duration_turns > 0 (recebeu ${novoValor}/${remainingTurns}).`), {
+      statusCode: 500,
+    });
+  }
+  if (atual && atual.valor >= novoValor) return atual;
+  return { valor: novoValor, remainingTurns };
+}
+
+// Absorve `dano` do escudo atual (null = sem escudo) — devolve o escudo
+// já descontado (ou null se esgotou) e o dano que sobrou pra Vida de
+// verdade. Nunca deixa `danoResidual` negativo.
+function absorverDano(escudo, dano) {
+  if (!escudo || dano <= 0) return { escudo, danoResidual: Math.max(0, dano) };
+  const absorvido = Math.min(escudo.valor, dano);
+  const valorRestante = escudo.valor - absorvido;
+  return {
+    escudo: valorRestante > 0 ? { ...escudo, valor: valorRestante } : null,
+    danoResidual: dano - absorvido,
+  };
+}
+
+function decrementarDuracaoDoEscudo(escudo) {
+  if (!escudo) return null;
+  const restante = escudo.remainingTurns - 1;
+  return restante > 0 ? { ...escudo, remainingTurns: restante } : null;
+}
+
 module.exports = {
   ATRIBUTOS_BUFAVEIS,
+  STATUS_RESISTANCE_MAXIMA,
   aplicarBuff,
   decrementarDuracoes,
   somaDeAtributo,
   modificadorDeDanoSaida,
   bonusDeDefesa,
+  regenDeVidaDoTurno,
+  regenDeManaDoTurno,
+  resolverTentativaDeStatus,
+  concederEscudo,
+  absorverDano,
+  decrementarDuracaoDoEscudo,
 };

@@ -50,6 +50,17 @@ function applyCombatBuff({ combatBuffs, config, magnitude, duration_turns, sourc
   return { combatBuffs: novaLista, aplicado: true };
 }
 
+// GRANT_SHIELD (spec Caldeirão §13) — escudo absorve dano ANTES da
+// Vida; delegado inteiro pro combatBuffService.concederEscudo (o maior
+// valor prevalece, nunca soma dois escudos). Contrato próprio (nem
+// `statusEffects` nem `combatBuffs`) porque é estado mutável — esvazia
+// conforme absorve dano, bem diferente de um multiplicador recalculado
+// do zero a cada vez.
+function grantShield({ escudoAtual, magnitude, duration_turns }) {
+  const novoEscudo = combatBuffService.concederEscudo(escudoAtual ?? null, magnitude, duration_turns);
+  return { escudo: novoEscudo, aplicado: true };
+}
+
 // Cura de vida/mana (spec Caldeirão §6.5) — migra Poção de Vida/Mana
 // (e qualquer novo consumível) pro motor de ConsumableEffect, saindo do
 // par legado ConsumableProperties.efeito_vida/efeito_mana (percentual
@@ -100,6 +111,7 @@ const CONSUMABLE_EFFECT_HANDLERS = {
   RESTORE_MANA_FLAT: restoreManaFlat,
   RESTORE_MANA_PERCENT: restoreManaPercent,
   APPLY_COMBAT_BUFF: applyCombatBuff,
+  GRANT_SHIELD: grantShield,
 };
 
 function efeitoConhecido(effectKey) {

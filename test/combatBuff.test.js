@@ -52,11 +52,16 @@ test.after(async () => {
 // trechos de resolverTurnoComStatus que não dependem do banco) são
 // funções puras o bastante pra controlar Math.random direto e tornar
 // acerto/crítico/variação de dano 100% determinísticos.
-function comMathRandomFixo(valor, fn) {
+// Cuidado: `fn` pode ser assíncrona (resolverTurnoComStatus) e dar um
+// `await` ANTES das rolagens de dado que este helper existe pra fixar —
+// restaurar Math.random num `finally` síncrono destravaria o mock cedo
+// demais, antes da Promise resolver de verdade. Sempre aguarda o
+// resultado (funciona pra síncrono também) antes de restaurar.
+async function comMathRandomFixo(valor, fn) {
   const original = Math.random;
   Math.random = () => valor;
   try {
-    return fn();
+    return await Promise.resolve(fn());
   } finally {
     Math.random = original;
   }
@@ -189,7 +194,7 @@ test("aplicarAcao: item com APPLY_COMBAT_BUFF devolve novosBuffsAtacante sem mex
 // acerto sem crítico e isolar só o efeito do buff)
 // ---------------------------------------------------------------------
 
-test("aplicarAcao: multiplicadorDano (onde o DANO_SAIDA_PCT entra, resolvido por quem chama) aumenta o dano do ataque básico na proporção exata", () => {
+test("aplicarAcao: multiplicadorDano (onde o DANO_SAIDA_PCT entra, resolvido por quem chama) aumenta o dano do ataque básico na proporção exata", async () => {
   // aplicarAcao nunca lê buffsAtacante pra multiplicar dano — isso é
   // responsabilidade de resolverTurnoComStatus (que soma
   // combatBuffService.modificadorDeDanoSaida ao multiplicadorDano antes
@@ -200,10 +205,10 @@ test("aplicarAcao: multiplicadorDano (onde o DANO_SAIDA_PCT entra, resolvido por
   const atacante = personagemBase();
   const defensor = personagemBase();
 
-  const semBuff = comMathRandomFixo(0.99, () =>
+  const semBuff = await comMathRandomFixo(0.99, () =>
     aplicarAcao({ atacante: { ...atacante }, defensor: { ...defensor }, acao: { tipo: "attack" }, multiplicadorDano: 1 }),
   );
-  const comBuff = comMathRandomFixo(0.99, () =>
+  const comBuff = await comMathRandomFixo(0.99, () =>
     aplicarAcao({
       atacante: { ...atacante },
       defensor: { ...defensor },
@@ -218,15 +223,15 @@ test("aplicarAcao: multiplicadorDano (onde o DANO_SAIDA_PCT entra, resolvido por
   assert.equal(comBuff.dano, Math.round(semBuff.dano * 1.5));
 });
 
-test("aplicarAcao: DEFESA_FLAT do defensor reduz o dano recebido do ataque básico", () => {
+test("aplicarAcao: DEFESA_FLAT do defensor reduz o dano recebido do ataque básico", async () => {
   const atacante = personagemBase();
   const defensorSemBuff = personagemBase({ defesa: 0 });
   const defensorComBuff = personagemBase({ defesa: 0 });
 
-  const semBuff = comMathRandomFixo(0.99, () =>
+  const semBuff = await comMathRandomFixo(0.99, () =>
     aplicarAcao({ atacante: { ...atacante }, defensor: defensorSemBuff, acao: { tipo: "attack" }, buffsDefensor: [] }),
   );
-  const comBuff = comMathRandomFixo(0.99, () =>
+  const comBuff = await comMathRandomFixo(0.99, () =>
     aplicarAcao({
       atacante: { ...atacante },
       defensor: defensorComBuff,

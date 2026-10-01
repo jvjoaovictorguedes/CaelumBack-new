@@ -34,6 +34,7 @@ async function aplicarEfeitosDoItem({
   idItem,
   statusEffects,
   combatBuffs = [],
+  escudoAtual = null,
   vidaAtual = null,
   vidaMaxima = null,
   manaAtual = null,
@@ -45,6 +46,7 @@ async function aplicarEfeitosDoItem({
   const efeitos = await listarEfeitosAtivos(idItem, transaction);
   let lista = statusEffects;
   let buffs = combatBuffs;
+  let escudo = escudoAtual;
   let vida = vidaAtual;
   let mana = manaAtual;
   let curaVida = 0;
@@ -69,6 +71,7 @@ async function aplicarEfeitosDoItem({
     const resultado = executarEfeito(efeito.effect_key, {
       statusEffects: lista,
       combatBuffs: buffs,
+      escudoAtual: escudo,
       config: efeito.config,
       magnitude: efeito.magnitude,
       duration_turns: efeito.duration_turns,
@@ -86,6 +89,10 @@ async function aplicarEfeitosDoItem({
       buffs = resultado.combatBuffs;
       log.push(`${nomeAlvo} recebeu um bônus de combate por ${efeito.duration_turns} turno(s).`);
     }
+    if (efeito.effect_key === "GRANT_SHIELD" && resultado.escudo) {
+      escudo = resultado.escudo;
+      log.push(`${nomeAlvo} ganhou um escudo de ${escudo.valor} pontos.`);
+    }
     if (ehResultadoDeCleanse && resultado.aplicado) log.push(`${nomeAlvo} foi curado(a) de um efeito negativo.`);
     if (typeof resultado.vidaAtual === "number") {
       vida = resultado.vidaAtual;
@@ -100,6 +107,7 @@ async function aplicarEfeitosDoItem({
   return {
     statusEffects: lista,
     combatBuffs: buffs,
+    escudo,
     vidaAtual: vida,
     manaAtual: mana,
     curaVida,
