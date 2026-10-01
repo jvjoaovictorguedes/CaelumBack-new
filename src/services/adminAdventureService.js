@@ -10,9 +10,11 @@ const AdventureZone = require("../models/AdventureZone");
 const AdventureMonster = require("../models/AdventureMonster");
 const AdventureZoneMonster = require("../models/AdventureZoneMonster");
 const AdventureMonsterLoot = require("../models/AdventureMonsterLoot");
+const MonsterStatusEffect = require("../models/MonsterStatusEffect");
 const Item = require("../models/Item");
 const ExpeditionRegion = require("../models/ExpeditionRegion");
 const { registrarAcao } = require("./adminAuditService");
+const { CHAVES_VALIDAS } = require("../config/statusEffectConfig");
 const { calcularPoderMonstro } = require("./combatPowerService");
 
 function erro(mensagem, statusCode = 400) {
@@ -752,6 +754,80 @@ async function sincronizarLootMonstro(idMonstro, lootPayload, { idAdmin, req }) 
   });
 }
 
+// ----------------------------------------------------------- STATUS EFFECT
+// PUT /monsters/:id/status-effects — ideia #3 da fila de melhorias
+// (monstro causando status no jogador). Mesmo padrão de sincronização
+// de loot acima: payload é a lista inteira, identificado por `status_key`
+// (chave única por monstro, igual weapon_status_effects por item+trigger)
+// — nunca duas linhas do mesmo status pro mesmo monstro.
+function validarStatusEffectDeMonstro(dados) {
+  if (!CHAVES_VALIDAS.includes(dados.status_key)) {
+    throw erro(`status_key inválida: "${dados.status_key}". Use uma das chaves do Motor de Status.`);
+  }
+  if (dados.chance_ppm == null || !Number.isInteger(dados.chance_ppm) || dados.chance_ppm < 0 || dados.chance_ppm > PPM_MAXIMO) {
+    throw erro(`chance_ppm precisa ser um inteiro entre 0 e ${PPM_MAXIMO}.`);
+  }
+  if (dados.duration_turns == null || !Number.isInteger(dados.duration_turns) || dados.duration_turns < 1) {
+    throw erro("duration_turns precisa ser um inteiro maior ou igual a 1.");
+  }
+  if (dados.potency_base == null || typeof dados.potency_base !== "number" || Number.isNaN(dados.potency_base)) {
+    throw erro("potency_base precisa ser um número.");
+  }
+}
+
+async function sincronizarStatusEffectsMonstro(idMonstro, payload, { idAdmin, req }) {
+  if (!Array.isArray(payload)) throw erro("status effects precisa ser uma lista.");
+
+  const chaves = payload.map((e) => e.status_key);
+  if (new Set(chaves).size !== chaves.length) {
+    throw erro("Não pode haver duas linhas do mesmo status_key pro mesmo monstro.");
+  }
+  for (const efeito of payload) validarStatusEffectDeMonstro(efeito);
+
+  return sequelize.transaction(async (transaction) => {
+    const monstro = await AdventureMonster.findByPk(idMonstro, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!monstro) throw erro("Monstro não encontrado.", 404);
+
+    const linhasAtuais = await MonsterStatusEffect.findAll({ where: { id_monstro: idMonstro }, transaction });
+    const antes = linhasAtuais.map((l) => l.toJSON());
+    const porStatusKey = new Map(linhasAtuais.map((l) => [l.status_key, l]));
+
+    const chavesMantidas = new Set();
+    for (const efeito of payload) {
+      const dados = {
+        chance_ppm: efeito.chance_ppm,
+        duration_turns: efeito.duration_turns,
+        potency_base: efeito.potency_base,
+        ativo: efeito.ativo ?? true,
+      };
+      const existente = porStatusKey.get(efeito.status_key);
+      if (existente) {
+        await existente.update(dados, { transaction });
+      } else {
+        await MonsterStatusEffect.create({ id_monstro: idMonstro, status_key: efeito.status_key, ...dados }, { transaction });
+      }
+      chavesMantidas.add(efeito.status_key);
+    }
+    const idsParaRemover = linhasAtuais.filter((l) => !chavesMantidas.has(l.status_key)).map((l) => l.id);
+    if (idsParaRemover.length) {
+      await MonsterStatusEffect.destroy({ where: { id: idsParaRemover }, transaction });
+    }
+
+    const depois = await MonsterStatusEffect.findAll({ where: { id_monstro: idMonstro }, transaction, order: [["status_key", "ASC"]] });
+    await registrarAcao({
+      idAdmin,
+      acao: "sincronizar_status_effects",
+      entidade: "MonsterStatusEffect",
+      idEntidade: idMonstro,
+      dadosAntes: { id_monstro: idMonstro, efeitos: antes },
+      dadosDepois: { id_monstro: idMonstro, efeitos: depois.map((l) => l.toJSON()) },
+      req,
+      transaction,
+    });
+    return depois;
+  });
+}
+
 // GET /monsters/:id (§7.3) — detalhe agregado: reduz o número de
 // requests que o MonsterEditor precisa fazer ao abrir (stats + Poder +
 // drops + zonas onde aparece). Pedido do jogador: MonsterEditor passou a
@@ -763,13 +839,14 @@ async function getAdminMonsterDetail(id) {
   const monstro = await AdventureMonster.findByPk(id);
   if (!monstro) throw erro("Monstro não encontrado.", 404);
 
-  const [loot, vinculos] = await Promise.all([
+  const [loot, vinculos, efeitosDeStatus] = await Promise.all([
     listAdminMonsterLoot({ idMonstro: id }),
     AdventureZoneMonster.findAll({
       where: { id_monstro: id },
       include: [{ model: AdventureZone, attributes: ["id", "nome"] }],
       order: [["id_area", "ASC"]],
     }),
+    MonsterStatusEffect.findAll({ where: { id_monstro: id }, order: [["status_key", "ASC"]] }),
   ]);
 
   const json = monstro.toJSON();
@@ -777,6 +854,7 @@ async function getAdminMonsterDetail(id) {
     monstro: json,
     combat_power: calcularPoderMonstro(json),
     loot,
+    efeitosDeStatus,
     zonas: vinculos.map((v) => ({
       id: v.id,
       id_area: v.id_area,
@@ -808,5 +886,6 @@ module.exports = {
   listExpeditionRegions,
   sincronizarRosterZona,
   sincronizarLootMonstro,
+  sincronizarStatusEffectsMonstro,
   getAdminMonsterDetail,
 };
