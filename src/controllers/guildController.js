@@ -903,7 +903,13 @@ exports.registrarGasto = async (req, res) => {
 
   try {
     const resultado = await sequelize.transaction(async (transaction) => {
-      await exigirPermissao(req.params.id, idResponsavel, "autorizar_gastos");
+      const membro = await exigirPermissao(req.params.id, idResponsavel, "autorizar_gastos");
+      // Mesmo que "autorizar_gastos" seja reatribuível por cargo (editar_cargos),
+      // registrar gasto é uma ação só do líder — a matriz de permissão sozinha
+      // não basta porque um Fundador poderia delegar essa permissão a outro cargo.
+      if (membro.cargo !== "Fundador") {
+        throw erro("Só o líder da guilda pode registrar gastos.", 403);
+      }
       const guild = await Guild.findByPk(req.params.id, { transaction, lock: transaction.LOCK.UPDATE });
       if (guild.tesouro < valorNumerico) throw erro("O tesouro não tem saldo suficiente para esse gasto.", 400);
 
