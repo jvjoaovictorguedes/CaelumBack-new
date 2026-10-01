@@ -141,7 +141,19 @@ function validarGrupo(grupo, valores) {
   if (!valores || typeof valores !== "object") throw erro("Payload de balanceamento vazio.");
 
   if (grupo === "expedition.cooldown") {
-    if (valores.TEMPO_COLETA_MS !== undefined) validarInteiroPositivo("TEMPO_COLETA_MS", valores.TEMPO_COLETA_MS);
+    if (valores.TEMPO_COLETA_MS !== undefined) {
+      validarInteiroPositivo("TEMPO_COLETA_MS", valores.TEMPO_COLETA_MS);
+      // Teto defensivo — sem isso um admin digitando um valor errado
+      // (ex.: querendo "3 minutos" mas digitando "180000" a mais, ou
+      // colando um número com dígitos extras) trava a coleta pro jogo
+      // INTEIRO por horas sem nenhum aviso (bug real reportado: cooldown
+      // de ~19h aplicado globalmente depois de um salvamento assim).
+      // 10 minutos já é bem mais que qualquer cooldown de coleta faz
+      // sentido ter.
+      if (valores.TEMPO_COLETA_MS > 600_000) {
+        throw erro("TEMPO_COLETA_MS não pode passar de 600000 (10 minutos).");
+      }
+    }
     return;
   }
 
