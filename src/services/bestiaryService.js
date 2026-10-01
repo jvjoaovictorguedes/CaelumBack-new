@@ -23,12 +23,18 @@ async function listarRegioes(idPersonagem) {
   const regioes = [];
   for (const zona of zonas) {
     const maestria = await calcularMaestriaDaRegiao(idPersonagem, zona.id);
+    // Mistério do Bestiário — o jogador só sabe o TOTAL de monstros de
+    // uma região depois de descobrir todos eles (mesmo princípio que já
+    // existia pra nome/imagem/drops de cada monstro individual, só que
+    // agora cobrindo a contagem também — contar os "???" já entregava o
+    // total de quebra). `total` null = ainda em segredo.
+    const totalRevelado = maestria.total > 0 && maestria.descobertos === maestria.total ? maestria.total : null;
     regioes.push({
       id: zona.id,
       nome: zona.nome,
       imagem_url: zona.imagem_url,
       descobertos: maestria.descobertos,
-      total: maestria.total,
+      total: totalRevelado,
       maestria_nivel: maestria.nivel,
       maestria_numeral: numeralRomano(maestria.nivel),
       progresso_pct_proximo_nivel: maestria.progresso_pct_proximo_nivel,
@@ -36,8 +42,13 @@ async function listarRegioes(idPersonagem) {
   }
 
   const criaturasDescobertas = regioes.reduce((soma, r) => soma + r.descobertos, 0);
-  const criaturasTotais = regioes.reduce((soma, r) => soma + r.total, 0);
-  const regioesCompletas = regioes.filter((r) => r.total > 0 && r.descobertos === r.total).length;
+  // Só soma um total GLOBAL quando toda região já revelou o próprio total
+  // — somar os totais junto com regiões ainda em segredo deixaria o
+  // jogador inferir o número escondido por subtração.
+  const criaturasTotais = regioes.every((r) => r.total !== null)
+    ? regioes.reduce((soma, r) => soma + r.total, 0)
+    : null;
+  const regioesCompletas = regioes.filter((r) => r.total !== null && r.descobertos === r.total).length;
   const maestriasV = regioes.filter((r) => r.maestria_nivel === NIVEL_MAXIMO_MAESTRIA).length;
 
   return {
@@ -103,26 +114,26 @@ async function obterRegiao(idPersonagem, idZona) {
     lootsPorMonstro.set(loot.id_monstro, lista);
   }
 
-  const monstros = vinculos.map((v) => {
+  // Mistério do Bestiário — uma linha "???" por monstro não descoberto
+  // já entregava o TOTAL da zona de graça (bastava contar os cards).
+  // Enquanto a zona não estiver 100% descoberta, nem a QUANTIDADE de
+  // desconhecidos aparece: só os já descobertos entram no array, e
+  // `ha_nao_descobertos` avisa a tela que ainda existe algo escondido
+  // (sem dizer quantos).
+  const bestiarioCompleto = maestria.total > 0 && maestria.descobertos === maestria.total;
+
+  const monstrosDescobertos = [];
+  let haNaoDescobertos = false;
+  for (const v of vinculos) {
     const kill = killsPorNome.get(v.monstro.nome);
     const descoberto = Boolean(kill?.primeira_derrota_em);
 
     if (!descoberto) {
-      // §5 — nada de identificador vaza antes da primeira vitória.
-      return {
-        descoberto: false,
-        nome: "???",
-        raridade: "???",
-        descricao: "???",
-        imagem_url: null,
-        nivel: null,
-        abates: 0,
-        requisito_proximo_nivel: null,
-        drops: [],
-      };
+      haNaoDescobertos = true;
+      continue;
     }
 
-    return {
+    monstrosDescobertos.push({
       descoberto: true,
       nome: v.monstro.nome,
       // AdventureMonster não tem campo de "tipo"/habilidades/resistências
@@ -144,8 +155,8 @@ async function obterRegiao(idPersonagem, idZona) {
       abates: kill.quantidade,
       requisito_proximo_nivel: proximoNivel ? REQUISITOS_ABATES_POR_NIVEL[proximoNivel][v.tipo_aparicao] : null,
       drops: lootsPorMonstro.get(v.monstro.id) ?? [],
-    };
-  });
+    });
+  }
 
   // Bônus regional por nível de Maestria (§14/§15 do bestiaryConfig) —
   // mostra o nível atual e, quando ainda não é o máximo, o que o
@@ -164,7 +175,8 @@ async function obterRegiao(idPersonagem, idZona) {
       nome: zona.nome,
       imagem_url: zona.imagem_url,
       descobertos: maestria.descobertos,
-      total: maestria.total,
+      total: bestiarioCompleto ? maestria.total : null,
+      ha_nao_descobertos: haNaoDescobertos,
       maestria_nivel: maestria.nivel,
       maestria_numeral: numeralRomano(maestria.nivel),
       progresso_pct_proximo_nivel: maestria.progresso_pct_proximo_nivel,
@@ -173,7 +185,7 @@ async function obterRegiao(idPersonagem, idZona) {
       bonus_proximo_nivel: bonusProximoNivel,
       tabela_bonus_por_nivel: tabelaBonus,
     },
-    monstros,
+    monstros: monstrosDescobertos,
   };
 }
 
