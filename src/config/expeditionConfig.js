@@ -156,6 +156,18 @@ function tempoColetaMsAtual() {
 // dominar o ritmo normal de coleta.
 let CHANCE_MONSTRO_PPM = 60_000; // 6% — mesmo motivo do `let` em TEMPO_COLETA_MS acima.
 
+// Recompensa de XP/Ouro da vitória contra o monstro de emboscada
+// (fórmula: BASE + NIVEL_DO_MONSTRO * POR_NIVEL) — usada em
+// combatController.js no fallback genérico de recompensa (encontro sem
+// id_area), que hoje é alimentado só pela emboscada da Expedição (ver
+// expeditionService.coletar/origemExpedicao) e por encontros legados
+// antigos sem zona. Pedido do jogador: dar pro admin o mesmo controle
+// que já existe pra XP/ouro da Aventura normal.
+let EMBOSCADA_XP_BASE = 15;
+let EMBOSCADA_XP_POR_NIVEL = 8;
+let EMBOSCADA_OURO_BASE = 5;
+let EMBOSCADA_OURO_POR_NIVEL = 4;
+
 // Quantos NÍVEIS DE COMBATE acima/abaixo do próprio personagem o
 // monstro da interrupção fica, por região — a região só tem
 // nivel_minimo (1-10, escala de profissão, NÃO a mesma escala do
@@ -223,6 +235,22 @@ function aplicarOverridesBalanceamento(grupo, valores) {
         CHANCE_MONSTRO_PPM = valores.CHANCE_MONSTRO_PPM;
         module.exports.CHANCE_MONSTRO_PPM = CHANCE_MONSTRO_PPM;
       }
+      if (typeof valores.EMBOSCADA_XP_BASE === "number") {
+        EMBOSCADA_XP_BASE = valores.EMBOSCADA_XP_BASE;
+        module.exports.EMBOSCADA_XP_BASE = EMBOSCADA_XP_BASE;
+      }
+      if (typeof valores.EMBOSCADA_XP_POR_NIVEL === "number") {
+        EMBOSCADA_XP_POR_NIVEL = valores.EMBOSCADA_XP_POR_NIVEL;
+        module.exports.EMBOSCADA_XP_POR_NIVEL = EMBOSCADA_XP_POR_NIVEL;
+      }
+      if (typeof valores.EMBOSCADA_OURO_BASE === "number") {
+        EMBOSCADA_OURO_BASE = valores.EMBOSCADA_OURO_BASE;
+        module.exports.EMBOSCADA_OURO_BASE = EMBOSCADA_OURO_BASE;
+      }
+      if (typeof valores.EMBOSCADA_OURO_POR_NIVEL === "number") {
+        EMBOSCADA_OURO_POR_NIVEL = valores.EMBOSCADA_OURO_POR_NIVEL;
+        module.exports.EMBOSCADA_OURO_POR_NIVEL = EMBOSCADA_OURO_POR_NIVEL;
+      }
       break;
     }
     default:
@@ -243,6 +271,10 @@ module.exports = {
   TEMPO_COLETA_MS,
   tempoColetaMsAtual,
   CHANCE_MONSTRO_PPM,
+  EMBOSCADA_XP_BASE,
+  EMBOSCADA_XP_POR_NIVEL,
+  EMBOSCADA_OURO_BASE,
+  EMBOSCADA_OURO_POR_NIVEL,
   deslocamentoDeNivelPorRegiao,
   aplicarOverridesBalanceamento,
 };

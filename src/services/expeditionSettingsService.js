@@ -56,7 +56,13 @@ const DEFAULTS_ORIGINAIS = {
       Object.entries(expeditionConfig.QUANTIDADE_POR_NIVEL).map(([n, faixa]) => [n, [...faixa]]),
     ),
   },
-  "expedition.ambush": { CHANCE_MONSTRO_PPM: expeditionConfig.CHANCE_MONSTRO_PPM },
+  "expedition.ambush": {
+    CHANCE_MONSTRO_PPM: expeditionConfig.CHANCE_MONSTRO_PPM,
+    EMBOSCADA_XP_BASE: expeditionConfig.EMBOSCADA_XP_BASE,
+    EMBOSCADA_XP_POR_NIVEL: expeditionConfig.EMBOSCADA_XP_POR_NIVEL,
+    EMBOSCADA_OURO_BASE: expeditionConfig.EMBOSCADA_OURO_BASE,
+    EMBOSCADA_OURO_POR_NIVEL: expeditionConfig.EMBOSCADA_OURO_POR_NIVEL,
+  },
   "adventure.danger": { ...adventureConfig.LIMIAR_PERIGO },
   "party.balance": {
     TAMANHO_MAXIMO_GRUPO: partyBattleConfig.TAMANHO_MAXIMO_GRUPO,
@@ -97,7 +103,13 @@ function getSnapshotAtual(grupo) {
         ),
       };
     case "expedition.ambush":
-      return { CHANCE_MONSTRO_PPM: expeditionConfig.CHANCE_MONSTRO_PPM };
+      return {
+        CHANCE_MONSTRO_PPM: expeditionConfig.CHANCE_MONSTRO_PPM,
+        EMBOSCADA_XP_BASE: expeditionConfig.EMBOSCADA_XP_BASE,
+        EMBOSCADA_XP_POR_NIVEL: expeditionConfig.EMBOSCADA_XP_POR_NIVEL,
+        EMBOSCADA_OURO_BASE: expeditionConfig.EMBOSCADA_OURO_BASE,
+        EMBOSCADA_OURO_POR_NIVEL: expeditionConfig.EMBOSCADA_OURO_POR_NIVEL,
+      };
     case "adventure.danger":
       return { ...adventureConfig.LIMIAR_PERIGO };
     case "party.balance":
@@ -198,6 +210,10 @@ function validarGrupo(grupo, valores) {
 
   if (grupo === "expedition.ambush") {
     if (valores.CHANCE_MONSTRO_PPM !== undefined) validarPpm("CHANCE_MONSTRO_PPM", valores.CHANCE_MONSTRO_PPM);
+    for (const campo of ["EMBOSCADA_XP_BASE", "EMBOSCADA_XP_POR_NIVEL", "EMBOSCADA_OURO_BASE", "EMBOSCADA_OURO_POR_NIVEL"]) {
+      if (valores[campo] === undefined) continue;
+      if (!Number.isInteger(valores[campo]) || valores[campo] < 0) throw erro(`${campo} precisa ser um inteiro >= 0.`);
+    }
     return;
   }
 

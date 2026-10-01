@@ -46,6 +46,7 @@ const AdventureMonster = require("../models/AdventureMonster");
 const { obterSessaoAtiva } = require("../services/adventureService");
 const { sortearMonstroDaZona } = require("../services/adventureRollService");
 const { concederRecompensaDeZona } = require("../services/adventureRewardService");
+const expeditionConfig = require("../config/expeditionConfig");
 const { concederOuro } = require("../services/goldService");
 const { registrarProgressoContrato } = require("../services/adventureGuildObjectiveService");
 const { registrarProgressoMissaoGuilda } = require("../services/guildMissionService");
@@ -1118,8 +1119,11 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         dinheiroGanho = recompensa.dinheiroGanho;
         espoliosDeZona = recompensa.espolios;
       } else {
-        xpGanho = 15 + inimigoAtual.nivel * 8;
-        dinheiroGanho = 5 + inimigoAtual.nivel * 4;
+        // Recompensa do monstro de emboscada da Expedição (e de
+        // encontros legados sem zona) — configurável no Admin (ver
+        // expeditionConfig.js, grupo "expedition.ambush").
+        xpGanho = expeditionConfig.EMBOSCADA_XP_BASE + inimigoAtual.nivel * expeditionConfig.EMBOSCADA_XP_POR_NIVEL;
+        dinheiroGanho = expeditionConfig.EMBOSCADA_OURO_BASE + inimigoAtual.nivel * expeditionConfig.EMBOSCADA_OURO_POR_NIVEL;
       }
 
       // Buffs de Guilda (§19/§20) — só em recompensas de Aventura, nunca
