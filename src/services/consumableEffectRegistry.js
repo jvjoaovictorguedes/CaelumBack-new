@@ -11,6 +11,7 @@
 // `manaAtual` (novo valor já clampado no respectivo máximo, mais
 // `curou` com o delta aplicado) — nunca os dois tipos no mesmo handler.
 const statusEffectService = require("./statusEffectService");
+const combatBuffService = require("./combatBuffService");
 const { CHAVES_VALIDAS } = require("../config/statusEffectConfig");
 
 function cleanseStatus({ statusEffects, config }) {
@@ -32,12 +33,22 @@ function cleanseCategory({ statusEffects, config }) {
   return { statusEffects: novaLista, aplicado: novaLista.length !== statusEffects.length };
 }
 
-// APPLY_COMBAT_BUFF fica deliberadamente FORA da whitelist nesta
-// entrega (Fase 6 — spec §13: buffs temporários exigem
-// combatBuffService próprio, não implementado ainda). Registrar a
-// chave aqui sem handler faria falhar "de forma segura" mesmo assim,
-// mas é mais claro simplesmente não listá-la: um admin/seed que tente
-// usá-la recebe o mesmo erro de "effect_key desconhecida" do fallback.
+// APPLY_COMBAT_BUFF (spec Caldeirão §13) — buff temporário de combate,
+// delegado inteiro pro combatBuffService (duração/empilhamento/
+// aplicação no cálculo de dano-defesa vivem só lá, igual CLEANSE_*
+// delega em statusEffectService). `config.atributo` é a whitelist de
+// ATRIBUTOS_BUFAVEIS; `magnitude` é o valor do buff; `duration_turns`
+// vem direto da coluna ConsumableEffect.duration_turns (não de
+// `config`), igual todo outro efeito com duração.
+function applyCombatBuff({ combatBuffs, config, magnitude, duration_turns, sourceItemId }) {
+  const novaLista = combatBuffService.aplicarBuff(combatBuffs, {
+    atributo: config?.atributo,
+    valor: magnitude,
+    remainingTurns: duration_turns,
+    sourceItemId: sourceItemId ?? null,
+  });
+  return { combatBuffs: novaLista, aplicado: true };
+}
 
 // Cura de vida/mana (spec Caldeirão §6.5) — migra Poção de Vida/Mana
 // (e qualquer novo consumível) pro motor de ConsumableEffect, saindo do
@@ -88,6 +99,7 @@ const CONSUMABLE_EFFECT_HANDLERS = {
   HEAL_HP_PERCENT: healHpPercent,
   RESTORE_MANA_FLAT: restoreManaFlat,
   RESTORE_MANA_PERCENT: restoreManaPercent,
+  APPLY_COMBAT_BUFF: applyCombatBuff,
 };
 
 function efeitoConhecido(effectKey) {

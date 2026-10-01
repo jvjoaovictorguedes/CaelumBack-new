@@ -366,8 +366,15 @@ testeComBanco("CLEANSE_CATEGORY(DOT) remove todos os DoTs e mantém controles", 
 });
 
 testeComBanco("effect_key fora da whitelist é ignorada com segurança (não quebra o uso do item)", async () => {
+  // Alquimia V2 (spec §13) — APPLY_COMBAT_BUFF era o exemplo original
+  // aqui ("reservada, ainda não implementada"); agora que tem handler de
+  // verdade, uma config inválida (`config.atributo` ausente) PASSA a
+  // lançar erro de propósito (mesma regra de CLEANSE_STATUS/
+  // CLEANSE_CATEGORY com config ruim — ver combatBuffService.test via
+  // consumableEffectRegistry), não mais "efeito desconhecido ignorado".
+  // Esta chave genuinamente não existe e nunca vai existir.
   const item = await criarItemConsumivel({});
-  await ConsumableEffect.create({ id_item: item.id, effect_key: "APPLY_COMBAT_BUFF", config: { attribute: "Forca" } });
+  await ConsumableEffect.create({ id_item: item.id, effect_key: "EFFECT_KEY_RESERVADA_PARA_TESTE", config: {} });
 
   let lista = statusEffectService.listaVazia();
   lista = statusEffectService.aplicarStatus(lista, { key: "POISON", remainingTurns: 3, potency: 5 });

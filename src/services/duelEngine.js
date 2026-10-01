@@ -24,6 +24,7 @@ const {
   EFFECT_KEYS_DE_VIDA,
   EFFECT_KEYS_DE_MANA,
 } = require("./consumableEffectRegistry");
+const combatBuffService = require("./combatBuffService");
 
 // acao: { tipo: "attack" }, { tipo: "power", power: <Power> } ou
 // { tipo: "item", item: <Item>, efeito: <ConsumableProperties>,
@@ -53,6 +54,14 @@ function aplicarAcao({
   manaMaxAtacante,
   blindPotency = 0,
   multiplicadorDano = 1,
+  // Buffs de combate ATUAIS (spec Caldeirão §13) — `buffsAtacante` é só
+  // lido aqui pra resolver um NOVO APPLY_COMBAT_BUFF de item (devolvido
+  // em `novosBuffsAtacante`; nunca afeta o dano DESTE turno, só dos
+  // seguintes — mesmo critério de statusEffectService pros efeitos
+  // "Self"). `buffsDefensor` só entra na mitigação de Defesa do golpe
+  // RECEBIDO, nunca muda.
+  buffsAtacante = [],
+  buffsDefensor = [],
 }) {
   let dano = 0;
   let cura = 0;
@@ -60,6 +69,11 @@ function aplicarAcao({
   let esquivou = false;
   let motivoEsquiva = null;
   let nomeAcao = "Ataque básico";
+  let novosBuffsAtacante = buffsAtacante;
+  const bonusDefesaDefensor = combatBuffService.bonusDeDefesa(buffsDefensor);
+  const defensorComBuffs = bonusDefesaDefensor
+    ? { ...defensor, defesa: (defensor.defesa || 0) + bonusDefesaDefensor }
+    : defensor;
   // Precisão/Crítico (Velocidade) — mesmo `contexto` opcional de
   // combatFormulas.calcularDanoBasico/calcularEfeitoPoder, pra quem
   // chama (resolverTurnoComStatus, abaixo, e por tabela pvpController/
@@ -95,10 +109,14 @@ function aplicarAcao({
       if (!efeitoConhecido(efeito.effect_key)) continue;
       const ehVida = EFFECT_KEYS_DE_VIDA.includes(efeito.effect_key);
       const ehMana = EFFECT_KEYS_DE_MANA.includes(efeito.effect_key);
-      if (!ehVida && !ehMana) continue; // cleanse etc. não se aplicam em PvP/Grupo ainda
+      const ehBuff = efeito.effect_key === "APPLY_COMBAT_BUFF";
+      if (!ehVida && !ehMana && !ehBuff) continue; // cleanse etc. não se aplicam em PvP/Grupo ainda
       const resultado = executarEfeito(efeito.effect_key, {
+        combatBuffs: novosBuffsAtacante,
         config: efeito.config,
         magnitude: efeito.magnitude,
+        duration_turns: efeito.duration_turns,
+        sourceItemId: acao.item?.id ?? null,
         vidaAtual: vidaSimulada,
         vidaMaxima: vidaMaxAtacante ?? vidaSimulada,
         manaAtual: manaSimulada,
@@ -113,6 +131,9 @@ function aplicarAcao({
         temManaModerna = true;
         manaSimulada = resultado.manaAtual;
         manaCurada += resultado.curou ?? 0;
+      }
+      if (ehBuff) {
+        novosBuffsAtacante = resultado.combatBuffs;
       }
     }
 
@@ -150,10 +171,10 @@ function aplicarAcao({
       const contextoCritico = {};
       const danoBase = Math.round(calcularDanoBasico(atacante, contextoCritico) * multiplicadorDano);
       critico = Boolean(contextoCritico.critico);
-      dano = aplicarMitigacaoDeDefesa(danoBase, defensor);
+      dano = aplicarMitigacaoDeDefesa(danoBase, defensorComBuffs);
       defensor.vida_atual = Math.max(0, defensor.vida_atual - dano);
     } else {
-      dano = aplicarMitigacaoDeDefesa(dano, defensor);
+      dano = aplicarMitigacaoDeDefesa(dano, defensorComBuffs);
       defensor.vida_atual = Math.max(0, defensor.vida_atual - dano);
     }
   }
@@ -173,7 +194,7 @@ function aplicarAcao({
     atacante.mana_atual = Math.min(tetoMana, atacante.mana_atual + manaCurada);
   }
 
-  return { nomeAcao, dano, cura, manaCurada, esquivou, motivoEsquiva, critico };
+  return { nomeAcao, dano, cura, manaCurada, esquivou, motivoEsquiva, critico, novosBuffsAtacante };
 }
 
 // Envolve aplicarAcao com o Motor de Status inteiro (Evolução do Motor
@@ -204,6 +225,13 @@ async function resolverTurnoComStatus({
   manaMaxAtacante,
   statusAtacante,
   statusDefensor,
+  // Buffs de combate ATUAIS (ConsumableEffect APPLY_COMBAT_BUFF — spec
+  // Caldeirão §13), mesma convenção de statusAtacante/statusDefensor:
+  // listas nunca mutadas, quem chama persiste de volta o que vier na
+  // resposta. `buffsDefensor` default [] — nem todo chamador rastreia
+  // isso ainda (ver partySocket.js/pvpLiveSocket.js).
+  buffsAtacante = [],
+  buffsDefensor = [],
   turno,
   casterActorId,
   armaEfeitosAtacante,
@@ -255,6 +283,7 @@ async function resolverTurnoComStatus({
       bloqueado: true,
       statusAtacante: listaAtacante,
       statusDefensor: listaDefensor,
+      buffsAtacante: combatBuffService.decrementarDuracoes(buffsAtacante),
       log,
     };
   }
@@ -292,8 +321,16 @@ async function resolverTurnoComStatus({
     vidaMaxAtacante,
     manaMaxAtacante,
     blindPotency: blindDoAtacante?.potency ?? 0,
-    multiplicadorDano: statusEffectService.multiplicadorDeDanoDeSaida(listaAtacante),
+    // DANO_SAIDA_PCT (ConsumableEffect APPLY_COMBAT_BUFF — spec
+    // Caldeirão §13) soma no mesmo passo que Enfraquecimento, igual ao
+    // PvE em combatController.js.
+    multiplicadorDano:
+      statusEffectService.multiplicadorDeDanoDeSaida(listaAtacante) *
+      combatBuffService.modificadorDeDanoSaida(buffsAtacante),
+    buffsAtacante,
+    buffsDefensor,
   });
+  let listaBuffsAtacante = resultado.novosBuffsAtacante ?? buffsAtacante;
 
   if (resultado.esquivou && resultado.motivoEsquiva === "BLIND_MISS") {
     log.push(`Cego, ${nomeAtacante} errou o golpe contra ${nomeDefensor}!`);
@@ -364,12 +401,14 @@ async function resolverTurnoComStatus({
   });
   const morteAoFimDoTurno = vidaAntesDoTick > 0 && atacante.vida_atual <= 0;
   listaAtacante = statusEffectService.decrementarDuracoes(listaAtacante);
+  listaBuffsAtacante = combatBuffService.decrementarDuracoes(listaBuffsAtacante);
 
   return {
     ...resultado,
     morteAoFimDoTurno,
     statusAtacante: listaAtacante,
     statusDefensor: listaDefensor,
+    buffsAtacante: listaBuffsAtacante,
     log,
   };
 }

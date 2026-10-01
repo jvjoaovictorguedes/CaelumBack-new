@@ -427,6 +427,9 @@ module.exports = function registerPartyHandlers(io) {
         // encontro; `armaEfeitos` já veio pronto de carregarLutador.
         for (const membro of membros) {
           membro.status = [];
+          // Buffs de combate (ConsumableEffect APPLY_COMBAT_BUFF — spec
+          // Caldeirão §13) — mesmo princípio do `status` acima.
+          membro.combatBuffs = [];
         }
         const derrotados = membros.filter((m) => m.estado.vida_atual <= 0);
         if (derrotados.length > 0) {
@@ -543,6 +546,7 @@ module.exports = function registerPartyHandlers(io) {
           ativo: e.ativo,
         }));
         inimigo.status = [];
+        inimigo.combatBuffs = [];
 
         const battleId = proximaBatalhaId++;
         const sala = `party-batalha:${battleId}`;
@@ -738,6 +742,7 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
     bloqueado,
     statusAtacante,
     statusDefensor,
+    buffsAtacante,
     log: logStatus,
   } = await resolverTurnoComStatus({
     atacante: atacante.estado,
@@ -747,6 +752,8 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
     manaMaxAtacante: atacante.manaMax,
     statusAtacante: atacante.status,
     statusDefensor: batalha.inimigo.status,
+    buffsAtacante: atacante.combatBuffs,
+    buffsDefensor: batalha.inimigo.combatBuffs,
     turno: batalha.contadorTurno,
     casterActorId: characterId,
     armaEfeitosAtacante: atacante.armaEfeitos,
@@ -756,6 +763,7 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
   });
   atacante.status = statusAtacante;
   batalha.inimigo.status = statusDefensor;
+  atacante.combatBuffs = buffsAtacante ?? atacante.combatBuffs;
 
   io.to(batalha.sala).emit("party:turno-resultado", {
     battleId,
@@ -913,6 +921,7 @@ async function executarTurnoMonstro(io, battleId) {
     bloqueado,
     statusAtacante,
     statusDefensor,
+    buffsAtacante,
     log: logStatus,
   } = await resolverTurnoComStatus({
     atacante: batalha.inimigo,
@@ -921,6 +930,8 @@ async function executarTurnoMonstro(io, battleId) {
     vidaMaxAtacante: batalha.inimigo.vida_maxima,
     statusAtacante: batalha.inimigo.status,
     statusDefensor: alvo.status,
+    buffsAtacante: batalha.inimigo.combatBuffs,
+    buffsDefensor: alvo.combatBuffs,
     turno: batalha.contadorTurno,
     casterActorId: "inimigo",
     efeitosDeStatusAtacante: batalha.inimigo.efeitosDeStatus,
@@ -929,6 +940,7 @@ async function executarTurnoMonstro(io, battleId) {
   });
   batalha.inimigo.status = statusAtacante;
   alvo.status = statusDefensor;
+  batalha.inimigo.combatBuffs = buffsAtacante ?? batalha.inimigo.combatBuffs;
 
   io.to(batalha.sala).emit("party:turno-resultado", {
     battleId,

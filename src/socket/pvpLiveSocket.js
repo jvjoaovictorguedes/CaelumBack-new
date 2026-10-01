@@ -350,6 +350,10 @@ module.exports = function registerPvpLiveHandlers(io) {
           danoTotalA: 0,
           danoTotalB: 0,
           statusEffects: { A: [], B: [] },
+          // Buffs de combate (ConsumableEffect APPLY_COMBAT_BUFF — spec
+          // Caldeirão §13) — mesmo princípio de statusEffects: vazio no
+          // início do duelo, nunca persistido fora dele.
+          combatBuffs: { A: [], B: [] },
           timer: null,
         };
         duelos.set(duelId, duelo);
@@ -496,6 +500,7 @@ module.exports = function registerPvpLiveHandlers(io) {
               effect_key: e.effect_key,
               magnitude: e.magnitude,
               config: e.config,
+              duration_turns: e.duration_turns,
             })),
           };
         } catch (error) {
@@ -596,6 +601,7 @@ async function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
     bloqueado,
     statusAtacante,
     statusDefensor,
+    buffsAtacante,
     log: logStatus,
   } = await resolverTurnoComStatus({
     atacante: atacanteInfo.estado,
@@ -605,6 +611,11 @@ async function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
     manaMaxAtacante,
     statusAtacante: duelo.statusEffects[chave],
     statusDefensor: duelo.statusEffects[outraChave],
+    // Tolerante a duelo construído sem combatBuffs ainda (defensivo —
+    // todo construtor de duelo já inclui isso, mas nunca custa não
+    // quebrar um duelo em andamento de antes do deploy).
+    buffsAtacante: duelo.combatBuffs?.[chave] ?? [],
+    buffsDefensor: duelo.combatBuffs?.[outraChave] ?? [],
     turno: duelo.acoes,
     casterActorId: chave,
     armaEfeitosAtacante: atacanteInfo.armaEfeitos,
@@ -614,6 +625,8 @@ async function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
   });
   duelo.statusEffects[chave] = statusAtacante;
   duelo.statusEffects[outraChave] = statusDefensor;
+  duelo.combatBuffs = duelo.combatBuffs ?? { A: [], B: [] };
+  duelo.combatBuffs[chave] = buffsAtacante ?? duelo.combatBuffs[chave];
 
   if (dano > 0) {
     if (chave === "A") duelo.danoTotalA += dano;

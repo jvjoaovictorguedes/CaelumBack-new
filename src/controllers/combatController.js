@@ -56,6 +56,7 @@ const { bonusesAtivosPara: bonusesTavernaAtivosPara } = require("../services/tav
 const worldBossDiscoveryService = require("../services/worldBossDiscoveryService");
 const achievementService = require("../services/achievementService");
 const statusEffectService = require("../services/statusEffectService");
+const combatBuffService = require("../services/combatBuffService");
 const cooldownService = require("../services/cooldownService");
 const { resolverEfeitosDoUso } = require("../services/combatEffectResolver");
 const { resolverEfeitosDeArmaNoHit } = require("../services/weaponEffectResolver");
@@ -77,6 +78,10 @@ const uniqueFeatPublicService = require("../services/uniqueFeatPublicService");
 function estadoDeStatusECooldown(inimigoAtual) {
   return {
     statusEffects: inimigoAtual.statusEffects ?? { player: [], enemy: [] },
+    // Buffs de combate (ConsumableEffect APPLY_COMBAT_BUFF — spec
+    // Caldeirão §13) — mesma tolerância a encontro antigo sem essa
+    // chave ainda (ausência = vazio, nunca erro).
+    combatBuffs: inimigoAtual.combatBuffs ?? { player: [], enemy: [] },
     cooldowns: inimigoAtual.cooldowns ?? { player: {}, enemy: {} },
     combatTurn: (inimigoAtual.combatTurn ?? 0) + 1,
   };
@@ -531,6 +536,10 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
         // Motor de Status/Cooldown (§37) — estado vazio no início do
         // encontro; executarTurno preenche conforme o combate avança.
         statusEffects: { player: [], enemy: [] },
+        // Buffs de combate (ConsumableEffect APPLY_COMBAT_BUFF — spec
+        // Caldeirão §13) — mesmo princípio de statusEffects: vazio no
+        // início do encontro, nunca persistido fora dele.
+        combatBuffs: { player: [], enemy: [] },
         cooldowns: { player: {}, enemy: {} },
         combatTurn: 0,
       };
@@ -690,7 +699,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     // depois da própria ação — ver bloco logo após a checagem de
     // vitória mais abaixo.
     // ==========================================================
-    const { statusEffects, cooldowns, combatTurn } = estadoDeStatusECooldown(inimigoAtual);
+    const { statusEffects, combatBuffs, cooldowns, combatTurn } = estadoDeStatusECooldown(inimigoAtual);
     const cooldownsPlayerAplicadosNesteTurno = new Set();
     const cooldownsEnemyAplicadosNesteTurno = new Set();
 
@@ -883,9 +892,14 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         );
       // Enfraquecimento (§45) reduz o dano de SAÍDA de quem está com o
       // status, antes de qualquer mitigação do alvo. PVE_DAMAGE_PCT da
-      // Taverna soma no mesmo passo, POR CIMA (§13).
+      // Taverna e o buff DANO_SAIDA_PCT (ConsumableEffect
+      // APPLY_COMBAT_BUFF — spec Caldeirão §13) somam no mesmo passo,
+      // POR CIMA.
       const dano = Math.round(
-        danoBase * statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.player) * multiplicadorDanoTaverna,
+        danoBase *
+          statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.player) *
+          combatBuffService.modificadorDeDanoSaida(combatBuffs.player) *
+          multiplicadorDanoTaverna,
       );
 
       // Motor de Status §11 — resolverEfeitosDoUso preserva `target`
@@ -990,6 +1004,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       const efeitosModernos = await consumableEffectService.aplicarEfeitosDoItem({
         idItem: action.itemId,
         statusEffects: statusEffects.player,
+        combatBuffs: combatBuffs.player,
         vidaAtual: personagemAtual.vida_atual,
         vidaMaxima: vidaMaximaEfetiva,
         manaAtual: personagemAtual.mana_atual,
@@ -998,6 +1013,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         transaction,
       });
       statusEffects.player = efeitosModernos.statusEffects;
+      combatBuffs.player = efeitosModernos.combatBuffs;
       log.push(...efeitosModernos.log);
 
       // Mesma fórmula (percentual da vida/mana MÁXIMA, não pontos
@@ -1065,6 +1081,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         const danoBasicoEnfraquecido = Math.round(
           calcularDanoBasico(personagemAtual, contextoCriticoAtaque) *
             statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.player) *
+            combatBuffService.modificadorDeDanoSaida(combatBuffs.player) *
             multiplicadorDanoTaverna,
         );
         if (contextoCriticoAtaque.critico) criticoJogador = true;
@@ -1400,6 +1417,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           drop,
           espolios: espoliosDeZona,
           statusEffects,
+          combatBuffs,
           bestiarioCompletoAgora,
           huntUpdate,
           worldBoss,
@@ -1437,6 +1455,11 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     });
     danoStatusJogador = Math.max(0, vidaJogadorAntesDoTick - personagemAtual.vida_atual);
     statusEffects.player = statusEffectService.decrementarDuracoes(statusEffects.player);
+    // combatBuffs.player NÃO decrementa aqui (diferente de statusEffects) —
+    // DEFESA_FLAT ainda precisa valer na mitigação do contra-ataque do
+    // inimigo, que só acontece MAIS ABAIXO neste mesmo turno. Decrementa
+    // junto com combatBuffs.enemy, depois que o contra-ataque já leu o
+    // valor atual (ver comentário lá).
 
     // Snapshot de vida/mana ao FIM do turno do jogador (ação + tick de
     // DoT próprio), antes do contra-ataque do inimigo mais abaixo — sem
@@ -1475,6 +1498,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           },
           enemy: inimigoAtual,
           statusEffects,
+          combatBuffs,
           criticoJogador,
           criticoInimigo,
           danoCausadoNoInimigo,
@@ -1547,11 +1571,18 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         // embutida em aplicarMitigacaoDeDefesa (que também mitiga PvP/
         // World Boss, onde a Taverna nunca deve valer). Mesmo piso de 1
         // dano que aplicarMitigacaoDeDefesa já garante, pra o buff nunca
-        // virar imunidade total.
+        // virar imunidade total. O bônus DEFESA_FLAT (ConsumableEffect
+        // APPLY_COMBAT_BUFF — spec Caldeirão §13) é um objeto efêmero só
+        // pra esta chamada — nunca altera personagemAtual.defesa de
+        // verdade (a mutação de vida_atual abaixo continua usando o
+        // objeto real).
+        const defensorComBuffs = combatBuffService.bonusDeDefesa(combatBuffs.player)
+          ? { ...personagemAtual, defesa: (personagemAtual.defesa || 0) + combatBuffService.bonusDeDefesa(combatBuffs.player) }
+          : personagemAtual;
         const danoRecebido = Math.max(
           1,
           Math.round(
-            aplicarMitigacaoDeDefesa(danoComCriticoInimigo, personagemAtual) * multiplicadorDefesaTaverna,
+            aplicarMitigacaoDeDefesa(danoComCriticoInimigo, defensorComBuffs) * multiplicadorDefesaTaverna,
           ),
         );
         danoRecebidoContraAtaque = danoRecebido;
@@ -1631,6 +1662,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           },
           enemy: inimigoAtual,
           statusEffects: { player: [], enemy: [] },
+          combatBuffs: { player: [], enemy: [] },
           cooldowns: { player: {}, enemy: {} },
           criticoJogador,
           criticoInimigo,
@@ -1659,6 +1691,14 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     });
     danoStatusInimigo = Math.max(0, vidaInimigoAntesDoTick - inimigoAtual.vida_atual);
     statusEffects.enemy = statusEffectService.decrementarDuracoes(statusEffects.enemy);
+    combatBuffs.enemy = combatBuffService.decrementarDuracoes(combatBuffs.enemy);
+    // combatBuffs.player decrementa só AGORA (não lá em cima, junto de
+    // statusEffects.player) — o contra-ataque do inimigo (mitigado pelo
+    // DEFESA_FLAT do jogador, calculado mais acima) já rodou e leu o
+    // valor de ANTES deste decremento; se decrementasse antes, um buff
+    // com "1 turno restante" perderia a proteção no próprio turno em
+    // que ainda deveria valer.
+    combatBuffs.player = combatBuffService.decrementarDuracoes(combatBuffs.player);
 
     if (inimigoAtual.vida_atual <= 0) {
       return await concederVitoriaEResponder();
@@ -1671,7 +1711,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     // Persiste o estado atualizado do inimigo (vida restante) E o
     // estado de status/cooldown/turno pro próximo turno (§37 —
     // extensão do JSONB já existente).
-    character.encontro_pve = { ...inimigoAtual, statusEffects, cooldowns, combatTurn };
+    character.encontro_pve = { ...inimigoAtual, statusEffects, combatBuffs, cooldowns, combatTurn };
     await character.save({ transaction });
 
     return res.status(200).json({
@@ -1695,6 +1735,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
 
         enemy: inimigoAtual,
         statusEffects,
+        combatBuffs,
         cooldowns: { player: cooldowns.player },
         criticoJogador,
         criticoInimigo,

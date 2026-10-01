@@ -496,6 +496,12 @@ async function iniciarPartidaAssincrona(io, { idDesafiante }) {
       danoTotalA: 0,
       danoTotalB: 0,
       statusEffects: { A: [], B: [] },
+      // Buffs de combate (ConsumableEffect APPLY_COMBAT_BUFF — spec
+      // Caldeirão §13) — mesmo princípio de statusEffects, exigido por
+      // pvpLiveSocket.executarTurno em todo duelo, inclusive este
+      // construído direto aqui (ranked assíncrono nunca passa pelo
+      // handshake normal de desafio).
+      combatBuffs: { A: [], B: [] },
       timer: null,
       timerIA: null,
       ranked: true,

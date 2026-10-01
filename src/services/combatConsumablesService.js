@@ -47,7 +47,12 @@ async function listarConsumiveisDeCombate(characterId, transaction) {
   const efeitosModernosPorItem = new Map();
   for (const efeito of efeitosModernos) {
     const lista = efeitosModernosPorItem.get(efeito.id_item) ?? [];
-    lista.push({ effect_key: efeito.effect_key, magnitude: efeito.magnitude, config: efeito.config });
+    lista.push({
+      effect_key: efeito.effect_key,
+      magnitude: efeito.magnitude,
+      config: efeito.config,
+      duration_turns: efeito.duration_turns,
+    });
     efeitosModernosPorItem.set(efeito.id_item, lista);
   }
 

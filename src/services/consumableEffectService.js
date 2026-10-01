@@ -33,6 +33,7 @@ async function listarEfeitosAtivos(idItem, transaction) {
 async function aplicarEfeitosDoItem({
   idItem,
   statusEffects,
+  combatBuffs = [],
   vidaAtual = null,
   vidaMaxima = null,
   manaAtual = null,
@@ -43,6 +44,7 @@ async function aplicarEfeitosDoItem({
 }) {
   const efeitos = await listarEfeitosAtivos(idItem, transaction);
   let lista = statusEffects;
+  let buffs = combatBuffs;
   let vida = vidaAtual;
   let mana = manaAtual;
   let curaVida = 0;
@@ -66,8 +68,11 @@ async function aplicarEfeitosDoItem({
 
     const resultado = executarEfeito(efeito.effect_key, {
       statusEffects: lista,
+      combatBuffs: buffs,
       config: efeito.config,
       magnitude: efeito.magnitude,
+      duration_turns: efeito.duration_turns,
+      sourceItemId: idItem,
       vidaAtual: vida,
       vidaMaxima,
       manaAtual: mana,
@@ -75,8 +80,13 @@ async function aplicarEfeitosDoItem({
       quantidade,
     });
 
-    if (resultado.statusEffects) lista = resultado.statusEffects;
-    if (resultado.aplicado) log.push(`${nomeAlvo} foi curado(a) de um efeito negativo.`);
+    const ehResultadoDeCleanse = resultado.statusEffects !== undefined;
+    if (ehResultadoDeCleanse) lista = resultado.statusEffects;
+    if (resultado.combatBuffs) {
+      buffs = resultado.combatBuffs;
+      log.push(`${nomeAlvo} recebeu um bônus de combate por ${efeito.duration_turns} turno(s).`);
+    }
+    if (ehResultadoDeCleanse && resultado.aplicado) log.push(`${nomeAlvo} foi curado(a) de um efeito negativo.`);
     if (typeof resultado.vidaAtual === "number") {
       vida = resultado.vidaAtual;
       curaVida += resultado.curou ?? 0;
@@ -89,6 +99,7 @@ async function aplicarEfeitosDoItem({
 
   return {
     statusEffects: lista,
+    combatBuffs: buffs,
     vidaAtual: vida,
     manaAtual: mana,
     curaVida,
