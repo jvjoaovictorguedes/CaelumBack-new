@@ -9,31 +9,21 @@
 // nunca só um número solto em MarketListing. Equipamento continua
 // sempre 1/1 (nunca compra parcial — uma instância não divide).
 const { Op, fn, col } = require("sequelize");
-const { sequelize } = require("../config/database");
-const Character = require("../models/Character");
 const Item = require("../models/Item");
 const WeaponProperties = require("../models/WeaponProperties");
 const ArmorProperties = require("../models/ArmorProperties");
 const ConsumableProperties = require("../models/ConsumableProperties");
 const FishingRodProperties = require("../models/FishingRodProperties");
-const CharacterInventory = require("../models/CharacterInventory");
 const CharacterEquipmentInstance = require("../models/CharacterEquipmentInstance");
+const Character = require("../models/Character");
 const MarketListing = require("../models/MarketListing");
 const MarketTransaction = require("../models/MarketTransaction");
-const { addStack } = require("../services/inventoryService");
-const equipmentInstanceService = require("../services/equipmentInstanceService");
 const { propriedadesEfetivasArma, propriedadesEfetivasArmadura } = require("../services/equipmentRefinementService");
+const marketService = require("../services/marketService");
 const {
-  TAXA_MERCADO,
-  PRECO_MINIMO_UNITARIO,
-  PRECO_MAXIMO_UNITARIO,
   LIMITE_PAGINA_PADRAO,
   LIMITE_PAGINA_MAXIMO,
 } = require("../config/marketConfig");
-
-function erro(mensagem, statusCode = 400) {
-  return Object.assign(new Error(mensagem), { statusCode });
-}
 
 // Anexa propriedades_efetivas (já considerando o refinamento — spec
 // §11: "não obrigar o comprador a abrir a Forja pra entender o item")
@@ -70,95 +60,20 @@ const INCLUDE_ITEM_COM_PROPRIEDADES = {
 // vai perder de taxa e quanto vai receber de fato. Nunca hardcoded no
 // front: se TAXA_MERCADO mudar aqui, a tela de Vender já reflete.
 exports.obterConfig = (req, res) => {
-  return res.status(200).json({
-    status: "success",
-    data: { taxa_mercado: TAXA_MERCADO, preco_minimo_unitario: PRECO_MINIMO_UNITARIO, preco_maximo_unitario: PRECO_MAXIMO_UNITARIO },
-  });
+  return res.status(200).json({ status: "success", data: marketService.getConfig() });
 };
 
 exports.criarAnuncio = async (req, res) => {
   const id_personagem = req.personagemAtual.id;
   const { id_item, quantidade, preco_unitario, id_instancia } = req.body;
 
-  const qtd = Number(quantidade);
-  const preco = Number(preco_unitario);
-
-  if (!id_item || !Number.isInteger(qtd) || qtd <= 0) {
-    return res.status(400).json({ message: "id_item e quantidade (inteiro positivo) são obrigatórios." });
-  }
-  if (!Number.isInteger(preco) || preco < PRECO_MINIMO_UNITARIO || preco > PRECO_MAXIMO_UNITARIO) {
-    return res.status(400).json({ message: `Preço unitário deve estar entre ${PRECO_MINIMO_UNITARIO} e ${PRECO_MAXIMO_UNITARIO}.` });
-  }
-
   try {
-    const listing = await sequelize.transaction(async (transaction) => {
-      const item = await Item.findByPk(id_item, { transaction });
-      if (!item) {
-        throw erro("Item não encontrado.", 404);
-      }
-      if (["QuestItem", "Currencia"].includes(item.tipo_item)) {
-        throw erro(`Item do tipo "${item.tipo_item}" não pode ser anunciado.`);
-      }
-      // Painel Administrativo §14 — bloqueio configurável por item (ex.:
-      // recompensa exclusiva de evento), sem precisar de código novo
-      // pra cada caso.
-      if (!item.negociavel_mercado) {
-        throw erro(`"${item.nome}" não pode ser anunciado no Mercado.`);
-      }
-
-      // Inventário v2 (§4/§11/§12) — equipamento não é mais empilhável:
-      // anuncia UMA instância específica (cada uma pode ter refinamento
-      // diferente), nunca uma "quantidade" solta de id_item.
-      if (equipmentInstanceService.ehInstanciavel(item.tipo_item)) {
-        if (qtd !== 1) {
-          throw erro("Equipamento é anunciado um de cada vez (quantidade deve ser 1).");
-        }
-        if (!id_instancia) {
-          throw erro("id_instancia é obrigatório pra anunciar equipamento.");
-        }
-        await equipmentInstanceService.reserveForMarket(id_personagem, id_instancia, transaction);
-
-        return MarketListing.create(
-          {
-            id_personagem_vendedor: id_personagem,
-            id_item,
-            id_instancia,
-            quantidade_total: 1,
-            quantidade_restante: 1,
-            preco_unitario: preco,
-            status: "Ativo",
-          },
-          { transaction },
-        );
-      }
-
-      const inventoryEntry = await CharacterInventory.findOne({
-        where: { id_personagem, id_item },
-        transaction,
-        lock: transaction.LOCK.UPDATE,
-      });
-      if (!inventoryEntry || inventoryEntry.quantidade < qtd) {
-        throw erro(`Você não tem ${qtd} unidade(s) de "${item.nome}" disponível(is) no inventário.`);
-      }
-
-      inventoryEntry.quantidade -= qtd;
-      if (inventoryEntry.quantidade <= 0) {
-        await inventoryEntry.destroy({ transaction });
-      } else {
-        await inventoryEntry.save({ transaction });
-      }
-
-      return MarketListing.create(
-        {
-          id_personagem_vendedor: id_personagem,
-          id_item,
-          quantidade_total: qtd,
-          quantidade_restante: qtd,
-          preco_unitario: preco,
-          status: "Ativo",
-        },
-        { transaction },
-      );
+    const listing = await marketService.createListing({
+      idPersonagem: id_personagem,
+      idItem: id_item,
+      quantidade,
+      precoUnitario: preco_unitario,
+      idInstancia: id_instancia,
     });
 
     return res.status(201).json({ status: "success", message: "Anúncio criado!", data: { listing } });
@@ -339,130 +254,13 @@ exports.comprarAnuncio = async (req, res) => {
   const { id } = req.params;
 
   try {
-    const resultado = await sequelize.transaction(async (transaction) => {
-      const listing = await MarketListing.findByPk(id, {
-        transaction,
-        lock: transaction.LOCK.UPDATE,
-      });
-      if (!listing || listing.status !== "Ativo" || listing.quantidade_restante <= 0) {
-        throw erro("Este anúncio não está mais disponível.", 404);
-      }
-      if (listing.id_personagem_vendedor === id_personagem_comprador) {
-        throw erro("Você não pode comprar seu próprio anúncio.");
-      }
-
-      // Compra parcial de stack (spec §6) — equipamento é sempre
-      // exatamente 1 (a instância inteira, nunca "pedaço" dela). Sem
-      // quantidade no corpo, assume "o anúncio inteiro" — mantém
-      // compatibilidade com quem já chamava essa rota sem o campo novo.
-      const quantidadeSolicitada =
-        req.body?.quantidade !== undefined ? Number(req.body.quantidade) : listing.quantidade_restante;
-
-      if (!Number.isInteger(quantidadeSolicitada) || quantidadeSolicitada <= 0) {
-        throw erro("Quantidade inválida.");
-      }
-      if (listing.id_instancia && quantidadeSolicitada !== 1) {
-        throw erro("Equipamento é comprado sempre 1 de cada vez.");
-      }
-      if (quantidadeSolicitada > listing.quantidade_restante) {
-        throw erro(`Só restam ${listing.quantidade_restante} unidade(s) neste anúncio.`);
-      }
-
-      // Trava comprador e vendedor sempre na mesma ordem (id menor
-      // primeiro) — sem isso, duas compras concorrentes envolvendo os
-      // mesmos dois personagens em papéis invertidos (A compra de B ao
-      // mesmo tempo que B compra de A) podiam travar em deadlock.
-      const vendedorId = listing.id_personagem_vendedor;
-      const [primeiroId, segundoId] = [id_personagem_comprador, vendedorId].sort((a, b) => a - b);
-      const primeiro = await Character.findByPk(primeiroId, { transaction, lock: transaction.LOCK.UPDATE });
-      const segundo = await Character.findByPk(segundoId, { transaction, lock: transaction.LOCK.UPDATE });
-      const comprador = primeiroId === id_personagem_comprador ? primeiro : segundo;
-      const vendedor = primeiroId === vendedorId ? primeiro : segundo;
-
-      if (!comprador) {
-        throw erro("Personagem não encontrado.", 404);
-      }
-      if (!vendedor) {
-        throw erro("Vendedor não encontrado.", 404);
-      }
-
-      // Preço total SEMPRE recalculado aqui a partir do preco_unitario
-      // gravado no anúncio e da quantidade validada acima — nunca a
-      // partir de um total que o cliente mande (spec §15).
-      const precoTotal = listing.preco_unitario * quantidadeSolicitada;
-      if (comprador.dinheiro < precoTotal) {
-        throw erro("Moedas insuficientes para esta compra.");
-      }
-
-      const taxa = Math.floor(precoTotal * TAXA_MERCADO);
-      const valorLiquidoVendedor = precoTotal - taxa;
-
-      comprador.dinheiro -= precoTotal;
-      // Ouro do mercado é transferência entre jogadores, não fonte nova
-      // — nunca passa por goldService.concederOuro (ver comentário lá).
-      vendedor.dinheiro += valorLiquidoVendedor;
-      await comprador.save({ transaction });
-      await vendedor.save({ transaction });
-
-      // Inventário v2 — anúncio de equipamento transfere a INSTÂNCIA
-      // (mantém o refinamento dela); anúncio de stack credita a
-      // quantidade comprada (pode ser parte do total anunciado).
-      if (listing.id_instancia) {
-        await equipmentInstanceService.transfer(listing.id_instancia, id_personagem_comprador, transaction);
-      } else {
-        // Anúncio de equipamento SEM id_instancia é lixo de antes da
-        // regra atual (criarAnuncio exige id_instancia pra tipo
-        // equipável desde a v2) — nunca deveria existir mais, mas se
-        // sobrou algum caindo aqui, criar um stack pra um item
-        // equipável seria pior que recusar a compra: o item ficaria
-        // preso num character_inventory que a tela de equipamentos
-        // nunca lê (só lê CharacterEquipmentInstance), ou seja, o
-        // jogador paga e "some". Recusa alto e claro em vez disso.
-        const itemAnunciado = await Item.findByPk(listing.id_item, { transaction });
-        if (itemAnunciado && equipmentInstanceService.ehInstanciavel(itemAnunciado.tipo_item)) {
-          throw erro(
-            "Este anúncio está corrompido (equipamento sem instância vinculada) e não pode ser comprado. Avise um administrador.",
-            409,
-          );
-        }
-        await addStack(id_personagem_comprador, listing.id_item, quantidadeSolicitada, transaction);
-      }
-
-      listing.quantidade_restante -= quantidadeSolicitada;
-      if (listing.quantidade_restante <= 0) {
-        listing.status = "Vendido";
-        listing.vendido_em = new Date();
-      }
-      // id_personagem_comprador no listing registra só o último
-      // comprador — o histórico completo (múltiplos compradores parciais)
-      // vive em MarketTransaction, nunca aqui.
-      listing.id_personagem_comprador = id_personagem_comprador;
-      await listing.save({ transaction });
-
-      let refinamentoNaVenda = null;
-      if (listing.id_instancia) {
-        const instancia = await CharacterEquipmentInstance.findByPk(listing.id_instancia, { transaction });
-        refinamentoNaVenda = instancia?.refinamento ?? null;
-      }
-
-      const transacao = await MarketTransaction.create(
-        {
-          id_listing: listing.id,
-          id_personagem_vendedor: vendedorId,
-          id_personagem_comprador,
-          id_item: listing.id_item,
-          id_instancia: listing.id_instancia,
-          refinamento: refinamentoNaVenda,
-          quantidade: quantidadeSolicitada,
-          preco_unitario: listing.preco_unitario,
-          preco_total: precoTotal,
-          taxa,
-          valor_liquido_vendedor: valorLiquidoVendedor,
-        },
-        { transaction },
-      );
-
-      return { listing, transacao, precoTotal, valorLiquidoVendedor };
+    // Sem quantidade no corpo, assume "o anúncio inteiro" — mantém
+    // compatibilidade com quem já chamava essa rota sem o campo novo
+    // (compra parcial de stack, spec v2 §6).
+    const resultado = await marketService.buyListing({
+      idListing: id,
+      idPersonagemComprador: id_personagem_comprador,
+      quantidade: req.body?.quantidade,
     });
 
     return res.status(200).json({ status: "success", message: "Compra realizada!", data: resultado });
@@ -480,31 +278,7 @@ exports.cancelarAnuncio = async (req, res) => {
   const { id } = req.params;
 
   try {
-    await sequelize.transaction(async (transaction) => {
-      const listing = await MarketListing.findByPk(id, {
-        transaction,
-        lock: transaction.LOCK.UPDATE,
-      });
-      if (!listing || listing.status !== "Ativo") {
-        throw erro("Este anúncio não está mais ativo.", 404);
-      }
-      if (listing.id_personagem_vendedor !== id_personagem) {
-        throw erro("Este anúncio não é seu.", 403);
-      }
-
-      // Devolve só o que RESTOU anunciado — se já vendeu parte, essa
-      // parte já foi entregue a outros compradores e não volta.
-      if (listing.id_instancia) {
-        await equipmentInstanceService.releaseFromMarket(listing.id_instancia, transaction);
-      } else if (listing.quantidade_restante > 0) {
-        await addStack(id_personagem, listing.id_item, listing.quantidade_restante, transaction);
-      }
-
-      listing.status = "Cancelado";
-      listing.cancelado_em = new Date();
-      await listing.save({ transaction });
-    });
-
+    await marketService.cancelListing({ idListing: id, idPersonagem: id_personagem });
     return res.status(200).json({ status: "success", message: "Anúncio cancelado, item devolvido ao inventário." });
   } catch (error) {
     const statusCode = error.statusCode || 500;
