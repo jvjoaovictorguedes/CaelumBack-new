@@ -517,6 +517,14 @@ Character.hasOne(CharacterFishingProgress, { foreignKey: "id_personagem" });
 // global quando null).
 FishingTournament.belongsTo(FishingZone, { foreignKey: "id_zone", as: "zona" });
 
+// Ideia #1 da fila de melhorias — inscrição explícita (reversão do
+// design original "participação automática").
+const FishingTournamentEntry = require("./FishingTournamentEntry");
+FishingTournament.hasMany(FishingTournamentEntry, { foreignKey: "id_tournament", as: "inscricoes" });
+FishingTournamentEntry.belongsTo(FishingTournament, { foreignKey: "id_tournament", as: "torneio" });
+FishingTournamentEntry.belongsTo(Character, { foreignKey: "id_personagem", as: "personagem" });
+FishingTournament.belongsTo(Character, { foreignKey: "vencedor_character_id", as: "vencedor" });
+
 Vessel.hasMany(CharacterVessel, { foreignKey: "id_vessel" });
 CharacterVessel.belongsTo(Vessel, { foreignKey: "id_vessel", as: "vessel" });
 

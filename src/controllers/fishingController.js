@@ -113,13 +113,26 @@ exports.getTorneioAtual = async (req, res) => {
   try {
     const { torneio, status } = await fishingTournamentService.obterTorneioAtual();
     if (!torneio) {
-      return res.status(200).json({ status: "success", data: { torneio: null, statusTorneio: "NENHUM", leaderboard: null, minhaPosicao: null } });
+      return res.status(200).json({
+        status: "success",
+        data: { torneio: null, statusTorneio: "NENHUM", leaderboard: null, minhaPosicao: null, inscrito: false },
+      });
     }
     const leaderboard = await fishingTournamentService.listarLeaderboardTorneio(torneio.id, req.query.page);
     const minhaPosicao = await fishingTournamentService.obterMinhaPosicaoTorneio(torneio.id, req.personagemAtual.id);
-    res.status(200).json({ status: "success", data: { torneio, statusTorneio: status, leaderboard, minhaPosicao } });
+    const inscrito = await fishingTournamentService.estaInscrito(torneio.id, req.personagemAtual.id);
+    res.status(200).json({ status: "success", data: { torneio, statusTorneio: status, leaderboard, minhaPosicao, inscrito } });
   } catch (error) {
     tratarErro(res, error, "Erro ao buscar torneio de Pesca.");
+  }
+};
+
+exports.postInscreverTorneio = async (req, res) => {
+  try {
+    await fishingTournamentService.inscreverNoTorneio(req.params.id, req.personagemAtual.id);
+    res.status(200).json({ status: "success", data: { inscrito: true } });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao se inscrever no torneio de Pesca.");
   }
 };
 

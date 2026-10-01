@@ -17,6 +17,13 @@ const FishingTournament = sequelize.define(
     termina_em: { type: DataTypes.DATE, allowNull: false },
     ativo: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     id_admin_criador: { type: DataTypes.INTEGER, allowNull: true },
+    // Ideia #1 da fila de melhorias — preenchidos por
+    // fishingTournamentScheduler.js quando termina_em passa: nunca
+    // setados por nenhuma rota de jogador/admin diretamente.
+    finalizado_em: { type: DataTypes.DATE, allowNull: true },
+    vencedor_character_id: { type: DataTypes.INTEGER, allowNull: true },
+    // Snapshot do nome — sobrevive se o personagem for deletado depois.
+    vencedor_nome: { type: DataTypes.STRING(100), allowNull: true },
   },
   { tableName: "fishing_tournaments" },
 );

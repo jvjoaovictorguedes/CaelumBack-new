@@ -16,6 +16,7 @@ router.get("/baits", fishingController.getBaits);
 router.get("/almanac", fishingController.getAlmanac);
 router.get("/ranking", fishingController.getRanking);
 router.get("/tournament", fishingController.getTorneioAtual);
+router.post("/tournament/:id/inscrever", fishingController.postInscreverTorneio);
 
 router.get("/sessions/active", fishingController.getSessaoAtiva);
 router.post("/sessions/start", fishingController.postStart);

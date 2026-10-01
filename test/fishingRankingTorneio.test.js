@@ -18,11 +18,13 @@ const FishingZone = require("../src/models/FishingZone");
 const FishingCatchRecord = require("../src/models/FishingCatchRecord");
 const CharacterFishingProgress = require("../src/models/CharacterFishingProgress");
 const FishingTournament = require("../src/models/FishingTournament");
+const FishingTournamentEntry = require("../src/models/FishingTournamentEntry");
 const Character = require("../src/models/Character");
 const User = require("../src/models/User");
 
 const fishingRankingService = require("../src/services/fishingRankingService");
 const fishingTournamentService = require("../src/services/fishingTournamentService");
+const fishingTournamentScheduler = require("../src/services/fishingTournamentScheduler");
 
 let temBanco = false;
 test.before(async () => {
@@ -47,6 +49,7 @@ test.after(async () => {
   if (!temBanco) return;
   await FishingCatchRecord.destroy({ where: { id_personagem: personagensCriados.length ? personagensCriados : [-1] } });
   await CharacterFishingProgress.destroy({ where: { id_personagem: personagensCriados.length ? personagensCriados : [-1] } });
+  await FishingTournamentEntry.destroy({ where: { id_tournament: torneiosCriados.length ? torneiosCriados : [-1] } });
   await FishingTournament.destroy({ where: { id: torneiosCriados.length ? torneiosCriados : [-1] } });
   await FishingSpecies.destroy({ where: { id: especiesCriadas.length ? especiesCriadas : [-1] } });
   await FishingZone.destroy({ where: { id: zonasCriadas.length ? zonasCriadas : [-1] } });
@@ -203,6 +206,12 @@ testeComBanco("torneio: leaderboard soma weight_g*quality só das capturas DENTR
     termina_em: new Date(Date.now() + 3_600_000),
   });
   torneiosCriados.push(torneio.id);
+  // Inscrição direta no model (não via inscreverNoTorneio — esse torneio
+  // já começou de propósito pra determinismo do teste, e a função real
+  // fecha inscrição nesse ponto; aqui simulamos "já estavam inscritos
+  // antes do início", que é o caso real que a regra cobre).
+  await FishingTournamentEntry.create({ id_tournament: torneio.id, id_personagem: p1.id });
+  await FishingTournamentEntry.create({ id_tournament: torneio.id, id_personagem: p2.id });
 
   // p1: 2 capturas dentro da janela (conta as duas), 1 fora (ignorada).
   await catchRecord({ idPersonagem: p1.id, idSpecies: esp.id, idZone: z.id, weight_g: 1000, quality: 0.5 });
@@ -250,6 +259,7 @@ testeComBanco("torneio: escopo por zona ignora capturas de outras zonas", async 
     termina_em: new Date(Date.now() + 3_600_000),
   });
   torneiosCriados.push(torneio.id);
+  await FishingTournamentEntry.create({ id_tournament: torneio.id, id_personagem: p1.id });
 
   await catchRecord({ idPersonagem: p1.id, idSpecies: esp.id, idZone: zonaDoTorneio.id, weight_g: 1000, quality: 1 });
   await catchRecord({ idPersonagem: p1.id, idSpecies: esp.id, idZone: outraZona.id, weight_g: 8000, quality: 1 });
@@ -257,4 +267,197 @@ testeComBanco("torneio: escopo por zona ignora capturas de outras zonas", async 
   const minha = await fishingTournamentService.obterMinhaPosicaoTorneio(torneio.id, p1.id);
   assert.equal(minha.pontuacao, 1000);
   assert.equal(minha.capturas, 1);
+});
+
+// ---------------------------------------------------------- INSCRIÇÃO
+testeComBanco("torneio: inscrição funciona ANTES do início e fica refletida em estaInscrito", async () => {
+  const p1 = await personagem();
+  const torneio = await FishingTournament.create({
+    nome: `Torneio Inscrição Futura ${sufixo()}`,
+    inicia_em: new Date(Date.now() + 3_600_000),
+    termina_em: new Date(Date.now() + 7_200_000),
+  });
+  torneiosCriados.push(torneio.id);
+
+  assert.equal(await fishingTournamentService.estaInscrito(torneio.id, p1.id), false);
+  await fishingTournamentService.inscreverNoTorneio(torneio.id, p1.id);
+  assert.equal(await fishingTournamentService.estaInscrito(torneio.id, p1.id), true);
+});
+
+testeComBanco("torneio: inscrição é idempotente (inscrever de novo não falha nem duplica)", async () => {
+  const p1 = await personagem();
+  const torneio = await FishingTournament.create({
+    nome: `Torneio Inscrição Dupla ${sufixo()}`,
+    inicia_em: new Date(Date.now() + 3_600_000),
+    termina_em: new Date(Date.now() + 7_200_000),
+  });
+  torneiosCriados.push(torneio.id);
+
+  await fishingTournamentService.inscreverNoTorneio(torneio.id, p1.id);
+  await fishingTournamentService.inscreverNoTorneio(torneio.id, p1.id);
+
+  const linhas = await FishingTournamentEntry.findAll({ where: { id_tournament: torneio.id, id_personagem: p1.id } });
+  assert.equal(linhas.length, 1);
+});
+
+testeComBanco("torneio: inscrição é recusada depois que o torneio já começou", async () => {
+  const p1 = await personagem();
+  const torneio = await FishingTournament.create({
+    nome: `Torneio Já Começou ${sufixo()}`,
+    inicia_em: new Date(Date.now() - 60_000),
+    termina_em: new Date(Date.now() + 3_600_000),
+  });
+  torneiosCriados.push(torneio.id);
+
+  await assert.rejects(
+    fishingTournamentService.inscreverNoTorneio(torneio.id, p1.id),
+    /Inscrições encerradas/,
+  );
+});
+
+testeComBanco("torneio: captura de quem NÃO se inscreveu não conta pro placar", async () => {
+  const inscrito = await personagem();
+  const naoInscrito = await personagem();
+  const esp = await especie();
+  const z = await zona();
+
+  const torneio = await FishingTournament.create({
+    nome: `Torneio Só Inscritos ${sufixo()}`,
+    inicia_em: new Date(Date.now() - 3_600_000),
+    termina_em: new Date(Date.now() + 3_600_000),
+  });
+  torneiosCriados.push(torneio.id);
+  await FishingTournamentEntry.create({ id_tournament: torneio.id, id_personagem: inscrito.id });
+
+  await catchRecord({ idPersonagem: inscrito.id, idSpecies: esp.id, idZone: z.id, weight_g: 1000, quality: 1 });
+  await catchRecord({ idPersonagem: naoInscrito.id, idSpecies: esp.id, idZone: z.id, weight_g: 9999, quality: 1 });
+
+  const leaderboard = await fishingTournamentService.listarLeaderboardTorneio(torneio.id, 1);
+  assert.ok(leaderboard.itens.some((i) => i.id === inscrito.id));
+  assert.ok(!leaderboard.itens.some((i) => i.id === naoInscrito.id), "não inscrito nunca pode aparecer no placar, mesmo tendo pescado mais");
+
+  const minhaNaoInscrito = await fishingTournamentService.obterMinhaPosicaoTorneio(torneio.id, naoInscrito.id);
+  assert.equal(minhaNaoInscrito.elegivel, false);
+  assert.match(minhaNaoInscrito.motivo, /não se inscreveu/);
+});
+
+// ---------------------------------------------------- FINALIZAÇÃO AUTOMÁTICA
+testeComBanco("scheduler: finaliza um torneio vencido, registra o vencedor e desativa", async () => {
+  const vencedor = await personagem();
+  const segundo = await personagem();
+  const esp = await especie();
+  const z = await zona();
+
+  const torneio = await FishingTournament.create({
+    nome: `Torneio Pra Finalizar ${sufixo()}`,
+    inicia_em: new Date(Date.now() - 7_200_000),
+    termina_em: new Date(Date.now() - 1_000), // já terminou
+    ativo: true,
+  });
+  torneiosCriados.push(torneio.id);
+  await FishingTournamentEntry.create({ id_tournament: torneio.id, id_personagem: vencedor.id });
+  await FishingTournamentEntry.create({ id_tournament: torneio.id, id_personagem: segundo.id });
+
+  await catchRecord({ idPersonagem: vencedor.id, idSpecies: esp.id, idZone: z.id, weight_g: 5000, quality: 1, caughtAt: new Date(Date.now() - 3_600_000) });
+  await catchRecord({ idPersonagem: segundo.id, idSpecies: esp.id, idZone: z.id, weight_g: 1000, quality: 1, caughtAt: new Date(Date.now() - 3_600_000) });
+
+  await fishingTournamentScheduler.finalizarUmTorneio(torneio.id);
+
+  await torneio.reload();
+  assert.equal(torneio.ativo, false);
+  assert.ok(torneio.finalizado_em);
+  assert.equal(torneio.vencedor_character_id, vencedor.id);
+  assert.equal(torneio.vencedor_nome, vencedor.nome);
+});
+
+testeComBanco("scheduler: finalizarTorneiosVencidos processa só os que já passaram de termina_em e estão ativos", async () => {
+  const p1 = await personagem();
+  const esp = await especie();
+  const z = await zona();
+
+  const vencido = await FishingTournament.create({
+    nome: `Torneio Vencido ${sufixo()}`,
+    inicia_em: new Date(Date.now() - 7_200_000),
+    termina_em: new Date(Date.now() - 1_000),
+    ativo: true,
+  });
+  torneiosCriados.push(vencido.id);
+  await FishingTournamentEntry.create({ id_tournament: vencido.id, id_personagem: p1.id });
+  await catchRecord({ idPersonagem: p1.id, idSpecies: esp.id, idZone: z.id, weight_g: 1000, quality: 1, caughtAt: new Date(Date.now() - 3_600_000) });
+
+  const aindaRolando = await FishingTournament.create({
+    nome: `Torneio Ainda Rolando ${sufixo()}`,
+    inicia_em: new Date(Date.now() - 3_600_000),
+    termina_em: new Date(Date.now() + 3_600_000),
+    ativo: true,
+  });
+  torneiosCriados.push(aindaRolando.id);
+
+  await fishingTournamentScheduler.finalizarTorneiosVencidos();
+
+  await vencido.reload();
+  await aindaRolando.reload();
+  assert.equal(vencido.ativo, false, "torneio vencido devia ter sido finalizado");
+  assert.ok(vencido.finalizado_em);
+  assert.equal(aindaRolando.ativo, true, "torneio ainda em andamento não pode ser mexido");
+  assert.equal(aindaRolando.finalizado_em, null);
+});
+
+testeComBanco("scheduler: processar o mesmo torneio duas vezes não sobrescreve o resultado (idempotente)", async () => {
+  const vencedor = await personagem();
+  const esp = await especie();
+  const z = await zona();
+
+  const torneio = await FishingTournament.create({
+    nome: `Torneio Idempotente ${sufixo()}`,
+    inicia_em: new Date(Date.now() - 7_200_000),
+    termina_em: new Date(Date.now() - 1_000),
+    ativo: true,
+  });
+  torneiosCriados.push(torneio.id);
+  await FishingTournamentEntry.create({ id_tournament: torneio.id, id_personagem: vencedor.id });
+  await catchRecord({ idPersonagem: vencedor.id, idSpecies: esp.id, idZone: z.id, weight_g: 1000, quality: 1, caughtAt: new Date(Date.now() - 3_600_000) });
+
+  await fishingTournamentScheduler.finalizarUmTorneio(torneio.id);
+  await torneio.reload();
+  const finalizadoEmPrimeiraVez = torneio.finalizado_em.getTime();
+
+  const resultadoSegundaChamada = await fishingTournamentScheduler.finalizarUmTorneio(torneio.id);
+  assert.equal(resultadoSegundaChamada, null, "já finalizado não deve ser reprocessado");
+
+  await torneio.reload();
+  assert.equal(torneio.finalizado_em.getTime(), finalizadoEmPrimeiraVez);
+});
+
+testeComBanco("obterTorneioAtual mostra o ÚLTIMO finalizado quando não há nenhum ativo/agendado", async () => {
+  const vencedor = await personagem();
+  const esp = await especie();
+  const z = await zona();
+
+  const torneio = await FishingTournament.create({
+    nome: `Torneio Pra Mostrar Depois ${sufixo()}`,
+    inicia_em: new Date(Date.now() - 7_200_000),
+    termina_em: new Date(Date.now() - 1_000),
+    ativo: true,
+  });
+  torneiosCriados.push(torneio.id);
+  await FishingTournamentEntry.create({ id_tournament: torneio.id, id_personagem: vencedor.id });
+  await catchRecord({ idPersonagem: vencedor.id, idSpecies: esp.id, idZone: z.id, weight_g: 1000, quality: 1, caughtAt: new Date(Date.now() - 3_600_000) });
+
+  await fishingTournamentScheduler.finalizarUmTorneio(torneio.id);
+
+  // Outros testes deste arquivo deixam torneios "ativo:true" cobrindo o
+  // "agora" (cleanup só roda no test.after, no fim do arquivo inteiro) —
+  // sem desativar esses fixtures aqui, qualquer um deles venceria o
+  // fallback de FINALIZADO antes de chegar neste torneio.
+  await FishingTournament.update(
+    { ativo: false },
+    { where: { id: torneiosCriados.filter((id) => id !== torneio.id) } },
+  );
+
+  const { torneio: torneioAtual, status } = await fishingTournamentService.obterTorneioAtual();
+  assert.ok(torneioAtual);
+  assert.equal(status, "FINALIZADO");
+  assert.equal(torneioAtual.id, torneio.id);
+  assert.equal(torneioAtual.vencedor_nome, vencedor.nome);
 });
