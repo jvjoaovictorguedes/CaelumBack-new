@@ -92,20 +92,24 @@ async function carregarResolvedorEmLote() {
     require("../models/ExpeditionResource"),
     require("../models/AlchemyRecipe"),
   ];
-  const [barras, recursos, expedicaoRecursos, receitas] = await Promise.all([
+  const [barras, recursos, expedicaoRecursos, receitas, espolios] = await Promise.all([
     ForgeBarItem.findAll(),
     ExpeditionResourceItem.findAll(),
     ExpeditionResource.findAll({ attributes: ["id", "nome"] }),
     AlchemyRecipe.findAll({ attributes: ["id", "nome", "id_item_resultado"] }),
+    Item.findAll({ where: { tipo_item: "Espolio", ativo: true }, attributes: ["id", "nome"] }),
   ]);
 
   const porChave = new Map();
   for (const linha of barras) porChave.set(`Barra:${linha.id_recurso}:${linha.qualidade}`, linha.id_item);
   for (const linha of recursos) porChave.set(`RecursoExpedicao:${linha.id_recurso}:${linha.qualidade}`, linha.id_item);
-  // ProdutoAlquimia não tem variante de qualidade — o mesmo id_item_resultado
-  // vale nas 6 qualidades (mesmo racional de resolverIdItemDoInsumo).
+  // ProdutoAlquimia/Espolio não têm variante de qualidade — o mesmo
+  // id_item vale nas 6 qualidades (mesmo racional de resolverIdItemDoInsumo).
   for (const receita of receitas) {
     for (const qualidade of ORDEM_QUALIDADE) porChave.set(`ProdutoAlquimia:${receita.id}:${qualidade}`, receita.id_item_resultado);
+  }
+  for (const item of espolios) {
+    for (const qualidade of ORDEM_QUALIDADE) porChave.set(`Espolio:${item.id}:${qualidade}`, item.id);
   }
 
   // Nome lógico do insumo (ver resolverNomeRecursoDoInsumo — nunca ler
@@ -117,6 +121,7 @@ async function carregarResolvedorEmLote() {
     nomesPorChave.set(`RecursoExpedicao:${recurso.id}`, recurso.nome);
   }
   for (const receita of receitas) nomesPorChave.set(`ProdutoAlquimia:${receita.id}`, receita.nome);
+  for (const item of espolios) nomesPorChave.set(`Espolio:${item.id}`, item.nome);
 
   return {
     idItemDoInsumo(tipoInsumo, idRecurso, qualidade) {

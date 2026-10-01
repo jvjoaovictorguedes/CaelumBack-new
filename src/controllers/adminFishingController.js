@@ -1,6 +1,7 @@
 // Painel Administrativo — controller fino, delega pro adminFishingService.
 const adminFishingService = require("../services/adminFishingService");
 const fishingBalanceSimulatorService = require("../services/fishingBalanceSimulatorService");
+const fishingSettingsService = require("../services/fishingSettingsService");
 
 function tratarErro(res, error, mensagemPadrao) {
   const statusCode = error.statusCode || 500;
@@ -348,5 +349,27 @@ exports.atualizarTorneio = async (req, res) => {
     res.status(200).json({ status: "success", data: { torneio } });
   } catch (error) {
     tratarErro(res, error, "Erro interno do servidor ao atualizar torneio.");
+  }
+};
+
+// Balanceamento (XP por nível de Pesca + buff de Proficiência por nível)
+exports.obterBalanceamento = async (req, res) => {
+  try {
+    const resultado = await fishingSettingsService.getBalanceamentoCompleto();
+    res.status(200).json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao carregar o balanceamento.");
+  }
+};
+
+exports.atualizarBalanceamento = async (req, res) => {
+  try {
+    const resultado = await fishingSettingsService.updateBalanceamento(req.params.group, req.body ?? {}, {
+      idAdmin: req.user.id,
+      req,
+    });
+    res.status(200).json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao salvar o balanceamento.");
   }
 };

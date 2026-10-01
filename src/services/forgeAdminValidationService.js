@@ -13,8 +13,10 @@ const CATEGORIAS_BLUEPRINT_VALIDAS = ["Arma", "Armadura", "Capacete", "Escudo", 
 // suportadas por "RecursoExpedicao" (mesma ExpeditionResource de
 // Mineração, só profissão diferente) — nunca precisaram de um tipo
 // novo, só o painel admin não deixava escolher outra profissão (ver
-// adminForgeService.js/listarRecursosAdmin).
-const TIPOS_INSUMO_VALIDOS = ["Barra", "RecursoExpedicao", "ProdutoAlquimia"];
+// adminForgeService.js/listarRecursosAdmin). Espolio (pedido: "usar
+// espólios também" na fabricação) é a 4ª fonte — id_recurso aponta
+// direto pro Item.id do Espólio (ver forgeMaterialsService.js).
+const TIPOS_INSUMO_VALIDOS = ["Barra", "RecursoExpedicao", "ProdutoAlquimia", "Espolio"];
 
 function erro(mensagem, statusCode = 400) {
   const e = new Error(mensagem);
@@ -72,7 +74,7 @@ function validarIngredientesPayload(ingredientes) {
     }
     if (!Number.isInteger(ingrediente.id_recurso)) {
       throw erro(
-        "id_recurso precisa ser um inteiro (ExpeditionResource.id pra Barra/RecursoExpedicao, AlchemyRecipe.id pra ProdutoAlquimia).",
+        "id_recurso precisa ser um inteiro (ExpeditionResource.id pra Barra/RecursoExpedicao, AlchemyRecipe.id pra ProdutoAlquimia, Item.id pra Espolio).",
       );
     }
     if (!Number.isInteger(ingrediente.quantidade_base) || ingrediente.quantidade_base < 1) {
