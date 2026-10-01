@@ -20,6 +20,7 @@ const Mission = require("./Mission");
 const CharacterMissionProgress = require("./CharacterMissionProgress");
 const MarketListing = require("./MarketListing");
 const MarketTransaction = require("./MarketTransaction");
+const PlayerShop = require("./PlayerShop");
 const PvPSeason = require("./PvPSeason");
 const CharacterPvpSeason = require("./CharacterPvpSeason");
 const RankedMatch = require("./RankedMatch");
@@ -135,6 +136,10 @@ MarketListing.belongsTo(CharacterEquipmentInstance, { foreignKey: "id_instancia"
 // stack); histórico de preço e receita líquida acumulada de "Meus
 // Anúncios" vêm daqui, nunca recalculados a partir do MarketListing.
 MarketListing.hasMany(MarketTransaction, { foreignKey: "id_listing", as: "transacoes" });
+
+// Loja do Aventureiro V2 — perfil comercial (1 por personagem).
+PlayerShop.belongsTo(Character, { foreignKey: "id_personagem", as: "personagem" });
+Character.hasOne(PlayerShop, { foreignKey: "id_personagem", as: "loja" });
 MarketTransaction.belongsTo(MarketListing, { foreignKey: "id_listing", as: "listing" });
 MarketTransaction.belongsTo(Item, { foreignKey: "id_item", as: "item" });
 MarketTransaction.belongsTo(Character, { foreignKey: "id_personagem_vendedor", as: "vendedor" });
