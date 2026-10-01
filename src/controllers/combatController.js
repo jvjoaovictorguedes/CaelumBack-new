@@ -847,6 +847,14 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           message: "Este item não possui efeito configurado.",
         });
       }
+      // Poção de Reset de Atributos reorganiza o personagem inteiro (não
+      // é um efeito "de turno") — usa fora de combate (POST /character-items/use),
+      // nunca como ação de combate.
+      if (efeitoConsumivel.efeito_reset_atributos) {
+        return res.status(400).json({
+          message: "Esse item não pode ser usado em combate — use-o fora de uma luta.",
+        });
+      }
     }
 
     // ==========================================================

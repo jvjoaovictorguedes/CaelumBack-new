@@ -58,7 +58,7 @@ const CAMPOS_ARMOR = [
   "bonus_agilidade",
   "bonus_velocidade",
 ];
-const CAMPOS_CONSUMABLE = ["efeito_vida", "efeito_mana", "efeito_atributo", "valor_atributo", "duracao_efeito"];
+const CAMPOS_CONSUMABLE = ["efeito_vida", "efeito_mana", "efeito_atributo", "valor_atributo", "duracao_efeito", "efeito_reset_atributos"];
 const CAMPOS_FISHING_ROD = ["forca_linha", "controle", "recolhimento", "precisao", "estabilidade", "nivel_pesca_minimo"];
 const CAMPOS_FORGE_TOOL = ["slot", "nivel_ferreiro_minimo"];
 
@@ -116,7 +116,8 @@ function validarSubtipoFerramenta(tipoItem, payload, { exigirEscolha }) {
 function limparAtributoDePocaoDeCura(camposConsumable, dadosExistentes = {}) {
   const efeitoVida = camposConsumable.efeito_vida ?? dadosExistentes.efeito_vida ?? 0;
   const efeitoMana = camposConsumable.efeito_mana ?? dadosExistentes.efeito_mana ?? 0;
-  if (efeitoVida > 0 || efeitoMana > 0) {
+  const efeitoReset = camposConsumable.efeito_reset_atributos ?? dadosExistentes.efeito_reset_atributos ?? false;
+  if (efeitoVida > 0 || efeitoMana > 0 || efeitoReset) {
     camposConsumable.efeito_atributo = null;
     camposConsumable.valor_atributo = 0;
   }

@@ -17,6 +17,7 @@ const { limparEncontroExpirado } = require("../services/pveEncounterService");
 const { vidaManaMaximaComTaverna } = require("../services/tavernBuffService");
 const { addStack } = require("../services/inventoryService");
 const { ehInstanciavel, create: criarInstancia } = require("../services/equipmentInstanceService");
+const { resetarAtributos } = require("../services/attributeService");
 
 // Sem essas associações, qualquer include: [{model: Character}, {model: Item}]
 // abaixo derruba a chamada com "CharacterInventory is not associated to X!".
@@ -136,6 +137,18 @@ exports.useItem = async (req, res) => {
         throw error;
       }
 
+      // Reset de atributos SEMPRE antes de calcular vida/mana máxima
+      // abaixo — ele pode reduzir vitalidade/inteligência (ponto
+      // devolvido pra pontos_distribuir), e o teto de vida/mana precisa
+      // refletir o personagem JÁ resetado, senão cura usando um teto
+      // "antigo" que não existe mais. Idempotente: usar a poção de novo
+      // depois de já estar no piso da raça só não recupera ponto nenhum.
+      let pontosRecuperadosNoReset = 0;
+      if (efeito.efeito_reset_atributos) {
+        const resultadoReset = await resetarAtributos(character, transaction);
+        pontosRecuperadosNoReset = resultadoReset.pontosRecuperados;
+      }
+
       // Precisa considerar o bônus de equipamento e o multiplicador da
       // classe aqui também — senão a vida/mana máxima "de verdade" fica
       // menor do que devia só dentro dessa conta, e a poção nunca cura
@@ -180,17 +193,28 @@ exports.useItem = async (req, res) => {
         character,
         inventoryEntry,
         ficouZerado: inventoryEntry.quantidade <= 0,
+        pontosRecuperadosNoReset,
       };
     });
 
     return res.status(200).json({
       status: "success",
-      message: "Item usado com sucesso!",
+      message:
+        result.pontosRecuperadosNoReset > 0
+          ? `Atributos resetados! ${result.pontosRecuperadosNoReset} ponto(s) liberado(s) pra redistribuir.`
+          : "Item usado com sucesso!",
       data: {
         character: {
           vida_atual: result.character.vida_atual,
           mana_atual: result.character.mana_atual,
+          forca: result.character.forca,
+          vitalidade: result.character.vitalidade,
+          agilidade: result.character.agilidade,
+          inteligencia: result.character.inteligencia,
+          velocidade: result.character.velocidade,
+          pontos_distribuir: result.character.pontos_distribuir,
         },
+        pontosRecuperadosNoReset: result.pontosRecuperadosNoReset,
         quantidadeRestante: result.ficouZerado
           ? 0
           : result.inventoryEntry.quantidade,
