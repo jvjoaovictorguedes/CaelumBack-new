@@ -66,6 +66,9 @@ const DEFAULTS_ORIGINAIS = {
     MAX_RODADAS: partyBattleConfig.MAX_RODADAS,
     FATOR_DIFICULDADE_VIDA_POR_EXTRA: partyBattleConfig.FATOR_DIFICULDADE_VIDA_POR_EXTRA,
     FATOR_DIFICULDADE_DANO_POR_EXTRA: partyBattleConfig.FATOR_DIFICULDADE_DANO_POR_EXTRA,
+    LIMIAR_NIVEL_ACIMA_DA_ZONA: partyBattleConfig.LIMIAR_NIVEL_ACIMA_DA_ZONA,
+    REDUCAO_RECOMPENSA_POR_NIVEL_EXCEDENTE: partyBattleConfig.REDUCAO_RECOMPENSA_POR_NIVEL_EXCEDENTE,
+    PISO_MULTIPLICADOR_RECOMPENSA: partyBattleConfig.PISO_MULTIPLICADOR_RECOMPENSA,
   },
 };
 
@@ -106,6 +109,9 @@ function getSnapshotAtual(grupo) {
         MAX_RODADAS: partyBattleConfig.MAX_RODADAS,
         FATOR_DIFICULDADE_VIDA_POR_EXTRA: partyBattleConfig.FATOR_DIFICULDADE_VIDA_POR_EXTRA,
         FATOR_DIFICULDADE_DANO_POR_EXTRA: partyBattleConfig.FATOR_DIFICULDADE_DANO_POR_EXTRA,
+        LIMIAR_NIVEL_ACIMA_DA_ZONA: partyBattleConfig.LIMIAR_NIVEL_ACIMA_DA_ZONA,
+        REDUCAO_RECOMPENSA_POR_NIVEL_EXCEDENTE: partyBattleConfig.REDUCAO_RECOMPENSA_POR_NIVEL_EXCEDENTE,
+        PISO_MULTIPLICADOR_RECOMPENSA: partyBattleConfig.PISO_MULTIPLICADOR_RECOMPENSA,
       };
     default:
       throw erro(`Grupo de balanceamento desconhecido: ${grupo}.`);
@@ -211,6 +217,18 @@ function validarGrupo(grupo, valores) {
     if (valores.FATOR_DIFICULDADE_DANO_POR_EXTRA !== undefined) {
       const v = valores.FATOR_DIFICULDADE_DANO_POR_EXTRA;
       if (typeof v !== "number" || v < 0) throw erro("FATOR_DIFICULDADE_DANO_POR_EXTRA precisa ser um número >= 0 (fração, ex.: 0.08 = +8%).");
+    }
+    if (valores.LIMIAR_NIVEL_ACIMA_DA_ZONA !== undefined) {
+      const v = valores.LIMIAR_NIVEL_ACIMA_DA_ZONA;
+      if (!Number.isInteger(v) || v < 0) throw erro("LIMIAR_NIVEL_ACIMA_DA_ZONA precisa ser um inteiro >= 0.");
+    }
+    if (valores.REDUCAO_RECOMPENSA_POR_NIVEL_EXCEDENTE !== undefined) {
+      const v = valores.REDUCAO_RECOMPENSA_POR_NIVEL_EXCEDENTE;
+      if (typeof v !== "number" || v < 0 || v > 1) throw erro("REDUCAO_RECOMPENSA_POR_NIVEL_EXCEDENTE precisa ser um número entre 0 e 1 (fração, ex.: 0.05 = -5% por nível excedente).");
+    }
+    if (valores.PISO_MULTIPLICADOR_RECOMPENSA !== undefined) {
+      const v = valores.PISO_MULTIPLICADOR_RECOMPENSA;
+      if (typeof v !== "number" || v < 0 || v > 1) throw erro("PISO_MULTIPLICADOR_RECOMPENSA precisa ser um número entre 0 e 1 (fração, ex.: 0.2 = nunca cai abaixo de 20%).");
     }
     return;
   }
