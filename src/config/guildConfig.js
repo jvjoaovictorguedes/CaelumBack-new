@@ -161,6 +161,16 @@ let BOSS_AO_VIVO_PRAZO_TURNO_MS = 20 * 1000;
 // mais forte que a 1ª em vez de ~1.6x, sem virar parede logo de cara.
 let BOSS_AO_VIVO_FATOR_ESCALADA_DANO = 0.2;
 let BOSS_AO_VIVO_MAX_RODADAS = 60;
+// "Ritmo de turno" do chefe (pedido do jogador: igual à Ameaça Mundial)
+// — pausa MÍNIMA sempre respeitada antes do contra-ataque do chefe
+// resolver, mesmo sem nenhuma habilidade escolhida (telegraph). Sem
+// isso, "turno do chefe" virava só o round-trip da rede: o dano
+// aparecia instantaneamente, sem nenhuma pausa perceptível entre o fim
+// do seu golpe e o contra-ataque, diferente de todo outro combate do
+// jogo. Guild Boss nunca compara isto com worldboss.player_action_cooldown_ms
+// (mundos de config diferentes — ver worldBossConfig.js), só reaproveita
+// o MESMO espírito.
+let BOSS_AO_VIVO_TELEGRAPH_MS = 1500;
 
 // §31 — 1 boss por semana, ciclo global semanal (mesma semana UTC usada
 // pelas missões Semanais de personagem/guilda).
@@ -247,6 +257,10 @@ function aplicarOverridesBalanceamento(grupo, valores) {
         BOSS_AO_VIVO_MAX_RODADAS = valores.BOSS_AO_VIVO_MAX_RODADAS;
         module.exports.BOSS_AO_VIVO_MAX_RODADAS = BOSS_AO_VIVO_MAX_RODADAS;
       }
+      if (typeof valores.BOSS_AO_VIVO_TELEGRAPH_MS === "number") {
+        BOSS_AO_VIVO_TELEGRAPH_MS = valores.BOSS_AO_VIVO_TELEGRAPH_MS;
+        module.exports.BOSS_AO_VIVO_TELEGRAPH_MS = BOSS_AO_VIVO_TELEGRAPH_MS;
+      }
       break;
     }
     default:
@@ -275,6 +289,7 @@ module.exports = {
   BOSS_AO_VIVO_PRAZO_TURNO_MS,
   BOSS_AO_VIVO_FATOR_ESCALADA_DANO,
   BOSS_AO_VIVO_MAX_RODADAS,
+  BOSS_AO_VIVO_TELEGRAPH_MS,
   XP_GUILDA_MISSAO_RANK_MIN,
   XP_GUILDA_MISSAO_RANK_MAX,
   aplicarOverridesBalanceamento,

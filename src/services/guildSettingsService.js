@@ -36,6 +36,7 @@ const DEFAULTS_ORIGINAIS = {
     BOSS_AO_VIVO_PRAZO_TURNO_MS: guildConfig.BOSS_AO_VIVO_PRAZO_TURNO_MS,
     BOSS_AO_VIVO_FATOR_ESCALADA_DANO: guildConfig.BOSS_AO_VIVO_FATOR_ESCALADA_DANO,
     BOSS_AO_VIVO_MAX_RODADAS: guildConfig.BOSS_AO_VIVO_MAX_RODADAS,
+    BOSS_AO_VIVO_TELEGRAPH_MS: guildConfig.BOSS_AO_VIVO_TELEGRAPH_MS,
   },
 };
 
@@ -77,6 +78,7 @@ function getSnapshotAtual(grupo) {
         BOSS_AO_VIVO_PRAZO_TURNO_MS: guildConfig.BOSS_AO_VIVO_PRAZO_TURNO_MS,
         BOSS_AO_VIVO_FATOR_ESCALADA_DANO: guildConfig.BOSS_AO_VIVO_FATOR_ESCALADA_DANO,
         BOSS_AO_VIVO_MAX_RODADAS: guildConfig.BOSS_AO_VIVO_MAX_RODADAS,
+        BOSS_AO_VIVO_TELEGRAPH_MS: guildConfig.BOSS_AO_VIVO_TELEGRAPH_MS,
       };
     default:
       throw erro(`Grupo de balanceamento desconhecido: ${grupo}.`);
@@ -195,6 +197,15 @@ function validarGrupo(grupo, valores) {
     }
     if (valores.BOSS_AO_VIVO_MAX_RODADAS !== undefined) {
       validarInteiroPositivo("BOSS_AO_VIVO_MAX_RODADAS", valores.BOSS_AO_VIVO_MAX_RODADAS);
+    }
+    if (valores.BOSS_AO_VIVO_TELEGRAPH_MS !== undefined) {
+      validarInteiroPositivo("BOSS_AO_VIVO_TELEGRAPH_MS", valores.BOSS_AO_VIVO_TELEGRAPH_MS);
+      // Teto defensivo — mesmo raciocínio do cooldown de Expedição
+      // (expeditionSettingsService.js): sem isso um valor digitado
+      // errado travaria o turno do chefe por minutos sem aviso nenhum.
+      if (valores.BOSS_AO_VIVO_TELEGRAPH_MS > 15_000) {
+        throw erro("BOSS_AO_VIVO_TELEGRAPH_MS não pode passar de 15000 (15 segundos).");
+      }
     }
     return;
   }

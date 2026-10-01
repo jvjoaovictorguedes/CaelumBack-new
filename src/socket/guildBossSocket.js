@@ -11,23 +11,32 @@
 // Diferenças de propósito em relação à Aventura em grupo:
 //   - Sem convite: qualquer membro da guilda pode entrar numa sala
 //     aberta (a própria filiação à guilda já é o "convite").
-//   - Sem "pronto": não tem anfitrião — qualquer um na sala pode
-//     iniciar assim que houver pelo menos 1 participante.
+//   - Sem sala de espera/lobby — pedido do jogador ("entrar tipo
+//     aventura"): "guildboss:entrar" já entrega o personagem DENTRO da
+//     luta, nunca numa tela de espera por outros membros. Se já existe
+//     uma luta em andamento contra a tentativa ativa da guilda, entra
+//     nela (adicionado ao fim da fila de turnos); senão, abre uma luta
+//     nova com só esse personagem — mais gente pode entrar a qualquer
+//     momento depois, inclusive no meio de uma rodada.
 //   - Sem consumíveis: "guildboss:acao" só aceita "attack"/"power",
 //     nunca "item" (pedido explícito do jogador).
 //   - Boss revida com dano crescente por rodada (dano_base_ataque na
 //     rodada 1, escalando por BOSS_AO_VIVO_FATOR_ESCALADA_DANO) — o
 //     modo assíncrono nunca causava dano de volta, só o novo modo ao
-//     vivo faz o boss atacar.
+//     vivo faz o boss atacar. O turno do chefe sempre tem um telegraph
+//     mínimo (BOSS_AO_VIVO_TELEGRAPH_MS) antes de resolver — mesmo
+//     espírito do "ritmo de turno" que a Ameaça Mundial já tem
+//     (worldboss.player_action_cooldown_ms): sem isso, "turno" virava
+//     só o round-trip da rede, sem nenhuma pausa perceptível entre o
+//     fim do seu ataque e o contra-ataque do chefe.
 //   - Ranking ao vivo (dano + número de ataques) já é a mesma
 //     informação persistida em GuildBossContribution — dá pra ver
 //     tanto durante a luta (broadcast a cada golpe) quanto depois via
 //     GET /guilds/:id/boss (guildBossService.obterStatus).
 //   - Cooldown de 20min por membro (guildBossService.COOLDOWN_ATAQUE_MS)
-//     checado na ENTRADA da sala, não por golpe — dentro de uma luta já
-//     em andamento os turnos seguem livres, só reentrar numa luta nova
-//     é que espera o cooldown (o clique assíncrono de "atacar" antigo
-//     saiu da UI: a luta ao vivo agora é o único jeito de atacar).
+//     checado na ENTRADA, não por golpe — dentro de uma luta já em
+//     andamento os turnos seguem livres, só entrar numa luta NOVA (a
+//     tentativa semanal trocou) é que espera o cooldown de novo.
 //
 // De propósito SEM "identificar" próprio: reaproveita socket.characterId
 // já setado pelo "identificar" do pvpLiveSocket, mesmo raciocínio já
@@ -69,59 +78,19 @@ async function registrarLog(idGuild, tipo, { responsavel, detalhes, transaction 
   );
 }
 
-// idGuild -> { idGuild, participantes: Map<charId,{id,nome,classe}>, ordem: [charId] }
-// Só existe ANTES da batalha começar — ao iniciar, vira uma `batalha` e
-// some daqui (não sobrevive à corrida, sem "voltar pro lobby": quem
-// quiser lutar de novo entra numa sala nova).
-const lobbies = new Map();
-// characterId (string) -> idGuild — só enquanto numa lobby (pré-batalha).
-const lobbyPorPersonagem = new Map();
-
 let proximaBatalhaId = 1;
 // battleId -> batalha em andamento
 const batalhas = new Map();
 // characterId (string) -> battleId
 const batalhaPorPersonagem = new Map();
-
-function salaLobby(idGuild) {
-  return `guildboss-lobby:${idGuild}`;
-}
+// idGuild -> battleId — a luta "corrente" da guilda, se houver. Sem
+// sala de espera, "guildboss:entrar" usa isto pra decidir se entra numa
+// luta já em andamento ou abre uma nova (ver comentário no topo do
+// arquivo).
+const batalhaPorGuild = new Map();
 
 function salaBatalha(battleId) {
   return `guildboss-batalha:${battleId}`;
-}
-
-function participantesPublicos(lobby) {
-  return lobby.ordem.map((id) => lobby.participantes.get(id)).filter(Boolean);
-}
-
-function emitirLobbyAtualizada(io, lobby) {
-  io.to(salaLobby(lobby.idGuild)).emit("guildboss:lobby-atualizada", {
-    idGuild: lobby.idGuild,
-    participantes: participantesPublicos(lobby),
-  });
-}
-
-function removerDaLobby(io, characterId) {
-  const chave = chaveOnline(characterId);
-  const idGuild = lobbyPorPersonagem.get(chave);
-  if (!idGuild) return;
-  const lobby = lobbies.get(idGuild);
-  lobbyPorPersonagem.delete(chave);
-  if (!lobby) return;
-
-  lobby.participantes.delete(chave);
-  lobby.ordem = lobby.ordem.filter((id) => id !== chave);
-
-  const socketId = online.get(chave);
-  const socketDoMembro = socketId ? io.sockets.sockets.get(socketId) : null;
-  socketDoMembro?.leave(salaLobby(idGuild));
-
-  if (lobby.participantes.size === 0) {
-    lobbies.delete(idGuild);
-  } else {
-    emitirLobbyAtualizada(io, lobby);
-  }
 }
 
 // Duas funções PURAS (sem I/O, testadas isoladamente em
@@ -160,15 +129,165 @@ async function tentativaAtivaDaGuild(idGuild) {
   return atual.status === "Ativo" ? atual : null;
 }
 
+// Mesmo formato de membro público usado em "batalha-iniciada" (criação)
+// e "membro-entrou" (entrada no meio de uma luta já em andamento) —
+// nunca duas cópias desse objeto.
+function membroPublico(m) {
+  return {
+    id: m.id,
+    nome: m.nome,
+    genero: m.genero,
+    classe: m.classe,
+    vidaMax: m.vidaMax,
+    manaMax: m.manaMax,
+    vida: m.estado.vida_atual,
+    mana: m.estado.mana_atual,
+    poderes: poderesPublicos(m.poderes),
+  };
+}
+
+// Estado completo de uma luta em andamento — usado tanto pra quem
+// acabou de abrir/entrar numa luta (resposta direta de
+// "guildboss:entrar") quanto, futuramente, por qualquer resync. `turnoDe`
+// só faz sentido durante a fase "aliados" (fase "chefe" = telegraph ou
+// resolução do contra-ataque em andamento, ninguém pode agir).
+function montarEstadoBatalha(batalha) {
+  return {
+    battleId: batalha.id,
+    nomeChefe: batalha.nomeChefe,
+    vidaAtual: batalha.vidaRestante,
+    vidaTotal: batalha.vidaTotal,
+    membros: batalha.ordem
+      .map((id) => batalha.membros.get(chaveOnline(id)))
+      .filter(Boolean)
+      .map(membroPublico),
+    ordem: batalha.ordem,
+    turnoDe: batalha.fase === "aliados" ? batalha.ordem[batalha.turnoIndex] : null,
+    fase: batalha.fase,
+    rodada: batalha.rodada,
+    prazoSegundos: guildConfig.BOSS_AO_VIVO_PRAZO_TURNO_MS / 1000,
+  };
+}
+
+// Abre uma luta nova contra a `tentativa` ativa da guilda, já com
+// `characterIdInicial` dentro — nunca espera mais ninguém (ver
+// comentário no topo do arquivo: "entrar tipo aventura"). Mais membros
+// entram depois via o branch de "luta em andamento" de
+// "guildboss:entrar", a qualquer momento, inclusive no meio de uma
+// rodada.
+async function criarBatalha(io, idGuild, tentativa, characterIdInicial, socketIniciador) {
+  const chefe = await GuildBossConfig.findByPk(tentativa.id_guild_boss_config);
+  if (!chefe) {
+    socketIniciador?.emit("guildboss:erro", { mensagem: "Configuração do Boss não encontrada." });
+    return;
+  }
+
+  // Igual ao World Boss (montarSnapshotHabilidades) — congela os
+  // valores efetivos do Power NO INÍCIO da luta, nunca só id_power
+  // (editar o Power no meio da luta não pode mudar o que já está
+  // rolando). Sem fases/mana/escala_com_furia — Boss da Guilda não tem
+  // esses conceitos.
+  const habilidadesRaw = await GuildBossAbility.findAll({
+    where: { id_guild_boss_config: chefe.id, ativo: true },
+    include: [{ model: Power }],
+    order: [["prioridade", "DESC"]],
+  });
+  const habilidadesChefe = habilidadesRaw
+    .filter((h) => h.Power)
+    .map((h) => ({
+      id_ability: h.id,
+      power_snapshot: {
+        id: h.Power.id,
+        nome: h.Power.nome,
+        imagem_url: h.Power.imagem_url,
+        dano_base: h.Power.dano_base,
+        cura_base: h.Power.cura_base,
+        custo_mana: h.Power.custo_mana,
+        cooldown: h.Power.cooldown,
+        escala_atributo: h.Power.escala_atributo,
+        valor_escala: h.Power.valor_escala,
+        tipo_dano: h.Power.tipo_dano,
+      },
+      peso_uso: h.peso_uso,
+      prioridade: h.prioridade,
+      tipo_alvo: h.tipo_alvo,
+      tempo_conjuracao_ms: h.tempo_conjuracao_ms,
+      cooldown_override: h.cooldown_rodadas_override,
+    }));
+
+  // Proezas Únicas §11 — Guild Boss é PERMITIDO pra Legado (a menos que
+  // o UniquePowerEffect específico diga o contrário via
+  // allow_guild_boss), então passa o contexto certo em vez de deixar
+  // cair no default de duelo casual.
+  const lutador = await carregarLutador(characterIdInicial, { contexto: "GUILD_BOSS" });
+  if (!lutador) {
+    socketIniciador?.emit("guildboss:erro", { mensagem: "Não foi possível carregar seu personagem." });
+    return;
+  }
+  // Cooldown de Powers por ATOR (não por batalha) — cada membro entra
+  // com o mapa vazio, igual toda sessão nova do Boss Mundial.
+  lutador.cooldowns = {};
+
+  const battleId = proximaBatalhaId++;
+  const sala = salaBatalha(battleId);
+  const batalha = {
+    id: battleId,
+    idGuild,
+    idBossAttempt: tentativa.id,
+    sala,
+    nomeChefe: chefe.nome_chefe,
+    defesaChefe: chefe.defesa,
+    danoBaseChefe: chefe.dano_base_ataque,
+    vidaTotal: Number(tentativa.vida_total),
+    vidaRestante: Number(tentativa.vida_restante),
+    ordem: [characterIdInicial],
+    // cooldowns por membro (turnos, cooldownService — mesmo motor
+    // genérico já usado em PvE/World Boss) some junto com a batalha (§
+    // nunca persistido, mesmo critério de cooldownService.js: "acaba a
+    // luta, os cooldowns somem").
+    membros: new Map([[chaveOnline(lutador.id), lutador]]),
+    turnoIndex: 0,
+    fase: "aliados", // "aliados" (percorrendo a ordem) | "chefe"
+    rodada: 1,
+    timer: null,
+    processandoAcao: false,
+    habilidadesChefe,
+    cooldownsChefe: {},
+  };
+  batalhas.set(battleId, batalha);
+  batalhaPorGuild.set(idGuild, battleId);
+  batalhaPorPersonagem.set(characterIdInicial, battleId);
+
+  socketIniciador?.join(sala);
+
+  io.to(sala).emit("guildboss:batalha-iniciada", montarEstadoBatalha(batalha));
+
+  iniciarTimerDeTurno(io, battleId);
+}
+
 module.exports = function registerGuildBossHandlers(io) {
   io.on("connection", (socket) => {
+    // Sem sala de espera (pedido do jogador: "entrar tipo aventura") —
+    // este evento é o ÚNICO passo pra entrar na luta: se a guilda já
+    // tem uma luta rolando contra a tentativa ativa, entra nela (fim da
+    // fila de turnos); senão, abre uma luta nova já com este personagem
+    // dentro, sem esperar mais ninguém (ver criarBatalha).
     socket.on("guildboss:entrar", async () => {
       const characterId = socket.characterId;
       if (!characterId) {
         return socket.emit("guildboss:erro", { mensagem: "Identifique seu personagem antes de entrar." });
       }
-      if (batalhaPorPersonagem.has(characterId) || lobbyPorPersonagem.has(characterId)) {
-        return socket.emit("guildboss:erro", { mensagem: "Você já está numa sala ou batalha do Boss." });
+
+      // Reconexão/F5/segunda aba — já está numa luta, só rejunta a sala
+      // e reenvia o estado atual, nunca cria outra.
+      const battleIdAtual = batalhaPorPersonagem.get(characterId);
+      if (battleIdAtual) {
+        const batalhaAtual = batalhas.get(battleIdAtual);
+        if (batalhaAtual) {
+          socket.join(batalhaAtual.sala);
+          return socket.emit("guildboss:estado", montarEstadoBatalha(batalhaAtual));
+        }
+        batalhaPorPersonagem.delete(characterId);
       }
 
       try {
@@ -189,172 +308,59 @@ module.exports = function registerGuildBossHandlers(io) {
           });
         }
 
-        let lobby = lobbies.get(membro.id_guild);
-        if (!lobby) {
-          lobby = { idGuild: membro.id_guild, participantes: new Map(), ordem: [] };
-          lobbies.set(membro.id_guild, lobby);
-        }
-        if (lobby.participantes.size >= guildConfig.BOSS_AO_VIVO_TAMANHO_MAXIMO) {
-          return socket.emit("guildboss:erro", { mensagem: `A sala já está cheia (máximo ${guildConfig.BOSS_AO_VIVO_TAMANHO_MAXIMO}).` });
+        const battleIdDaGuild = batalhaPorGuild.get(membro.id_guild);
+        const batalhaEmAndamento = battleIdDaGuild ? batalhas.get(battleIdDaGuild) : null;
+
+        // Já tem gente da guilda lutando contra ESTA MESMA tentativa —
+        // entra direto nela, no fim da fila de turnos (nunca cria uma
+        // segunda luta concorrente pra mesma tentativa).
+        if (batalhaEmAndamento && batalhaEmAndamento.idBossAttempt === tentativa.id) {
+          if (batalhaEmAndamento.membros.size >= guildConfig.BOSS_AO_VIVO_TAMANHO_MAXIMO) {
+            return socket.emit("guildboss:erro", {
+              mensagem: `A luta já está cheia (máximo ${guildConfig.BOSS_AO_VIVO_TAMANHO_MAXIMO}).`,
+            });
+          }
+
+          // Proezas Únicas §11 — mesmo contexto de criarBatalha abaixo.
+          const lutador = await carregarLutador(characterId, { contexto: "GUILD_BOSS" });
+          if (!lutador) {
+            return socket.emit("guildboss:erro", { mensagem: "Não foi possível carregar seu personagem." });
+          }
+          lutador.cooldowns = {};
+          batalhaEmAndamento.membros.set(chaveOnline(lutador.id), lutador);
+          batalhaEmAndamento.ordem.push(characterId);
+          batalhaPorPersonagem.set(characterId, batalhaEmAndamento.id);
+          socket.join(batalhaEmAndamento.sala);
+
+          io.to(batalhaEmAndamento.sala).emit("guildboss:membro-entrou", {
+            battleId: batalhaEmAndamento.id,
+            membro: membroPublico(lutador),
+            ordem: batalhaEmAndamento.ordem,
+          });
+          return socket.emit("guildboss:estado", montarEstadoBatalha(batalhaEmAndamento));
         }
 
-        const personagem = await Character.findByPk(characterId, { include: [{ model: Class }] });
-        if (!personagem) {
-          return socket.emit("guildboss:erro", { mensagem: "Personagem não encontrado." });
-        }
-
-        lobby.participantes.set(characterId, { id: personagem.id, nome: personagem.nome, classe: personagem.Class?.nome ?? null });
-        lobby.ordem.push(characterId);
-        lobbyPorPersonagem.set(characterId, membro.id_guild);
-        socket.join(salaLobby(membro.id_guild));
-
-        emitirLobbyAtualizada(io, lobby);
+        // Ninguém da guilda lutando agora contra esta tentativa — abre
+        // a luta já com este personagem dentro.
+        await criarBatalha(io, membro.id_guild, tentativa, characterId, socket);
       } catch (error) {
-        console.error("Erro ao entrar na sala do Boss da Guilda:", error);
-        socket.emit("guildboss:erro", { mensagem: "Não foi possível entrar na sala do Boss." });
+        console.error("Erro ao entrar no Boss da Guilda:", error);
+        socket.emit("guildboss:erro", { mensagem: "Não foi possível entrar na luta do Boss." });
       }
     });
 
+    // Sem sala de espera pra "sair" de verdade — só para de receber os
+    // eventos da luta (o turno dele, se chegar a vez, segue andando
+    // sozinho pelo timer, igual qualquer ausência). "entrar" de novo
+    // rejunta a MESMA luta (ver branch de reconexão acima), nunca cria
+    // outra.
     socket.on("guildboss:sair", () => {
       const characterId = socket.characterId;
       if (!characterId) return;
-      removerDaLobby(io, characterId);
-    });
-
-    socket.on("guildboss:iniciar", async () => {
-      const characterId = socket.characterId;
-      if (!characterId) return;
-      const idGuild = lobbyPorPersonagem.get(characterId);
-      if (!idGuild) return socket.emit("guildboss:erro", { mensagem: "Você não está em nenhuma sala do Boss." });
-      const lobby = lobbies.get(idGuild);
-      if (!lobby) return;
-      if (lobby.ordem.length < guildConfig.BOSS_AO_VIVO_TAMANHO_MINIMO) {
-        return socket.emit("guildboss:erro", { mensagem: "Precisa de pelo menos 1 aventureiro pra iniciar." });
-      }
-
-      try {
-        const tentativa = await tentativaAtivaDaGuild(idGuild);
-        if (!tentativa) {
-          lobbies.delete(idGuild);
-          for (const id of lobby.ordem) lobbyPorPersonagem.delete(id);
-          io.to(salaLobby(idGuild)).emit("guildboss:sala-desfeita", { motivo: "boss_indisponivel" });
-          return;
-        }
-        const chefe = await GuildBossConfig.findByPk(tentativa.id_guild_boss_config);
-        if (!chefe) return socket.emit("guildboss:erro", { mensagem: "Configuração do Boss não encontrada." });
-
-        // Igual ao World Boss (montarSnapshotHabilidades) — congela os
-        // valores efetivos do Power NO INÍCIO da luta, nunca só id_power
-        // (editar o Power no meio da luta não pode mudar o que já está
-        // rolando). Sem fases/mana/escala_com_furia — Boss da Guilda não
-        // tem esses conceitos.
-        const habilidadesRaw = await GuildBossAbility.findAll({
-          where: { id_guild_boss_config: chefe.id, ativo: true },
-          include: [{ model: Power }],
-          order: [["prioridade", "DESC"]],
-        });
-        const habilidadesChefe = habilidadesRaw
-          .filter((h) => h.Power)
-          .map((h) => ({
-            id_ability: h.id,
-            power_snapshot: {
-              id: h.Power.id,
-              nome: h.Power.nome,
-              imagem_url: h.Power.imagem_url,
-              dano_base: h.Power.dano_base,
-              cura_base: h.Power.cura_base,
-              custo_mana: h.Power.custo_mana,
-              cooldown: h.Power.cooldown,
-              escala_atributo: h.Power.escala_atributo,
-              valor_escala: h.Power.valor_escala,
-              tipo_dano: h.Power.tipo_dano,
-            },
-            peso_uso: h.peso_uso,
-            prioridade: h.prioridade,
-            tipo_alvo: h.tipo_alvo,
-            tempo_conjuracao_ms: h.tempo_conjuracao_ms,
-            cooldown_override: h.cooldown_rodadas_override,
-          }));
-
-        // Proezas Únicas §11 — Guild Boss é PERMITIDO pra Legado (a
-        // menos que o UniquePowerEffect específico diga o contrário via
-        // allow_guild_boss), então passa o contexto certo em vez de
-        // deixar cair no default de duelo casual.
-        const membros = await Promise.all(lobby.ordem.map((id) => carregarLutador(id, { contexto: "GUILD_BOSS" })));
-        if (membros.some((m) => !m)) {
-          return socket.emit("guildboss:erro", { mensagem: "Não foi possível carregar todos os personagens da sala." });
-        }
-        // Cooldown de Powers por ATOR (não por batalha) — cada membro
-        // entra com o mapa vazio, igual toda sessão nova do Boss Mundial.
-        for (const membro of membros) membro.cooldowns = {};
-
-        const battleId = proximaBatalhaId++;
-        const sala = salaBatalha(battleId);
-        const batalha = {
-          id: battleId,
-          idGuild,
-          idBossAttempt: tentativa.id,
-          sala,
-          nomeChefe: chefe.nome_chefe,
-          defesaChefe: chefe.defesa,
-          danoBaseChefe: chefe.dano_base_ataque,
-          vidaTotal: Number(tentativa.vida_total),
-          vidaRestante: Number(tentativa.vida_restante),
-          ordem: lobby.ordem.slice(),
-          // cooldowns por membro (turnos, cooldownService — mesmo motor
-          // genérico já usado em PvE/World Boss) some junto com a
-          // batalha (§ nunca persistido, mesmo critério de
-          // cooldownService.js: "acaba a luta, os cooldowns somem").
-          membros: new Map(membros.map((m) => [chaveOnline(m.id), { ...m, cooldowns: {} }])),
-          turnoIndex: 0,
-          fase: "aliados", // "aliados" (percorrendo a ordem) | "chefe"
-          rodada: 1,
-          timer: null,
-          processandoAcao: false,
-          habilidadesChefe,
-          cooldownsChefe: {},
-        };
-        batalhas.set(battleId, batalha);
-        for (const id of lobby.ordem) {
-          batalhaPorPersonagem.set(id, battleId);
-          lobbyPorPersonagem.delete(id);
-        }
-        lobbies.delete(idGuild);
-
-        const socketsDaLobby = io.sockets.adapter.rooms.get(salaLobby(idGuild));
-        for (const socketId of socketsDaLobby || []) {
-          const s = io.sockets.sockets.get(socketId);
-          s?.leave(salaLobby(idGuild));
-          s?.join(sala);
-        }
-
-        io.to(sala).emit("guildboss:batalha-iniciada", {
-          battleId,
-          nomeChefe: batalha.nomeChefe,
-          vidaAtual: batalha.vidaRestante,
-          vidaTotal: batalha.vidaTotal,
-          membros: membros.map((m) => ({
-            id: m.id,
-            nome: m.nome,
-            genero: m.genero,
-            classe: m.classe,
-            vidaMax: m.vidaMax,
-            manaMax: m.manaMax,
-            vida: m.estado.vida_atual,
-            mana: m.estado.mana_atual,
-            poderes: poderesPublicos(m.poderes),
-          })),
-          ordem: batalha.ordem,
-          turnoDe: batalha.ordem[0],
-          rodada: batalha.rodada,
-          prazoSegundos: guildConfig.BOSS_AO_VIVO_PRAZO_TURNO_MS / 1000,
-        });
-
-        iniciarTimerDeTurno(io, battleId);
-      } catch (error) {
-        console.error("Erro ao iniciar batalha ao vivo do Boss da Guilda:", error);
-        socket.emit("guildboss:erro", { mensagem: "Não foi possível iniciar a batalha." });
-      }
+      const battleId = batalhaPorPersonagem.get(characterId);
+      if (!battleId) return;
+      const batalha = batalhas.get(battleId);
+      if (batalha) socket.leave(batalha.sala);
     });
 
     // Sem "tipo: item" de propósito — consumíveis não podem ser usados
@@ -418,7 +424,6 @@ module.exports = function registerGuildBossHandlers(io) {
       // igual (não diferente) trataria toda reconexão como abandono.
       const eraSocketAtivo = online.get(characterId) === socket.id;
       if (!eraSocketAtivo) return;
-      removerDaLobby(io, characterId);
       sairDaBatalhaPorDesconexao(io, characterId);
     });
   });
@@ -614,12 +619,15 @@ function cooldownsPublicos(cooldowns) {
 
 // Decide SE o chefe usa uma habilidade (mesma IA de cooldown/prioridade/
 // peso do World Boss, via bossAbilityAiService — nunca uma segunda
-// cópia dessa regra) e, se ela tiver telegraph (tempo_conjuracao_ms),
-// avisa a sala e só resolve depois — igual ao "cast_pendente" do World
-// Boss. `batalha.fase` vira "chefe" AQUI e só volta pra "aliados" no
-// fim de resolverAcaoDoChefe: entre a decisão e a resolução (inclusive
-// durante o telegraph) nenhuma ação de jogador é aceita (ver guildboss:
-// acao, que checa fase === "aliados").
+// cópia dessa regra) e SEMPRE avisa a sala com um telegraph antes de
+// resolver — igual ao "cast_pendente" do World Boss, só que o chefe da
+// Guilda nunca pula essa pausa (pedido do jogador: "ritmo de turno
+// igual à Ameaça Mundial" — sem isso, o contra-ataque resolvia
+// instantaneamente quando nenhuma habilidade estava configurada, sem
+// nenhuma pausa perceptível). `batalha.fase` vira "chefe" AQUI e só
+// volta pra "aliados" no fim de resolverAcaoDoChefe: entre a decisão e
+// a resolução (inclusive durante o telegraph) nenhuma ação de jogador
+// é aceita (ver guildboss:acao, que checa fase === "aliados").
 function executarTurnoChefe(io, battleId) {
   const batalha = batalhas.get(battleId);
   if (!batalha) return;
@@ -638,20 +646,20 @@ function executarTurnoChefe(io, battleId) {
   });
   const abilityEscolhida = escolherHabilidade(elegiveis);
 
-  if (abilityEscolhida && abilityEscolhida.tempo_conjuracao_ms > 0) {
-    io.to(batalha.sala).emit("guildboss:cast-start", {
-      battleId,
-      nomePoder: abilityEscolhida.power_snapshot.nome,
-      imagemUrl: abilityEscolhida.power_snapshot.imagem_url,
-      tempoConjuracaoMs: abilityEscolhida.tempo_conjuracao_ms,
-      rodada: batalha.rodada,
-    });
-    clearTimeout(batalha.timer);
-    batalha.timer = setTimeout(() => resolverAcaoDoChefe(io, battleId, abilityEscolhida), abilityEscolhida.tempo_conjuracao_ms);
-    return;
-  }
+  // Nunca menor que o telegraph mínimo configurado, mesmo num ataque
+  // básico sem nenhuma habilidade escolhida — só fica MAIOR quando a
+  // habilidade em si pede um tempo de conjuração mais longo.
+  const tempoEsperaMs = Math.max(guildConfig.BOSS_AO_VIVO_TELEGRAPH_MS, abilityEscolhida?.tempo_conjuracao_ms ?? 0);
 
-  resolverAcaoDoChefe(io, battleId, abilityEscolhida);
+  io.to(batalha.sala).emit("guildboss:cast-start", {
+    battleId,
+    nomePoder: abilityEscolhida?.power_snapshot?.nome ?? null,
+    imagemUrl: abilityEscolhida?.power_snapshot?.imagem_url ?? null,
+    tempoConjuracaoMs: tempoEsperaMs,
+    rodada: batalha.rodada,
+  });
+  clearTimeout(batalha.timer);
+  batalha.timer = setTimeout(() => resolverAcaoDoChefe(io, battleId, abilityEscolhida), tempoEsperaMs);
 }
 
 function resolverAcaoDoChefe(io, battleId, abilityEscolhida) {
@@ -738,6 +746,13 @@ function finalizarBatalha(io, battleId, vitoria, recompensas, motivo = vitoria ?
   batalhas.delete(battleId);
   for (const id of batalha.ordem) {
     batalhaPorPersonagem.delete(id);
+  }
+  // Só remove de batalhaPorGuild se ainda aponta pra ESTA luta — uma
+  // guilda pode, em tese, já ter uma luta nova (outra tentativa) nesse
+  // mapa por uma corrida rara; nunca apagar o ponteiro de uma luta que
+  // não é esta.
+  if (batalhaPorGuild.get(batalha.idGuild) === battleId) {
+    batalhaPorGuild.delete(batalha.idGuild);
   }
 
   io.to(batalha.sala).emit("guildboss:batalha-fim", {
