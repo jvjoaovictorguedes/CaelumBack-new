@@ -153,8 +153,9 @@ CharacterCraftingQueue.belongsTo(CraftingRecipe, { foreignKey: "id_receita", as:
 // recurso tem até 6 Items (1 por qualidade).
 CharacterProfession.belongsTo(Character, { foreignKey: "id_personagem" });
 ExpeditionRegion.hasMany(ExpeditionRegionResource, { foreignKey: "id_regiao", as: "recursosDaRegiao" });
-ExpeditionRegionResource.belongsTo(ExpeditionRegion, { foreignKey: "id_regiao" });
+ExpeditionRegionResource.belongsTo(ExpeditionRegion, { foreignKey: "id_regiao", as: "regiao" });
 ExpeditionRegionResource.belongsTo(ExpeditionResource, { foreignKey: "id_recurso", as: "recurso" });
+ExpeditionResource.hasMany(ExpeditionRegionResource, { foreignKey: "id_recurso", as: "vinculosDeRegiao" });
 ExpeditionResource.hasMany(ExpeditionResourceItem, { foreignKey: "id_recurso", as: "itensPorQualidade" });
 ExpeditionResourceItem.belongsTo(ExpeditionResource, { foreignKey: "id_recurso" });
 ExpeditionResourceItem.belongsTo(Item, { foreignKey: "id_item", as: "item" });

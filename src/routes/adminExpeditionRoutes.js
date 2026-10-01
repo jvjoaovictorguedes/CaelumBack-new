@@ -17,4 +17,15 @@ const podeBalancear = requireAdminPermission("expedition.balance");
 router.get("/balance", podeBalancear, adminExpeditionController.obterBalanceamento);
 router.put("/balance/:group", podeBalancear, adminExpeditionController.atualizarBalanceamento);
 
+// Quais recursos caem (ativo) e o peso relativo de cada um por região,
+// pras 3 profissões — pedido do jogador: "poder escolher que tipos de
+// drops caem na exploração" (vale igual pra Mineração/Silvicultura).
+router.get("/resources", podeBalancear, adminExpeditionController.listarRecursos);
+router.patch("/resources/:idRecurso/active", podeBalancear, adminExpeditionController.atualizarAtivoDoRecurso);
+router.patch(
+  "/resources/region/:idRegiao/:idRecurso/weight",
+  podeBalancear,
+  adminExpeditionController.atualizarPesoNaRegiao,
+);
+
 module.exports = router;

@@ -108,7 +108,7 @@ async function listarRegioes(id_personagem, profissaoFiltro) {
       {
         model: ExpeditionRegionResource,
         as: "recursosDaRegiao",
-        include: [{ model: ExpeditionResource, as: "recurso" }],
+        include: [{ model: ExpeditionResource, as: "recurso", where: { ativo: true } }],
       },
     ],
   });
@@ -290,9 +290,13 @@ async function coletar(id_personagem, id_regiao) {
     // Recursos possíveis da região (sem lock — pesos são estáticos,
     // não mudam durante uma coleta) buscados numa query separada do
     // lock acima, mesma técnica usada na Forja pra include+FOR UPDATE.
+    // Só recursos ATIVOS entram no sorteio — sem esse filtro, desativar
+    // um recurso no admin (ver adminExpeditionResourceService.js) não
+    // tinha nenhum efeito de verdade: a tabela de pesos continuava
+    // sorteando ele do mesmo jeito.
     const recursosDaRegiao = await ExpeditionRegionResource.findAll({
       where: { id_regiao: regiao.id },
-      include: [{ model: ExpeditionResource, as: "recurso" }],
+      include: [{ model: ExpeditionResource, as: "recurso", where: { ativo: true } }],
       transaction,
     });
     if (recursosDaRegiao.length === 0) {
