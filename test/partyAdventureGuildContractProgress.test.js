@@ -21,6 +21,7 @@ const { sequelize, bancoDisponivel, criarPersonagem, sufixo } = require("./helpe
 const { registrarProgressoContrato } = require("../src/services/adventureGuildObjectiveService");
 const AdventureGuildMission = require("../src/models/AdventureGuildMission");
 const CharacterAdventureGuildContract = require("../src/models/CharacterAdventureGuildContract");
+const AdventureMonster = require("../src/models/AdventureMonster");
 
 let temBanco = false;
 test.before(async () => {
@@ -42,6 +43,21 @@ async function criarMissao(overrides = {}) {
     tipo_objetivo: "MatarInimigos",
     quantidade_objetivo: 3,
     ...overrides,
+  });
+}
+
+async function criarMonstro() {
+  return AdventureMonster.create({
+    nome: `Monstro Contrato Teste ${sufixo()}`,
+    nivel: 1,
+    vida_maxima: 10,
+    dano_min: 1,
+    dano_max: 2,
+    agilidade: 1,
+    velocidade: 1,
+    xp_recompensa: 1,
+    ouro_recompensa: 1,
+    ativo: true,
   });
 }
 
@@ -81,7 +97,11 @@ testeComBanco(
 
 testeComBanco("vitória em grupo avança contrato de MatarMonstroEspecifico só quando o id_monstro bate", async () => {
   const { personagem } = await criarPersonagem();
-  const idMonstroAlvo = 777;
+  // id_monstro_alvo tem FK real pra AdventureMonsters (ver migration
+  // 20260930750000-guilda-aventureiros-tabelas.js) — precisa de um
+  // monstro de verdade, nunca um id inventado.
+  const monstroAlvo = await criarMonstro();
+  const idMonstroAlvo = monstroAlvo.id;
   const missaoCerta = await criarMissao({
     tipo_objetivo: "MatarMonstroEspecifico",
     id_monstro_alvo: idMonstroAlvo,

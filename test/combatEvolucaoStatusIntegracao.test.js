@@ -162,6 +162,16 @@ testeComBanco("tentativa de Power/ataque bloqueada por hard control não gasta m
     },
   });
 
+  // mana_atual precisa caber no máximo REAL do personagem (nível 5,
+  // Inteligência 10 => manaMaximaDe = 86) — encontroDeTreino grava um
+  // valor fixo de 100 só pra testes que nunca mexem com mana, mas aqui
+  // a asserção abaixo compara igualdade exata, e 100 > 86 dispararia o
+  // clamp de sincronizarRegeneracaoDeVidaEMana (regenService.js) ANTES
+  // da checagem de STUN sequer rodar — um falso positivo que nada tem a
+  // ver com o bloqueio por hard control sendo testado aqui.
+  personagem.mana_atual = 50;
+  await personagem.save();
+
   const manaAntes = personagem.mana_atual;
   const r = await chamarExecutarTurno(personagem.id, { type: "power", powerId: power.id });
   assert.equal(r.statusCode, 200, "turno bloqueado ainda responde 200 (não é erro, é turno consumido)");
