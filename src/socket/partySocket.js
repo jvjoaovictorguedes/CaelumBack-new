@@ -716,6 +716,17 @@ function sairDaBatalhaPorDesconexao(io, characterId) {
   const membro = batalha.membros.get(characterId);
   if (membro) membro.estado.vida_atual = 0;
 
+  // Libera o cadeado de batalha deste personagem JÁ — ele nunca mais vai
+  // agir nesta luta (contagem de vivo abaixo nem olha pra ele de novo), e
+  // sem isso ficava bloqueado de criar/entrar em outro grupo até a
+  // batalha INTEIRA terminar pros outros (que podem demorar — ou nunca
+  // terminar, se também sumirem). Bug reportado: sair/desconectar de uma
+  // batalha em grupo e continuar recebendo "já está em grupo ou em
+  // batalha" ao tentar formar outro grupo, mesmo já aparecendo "sem
+  // grupo" (removerDoGrupo, chamado junto no disconnect, já limpava a
+  // PARTE do grupo — só a trava de batalha ficava presa).
+  batalhaPorPersonagem.delete(characterId);
+
   const alguemVivo = batalha.ordem.some((id) => batalha.membros.get(id)?.estado.vida_atual > 0);
   if (!alguemVivo) {
     finalizarBatalha(io, battleId, false, "abandono");
