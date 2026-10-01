@@ -129,6 +129,89 @@ testeComBanco("updateBalanceamento(fishing.proficiency) salva e aplica ao vivo n
   }
 });
 
+testeComBanco("updateBalanceamento(fishing.levelCap) exige confirmado:true e valida faixa 2..200", async () => {
+  const admin = await criarUsuarioAdmin();
+  await assert.rejects(
+    () => fishingSettingsService.updateBalanceamento("fishing.levelCap", { NIVEL_MAXIMO_PESCA: 30 }, { idAdmin: admin.id }),
+    /confirmação explícita/,
+  );
+  await assert.rejects(
+    () => fishingSettingsService.updateBalanceamento("fishing.levelCap", { confirmado: true, NIVEL_MAXIMO_PESCA: 1 }, { idAdmin: admin.id }),
+    /entre 2 e 200/,
+  );
+  await assert.rejects(
+    () => fishingSettingsService.updateBalanceamento("fishing.levelCap", { confirmado: true, NIVEL_MAXIMO_PESCA: 201 }, { idAdmin: admin.id }),
+    /entre 2 e 200/,
+  );
+});
+
+testeComBanco("updateBalanceamento(fishing.levelCap) sobe o teto, regera a curva e aplica ao vivo", async () => {
+  const admin = await criarUsuarioAdmin();
+  const maximoOriginal = fishingConfig.NIVEL_MAXIMO_PESCA;
+  try {
+    const resultado = await fishingSettingsService.updateBalanceamento(
+      "fishing.levelCap",
+      { confirmado: true, NIVEL_MAXIMO_PESCA: 30 },
+      { idAdmin: admin.id },
+    );
+    assert.equal(resultado.atual.NIVEL_MAXIMO_PESCA, 30);
+    assert.equal(fishingConfig.NIVEL_MAXIMO_PESCA, 30, "override precisa valer AO VIVO sem reiniciar o processo");
+    assert.ok(fishingConfig.XP_NECESSARIO_POR_ETAPA_PESCA[29], "etapa 29 precisa existir com o novo teto");
+    assert.equal(fishingConfig.XP_NECESSARIO_POR_ETAPA_PESCA[30], undefined, "nao pode sobrar etapa alem do novo teto");
+    assert.ok(fishingConfig.XP_TOTAL_PARA_NIVEL_PESCA[30], "XP total pro novo nivel maximo precisa existir");
+
+    // nivelPescaPorXpTotal/xpParaProximoNivelPesca sao funcoes desestruturadas
+    // em fishingProgressionService.js — continuam corretas porque fecham sobre
+    // o `let` do modulo, nao uma copia.
+    assert.equal(fishingConfig.nivelPescaPorXpTotal(fishingConfig.XP_TOTAL_PARA_NIVEL_PESCA[30]), 30);
+    assert.equal(fishingConfig.xpParaProximoNivelPesca(30), null, "nivel 30 agora eh o teto, nao tem proximo");
+  } finally {
+    await fishingSettingsService.updateBalanceamento(
+      "fishing.levelCap",
+      { confirmado: true, NIVEL_MAXIMO_PESCA: maximoOriginal },
+      { idAdmin: admin.id },
+    );
+    await GameSetting.destroy({ where: { chave: "fishing.levelCap" } });
+  }
+});
+
+testeComBanco("aplicarPersistidosNoBoot: aplica fishing.levelCap ANTES de fishing.progression (senao o override de etapa se perde)", async () => {
+  const admin = await criarUsuarioAdmin();
+  const maximoOriginal = fishingConfig.NIVEL_MAXIMO_PESCA;
+  try {
+    // Teto maior + override de etapa 1 — se a ordem no boot fosse
+    // invertida, regerarCurvaXpPadrao (disparada pelo levelCap) apagaria
+    // o valor 777 da etapa 1 depois dele já ter sido aplicado.
+    await fishingSettingsService.updateBalanceamento(
+      "fishing.levelCap",
+      { confirmado: true, NIVEL_MAXIMO_PESCA: 30 },
+      { idAdmin: admin.id },
+    );
+    await fishingSettingsService.updateBalanceamento(
+      "fishing.progression",
+      { confirmado: true, XP_NECESSARIO_POR_ETAPA_PESCA: { 1: 777 } },
+      { idAdmin: admin.id },
+    );
+
+    // simula restart: volta tudo pro default em memória...
+    fishingConfig.aplicarOverridesBalanceamento("fishing.levelCap", { NIVEL_MAXIMO_PESCA: maximoOriginal });
+    assert.equal(fishingConfig.NIVEL_MAXIMO_PESCA, maximoOriginal);
+    assert.notEqual(fishingConfig.XP_NECESSARIO_POR_ETAPA_PESCA[1], 777);
+
+    // ...e confirma que reler do banco restaura AMBOS corretamente, na ordem certa.
+    await fishingSettingsService.aplicarPersistidosNoBoot();
+    assert.equal(fishingConfig.NIVEL_MAXIMO_PESCA, 30);
+    assert.equal(fishingConfig.XP_NECESSARIO_POR_ETAPA_PESCA[1], 777, "override de etapa precisa sobreviver, aplicado DEPOIS do levelCap");
+  } finally {
+    await fishingSettingsService.updateBalanceamento(
+      "fishing.levelCap",
+      { confirmado: true, NIVEL_MAXIMO_PESCA: maximoOriginal },
+      { idAdmin: admin.id },
+    );
+    await GameSetting.destroy({ where: { chave: ["fishing.levelCap", "fishing.progression"] } });
+  }
+});
+
 testeComBanco("aplicarPersistidosNoBoot: relê o override salvo no GameSetting e reaplica no fishingConfig", async () => {
   const admin = await criarUsuarioAdmin();
   const etapa1Original = fishingConfig.XP_NECESSARIO_POR_ETAPA_PESCA[1];

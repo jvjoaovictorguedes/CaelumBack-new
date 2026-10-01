@@ -1,5 +1,6 @@
 // Painel Administrativo de Pesca — Balanceamento (pedido do jogador: editar
-// o XP necessário por nível de Pesca e o buff de Proficiência por nível).
+// o XP necessário por nível de Pesca, o buff de Proficiência por nível,
+// e o teto de nível/level cap).
 // Mesmo padrão exato de forgeSettingsService.js: persiste SÓ dados
 // validados em GameSetting (chaves fishing.progression/fishing.proficiency
 // — nunca JavaScript/expressões arbitrárias), e aplica por cima dos
@@ -16,7 +17,12 @@ const GameSetting = require("../models/GameSetting");
 const fishingConfig = require("../config/fishingConfig");
 const { registrarAcao } = require("./adminAuditService");
 
-const GRUPOS = ["fishing.progression", "fishing.proficiency"];
+// fishing.levelCap vem PRIMEIRO de propósito — aplicarPersistidosNoBoot
+// aplica os grupos nesta ordem, e trocar o teto regera a curva de XP do
+// zero (regerarCurvaXpPadrao); fishing.progression precisa rodar DEPOIS
+// pra reaplicar por cima qualquer override de etapa individual que o
+// admin já tinha salvo, senão ele seria apagado a cada boot.
+const GRUPOS = ["fishing.levelCap", "fishing.progression", "fishing.proficiency"];
 
 function erro(mensagem, statusCode = 400) {
   const e = new Error(mensagem);
@@ -28,6 +34,9 @@ function erro(mensagem, statusCode = 400) {
 // (antes de qualquer override) — só pra exibir "valor padrão" no Admin e
 // pra resetar; nunca usado em cálculo de gameplay.
 const DEFAULTS_ORIGINAIS = {
+  "fishing.levelCap": {
+    NIVEL_MAXIMO_PESCA: fishingConfig.NIVEL_MAXIMO_PESCA,
+  },
   "fishing.progression": {
     XP_NECESSARIO_POR_ETAPA_PESCA: { ...fishingConfig.XP_NECESSARIO_POR_ETAPA_PESCA },
   },
@@ -45,6 +54,8 @@ function getDefaults(grupo) {
 // impossível divergir do que o gameplay de verdade usa.
 function getSnapshotAtual(grupo) {
   switch (grupo) {
+    case "fishing.levelCap":
+      return { NIVEL_MAXIMO_PESCA: fishingConfig.NIVEL_MAXIMO_PESCA };
     case "fishing.progression":
       return {
         XP_NECESSARIO_POR_ETAPA_PESCA: { ...fishingConfig.XP_NECESSARIO_POR_ETAPA_PESCA },
@@ -71,6 +82,20 @@ async function getBalanceamentoCompleto() {
 function validarGrupo(grupo, valores) {
   if (!GRUPOS.includes(grupo)) throw erro(`Grupo de balanceamento desconhecido: ${grupo}.`);
   if (!valores || typeof valores !== "object") throw erro("Payload de balanceamento vazio.");
+
+  if (grupo === "fishing.levelCap") {
+    // Trocar o teto regera a curva de XP do zero (regerarCurvaXpPadrao em
+    // fishingConfig) — apaga qualquer override de etapa individual salvo
+    // antes em fishing.progression, mesmo critério de confirmação
+    // explícita que fishing.progression já exige.
+    if (!valores.confirmado) {
+      throw erro("Editar o teto de nível da Pesca exige confirmação explícita (confirmado: true) — isso reseta a curva de XP por nível pro padrão do novo teto.");
+    }
+    if (!Number.isInteger(valores.NIVEL_MAXIMO_PESCA) || valores.NIVEL_MAXIMO_PESCA < 2 || valores.NIVEL_MAXIMO_PESCA > 200) {
+      throw erro("NIVEL_MAXIMO_PESCA precisa ser um inteiro entre 2 e 200.");
+    }
+    return;
+  }
 
   if (grupo === "fishing.progression") {
     // V1 — editar a curva de XP exige confirmação explícita, mesmo
@@ -139,7 +164,13 @@ async function updateBalanceamento(grupo, valores, { idAdmin, req } = {}) {
 // restart.
 async function aplicarPersistidosNoBoot() {
   const linhas = await GameSetting.findAll({ where: { chave: GRUPOS } });
-  for (const linha of linhas) {
+  const porChave = new Map(linhas.map((l) => [l.chave, l]));
+  // Ordem de GRUPOS importa aqui: fishing.levelCap precisa aplicar ANTES
+  // de fishing.progression (ver comentário em GRUPOS acima), nunca a
+  // ordem que o findAll devolveu.
+  for (const chave of GRUPOS) {
+    const linha = porChave.get(chave);
+    if (!linha) continue;
     try {
       fishingConfig.aplicarOverridesBalanceamento(linha.chave, linha.valor);
     } catch (error) {
