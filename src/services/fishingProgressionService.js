@@ -1,7 +1,8 @@
 // Progresso de Pesca — espelha forgeProgressionService.js, mas usando a
 // curva 1..25 de fishingConfig.js (spec §7).
 const CharacterFishingProgress = require("../models/CharacterFishingProgress");
-const { nivelPescaPorXpTotal, xpParaProximoNivelPesca, NIVEL_MAXIMO_PESCA } = require("../config/fishingConfig");
+const fishingConfig = require("../config/fishingConfig");
+const { nivelPescaPorXpTotal, xpParaProximoNivelPesca } = fishingConfig;
 
 async function garantirProgresso(characterId, transaction) {
   const [progresso] = await CharacterFishingProgress.findOrCreate({
@@ -19,7 +20,7 @@ async function obterProgresso(characterId) {
     nivel,
     experiencia: progresso.experiencia,
     xp_proximo_nivel: xpParaProximoNivelPesca(nivel),
-    nivel_maximo: NIVEL_MAXIMO_PESCA,
+    nivel_maximo: fishingConfig.NIVEL_MAXIMO_PESCA,
     total_capturado: progresso.total_capturado,
   };
 }

@@ -56,7 +56,13 @@ const DEFAULTS_ORIGINAIS = {
       Object.entries(expeditionConfig.QUANTIDADE_POR_NIVEL).map(([n, faixa]) => [n, [...faixa]]),
     ),
   },
-  "expedition.ambush": { CHANCE_MONSTRO_PPM: expeditionConfig.CHANCE_MONSTRO_PPM },
+  "expedition.ambush": {
+    CHANCE_MONSTRO_PPM: expeditionConfig.CHANCE_MONSTRO_PPM,
+    EMBOSCADA_XP_BASE: expeditionConfig.EMBOSCADA_XP_BASE,
+    EMBOSCADA_XP_POR_NIVEL: expeditionConfig.EMBOSCADA_XP_POR_NIVEL,
+    EMBOSCADA_OURO_BASE: expeditionConfig.EMBOSCADA_OURO_BASE,
+    EMBOSCADA_OURO_POR_NIVEL: expeditionConfig.EMBOSCADA_OURO_POR_NIVEL,
+  },
   "adventure.danger": { ...adventureConfig.LIMIAR_PERIGO },
   "party.balance": {
     TAMANHO_MAXIMO_GRUPO: partyBattleConfig.TAMANHO_MAXIMO_GRUPO,
@@ -66,6 +72,9 @@ const DEFAULTS_ORIGINAIS = {
     MAX_RODADAS: partyBattleConfig.MAX_RODADAS,
     FATOR_DIFICULDADE_VIDA_POR_EXTRA: partyBattleConfig.FATOR_DIFICULDADE_VIDA_POR_EXTRA,
     FATOR_DIFICULDADE_DANO_POR_EXTRA: partyBattleConfig.FATOR_DIFICULDADE_DANO_POR_EXTRA,
+    LIMIAR_NIVEL_ACIMA_DA_ZONA: partyBattleConfig.LIMIAR_NIVEL_ACIMA_DA_ZONA,
+    REDUCAO_RECOMPENSA_POR_NIVEL_EXCEDENTE: partyBattleConfig.REDUCAO_RECOMPENSA_POR_NIVEL_EXCEDENTE,
+    PISO_MULTIPLICADOR_RECOMPENSA: partyBattleConfig.PISO_MULTIPLICADOR_RECOMPENSA,
   },
 };
 
@@ -94,7 +103,13 @@ function getSnapshotAtual(grupo) {
         ),
       };
     case "expedition.ambush":
-      return { CHANCE_MONSTRO_PPM: expeditionConfig.CHANCE_MONSTRO_PPM };
+      return {
+        CHANCE_MONSTRO_PPM: expeditionConfig.CHANCE_MONSTRO_PPM,
+        EMBOSCADA_XP_BASE: expeditionConfig.EMBOSCADA_XP_BASE,
+        EMBOSCADA_XP_POR_NIVEL: expeditionConfig.EMBOSCADA_XP_POR_NIVEL,
+        EMBOSCADA_OURO_BASE: expeditionConfig.EMBOSCADA_OURO_BASE,
+        EMBOSCADA_OURO_POR_NIVEL: expeditionConfig.EMBOSCADA_OURO_POR_NIVEL,
+      };
     case "adventure.danger":
       return { ...adventureConfig.LIMIAR_PERIGO };
     case "party.balance":
@@ -106,6 +121,9 @@ function getSnapshotAtual(grupo) {
         MAX_RODADAS: partyBattleConfig.MAX_RODADAS,
         FATOR_DIFICULDADE_VIDA_POR_EXTRA: partyBattleConfig.FATOR_DIFICULDADE_VIDA_POR_EXTRA,
         FATOR_DIFICULDADE_DANO_POR_EXTRA: partyBattleConfig.FATOR_DIFICULDADE_DANO_POR_EXTRA,
+        LIMIAR_NIVEL_ACIMA_DA_ZONA: partyBattleConfig.LIMIAR_NIVEL_ACIMA_DA_ZONA,
+        REDUCAO_RECOMPENSA_POR_NIVEL_EXCEDENTE: partyBattleConfig.REDUCAO_RECOMPENSA_POR_NIVEL_EXCEDENTE,
+        PISO_MULTIPLICADOR_RECOMPENSA: partyBattleConfig.PISO_MULTIPLICADOR_RECOMPENSA,
       };
     default:
       throw erro(`Grupo de balanceamento desconhecido: ${grupo}.`);
@@ -135,7 +153,19 @@ function validarGrupo(grupo, valores) {
   if (!valores || typeof valores !== "object") throw erro("Payload de balanceamento vazio.");
 
   if (grupo === "expedition.cooldown") {
-    if (valores.TEMPO_COLETA_MS !== undefined) validarInteiroPositivo("TEMPO_COLETA_MS", valores.TEMPO_COLETA_MS);
+    if (valores.TEMPO_COLETA_MS !== undefined) {
+      validarInteiroPositivo("TEMPO_COLETA_MS", valores.TEMPO_COLETA_MS);
+      // Teto defensivo — sem isso um admin digitando um valor errado
+      // (ex.: querendo "3 minutos" mas digitando "180000" a mais, ou
+      // colando um número com dígitos extras) trava a coleta pro jogo
+      // INTEIRO por horas sem nenhum aviso (bug real reportado: cooldown
+      // de ~19h aplicado globalmente depois de um salvamento assim).
+      // 10 minutos já é bem mais que qualquer cooldown de coleta faz
+      // sentido ter.
+      if (valores.TEMPO_COLETA_MS > 600_000) {
+        throw erro("TEMPO_COLETA_MS não pode passar de 600000 (10 minutos).");
+      }
+    }
     return;
   }
 
@@ -180,6 +210,10 @@ function validarGrupo(grupo, valores) {
 
   if (grupo === "expedition.ambush") {
     if (valores.CHANCE_MONSTRO_PPM !== undefined) validarPpm("CHANCE_MONSTRO_PPM", valores.CHANCE_MONSTRO_PPM);
+    for (const campo of ["EMBOSCADA_XP_BASE", "EMBOSCADA_XP_POR_NIVEL", "EMBOSCADA_OURO_BASE", "EMBOSCADA_OURO_POR_NIVEL"]) {
+      if (valores[campo] === undefined) continue;
+      if (!Number.isInteger(valores[campo]) || valores[campo] < 0) throw erro(`${campo} precisa ser um inteiro >= 0.`);
+    }
     return;
   }
 
@@ -211,6 +245,18 @@ function validarGrupo(grupo, valores) {
     if (valores.FATOR_DIFICULDADE_DANO_POR_EXTRA !== undefined) {
       const v = valores.FATOR_DIFICULDADE_DANO_POR_EXTRA;
       if (typeof v !== "number" || v < 0) throw erro("FATOR_DIFICULDADE_DANO_POR_EXTRA precisa ser um número >= 0 (fração, ex.: 0.08 = +8%).");
+    }
+    if (valores.LIMIAR_NIVEL_ACIMA_DA_ZONA !== undefined) {
+      const v = valores.LIMIAR_NIVEL_ACIMA_DA_ZONA;
+      if (!Number.isInteger(v) || v < 0) throw erro("LIMIAR_NIVEL_ACIMA_DA_ZONA precisa ser um inteiro >= 0.");
+    }
+    if (valores.REDUCAO_RECOMPENSA_POR_NIVEL_EXCEDENTE !== undefined) {
+      const v = valores.REDUCAO_RECOMPENSA_POR_NIVEL_EXCEDENTE;
+      if (typeof v !== "number" || v < 0 || v > 1) throw erro("REDUCAO_RECOMPENSA_POR_NIVEL_EXCEDENTE precisa ser um número entre 0 e 1 (fração, ex.: 0.05 = -5% por nível excedente).");
+    }
+    if (valores.PISO_MULTIPLICADOR_RECOMPENSA !== undefined) {
+      const v = valores.PISO_MULTIPLICADOR_RECOMPENSA;
+      if (typeof v !== "number" || v < 0 || v > 1) throw erro("PISO_MULTIPLICADOR_RECOMPENSA precisa ser um número entre 0 e 1 (fração, ex.: 0.2 = nunca cai abaixo de 20%).");
     }
     return;
   }

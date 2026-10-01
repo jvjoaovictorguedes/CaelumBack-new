@@ -66,22 +66,27 @@ exports.registerUser = async (req, res) => {
     // ANTES de criar a conta: rejeita explicitamente um nome que não
     // bate com ninguém, em vez de silenciosamente criar a conta sem
     // indicação (o jogador digitou errado e nunca ficaria sabendo).
-    // Nunca compara com o próprio username sendo criado agora — nem
-    // precisa: essa conta ainda não existe, não tem como um SELECT por
-    // username achá-la ainda.
+    //
+    // Busca por NOME DE PERSONAGEM, não username de login (pedido real:
+    // ninguém decora o username de quem indicou, mas todo mundo conhece
+    // o nome do personagem — aparece no chat/guilda/ranking). Character
+    // .nome é único no banco (ver model), então o match nunca é
+    // ambíguo. Nunca compara com o próprio registro em andamento — nem
+    // precisa: essa conta ainda não existe, não tem personagem pra um
+    // SELECT achar.
     let idIndicadoPor = null;
     const nomeIndicador = req.body.indicado_por?.trim();
     if (nomeIndicador) {
-      const indicador = await User.findOne({
-        where: { username: { [Op.iLike]: nomeIndicador } },
-        attributes: ["id"],
+      const personagemIndicador = await Character.findOne({
+        where: { nome: { [Op.iLike]: nomeIndicador } },
+        attributes: ["id_usuario"],
       });
-      if (!indicador) {
+      if (!personagemIndicador) {
         return res.status(400).json({
-          message: `Usuário indicador "${nomeIndicador}" não encontrado. Confira o nome (ou deixe o campo em branco).`,
+          message: `Personagem indicador "${nomeIndicador}" não encontrado. Confira o nome (ou deixe o campo em branco).`,
         });
       }
-      idIndicadoPor = indicador.id;
+      idIndicadoPor = personagemIndicador.id_usuario;
     }
 
     const newUser = await User.create({
@@ -121,6 +126,38 @@ exports.registerUser = async (req, res) => {
     }
     console.error("Erro ao registrar usuário:", error);
     res.status(500).json({ message: "Erro interno do servidor ao registrar." });
+  }
+};
+
+// GET /api/users/referral-check?nome=...
+// Checagem ao vivo do campo "Quem te indicou?" do registro — pedido
+// real: jogador digitava o nome errado, só descobria no 400 do
+// /register, e insistir nisso esgotava a cota do rate-limit antes de
+// perceber o erro de digitação. Devolve só um booleano (e o nome
+// "correto" já formatado, pra UI mostrar com a capitalização de
+// verdade) — NUNCA uma lista de nomes parecidos nem nada além disso:
+// isto não é um endpoint de busca/autocomplete, é só "este nome exato
+// bate com alguém?", pra nunca virar um jeito de varrer o catálogo de
+// personagens sem estar logado. Rota pública de propósito (ainda não
+// existe sessão no fluxo de registro) — protegida pelo rate-limit por
+// IP montado na rota (ver userRoutes.js).
+exports.verificarIndicador = async (req, res) => {
+  try {
+    const nome = (req.query.nome || "").trim();
+    if (!nome) {
+      return res.status(200).json({ existe: false });
+    }
+    const personagem = await Character.findOne({
+      where: { nome: { [Op.iLike]: nome } },
+      attributes: ["nome"],
+    });
+    if (!personagem) {
+      return res.status(200).json({ existe: false });
+    }
+    return res.status(200).json({ existe: true, nome: personagem.nome });
+  } catch (error) {
+    console.error("Erro ao checar indicador:", error);
+    res.status(500).json({ message: "Erro interno do servidor." });
   }
 };
 

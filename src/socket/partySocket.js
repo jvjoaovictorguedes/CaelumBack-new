@@ -22,13 +22,15 @@ const Character = require("../models/Character");
 const AdventureZone = require("../models/AdventureZone");
 const AdventureZoneMonster = require("../models/AdventureZoneMonster");
 const AdventureMonster = require("../models/AdventureMonster");
+const MonsterStatusEffect = require("../models/MonsterStatusEffect");
 const { sequelize } = require("../config/database");
-const { aplicarAcao } = require("../services/duelEngine");
+const { resolverTurnoComStatus } = require("../services/duelEngine");
 const { adicionarExperiencia } = require("../services/experienceService");
 const { concederOuro } = require("../services/goldService");
 const { rolarDropDeVitoria } = require("../services/dropService");
 const { sortearMonstroDaZona } = require("../services/adventureRollService");
-const { persistirEstadoFinalDoMembro } = require("../services/partyBattleService");
+const { persistirEstadoFinalDoMembro, calcularPenalidadePowerLeveling } = require("../services/partyBattleService");
+const { registrarProgressoContrato } = require("../services/adventureGuildObjectiveService");
 const { custoManaEfetivo } = require("../services/combatFormulas");
 const {
   online,
@@ -420,6 +422,12 @@ module.exports = function registerPartyHandlers(io) {
         if (membros.some((m) => !m)) {
           return socket.emit("party:erro", { mensagem: "Não foi possível carregar todos os personagens do grupo." });
         }
+        // Motor de Status (mesmo princípio do Duelo ao vivo/PvE solo) —
+        // lista de instâncias ATIVAS de cada aliado, vazia no início do
+        // encontro; `armaEfeitos` já veio pronto de carregarLutador.
+        for (const membro of membros) {
+          membro.status = [];
+        }
         const derrotados = membros.filter((m) => m.estado.vida_atual <= 0);
         if (derrotados.length > 0) {
           return socket.emit("party:erro", {
@@ -452,6 +460,16 @@ module.exports = function registerPartyHandlers(io) {
           });
         }
 
+        // Ideia #4 da fila de melhorias — calcula a penalidade ANTES de
+        // sortear o monstro (não depende dele, só da zona e do grupo),
+        // guardada na `batalha` pra ser aplicada na recompensa quando a
+        // luta terminar (finalizarBatalha).
+        const penalidadePowerLeveling = calcularPenalidadePowerLeveling({
+          tetoZona: zona.nivel_monstro_max,
+          niveisDosMembros: membros.map((m) => m.estado.nivel),
+          config: partyBattleConfig,
+        });
+
         const escolhido = sortearMonstroDaZona(monstrosElegiveis);
         const monstro = escolhido.monstro;
 
@@ -479,6 +497,11 @@ module.exports = function registerPartyHandlers(io) {
         const danoMax = Math.max(danoMin, Math.round(monstro.dano_max * fatorDificuldadeGrupo.dano));
 
         const inimigo = {
+          // Guilda dos Aventureiros (§23/§45) — id do catálogo, preservado
+          // pra poder alimentar contrato de Rank "matar monstro
+          // específico"/"matar na região" na vitória (finalizarBatalha),
+          // mesmo critério do encontro solo (combatController.js).
+          id_monstro: monstro.id,
           nome: monstro.nome,
           nivel: monstro.nivel,
           forca: Math.max(1, Math.round((danoMin + danoMax) / 2)),
@@ -504,6 +527,23 @@ module.exports = function registerPartyHandlers(io) {
         inimigo.sprite_key = monstro.sprite_key ?? null;
         inimigo.imagem_url = monstro.imagem_url ?? null;
 
+        // Motor de Status (mesmo princípio do PvE solo em
+        // combatController.js) — captura os efeitos de status
+        // configurados no monstro UMA vez, no início da batalha, pra
+        // executarTurnoMonstro nunca consultar o banco a cada golpe.
+        // `status` é a lista de instâncias ATIVAS nele, vazia no início.
+        const efeitosDeStatusDoMonstro = await MonsterStatusEffect.findAll({
+          where: { id_monstro: monstro.id, ativo: true },
+        });
+        inimigo.efeitosDeStatus = efeitosDeStatusDoMonstro.map((e) => ({
+          status_key: e.status_key,
+          chance_ppm: e.chance_ppm,
+          duration_turns: e.duration_turns,
+          potency_base: e.potency_base,
+          ativo: e.ativo,
+        }));
+        inimigo.status = [];
+
         const battleId = proximaBatalhaId++;
         const sala = `party-batalha:${battleId}`;
         const batalha = {
@@ -519,6 +559,13 @@ module.exports = function registerPartyHandlers(io) {
           rodada: 1,
           timer: null,
           processandoAcao: false,
+          penalidadePowerLeveling,
+          // Motor de Status — contador monotônico de turnos reais da
+          // batalha (aliado OU monstro agindo), nunca reaproveitado nem
+          // zerado por rodada: é o que resolverTurnoComStatus usa pra
+          // nunca rerrolar Paralyze duas vezes no mesmo turno de quem já
+          // agiu (mesmo papel de duelo.acoes no Duelo ao vivo).
+          contadorTurno: 0,
         };
         batalhas.set(battleId, batalha);
         for (const id of grupo.ordem) {
@@ -564,6 +611,12 @@ module.exports = function registerPartyHandlers(io) {
           ordem: batalha.ordem,
           turnoDe: batalha.ordem[0],
           prazoSegundos: partyBattleConfig.PRAZO_TURNO_MS / 1000,
+          // Ideia #4 da fila de melhorias — transparência: se a recompensa
+          // vai sair reduzida por power-leveling, o grupo sabe disso ANTES
+          // de lutar, não só ao ver o número final menor em party:batalha-fim.
+          penalidadePowerLeveling: penalidadePowerLeveling.aplicada
+            ? { multiplicador: penalidadePowerLeveling.multiplicador, excessoNivel: penalidadePowerLeveling.excesso }
+            : null,
         });
 
         iniciarTimerDeTurnoGrupo(io, battleId);
@@ -667,28 +720,60 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
   clearTimeout(batalha.timer);
 
   const atacante = batalha.membros.get(characterId);
-  const { nomeAcao, dano, cura, manaCurada, esquivou, critico } = aplicarAcao({
+  batalha.contadorTurno += 1;
+
+  // Motor de Status (Evolução do Motor de Status) — mesma engrenagem do
+  // Duelo ao vivo/PvE solo: ticks de DoT no FIM do turno de quem agiu
+  // (nunca na hora do golpe que aplicou o status), bloqueio de ação por
+  // controle duro/Silêncio, Enfraquecimento/Cegueira, proc de arma do
+  // aliado no monstro quando o ataque básico acerta.
+  const {
+    nomeAcao,
+    dano,
+    cura,
+    manaCurada,
+    esquivou,
+    critico,
+    bloqueado,
+    statusAtacante,
+    statusDefensor,
+    log: logStatus,
+  } = await resolverTurnoComStatus({
     atacante: atacante.estado,
     defensor: batalha.inimigo,
     acao,
     vidaMaxAtacante: atacante.vidaMax,
     manaMaxAtacante: atacante.manaMax,
+    statusAtacante: atacante.status,
+    statusDefensor: batalha.inimigo.status,
+    turno: batalha.contadorTurno,
+    casterActorId: characterId,
+    armaEfeitosAtacante: atacante.armaEfeitos,
+    itemIdArmaAtacante: atacante.estado.arma_equipada?.id_item ?? null,
+    nomeAtacante: atacante.nome,
+    nomeDefensor: batalha.inimigo.nome,
   });
+  atacante.status = statusAtacante;
+  batalha.inimigo.status = statusDefensor;
 
   io.to(batalha.sala).emit("party:turno-resultado", {
     battleId,
     origem: "aliado",
     idAtor: characterId,
-    nomeAcao: foiAutomatico ? `${nomeAcao} (tempo esgotado)` : nomeAcao,
+    nomeAcao: bloqueado ? nomeAcao : foiAutomatico ? `${nomeAcao} (tempo esgotado)` : nomeAcao,
     dano,
     cura,
     manaCurada,
     esquivou,
     critico: Boolean(critico),
+    bloqueado: Boolean(bloqueado),
+    logStatus,
     vidaInimigo: batalha.inimigo.vida_atual,
     vidaAliado: atacante.estado.vida_atual,
     manaAliado: atacante.estado.mana_atual,
     rodada: batalha.rodada,
+    statusInimigo: snapshotStatus(batalha.inimigo.status),
+    statusAliados: snapshotStatusAliados(batalha),
   });
 
   if (batalha.inimigo.vida_atual <= 0) {
@@ -752,6 +837,23 @@ function sairDaBatalhaPorDesconexao(io, characterId) {
   }
 }
 
+// Motor de Status — formato mínimo que o frontend precisa pra desenhar
+// os ícones (StatusEffectIcons.tsx), mesmo shape de statusA/statusB do
+// Duelo ao vivo (pvpLiveSocket.js): nunca manda a instância inteira
+// (sourceActorId/appliedAtTurn/etc são detalhe de servidor).
+function snapshotStatus(lista) {
+  return (lista ?? []).map((s) => ({ key: s.key, remainingTurns: s.remainingTurns, stacks: s.stacks }));
+}
+
+function snapshotStatusAliados(batalha) {
+  const mapa = {};
+  for (const id of batalha.ordem) {
+    const membro = batalha.membros.get(id);
+    if (membro) mapa[id] = snapshotStatus(membro.status);
+  }
+  return mapa;
+}
+
 function proximoAliadoVivoIndex(batalha, apartirDe) {
   for (let i = apartirDe; i < batalha.ordem.length; i++) {
     const membro = batalha.membros.get(batalha.ordem[i]);
@@ -781,7 +883,7 @@ function avancarTurnoAliado(io, battleId) {
   executarTurnoMonstro(io, battleId);
 }
 
-function executarTurnoMonstro(io, battleId) {
+async function executarTurnoMonstro(io, battleId) {
   const batalha = batalhas.get(battleId);
   if (!batalha) return;
 
@@ -794,12 +896,38 @@ function executarTurnoMonstro(io, battleId) {
   }
 
   const alvo = vivos[Math.floor(Math.random() * vivos.length)];
-  const { nomeAcao, dano, esquivou, critico } = aplicarAcao({
+  batalha.contadorTurno += 1;
+
+  // Mesmo motor de executarTurnoAliado, agora do lado do monstro —
+  // `efeitosDeStatusAtacante` é o catálogo configurado no admin (ideia
+  // #3 da fila de melhorias), rolado igual ao proc de arma do jogador:
+  // só dispara em ataque básico que de fato causa dano, nunca na hora
+  // de causar (isso aqui só REGISTRA a instância) — o dano do status em
+  // si só sai depois, no tick de fim de turno de quem ESTÁ com ele.
+  const {
+    nomeAcao,
+    dano,
+    esquivou,
+    critico,
+    bloqueado,
+    statusAtacante,
+    statusDefensor,
+    log: logStatus,
+  } = await resolverTurnoComStatus({
     atacante: batalha.inimigo,
     defensor: alvo.estado,
     acao: { tipo: "attack" },
     vidaMaxAtacante: batalha.inimigo.vida_maxima,
+    statusAtacante: batalha.inimigo.status,
+    statusDefensor: alvo.status,
+    turno: batalha.contadorTurno,
+    casterActorId: "inimigo",
+    efeitosDeStatusAtacante: batalha.inimigo.efeitosDeStatus,
+    nomeAtacante: batalha.inimigo.nome,
+    nomeDefensor: alvo.nome,
   });
+  batalha.inimigo.status = statusAtacante;
+  alvo.status = statusDefensor;
 
   io.to(batalha.sala).emit("party:turno-resultado", {
     battleId,
@@ -809,8 +937,12 @@ function executarTurnoMonstro(io, battleId) {
     dano,
     esquivou,
     critico: Boolean(critico),
+    bloqueado: Boolean(bloqueado),
+    logStatus,
     vidaAliado: alvo.estado.vida_atual,
     rodada: batalha.rodada,
+    statusInimigo: snapshotStatus(batalha.inimigo.status),
+    statusAliados: snapshotStatusAliados(batalha),
   });
 
   const alguemVivo = batalha.ordem.some((id) => batalha.membros.get(id)?.estado.vida_atual > 0);
@@ -875,14 +1007,36 @@ async function finalizarBatalha(io, battleId, vitoria, motivo = vitoria ? "comba
           // (max(10,nivel*8)/10+nivel*2), divergente da recompensa fixa
           // e autoral da Aventura solo (xp_recompensa/ouro_recompensa).
           // Agora usa a MESMA base fixa do monstro, cheia por membro.
-          const xpConcedida = batalha.inimigo.xp_recompensa ?? 0;
+          //
+          // Ideia #4 da fila de melhorias — multiplicadorRecompensa (1 =
+          // sem penalidade) calculado no início da luta (party:iniciar),
+          // aplicado aqui pra TODO MUNDO do grupo igual, inclusive quem
+          // está carregando: o alvo é desincentivar o farm de boost em
+          // si, não só "punir" o personagem fraco que está sendo ajudado.
+          const multiplicador = batalha.penalidadePowerLeveling?.multiplicador ?? 1;
+          const xpConcedida = Math.round((batalha.inimigo.xp_recompensa ?? 0) * multiplicador);
           const resultadoXp = await adicionarExperiencia(id, xpConcedida, { transaction, personagem: character });
 
-          const ouro = batalha.inimigo.ouro_recompensa ?? 0;
+          const ouro = Math.round((batalha.inimigo.ouro_recompensa ?? 0) * multiplicador);
           concederOuro(character, ouro);
 
           const drop = await rolarDropDeVitoria(character, batalha.inimigo, transaction);
           if (drop) drops[id] = drop;
+
+          // Guilda dos Aventureiros (§23/§45) — bug reportado: vitória em
+          // grupo nunca alimentava contrato de Rank ativo nenhum (só
+          // existia no encontro solo, combatController.js). Mesmo evento
+          // real, mesmo par de chamadas, dentro da MESMA transaction por
+          // membro — cada aventureiro do grupo progride no SEU próprio
+          // contrato, igual uma vitória solo contaria.
+          await registrarProgressoContrato(
+            character,
+            "MatarInimigos",
+            1,
+            { id_monstro: batalha.inimigo.id_monstro, id_area: batalha.zona.id },
+            transaction,
+          );
+          await registrarProgressoContrato(character, "GanharOuro", ouro, {}, transaction);
 
           recompensas[id] = {
             experiencia: xpConcedida,
@@ -905,6 +1059,9 @@ async function finalizarBatalha(io, battleId, vitoria, motivo = vitoria ? "comba
     motivo,
     recompensas,
     drops,
+    penalidadePowerLeveling: batalha.penalidadePowerLeveling?.aplicada
+      ? { multiplicador: batalha.penalidadePowerLeveling.multiplicador, excessoNivel: batalha.penalidadePowerLeveling.excesso }
+      : null,
   });
 
   for (const socketId of io.sockets.adapter.rooms.get(batalha.sala) || []) {

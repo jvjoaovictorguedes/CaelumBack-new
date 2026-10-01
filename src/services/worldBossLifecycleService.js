@@ -106,6 +106,7 @@ async function montarSnapshot(config, transaction) {
     descricao: config.descricao,
     lore: config.lore,
     imagem_url: config.imagem_url,
+    fundo_url: config.fundo_url,
     vida_base: Number(config.vida_base),
     defesa: config.defesa,
     // §4.1 — atributos de combate/raid do Boss.

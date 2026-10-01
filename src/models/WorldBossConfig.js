@@ -12,6 +12,11 @@ const WorldBossConfig = sequelize.define(
     descricao: { type: DataTypes.TEXT, allowNull: false },
     lore: { type: DataTypes.TEXT, allowNull: true },
     imagem_url: { type: DataTypes.STRING, allowNull: true },
+    // Fundo de batalha dedicado (WorldBossBattleScene.tsx) — sem isso a
+    // cena usava a própria imagem_url (retrato do Boss) borrada como
+    // fundo, por falta de campo próprio. Opcional: sem fundo_url
+    // cadastrado, o front cai nesse mesmo fallback borrado.
+    fundo_url: { type: DataTypes.STRING, allowNull: true },
     ativo: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     peso_selecao: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
     vida_base: { type: DataTypes.BIGINT, allowNull: false },

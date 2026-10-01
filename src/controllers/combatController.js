@@ -46,6 +46,7 @@ const AdventureMonster = require("../models/AdventureMonster");
 const { obterSessaoAtiva } = require("../services/adventureService");
 const { sortearMonstroDaZona } = require("../services/adventureRollService");
 const { concederRecompensaDeZona } = require("../services/adventureRewardService");
+const expeditionConfig = require("../config/expeditionConfig");
 const { concederOuro } = require("../services/goldService");
 const { registrarProgressoContrato } = require("../services/adventureGuildObjectiveService");
 const { registrarProgressoMissaoGuilda } = require("../services/guildMissionService");
@@ -58,11 +59,13 @@ const statusEffectService = require("../services/statusEffectService");
 const cooldownService = require("../services/cooldownService");
 const { resolverEfeitosDoUso } = require("../services/combatEffectResolver");
 const { resolverEfeitosDeArmaNoHit } = require("../services/weaponEffectResolver");
+const { resolverEfeitosDeMonstroNoHit } = require("../services/monsterEffectResolver");
 const { definicaoDoStatus, ACTION_TYPE } = require("../config/statusEffectConfig");
 const { calcularMaestriaDaRegiao } = require("../services/masteryService");
 const AdventureZone = require("../models/AdventureZone");
 const { BONUS_POR_NIVEL } = require("../config/bestiaryConfig");
 const WeaponStatusEffect = require("../models/WeaponStatusEffect");
+const MonsterStatusEffect = require("../models/MonsterStatusEffect");
 const { resolverModificadorParaEncontro, registrarMorteDaCacada } = require("../services/adventureHuntCombatService");
 const uniqueFeatService = require("../services/uniqueFeatService");
 const uniqueFeatPublicService = require("../services/uniqueFeatPublicService");
@@ -442,6 +445,23 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       inimigo.sprite_key = monstro?.sprite_key ?? null;
       inimigo.imagem_url = monstro?.imagem_url ?? null;
 
+      // Ideia #3 da fila de melhorias — captura os efeitos de status do
+      // monstro UMA vez, no início do encontro (mesmo princípio já usado
+      // pra armaEquipadaEfeitos do jogador), pra executarTurno nunca
+      // consultar o banco a cada hit. Monstro sem nenhuma linha
+      // configurada = monstro normal (opt-in).
+      const efeitosDeStatusDoMonstro = await MonsterStatusEffect.findAll({
+        where: { id_monstro: escolhido.id_monstro, ativo: true },
+        transaction,
+      });
+      inimigo.efeitosDeStatus = efeitosDeStatusDoMonstro.map((e) => ({
+        status_key: e.status_key,
+        chance_ppm: e.chance_ppm,
+        duration_turns: e.duration_turns,
+        potency_base: e.potency_base,
+        ativo: e.ativo,
+      }));
+
       // Caçadas §6 — compõe um SEGUNDO multiplicador por cima do perfil
       // normal, só no snapshot deste encontro e só se o alvo sorteado
       // bater com o alvo da Caçada Ativa do personagem. Nunca faz UPDATE
@@ -708,6 +728,22 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     let criticoJogador = false;
     let criticoInimigo = false;
 
+    // Bug relatado (Saymon, 01/10): o dano do status effect (DoT) estava
+    // sendo contabilizado JUNTO do dano de ataque/poder na tela — o
+    // front inferia "quanto o inimigo levou" só pela diferença de
+    // vida_atual entre o início e o fim da resposta, que já inclui o
+    // tick de DoT processado no mesmo request (fim do PRÓPRIO turno de
+    // quem carrega o status, ver blocos "MOTOR DE STATUS" abaixo). Os 4
+    // valores abaixo separam as duas fontes pro client poder mostrar o
+    // dano do status (ex.: Queimadura) como um número à parte, nunca
+    // somado ao golpe/arma/atributo que originou o ataque. Nunca usar
+    // dano_do_golpe + dano_do_status pra conferir a vida final — a vida
+    // final de verdade é sempre personagemAtual/inimigoAtual.vida_atual.
+    let danoCausadoNoInimigo = 0;
+    let danoStatusInimigo = 0;
+    let danoRecebidoContraAtaque = 0;
+    let danoStatusJogador = 0;
+
     if (!jogadorBloqueadoNesteTurno) {
 
     if (action.type === "power") {
@@ -890,6 +926,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         } else {
           if (contextoCriticoPoder.critico) criticoJogador = true;
           const danoMitigado = aplicarMitigacaoDeDefesa(dano, inimigoAtual);
+          danoCausadoNoInimigo = danoMitigado;
           inimigoAtual.vida_atual = Math.max(
             0,
             inimigoAtual.vida_atual - danoMitigado
@@ -1013,6 +1050,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           danoBasicoEnfraquecido,
           inimigoAtual,
         );
+        danoCausadoNoInimigo = dano;
 
         inimigoAtual.vida_atual = Math.max(
           0,
@@ -1081,8 +1119,11 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         dinheiroGanho = recompensa.dinheiroGanho;
         espoliosDeZona = recompensa.espolios;
       } else {
-        xpGanho = 15 + inimigoAtual.nivel * 8;
-        dinheiroGanho = 5 + inimigoAtual.nivel * 4;
+        // Recompensa do monstro de emboscada da Expedição (e de
+        // encontros legados sem zona) — configurável no Admin (ver
+        // expeditionConfig.js, grupo "expedition.ambush").
+        xpGanho = expeditionConfig.EMBOSCADA_XP_BASE + inimigoAtual.nivel * expeditionConfig.EMBOSCADA_XP_POR_NIVEL;
+        dinheiroGanho = expeditionConfig.EMBOSCADA_OURO_BASE + inimigoAtual.nivel * expeditionConfig.EMBOSCADA_OURO_POR_NIVEL;
       }
 
       // Buffs de Guilda (§19/§20) — só em recompensas de Aventura, nunca
@@ -1342,6 +1383,10 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           worldBoss,
           criticoJogador,
           criticoInimigo,
+          danoCausadoNoInimigo,
+          danoStatusInimigo,
+          danoRecebidoContraAtaque,
+          danoStatusJogador,
         },
       });
     }
@@ -1360,6 +1405,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     // terminar de aplicar DEPOIS nunca deve reverter uma vitória já
     // conquistada nesta mesma resposta.
     // ==========================================================
+    const vidaJogadorAntesDoTick = personagemAtual.vida_atual;
     personagemAtual.vida_atual = statusEffectService.processarTicksDeInicio({
       vidaAtual: personagemAtual.vida_atual,
       defensor: personagemAtual,
@@ -1367,6 +1413,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       log,
       nomeAlvo: "Você",
     });
+    danoStatusJogador = Math.max(0, vidaJogadorAntesDoTick - personagemAtual.vida_atual);
     statusEffects.player = statusEffectService.decrementarDuracoes(statusEffects.player);
 
     // Snapshot de vida/mana ao FIM do turno do jogador (ação + tick de
@@ -1408,6 +1455,10 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           statusEffects,
           criticoJogador,
           criticoInimigo,
+          danoCausadoNoInimigo,
+          danoStatusInimigo,
+          danoRecebidoContraAtaque,
+          danoStatusJogador,
         },
       });
     }
@@ -1481,6 +1532,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
             aplicarMitigacaoDeDefesa(danoComCriticoInimigo, personagemAtual) * multiplicadorDefesaTaverna,
           ),
         );
+        danoRecebidoContraAtaque = danoRecebido;
 
         personagemAtual.vida_atual =
           Math.max(
@@ -1499,6 +1551,23 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         const quebraFreeze = statusEffectService.removerFreezeAoReceberDanoDireto(statusEffects.player, danoRecebido);
         statusEffects.player = quebraFreeze.lista;
         if (quebraFreeze.quebrou) log.push("Você descongelou com o impacto!");
+
+        // Ideia #3 da fila de melhorias — monstro também pode aplicar
+        // status no jogador ao acertar, simétrico ao proc de arma do
+        // jogador logo acima. efeitosDeStatus já veio pré-carregado no
+        // início do encontro (zero N+1 por hit).
+        const efeitosDoMonstro = inimigoAtual.efeitosDeStatus ?? [];
+        if (efeitosDoMonstro.length > 0) {
+          const novosEfeitosDoMonstro = resolverEfeitosDeMonstroNoHit({
+            efeitosDeStatus: efeitosDoMonstro,
+            turno: combatTurn,
+          });
+          for (const efeito of novosEfeitosDoMonstro) {
+            statusEffects.player = statusEffectService.aplicarStatus(statusEffects.player, efeito);
+            const def = definicaoDoStatus(efeito.key);
+            log.push(`${inimigoAtual.nome} aplicou ${def.nomeUi} em você por ${efeito.remainingTurns} turno(s)!`);
+          }
+        }
       }
     }
 
@@ -1543,6 +1612,10 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           cooldowns: { player: {}, enemy: {} },
           criticoJogador,
           criticoInimigo,
+          danoCausadoNoInimigo,
+          danoStatusInimigo,
+          danoRecebidoContraAtaque,
+          danoStatusJogador,
         },
       });
     }
@@ -1554,6 +1627,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     // (checado logo acima), então um DoT que mate o inimigo agora
     // ainda conta como vitória normal.
     // ==========================================================
+    const vidaInimigoAntesDoTick = inimigoAtual.vida_atual;
     inimigoAtual.vida_atual = statusEffectService.processarTicksDeInicio({
       vidaAtual: inimigoAtual.vida_atual,
       defensor: inimigoAtual,
@@ -1561,6 +1635,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       log,
       nomeAlvo: inimigoAtual.nome,
     });
+    danoStatusInimigo = Math.max(0, vidaInimigoAntesDoTick - inimigoAtual.vida_atual);
     statusEffects.enemy = statusEffectService.decrementarDuracoes(statusEffects.enemy);
 
     if (inimigoAtual.vida_atual <= 0) {
@@ -1601,6 +1676,10 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         cooldowns: { player: cooldowns.player },
         criticoJogador,
         criticoInimigo,
+        danoCausadoNoInimigo,
+        danoStatusInimigo,
+        danoRecebidoContraAtaque,
+        danoStatusJogador,
       },
     });
 }

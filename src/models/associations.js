@@ -407,6 +407,12 @@ EquipmentSet.hasMany(EquipmentSetBonus, { foreignKey: "equipment_set_id", as: "b
 WeaponProperties.hasMany(WeaponStatusEffect, { foreignKey: "id_item", as: "statusEffects" });
 WeaponStatusEffect.belongsTo(WeaponProperties, { foreignKey: "id_item", as: "arma" });
 
+// Ideia #3 da fila de melhorias — monstro causando status effect no
+// jogador, mesmo princípio de WeaponStatusEffect acima.
+const MonsterStatusEffect = require("./MonsterStatusEffect");
+AdventureMonster.hasMany(MonsterStatusEffect, { foreignKey: "id_monstro", as: "efeitosDeStatus" });
+MonsterStatusEffect.belongsTo(AdventureMonster, { foreignKey: "id_monstro", as: "monstro" });
+
 // Painel Administrativo (§6/§7) — permissões granulares por role;
 // User<->AdminRole é N:N via UserAdminRole (um usuário pode acumular
 // mais de uma role, ex.: Conteúdo + Eventos).
@@ -509,6 +515,14 @@ Character.hasOne(CharacterFishingProgress, { foreignKey: "id_personagem" });
 // fishingTournamentService.js) — escopo de zona é OPCIONAL (torneio
 // global quando null).
 FishingTournament.belongsTo(FishingZone, { foreignKey: "id_zone", as: "zona" });
+
+// Ideia #1 da fila de melhorias — inscrição explícita (reversão do
+// design original "participação automática").
+const FishingTournamentEntry = require("./FishingTournamentEntry");
+FishingTournament.hasMany(FishingTournamentEntry, { foreignKey: "id_tournament", as: "inscricoes" });
+FishingTournamentEntry.belongsTo(FishingTournament, { foreignKey: "id_tournament", as: "torneio" });
+FishingTournamentEntry.belongsTo(Character, { foreignKey: "id_personagem", as: "personagem" });
+FishingTournament.belongsTo(Character, { foreignKey: "vencedor_character_id", as: "vencedor" });
 
 Vessel.hasMany(CharacterVessel, { foreignKey: "id_vessel" });
 CharacterVessel.belongsTo(Vessel, { foreignKey: "id_vessel", as: "vessel" });

@@ -58,6 +58,17 @@ const GAME_SETTINGS_DEFAULT = {
   "worldboss.hp_broadcast_interval_ms": 1000,
   "worldboss.leaderboard_limit": 20,
   "worldboss.participation_rewards_enabled": true,
+  // Bug relatado (01/10): sem contra-ataque do boss (decisão de design,
+  // ver worldBossCombatService.js) e sem fila de turnos entre vários
+  // jogadores (HP compartilhado, não é a pequena party/guilda), nada
+  // segurava o jogador de clicar ataque/poder em sequência imediata —
+  // "turno" virava só o round-trip da rede. Mesmo espírito do turno da
+  // Aventura/Boss da Guilda (um gesto de cada vez, com um tempo mínimo
+  // entre eles), mas pessoal — não espera fila de outros jogadores,
+  // só o próprio personagem — por isso bem mais curto que o
+  // BOSS_AO_VIVO_PRAZO_TURNO_MS (20s) da guilda, que é o PRAZO MÁXIMO
+  // de uma fila de poucos membros, não o ritmo mínimo entre ações.
+  "worldboss.player_action_cooldown_ms": 3000,
 };
 
 module.exports = {

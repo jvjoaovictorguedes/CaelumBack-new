@@ -43,16 +43,13 @@ const GuildBossConfig = require("../models/GuildBossConfig");
 const GuildLog = require("../models/GuildLog");
 const { aplicarAcao } = require("../services/duelEngine");
 const { custoManaEfetivo } = require("../services/combatFormulas");
-const { atacarBossAoVivo, expirarSeNecessario, tempoRestanteCooldown } = require("../services/guildBossService");
 // Cooldown real de Powers dentro da luta ao vivo — MESMO motor que o
 // Boss Mundial usa (worldBossCombatService.js) e o combate solo da
 // Aventura (combatController.js), nunca um paralelo: "cooldown 3"
 // bloqueia exatamente os 3 PRÓXIMOS turnos DESTE ator (não da rodada
-// inteira), documentado em cooldownService.js. Faltava inteiramente
-// aqui antes desta correção — Boss da Guilda deixava usar o mesmo Power
-// em toda rodada, sem nenhuma espera, diferente de todo outro combate
-// do jogo.
+// inteira), documentado em cooldownService.js.
 const cooldownService = require("../services/cooldownService");
+const { atacarBossAoVivo, expirarSeNecessario, tempoRestanteCooldown } = require("../services/guildBossService");
 // Lido via guildConfig.<chave> (nunca desestruturado) de propósito — são
 // primitivos que o Painel Administrativo pode sobrescrever em tempo real
 // (guildSettingsService.updateBalanceamento -> aplicarOverridesBalanceamento),

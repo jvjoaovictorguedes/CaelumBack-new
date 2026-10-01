@@ -382,6 +382,10 @@ registerGuildBossHandlers(io);
 registerWorldBossHandlers(io);
 registerUniqueFeatHandlers(io);
 require("./services/worldBossScheduler").iniciar();
+// Ideia #1 da fila de melhorias — Torneio da Pesca fecha sozinho
+// (vencedor registrado + ativo:false) quando termina_em passa, nunca
+// mais exigindo o admin desativar na mão.
+require("./services/fishingTournamentScheduler").iniciar();
 // rankedController usa isso pra criar a partida ranqueada assíncrona a
 // partir de uma rota REST (POST /ranked/match/start) e emitir os
 // eventos do duelo pro socket do jogador; messageController faz o mesmo

@@ -9,23 +9,40 @@
 // curva que Forja/Expedição (XP acumulado crescente por etapa) mas
 // escalado pra uma faixa maior de níveis.
 
-const NIVEL_MAXIMO_PESCA = 25;
+// `let`, não `const` — fishing.levelCap (abaixo) precisa poder mudar o
+// teto em runtime. Nunca destructure este valor (`const { NIVEL_MAXIMO_PESCA } =
+// require(...)`) em outro arquivo: isso copia o número e nunca mais
+// enxerga uma mudança feita aqui depois — sempre acesse via
+// `fishingConfig.NIVEL_MAXIMO_PESCA` (exportado como getter, sempre
+// live). Mesmo risco que o comentário de aplicarOverridesBalanceamento
+// já documentava pros objetos (nunca reatribuir o binding do módulo).
+let NIVEL_MAXIMO_PESCA = 25;
 
-const XP_NECESSARIO_POR_ETAPA_PESCA = (() => {
-  const mapa = {};
+// Curva suave: cresce ~18% por etapa, base 40 — dá uma progressão de
+// várias sessões sem ficar impossível perto do teto. Reconstrói os
+// objetos JÁ EXPORTADOS em-lugar (nunca reatribui XP_NECESSARIO_POR_ETAPA_PESCA/
+// XP_TOTAL_PARA_NIVEL_PESCA pra um objeto novo) — outros arquivos que já
+// desestruturaram essas tabelas continuam vendo as mudanças.
+function regerarCurvaXpPadrao() {
+  for (const chave of Object.keys(XP_NECESSARIO_POR_ETAPA_PESCA)) delete XP_NECESSARIO_POR_ETAPA_PESCA[chave];
   for (let nivel = 1; nivel < NIVEL_MAXIMO_PESCA; nivel += 1) {
-    // Curva suave: cresce ~18% por etapa, base 40 — dá uma progressão de
-    // várias sessões sem ficar impossível nos níveis finais (25).
-    mapa[nivel] = Math.round(40 * Math.pow(1.18, nivel - 1));
+    XP_NECESSARIO_POR_ETAPA_PESCA[nivel] = Math.round(40 * Math.pow(1.18, nivel - 1));
   }
-  return mapa;
-})();
-
-const XP_TOTAL_PARA_NIVEL_PESCA = { 1: 0 };
-for (let nivel = 2; nivel <= NIVEL_MAXIMO_PESCA; nivel += 1) {
-  XP_TOTAL_PARA_NIVEL_PESCA[nivel] =
-    XP_TOTAL_PARA_NIVEL_PESCA[nivel - 1] + XP_NECESSARIO_POR_ETAPA_PESCA[nivel - 1];
+  recomputarXpTotal();
 }
+
+function recomputarXpTotal() {
+  for (const chave of Object.keys(XP_TOTAL_PARA_NIVEL_PESCA)) delete XP_TOTAL_PARA_NIVEL_PESCA[chave];
+  XP_TOTAL_PARA_NIVEL_PESCA[1] = 0;
+  for (let nivel = 2; nivel <= NIVEL_MAXIMO_PESCA; nivel += 1) {
+    XP_TOTAL_PARA_NIVEL_PESCA[nivel] =
+      XP_TOTAL_PARA_NIVEL_PESCA[nivel - 1] + XP_NECESSARIO_POR_ETAPA_PESCA[nivel - 1];
+  }
+}
+
+const XP_NECESSARIO_POR_ETAPA_PESCA = {};
+const XP_TOTAL_PARA_NIVEL_PESCA = {};
+regerarCurvaXpPadrao();
 
 function nivelPescaPorXpTotal(xpTotal) {
   let nivel = 1;
@@ -209,13 +226,25 @@ function qualidadeEspecime(pesoG, pesoMinG, pesoMaxG) {
 // módulo — porque fishingProgressionService/fishingRodService já
 // desestruturaram essas tabelas no load.
 //
-// NIVEL_MAXIMO_PESCA NUNCA é editável aqui (mesma trava documentada em
-// forgeConfig.js: mudar o teto exigiria reestruturar XP_TOTAL_PARA_NIVEL_PESCA
-// inteiro e a faixa de PROFICIENCIA_PCT_POR_NIVEL, que assume esse teto) —
-// só o CUSTO de XP por nível (etapa 1..24) é editável.
+// NIVEL_MAXIMO_PESCA agora É editável (fishing.levelCap) — pedido do
+// jogador. Trocar o teto REGERA a curva de XP padrão do zero pro novo
+// teto (regerarCurvaXpPadrao) — qualquer override de etapa individual
+// salvo antes em fishing.progression é perdido (o admin precisa
+// reaplicar depois, se quiser). Por isso esse grupo também exige
+// confirmado:true, igual fishing.progression. PROFICIENCIA_PCT_POR_NIVEL
+// não precisa de nenhum ajuste quando o teto muda: o bônus é por
+// "níveis acima de 1" (aplicarProficienciaPesca), não uma tabela fixa
+// de 1..25, então escala sozinho pro teto novo.
 function aplicarOverridesBalanceamento(grupo, valores) {
   if (!valores || typeof valores !== "object") return;
   switch (grupo) {
+    case "fishing.levelCap": {
+      if (Number.isInteger(valores.NIVEL_MAXIMO_PESCA)) {
+        NIVEL_MAXIMO_PESCA = valores.NIVEL_MAXIMO_PESCA;
+        regerarCurvaXpPadrao();
+      }
+      break;
+    }
     case "fishing.progression": {
       if (valores.XP_NECESSARIO_POR_ETAPA_PESCA) {
         Object.assign(XP_NECESSARIO_POR_ETAPA_PESCA, valores.XP_NECESSARIO_POR_ETAPA_PESCA);
@@ -239,7 +268,6 @@ function aplicarOverridesBalanceamento(grupo, valores) {
 }
 
 module.exports = {
-  NIVEL_MAXIMO_PESCA,
   XP_NECESSARIO_POR_ETAPA_PESCA,
   XP_TOTAL_PARA_NIVEL_PESCA,
   nivelPescaPorXpTotal,
@@ -267,3 +295,14 @@ module.exports = {
   qualidadeEspecime,
   aplicarOverridesBalanceamento,
 };
+
+// Getter, não um valor copiado no momento do require — igual já era
+// garantido pros objetos acima (mesma referência mutada em-lugar). Sem
+// isso, fishing.levelCap mudaria o `let` interno mas qualquer arquivo
+// lendo `fishingConfig.NIVEL_MAXIMO_PESCA` continuaria vendo o 25
+// original, porque module.exports.NIVEL_MAXIMO_PESCA teria sido uma
+// cópia do valor congelada no load do módulo.
+Object.defineProperty(module.exports, "NIVEL_MAXIMO_PESCA", {
+  get: () => NIVEL_MAXIMO_PESCA,
+  enumerable: true,
+});

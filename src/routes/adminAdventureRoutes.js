@@ -38,6 +38,7 @@ router.patch("/monsters/:id", adminAdventureController.atualizarMonstro);
 router.post("/monsters/:id/duplicate", adminAdventureController.duplicarMonstro);
 router.delete("/monsters/:id", adminAdventureController.excluirMonstro);
 router.put("/monsters/:id/loot", adminAdventureController.sincronizarLootMonstro);
+router.put("/monsters/:id/status-effects", adminAdventureController.sincronizarStatusEffectsMonstro);
 
 router.get("/zone-monsters", adminAdventureController.listarAparicoes);
 router.post("/zone-monsters", adminAdventureController.criarAparicao);

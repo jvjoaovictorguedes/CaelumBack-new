@@ -209,6 +209,19 @@ exports.sincronizarLootMonstro = async (req, res) => {
   }
 };
 
+exports.sincronizarStatusEffectsMonstro = async (req, res) => {
+  try {
+    const efeitos = await adminAdventureService.sincronizarStatusEffectsMonstro(
+      req.params.id,
+      req.body?.efeitos ?? [],
+      { idAdmin: req.user.id, req },
+    );
+    res.status(200).json({ status: "success", data: { efeitos } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao sincronizar os efeitos de status do monstro.");
+  }
+};
+
 exports.detalheMonstro = async (req, res) => {
   try {
     const detalhe = await adminAdventureService.getAdminMonsterDetail(req.params.id);

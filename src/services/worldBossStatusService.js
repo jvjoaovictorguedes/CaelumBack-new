@@ -54,6 +54,7 @@ async function obterStatusPublico() {
     descricao: snapshot.descricao ?? null,
     lore: snapshot.lore ?? null,
     imagem_url: snapshot.imagem_url ?? null,
+    fundo_url: snapshot.fundo_url ?? null,
     mensagem_convocacao: snapshot.mensagem_convocacao ?? null,
     mensagem_fase_final: snapshot.mensagem_fase_final ?? null,
     mensagem_derrota: snapshot.mensagem_derrota ?? null,

@@ -57,7 +57,8 @@ const { resolverEfeitosDeArmaNoHit } = require("./weaponEffectResolver");
 const { ACTION_TYPE } = require("../config/statusEffectConfig");
 const WeaponStatusEffect = require("../models/WeaponStatusEffect");
 const { emitGlobal } = require("../socket/worldBossSocket");
-const { EVENT_STATUS, COMBAT_SESSION_STATUS } = require("../config/worldBossConfig");
+const { EVENT_STATUS, COMBAT_SESSION_STATUS, GAME_SETTINGS_DEFAULT } = require("../config/worldBossConfig");
+const gameSettingCache = require("./gameSettingCache");
 const uniqueFeatService = require("./uniqueFeatService");
 const uniqueFeatPublicService = require("./uniqueFeatPublicService");
 
@@ -99,7 +100,17 @@ function estadoLutador(personagem, base, vidaMax, manaMax) {
 // Silence): mesmo formato de um resultado normal (dano=0), pra quem
 // consome a resposta (socket/REST) nunca precisar de um branch a mais
 // só pra esse caso.
-function montarResultadoSemAcao({ evento, personagem, vidaMax, manaMax, bloqueado = false, motivoBloqueio, actionSeq, cooldowns = {} }) {
+function montarResultadoSemAcao({
+  evento,
+  personagem,
+  vidaMax,
+  manaMax,
+  bloqueado = false,
+  motivoBloqueio,
+  actionSeq,
+  cooldowns = {},
+  proximaAcaoJogadorEmMs = 0,
+}) {
   const hpAtual = Math.max(0, Number(evento.hp_current));
   return {
     nomeAcao: null,
@@ -113,6 +124,11 @@ function montarResultadoSemAcao({ evento, personagem, vidaMax, manaMax, bloquead
     motivoBloqueio: bloqueado ? motivoBloqueio : undefined,
     action_seq: actionSeq,
     cooldowns,
+    // "Turno" pessoal (§ comentário no topo deste arquivo) — ms que o
+    // jogador precisa esperar antes da PRÓXIMA ação valer, mesmo
+    // formato de proxima_acao_em_ms do Boss (worldBossStatusService),
+    // só que por personagem, não pelo relógio global do boss.
+    proxima_acao_jogador_em_ms: proximaAcaoJogadorEmMs,
     lutador: { vida_atual: personagem.vida_atual, mana_atual: personagem.mana_atual, vida_max: vidaMax, mana_max: manaMax },
     boss: {
       event_id: evento.id,
@@ -216,6 +232,16 @@ async function entrar(characterId) {
       // cooldownService (`power:<id>` -> turnos), pra reconexão
       // devolver o estado real sem o cliente ter que adivinhar.
       cooldowns: sessao.state?.cooldowns ?? {},
+      // Mesmo "turno" pessoal de executarAcao (ver comentário lá) —
+      // devolvido já aqui pra uma reconexão/F5 no meio do cooldown não
+      // deixar o botão liberado até a tentativa seguinte falhar.
+      proxima_acao_jogador_em_ms: Math.max(
+        0,
+        gameSettingCache.obter(
+          "worldboss.player_action_cooldown_ms",
+          GAME_SETTINGS_DEFAULT["worldboss.player_action_cooldown_ms"],
+        ) - (Date.now() - (Number(sessao.state?.ultima_acao_jogador_em) || 0)),
+      ),
       status: await worldBossStatusService.obterStatusPublico(),
     };
   });
@@ -275,6 +301,30 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
       return null;
     }
 
+    // Bug relatado (01/10) — "turno" pessoal contra a Ameaça Mundial:
+    // sem contra-ataque do boss e sem fila de turnos entre jogadores
+    // (ver topo do arquivo), nada impedia apertar ataque/poder em
+    // sequência imediata, bem mais rápido que qualquer outro combate
+    // do jogo (Aventura/PvP/Boss da Guilda sempre têm uma ação do
+    // "outro lado" — contra-ataque, animação, fila — entre dois
+    // cliques seus). Gate mínimo igual em espírito, só que pessoal
+    // (nunca espera outros jogadores): PRECISA vir ANTES de qualquer
+    // leitura/trava do personagem, pra um clique em loop nunca pagar o
+    // custo de carregar/travar a linha dele à toa.
+    const cooldownAcaoMs = gameSettingCache.obter(
+      "worldboss.player_action_cooldown_ms",
+      GAME_SETTINGS_DEFAULT["worldboss.player_action_cooldown_ms"],
+    );
+    const ultimaAcaoEm = Number(sessao.state?.ultima_acao_jogador_em) || 0;
+    const restanteCooldownMs = cooldownAcaoMs - (Date.now() - ultimaAcaoEm);
+    if (restanteCooldownMs > 0) {
+      erroPendente = erro(
+        `Aguarde ${(restanteCooldownMs / 1000).toFixed(1)}s antes de agir de novo.`,
+        429,
+      );
+      return null;
+    }
+
     const personagem = await carregarPersonagemTravado(characterId, transaction);
     if (!personagem) throw erro("Personagem não encontrado.", 404);
     const { base, vidaMax, manaMax } = await personagemEfetivoDe(personagem, transaction);
@@ -308,7 +358,12 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
     if (controleJogador.bloqueadas.has(tipoAcaoStatus)) {
       await personagem.save({ transaction });
       cooldownsJogador = cooldownService.decrementarCooldowns(cooldownsJogador);
-      sessao.state = { ...(sessao.state ?? {}), status: statusEffectService.decrementarDuracoes(listaJogador), cooldowns: cooldownsJogador };
+      sessao.state = {
+        ...(sessao.state ?? {}),
+        status: statusEffectService.decrementarDuracoes(listaJogador),
+        cooldowns: cooldownsJogador,
+        ultima_acao_jogador_em: Date.now(),
+      };
       await sessao.save({ transaction });
       return montarResultadoSemAcao({
         evento,
@@ -319,6 +374,7 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
         motivoBloqueio: controleJogador.motivoBloqueioTotal ?? "SILENCE",
         actionSeq: sessao.action_seq,
         cooldowns: cooldownsJogador,
+        proximaAcaoJogadorEmMs: cooldownAcaoMs,
       });
     }
 
@@ -432,7 +488,12 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
     }
     const chaveRecemAplicada = acao.tipo === "power" ? new Set([cooldownService.chaveDoPoder(acao.power.id)]) : undefined;
     cooldownsJogador = cooldownService.decrementarCooldowns(cooldownsJogador, chaveRecemAplicada);
-    sessao.state = { ...(sessao.state ?? {}), status: statusEffectService.decrementarDuracoes(listaJogador), cooldowns: cooldownsJogador };
+    sessao.state = {
+      ...(sessao.state ?? {}),
+      status: statusEffectService.decrementarDuracoes(listaJogador),
+      cooldowns: cooldownsJogador,
+      ultima_acao_jogador_em: Date.now(),
+    };
     await sessao.save({ transaction });
 
     evento.hp_current = hpDepois;
@@ -534,6 +595,7 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
       // dentro desta MESMA transação, nunca uma query extra pós-commit.
       action_seq: sessao.action_seq,
       cooldowns: cooldownsJogador,
+      proxima_acao_jogador_em_ms: cooldownAcaoMs,
       lutador: {
         vida_atual: personagem.vida_atual,
         mana_atual: personagem.mana_atual,

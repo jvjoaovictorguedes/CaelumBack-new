@@ -68,6 +68,15 @@ const limitadorTrocaSenha = criarLimitador({
   obterChave: (req) => `conta:${req.user.id}`,
 });
 
+// Checagem ao vivo do campo "Quem te indicou?" (GET /referral-check) —
+// pública de propósito (ver userController.verificarIndicador), só por
+// IP já que ainda não existe conta/sessão nesse ponto do registro.
+// Generoso o bastante pra digitação normal com debounce (várias
+// chamadas numa mesma tentativa de registro), apertado o bastante pra
+// não virar um jeito barato de varrer nomes de personagem em massa.
+const limitadorReferralCheckIP = criarLimitador({ janelaMs: 10 * 60 * 1000, maxTentativas: 60 });
+router.get("/referral-check", limitadorReferralCheckIP, userController.verificarIndicador);
+
 router.post("/register", [limitadorRegistroConta, limitadorRegistroIP], userController.registerUser);
 router.post("/login", [limitadorLoginConta, limitadorLoginIP], userController.loginUser);
 router.post("/google-login", limitadorLoginIP, userController.loginComGoogle);
