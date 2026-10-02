@@ -29,7 +29,7 @@ const { adicionarExperiencia } = require("../services/experienceService");
 const { concederOuro } = require("../services/goldService");
 const { rolarDropDeVitoria } = require("../services/dropService");
 const { sortearMonstroDaZona } = require("../services/adventureRollService");
-const { persistirEstadoFinalDoMembro, calcularPenalidadePowerLeveling } = require("../services/partyBattleService");
+const { persistirEstadoFinalDoMembro, calcularPenalidadeDiferencaNivel } = require("../services/partyBattleService");
 const { registrarProgressoContrato } = require("../services/adventureGuildObjectiveService");
 const { custoManaEfetivo } = require("../services/combatFormulas");
 const {
@@ -463,12 +463,11 @@ module.exports = function registerPartyHandlers(io) {
           });
         }
 
-        // Ideia #4 da fila de melhorias — calcula a penalidade ANTES de
-        // sortear o monstro (não depende dele, só da zona e do grupo),
-        // guardada na `batalha` pra ser aplicada na recompensa quando a
-        // luta terminar (finalizarBatalha).
-        const penalidadePowerLeveling = calcularPenalidadePowerLeveling({
-          tetoZona: zona.nivel_monstro_max,
+        // Pedido do jogador: calcula a penalidade ANTES de sortear o
+        // monstro (não depende dele, só da diferença de nível dentro do
+        // grupo), guardada na `batalha` pra ser aplicada na recompensa
+        // quando a luta terminar (finalizarBatalha).
+        const penalidadeDiferencaNivel = calcularPenalidadeDiferencaNivel({
           niveisDosMembros: membros.map((m) => m.estado.nivel),
           config: partyBattleConfig,
         });
@@ -563,7 +562,7 @@ module.exports = function registerPartyHandlers(io) {
           rodada: 1,
           timer: null,
           processandoAcao: false,
-          penalidadePowerLeveling,
+          penalidadeDiferencaNivel,
           // Motor de Status — contador monotônico de turnos reais da
           // batalha (aliado OU monstro agindo), nunca reaproveitado nem
           // zerado por rodada: é o que resolverTurnoComStatus usa pra
@@ -615,11 +614,11 @@ module.exports = function registerPartyHandlers(io) {
           ordem: batalha.ordem,
           turnoDe: batalha.ordem[0],
           prazoSegundos: partyBattleConfig.PRAZO_TURNO_MS / 1000,
-          // Ideia #4 da fila de melhorias — transparência: se a recompensa
-          // vai sair reduzida por power-leveling, o grupo sabe disso ANTES
+          // Transparência: se a recompensa vai sair reduzida pela
+          // diferença de nível dentro do grupo, o grupo sabe disso ANTES
           // de lutar, não só ao ver o número final menor em party:batalha-fim.
-          penalidadePowerLeveling: penalidadePowerLeveling.aplicada
-            ? { multiplicador: penalidadePowerLeveling.multiplicador, excessoNivel: penalidadePowerLeveling.excesso }
+          penalidadeDiferencaNivel: penalidadeDiferencaNivel.aplicada
+            ? { multiplicador: penalidadeDiferencaNivel.multiplicador, diferencaNivel: penalidadeDiferencaNivel.diferenca }
             : null,
         });
 
@@ -1021,12 +1020,12 @@ async function finalizarBatalha(io, battleId, vitoria, motivo = vitoria ? "comba
           // e autoral da Aventura solo (xp_recompensa/ouro_recompensa).
           // Agora usa a MESMA base fixa do monstro, cheia por membro.
           //
-          // Ideia #4 da fila de melhorias — multiplicadorRecompensa (1 =
-          // sem penalidade) calculado no início da luta (party:iniciar),
+          // Pedido do jogador: multiplicadorRecompensa (1 = sem
+          // penalidade) calculado no início da luta (party:iniciar),
           // aplicado aqui pra TODO MUNDO do grupo igual, inclusive quem
           // está carregando: o alvo é desincentivar o farm de boost em
           // si, não só "punir" o personagem fraco que está sendo ajudado.
-          const multiplicador = batalha.penalidadePowerLeveling?.multiplicador ?? 1;
+          const multiplicador = batalha.penalidadeDiferencaNivel?.multiplicador ?? 1;
           const xpConcedida = Math.round((batalha.inimigo.xp_recompensa ?? 0) * multiplicador);
           const resultadoXp = await adicionarExperiencia(id, xpConcedida, { transaction, personagem: character });
 
@@ -1072,8 +1071,8 @@ async function finalizarBatalha(io, battleId, vitoria, motivo = vitoria ? "comba
     motivo,
     recompensas,
     drops,
-    penalidadePowerLeveling: batalha.penalidadePowerLeveling?.aplicada
-      ? { multiplicador: batalha.penalidadePowerLeveling.multiplicador, excessoNivel: batalha.penalidadePowerLeveling.excesso }
+    penalidadeDiferencaNivel: batalha.penalidadeDiferencaNivel?.aplicada
+      ? { multiplicador: batalha.penalidadeDiferencaNivel.multiplicador, diferencaNivel: batalha.penalidadeDiferencaNivel.diferenca }
       : null,
   });
 

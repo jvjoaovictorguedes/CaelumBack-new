@@ -17,21 +17,21 @@ let MAX_RODADAS = 40;
 let FATOR_DIFICULDADE_VIDA_POR_EXTRA = 0.12;
 let FATOR_DIFICULDADE_DANO_POR_EXTRA = 0.08;
 
-// Ideia #4 da fila de melhorias — penalidade de XP/ouro pra GRUPO
-// INTEIRO quando alguém no grupo está muito acima do nível da zona
-// (power-leveling: um personagem forte carrega um fraco numa área fácil
-// pra ele upar rápido). Usa nivel_monstro_max da zona (o teto de nível
-// que o conteúdo dali foi desenhado pra entregar) como referência, não
-// o nível dos outros membros — um grupo de 2 jogadores de nível
-// parecido nunca é afetado, só quando alguém destoa MUITO da zona.
+// Pedido do jogador: penalidade de XP/ouro pra GRUPO INTEIRO quando a
+// DIFERENÇA DE NÍVEL DENTRO DO PRÓPRIO GRUPO é grande demais
+// (power-leveling: um personagem forte carrega um fraco, não importa o
+// nível da zona em si). Compara o maior nível do grupo com o MENOR
+// (ver calcularPenalidadeDiferencaNivel em partyBattleService.js) — um
+// grupo todo de nível parecido nunca é afetado, mesmo numa zona muito
+// acima ou abaixo do nível deles.
 //
-// LIMIAR: quantos níveis ACIMA do teto da zona ainda são tolerados sem
-// penalidade nenhuma (jogador ajudando um amigo perto do próprio nível,
-// ou só "voltando" numa área antiga, nunca é punido). PISO: a
-// recompensa nunca cai abaixo disso, mesmo com uma diferença de nível
-// gigantesca — o objetivo é desincentivar FARM dedicado de boost, não
-// proibir ajudar um amigo ocasionalmente nem zerar a recompensa.
-let LIMIAR_NIVEL_ACIMA_DA_ZONA = 10;
+// LIMIAR: quantos níveis de diferença entre o mais alto e o mais baixo
+// do grupo ainda são tolerados sem penalidade nenhuma (ajudar um amigo
+// de nível parecido nunca é punido). PISO: a recompensa nunca cai
+// abaixo disso, mesmo com uma diferença gigantesca — o objetivo é
+// desincentivar FARM dedicado de boost, não proibir ajudar um amigo
+// ocasionalmente nem zerar a recompensa.
+let LIMIAR_DIFERENCA_NIVEL_PARTY = 10;
 let REDUCAO_RECOMPENSA_POR_NIVEL_EXCEDENTE = 0.05;
 let PISO_MULTIPLICADOR_RECOMPENSA = 0.2;
 
@@ -66,9 +66,9 @@ function aplicarOverridesBalanceamento(grupo, valores) {
     FATOR_DIFICULDADE_DANO_POR_EXTRA = valores.FATOR_DIFICULDADE_DANO_POR_EXTRA;
     module.exports.FATOR_DIFICULDADE_DANO_POR_EXTRA = FATOR_DIFICULDADE_DANO_POR_EXTRA;
   }
-  if (typeof valores.LIMIAR_NIVEL_ACIMA_DA_ZONA === "number") {
-    LIMIAR_NIVEL_ACIMA_DA_ZONA = valores.LIMIAR_NIVEL_ACIMA_DA_ZONA;
-    module.exports.LIMIAR_NIVEL_ACIMA_DA_ZONA = LIMIAR_NIVEL_ACIMA_DA_ZONA;
+  if (typeof valores.LIMIAR_DIFERENCA_NIVEL_PARTY === "number") {
+    LIMIAR_DIFERENCA_NIVEL_PARTY = valores.LIMIAR_DIFERENCA_NIVEL_PARTY;
+    module.exports.LIMIAR_DIFERENCA_NIVEL_PARTY = LIMIAR_DIFERENCA_NIVEL_PARTY;
   }
   if (typeof valores.REDUCAO_RECOMPENSA_POR_NIVEL_EXCEDENTE === "number") {
     REDUCAO_RECOMPENSA_POR_NIVEL_EXCEDENTE = valores.REDUCAO_RECOMPENSA_POR_NIVEL_EXCEDENTE;
@@ -88,7 +88,7 @@ module.exports = {
   MAX_RODADAS,
   FATOR_DIFICULDADE_VIDA_POR_EXTRA,
   FATOR_DIFICULDADE_DANO_POR_EXTRA,
-  LIMIAR_NIVEL_ACIMA_DA_ZONA,
+  LIMIAR_DIFERENCA_NIVEL_PARTY,
   REDUCAO_RECOMPENSA_POR_NIVEL_EXCEDENTE,
   PISO_MULTIPLICADOR_RECOMPENSA,
   aplicarOverridesBalanceamento,

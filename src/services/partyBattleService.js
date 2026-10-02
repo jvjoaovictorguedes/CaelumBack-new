@@ -14,41 +14,33 @@ function persistirEstadoFinalDoMembro(character, membro) {
   character.ultima_atualizacao_mana = new Date();
 }
 
-// Ideia #4 da fila de melhorias — penalidade de XP/ouro pro GRUPO
-// INTEIRO quando o membro de MAIOR nível está muito acima do teto de
-// nível da zona (power-leveling: carregar um personagem fraco numa área
-// fácil demais pra ele upar rápido escondido atrás de quem carrega).
-//
-// Usa SÓ o maior excesso do grupo (não a média, nem o excesso de cada
-// um): um único "turista" de nível muito mais alto já é o problema
-// inteiro, mesmo que o resto do grupo esteja no nível certo da zona —
-// e um grupo todo parecido nunca é penalizado, mesmo se o nível deles
-// for um pouco acima do recomendado (afinal "recomendado" não é um teto
-// rígido, só uma referência de conteúdo).
-//
-// `tetoZona` é zona.nivel_monstro_max (o nível mais alto de monstro que
-// o conteúdo da área foi desenhado pra entregar) — nunca
-// nivel_jogador_minimo, que é só o piso de ENTRADA, não tem relação com
-// "até onde essa área ainda vale a pena".
-function calcularPenalidadePowerLeveling({ tetoZona, niveisDosMembros, config }) {
+// Pedido do jogador: penalidade de XP/ouro pro GRUPO INTEIRO quando a
+// DIFERENÇA DE NÍVEL DENTRO DO PRÓPRIO GRUPO é grande demais
+// (power-leveling: carregar um personagem fraco escondido atrás de quem
+// carrega, não importa o nível da zona em si). Compara o maior nível
+// do grupo com o MENOR — um grupo todo parecido nunca é penalizado,
+// mesmo numa zona muito acima ou abaixo do nível deles; só quando
+// alguém destoa MUITO dos próprios companheiros.
+function calcularPenalidadeDiferencaNivel({ niveisDosMembros, config }) {
   const niveis = (niveisDosMembros ?? []).filter((n) => Number.isFinite(n));
-  if (!Number.isFinite(tetoZona) || niveis.length === 0) {
-    return { multiplicador: 1, excesso: 0, aplicada: false };
+  if (niveis.length === 0) {
+    return { multiplicador: 1, diferenca: 0, aplicada: false };
   }
 
   const maiorNivel = Math.max(...niveis);
-  const excesso = Math.max(0, maiorNivel - tetoZona);
+  const menorNivel = Math.min(...niveis);
+  const diferenca = maiorNivel - menorNivel;
 
-  if (excesso <= config.LIMIAR_NIVEL_ACIMA_DA_ZONA) {
-    return { multiplicador: 1, excesso, aplicada: false };
+  if (diferenca <= config.LIMIAR_DIFERENCA_NIVEL_PARTY) {
+    return { multiplicador: 1, diferenca, aplicada: false };
   }
 
-  const niveisAlemDoLimiar = excesso - config.LIMIAR_NIVEL_ACIMA_DA_ZONA;
+  const niveisAlemDoLimiar = diferenca - config.LIMIAR_DIFERENCA_NIVEL_PARTY;
   const multiplicador = Math.max(
     config.PISO_MULTIPLICADOR_RECOMPENSA,
     1 - niveisAlemDoLimiar * config.REDUCAO_RECOMPENSA_POR_NIVEL_EXCEDENTE,
   );
-  return { multiplicador, excesso, aplicada: true };
+  return { multiplicador, diferenca, aplicada: true };
 }
 
-module.exports = { persistirEstadoFinalDoMembro, calcularPenalidadePowerLeveling };
+module.exports = { persistirEstadoFinalDoMembro, calcularPenalidadeDiferencaNivel };

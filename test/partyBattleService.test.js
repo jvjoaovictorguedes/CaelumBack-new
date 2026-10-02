@@ -6,7 +6,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { persistirEstadoFinalDoMembro, calcularPenalidadePowerLeveling } = require("../src/services/partyBattleService");
+const { persistirEstadoFinalDoMembro, calcularPenalidadeDiferencaNivel } = require("../src/services/partyBattleService");
 
 function personagemFalso(overrides = {}) {
   return {
@@ -67,18 +67,17 @@ test("sem membro (personagem não encontrado na batalha em memória), não mexe 
   assert.equal(character.mana_atual, 33);
 });
 
-// Ideia #4 da fila de melhorias — penalidade de XP/ouro pro grupo
-// inteiro quando o membro de MAIOR nível está muito acima do teto de
-// nível da zona (power-leveling).
+// Pedido do jogador: penalidade de XP/ouro pro grupo inteiro quando a
+// DIFERENÇA DE NÍVEL DENTRO DO GRUPO (maior - menor) é grande demais
+// (power-leveling), independente do nível da zona em si.
 const CONFIG_PADRAO = {
-  LIMIAR_NIVEL_ACIMA_DA_ZONA: 10,
+  LIMIAR_DIFERENCA_NIVEL_PARTY: 10,
   REDUCAO_RECOMPENSA_POR_NIVEL_EXCEDENTE: 0.05,
   PISO_MULTIPLICADOR_RECOMPENSA: 0.2,
 };
 
-test("calcularPenalidadePowerLeveling: grupo de nível parecido com a zona nunca é penalizado", () => {
-  const resultado = calcularPenalidadePowerLeveling({
-    tetoZona: 10,
+test("calcularPenalidadeDiferencaNivel: grupo de nível parecido nunca é penalizado", () => {
+  const resultado = calcularPenalidadeDiferencaNivel({
     niveisDosMembros: [8, 9, 11],
     config: CONFIG_PADRAO,
   });
@@ -86,57 +85,47 @@ test("calcularPenalidadePowerLeveling: grupo de nível parecido com a zona nunca
   assert.equal(resultado.multiplicador, 1);
 });
 
-test("calcularPenalidadePowerLeveling: dentro da tolerância (exatamente no limiar) ainda não penaliza", () => {
-  // teto 10 + limiar 10 = até nível 20 tolerado sem penalidade nenhuma.
-  const resultado = calcularPenalidadePowerLeveling({
-    tetoZona: 10,
-    niveisDosMembros: [5, 20],
+test("calcularPenalidadeDiferencaNivel: dentro da tolerância (exatamente no limiar) ainda não penaliza", () => {
+  // limiar 10 = até 10 níveis de diferença tolerados sem penalidade nenhuma.
+  const resultado = calcularPenalidadeDiferencaNivel({
+    niveisDosMembros: [5, 15],
     config: CONFIG_PADRAO,
   });
   assert.equal(resultado.aplicada, false);
   assert.equal(resultado.multiplicador, 1);
 });
 
-test("calcularPenalidadePowerLeveling: um nível acima da tolerância já reduz a recompensa", () => {
-  // teto 10 + limiar 10 = tolera até 20; nível 21 = 1 nível excedente.
-  const resultado = calcularPenalidadePowerLeveling({
-    tetoZona: 10,
-    niveisDosMembros: [5, 21],
+test("calcularPenalidadeDiferencaNivel: um nível de diferença acima da tolerância já reduz a recompensa", () => {
+  // limiar 10; diferença de 11 = 1 nível excedente.
+  const resultado = calcularPenalidadeDiferencaNivel({
+    niveisDosMembros: [5, 16],
     config: CONFIG_PADRAO,
   });
   assert.equal(resultado.aplicada, true);
-  assert.equal(resultado.excesso, 11);
+  assert.equal(resultado.diferenca, 11);
   // 1 - 1*0.05 = 0.95
   assert.ok(Math.abs(resultado.multiplicador - 0.95) < 1e-9);
 });
 
-test("calcularPenalidadePowerLeveling: usa só o MAIOR nível do grupo (um único 'turista' já conta)", () => {
-  const resultado = calcularPenalidadePowerLeveling({
-    tetoZona: 10,
+test("calcularPenalidadeDiferencaNivel: usa SÓ o maior e o menor nível (membro do meio não muda nada)", () => {
+  const resultado = calcularPenalidadeDiferencaNivel({
     niveisDosMembros: [6, 7, 100],
     config: CONFIG_PADRAO,
   });
   assert.equal(resultado.aplicada, true);
-  assert.equal(resultado.excesso, 90);
+  assert.equal(resultado.diferenca, 94);
 });
 
-test("calcularPenalidadePowerLeveling: nunca cai abaixo do piso configurado, mesmo com diferença gigante", () => {
-  const resultado = calcularPenalidadePowerLeveling({
-    tetoZona: 5,
-    niveisDosMembros: [5, 100],
+test("calcularPenalidadeDiferencaNivel: nunca cai abaixo do piso configurado, mesmo com diferença gigante", () => {
+  const resultado = calcularPenalidadeDiferencaNivel({
+    niveisDosMembros: [1, 100],
     config: CONFIG_PADRAO,
   });
   assert.equal(resultado.aplicada, true);
   assert.equal(resultado.multiplicador, CONFIG_PADRAO.PISO_MULTIPLICADOR_RECOMPENSA);
 });
 
-test("calcularPenalidadePowerLeveling: sem teto de zona válido ou sem membros, não aplica nada (defensivo)", () => {
-  assert.equal(
-    calcularPenalidadePowerLeveling({ tetoZona: null, niveisDosMembros: [5, 100], config: CONFIG_PADRAO }).aplicada,
-    false,
-  );
-  assert.equal(
-    calcularPenalidadePowerLeveling({ tetoZona: 10, niveisDosMembros: [], config: CONFIG_PADRAO }).aplicada,
-    false,
-  );
+test("calcularPenalidadeDiferencaNivel: sem membros (ou só 1), não aplica nada (defensivo)", () => {
+  assert.equal(calcularPenalidadeDiferencaNivel({ niveisDosMembros: [], config: CONFIG_PADRAO }).aplicada, false);
+  assert.equal(calcularPenalidadeDiferencaNivel({ niveisDosMembros: [42], config: CONFIG_PADRAO }).aplicada, false);
 });
