@@ -170,6 +170,7 @@ const CAMPOS_MONSTRO = [
   "ouro_recompensa",
   "defesa",
   "ativo",
+  "disponivel_emboscada",
 ];
 
 // CHECK constraints do banco (migration 20261208010000) já bloqueiam

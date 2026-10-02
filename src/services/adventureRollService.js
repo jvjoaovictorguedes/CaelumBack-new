@@ -34,4 +34,27 @@ function sortearNivelMonstro(zoneMonster, zone) {
   return crypto.randomInt(min, max + 1);
 }
 
-module.exports = { sortearMonstroDaZona, sortearNivelMonstro };
+// Emboscada da Expedição (Mineração/Silvicultura/Exploração) — escolhe
+// entre o pool curado pelo admin (AdventureMonster.disponivel_emboscada,
+// ver expeditionService.coletar) o(s) monstro(s) com nível mais próximo
+// do nível-alvo (nível de combate do jogador + deslocamento de
+// dificuldade da região, calculado pelo caller). Sem peso configurável
+// aqui — a emboscada nunca teve um conceito de "raridade" por monstro
+// como as Áreas de Caça, só filtro de elegibilidade; sorteio uniforme
+// entre os empatados na menor distância de nível evita sempre cair no
+// mesmo monstro quando dois+ catálogos têm o nível ideal.
+function sortearMonstroEmboscada(monstrosDisponiveis, nivelAlvo) {
+  if (!monstrosDisponiveis || monstrosDisponiveis.length === 0) return null;
+
+  let menorDistancia = Infinity;
+  for (const monstro of monstrosDisponiveis) {
+    const distancia = Math.abs((monstro.nivel ?? 1) - nivelAlvo);
+    if (distancia < menorDistancia) menorDistancia = distancia;
+  }
+  const candidatos = monstrosDisponiveis.filter(
+    (monstro) => Math.abs((monstro.nivel ?? 1) - nivelAlvo) === menorDistancia,
+  );
+  return candidatos[crypto.randomInt(0, candidatos.length)];
+}
+
+module.exports = { sortearMonstroDaZona, sortearNivelMonstro, sortearMonstroEmboscada };

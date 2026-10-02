@@ -50,6 +50,10 @@ const AdventureMonster = sequelize.define(
     // em combatFormulas.js), nunca uma fórmula própria de monstro.
     defesa: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
     ativo: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+    // Emboscada da Expedição (Mineração/Silvicultura/Exploração) — admin
+    // escolhe quais monstros do catálogo podem aparecer nela (ver
+    // migration 20270114010000-monstro-disponivel-emboscada.js).
+    disponivel_emboscada: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
   },
   {
     tableName: "AdventureMonsters",

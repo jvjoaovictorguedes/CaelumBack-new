@@ -23,6 +23,8 @@ const {
   deslocamentoDeNivelPorRegiao,
 } = expeditionConfig;
 const { sortearQualidade, sortearRecurso, sortearQuantidade, sortearInterrupcaoDeMonstro } = require("./expeditionRollService");
+const { sortearMonstroEmboscada } = require("./adventureRollService");
+const AdventureMonster = require("../models/AdventureMonster");
 const { nivelPorXpTotal, xpParaProximoNivel, aplicarGanhoDeXp } = require("./expeditionProgressionService");
 const { bonusesAtivosAgora } = require("./globalBuffService");
 const { bonusesAtivosPara: bonusesTavernaAtivosPara } = require("./tavernBuffService");
@@ -217,7 +219,49 @@ async function coletar(id_personagem, id_regiao) {
         1,
         (character.nivel ?? 1) + deslocamentoDeNivelPorRegiao(regiao.nivel_minimo),
       );
-      const inimigo = gerarInimigo(jogadorEfetivo, undefined, { nivelForcado });
+
+      // Pedido do jogador: admin escolhe QUAIS monstros do catálogo real
+      // podem aparecer na emboscada (AdventureMonster.disponivel_emboscada),
+      // em vez do gerador 100% procedural de sempre (gerarInimigo com
+      // nome decorativo sorteado de NOMES_INIMIGOS, sem sprite/imagem
+      // nenhuma vinculada a um monstro de verdade). Mesmo formato de
+      // `inimigo` que o encontro de zona monta em combatController.js
+      // (stats fixos do catálogo, nunca escalados por nivelForcado) —
+      // só a ESCOLHA de qual monstro usa nivelForcado, pra aproximar o
+      // nível do monstro sorteado do nível/dificuldade da região.
+      const candidatosEmboscada = await AdventureMonster.findAll({
+        where: { ativo: true, disponivel_emboscada: true },
+        transaction,
+      });
+      // nivel/vida_maxima/dano_min/dano_max ainda são nullable no schema
+      // (legado do Backfill da Reformulação V2 — ver comentário no topo
+      // de AdventureMonster.js); um catálogo pré-V2 nunca cadastrado de
+      // verdade não pode virar um monstro de emboscada quebrado.
+      const monstrosDisponiveisParaEmboscada = candidatosEmboscada.filter(
+        (m) => m.nivel != null && m.vida_maxima != null && m.dano_min != null && m.dano_max != null,
+      );
+      const monstroDeEmboscada = sortearMonstroEmboscada(monstrosDisponiveisParaEmboscada, nivelForcado);
+
+      // Fallback pro gerador antigo só se o admin desativar TODO o
+      // catálogo pra emboscada (pool vazio) — a emboscada nunca pode
+      // travar a coleta por falta de monstro elegível.
+      const inimigo = monstroDeEmboscada
+        ? {
+            nome: monstroDeEmboscada.nome,
+            nivel: monstroDeEmboscada.nivel,
+            forca: Math.max(1, Math.round((monstroDeEmboscada.dano_min + monstroDeEmboscada.dano_max) / 2)),
+            vitalidade: Math.max(1, Math.round(monstroDeEmboscada.vida_maxima / 5)),
+            agilidade: monstroDeEmboscada.agilidade,
+            velocidade: monstroDeEmboscada.velocidade,
+            vida_maxima: monstroDeEmboscada.vida_maxima,
+            vida_atual: monstroDeEmboscada.vida_maxima,
+            dano_min: monstroDeEmboscada.dano_min,
+            dano_max: monstroDeEmboscada.dano_max,
+            defesa: monstroDeEmboscada.defesa ?? 0,
+            sprite_key: monstroDeEmboscada.sprite_key ?? null,
+            imagem_url: monstroDeEmboscada.imagem_url ?? null,
+          }
+        : gerarInimigo(jogadorEfetivo, undefined, { nivelForcado });
 
       const statsPersonagem = {
         nivel: character.nivel,
