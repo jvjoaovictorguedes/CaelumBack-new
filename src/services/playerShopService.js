@@ -125,6 +125,25 @@ async function obterPerfilPublico(characterId) {
   };
 }
 
+// Resumo leve pro Dashboard V2 (doc "Dashboard V2" — "REUSO OBRIGATÓRIO: não
+// consultar inventário/MarketListing para reconstruir a Loja no Dashboard").
+// Mesma loja de obterMinhaLoja, mas só com a contagem de produtos ativos via
+// MarketListing.count (nunca o findAll+include pesado de obterPerfilPublico).
+async function obterResumoDaLoja(idPersonagem) {
+  const [loja, produtosAtivos] = await Promise.all([
+    PlayerShop.findOne({ where: { id_personagem: idPersonagem } }),
+    MarketListing.count({ where: { id_personagem_vendedor: idPersonagem, status: "Ativo" } }),
+  ]);
+  if (!loja) return null;
+  return {
+    nome: loja.nome,
+    descricao: loja.descricao,
+    aceitaEncomendas: loja.aceita_encomendas,
+    ativa: loja.ativa,
+    produtosAtivos,
+  };
+}
+
 const LIMITE_PAGINA_PADRAO = 20;
 const LIMITE_PAGINA_MAXIMO = 50;
 
@@ -195,6 +214,7 @@ async function listarLojasPublicas({ busca, profissao, aceitaEncomendas, page, l
 module.exports = {
   criarOuAtualizarLoja,
   obterMinhaLoja,
+  obterResumoDaLoja,
   obterPerfilPublico,
   listarLojasPublicas,
 };

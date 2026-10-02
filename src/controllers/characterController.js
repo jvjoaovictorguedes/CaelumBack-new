@@ -470,6 +470,18 @@ async function carregarRespostaDoPersonagem(character) {
   };
 }
 
+// Dashboard V2 (doc "Dashboard V2 — Centro do Aventureiro") — a MESMA
+// leitura completa que GET /me já usa (vida/mana máxima efetiva, XP,
+// bônus de atributos, reputação, guilda...), reaproveitada pelo resumo
+// agregado (dashboardSummaryService.js) sem duplicar nenhum cálculo.
+// Carrega o personagem com os mesmos includes de GET /me internamente
+// — quem chama só passa o id, nunca precisa saber de CHARACTER_INCLUDES.
+exports.obterPersonagemCompletoParaResumo = async function obterPersonagemCompletoParaResumo(idPersonagem) {
+  const character = await Character.findByPk(idPersonagem, { include: CHARACTER_INCLUDES });
+  if (!character) return null;
+  return carregarRespostaDoPersonagem(character);
+};
+
 // GET /api/characters/:id — dados COMPLETOS (dinheiro, vida, mana, XP,
 // equipamento) de um personagem. Só o dono (ou um admin) pode ver isso —
 // ver exigirDonoOuAdmin na rota. Pra ver dados de OUTRO jogador (perfil
