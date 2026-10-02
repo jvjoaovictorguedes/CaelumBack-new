@@ -28,6 +28,24 @@ const GlobalChatMessage = sequelize.define(
       type: DataTypes.STRING(500),
       allowNull: false,
     },
+    // Pedido do jogador: responder uma mensagem específica (igual
+    // WhatsApp). nome_personagem_respondido/texto_respondido são
+    // CONGELADOS no momento do envio (mesma lógica de nome_personagem
+    // acima) — a citação precisa continuar legível mesmo que a mensagem
+    // original já tenha sido apagada pela limpeza mensal.
+    id_mensagem_respondida: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: "GlobalChatMessages", key: "id" },
+    },
+    nome_personagem_respondido: {
+      type: DataTypes.STRING(100),
+      allowNull: true,
+    },
+    texto_respondido: {
+      type: DataTypes.STRING(500),
+      allowNull: true,
+    },
   },
   {
     tableName: "GlobalChatMessages",

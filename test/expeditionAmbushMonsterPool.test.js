@@ -154,66 +154,93 @@ async function criarMonstroCatalogo({ nome, nivel, disponivel_emboscada }) {
   return monstro;
 }
 
+// O catálogo de AdventureMonster NUNCA está vazio de verdade (seed de
+// conteúdo real, ver adventureExpansionData.js) — testar a ESCOLHA entre
+// "elegível" vs "bloqueado" com o resto do catálogo real ligado é uma
+// corrida contra dezenas de outros monstros do mesmo nível. Isola a
+// zona de teste desligando temporariamente disponivel_emboscada de todo
+// mundo que não foi criado por este teste, e restaura exatamente esse
+// conjunto no fim — nenhum outro fluxo do sistema lê essa coluna fora
+// da emboscada, então a flag voltar como estava não afeta nada mais.
+async function comCatalogoDeEmboscadaIsolado(fn) {
+  const idsOriginalmenteDisponiveis = (
+    await AdventureMonster.findAll({ where: { disponivel_emboscada: true }, attributes: ["id"] })
+  ).map((m) => m.id);
+  await AdventureMonster.update({ disponivel_emboscada: false }, { where: { disponivel_emboscada: true } });
+  try {
+    await fn();
+  } finally {
+    if (idsOriginalmenteDisponiveis.length > 0) {
+      await AdventureMonster.update(
+        { disponivel_emboscada: true },
+        { where: { id: idsOriginalmenteDisponiveis } },
+      );
+    }
+  }
+}
+
 testeComBanco(
   "coletar() em emboscada forçada: só sorteia monstro com disponivel_emboscada=true, nunca o desmarcado pelo admin",
-  async () => {
-    const { usuario, personagem } = await criarPersonagem({ nivel: 5 });
-    usuariosCriados.push(usuario.id);
-    personagensCriados.push(personagem.id);
+  () =>
+    comCatalogoDeEmboscadaIsolado(async () => {
+      const { usuario, personagem } = await criarPersonagem({ nivel: 5 });
+      usuariosCriados.push(usuario.id);
+      personagensCriados.push(personagem.id);
 
-    const regiao = await criarRegiaoComRecurso("Mineracao");
-    await expeditionService.listarProfissoes(personagem.id);
+      const regiao = await criarRegiaoComRecurso("Mineracao");
+      await expeditionService.listarProfissoes(personagem.id);
 
-    const elegivel = await criarMonstroCatalogo({
-      nome: `Emboscada Elegível ${sufixo()}`,
-      nivel: 5,
-      disponivel_emboscada: true,
-    });
-    await criarMonstroCatalogo({
-      nome: `Emboscada Bloqueada ${sufixo()}`,
-      nivel: 5,
-      disponivel_emboscada: false,
-    });
+      const elegivel = await criarMonstroCatalogo({
+        nome: `Emboscada Elegível ${sufixo()}`,
+        nivel: 5,
+        disponivel_emboscada: true,
+      });
+      await criarMonstroCatalogo({
+        nome: `Emboscada Bloqueada ${sufixo()}`,
+        nivel: 5,
+        disponivel_emboscada: false,
+      });
 
-    // Força 100% de chance de interrupção — sem isso o teste dependeria
-    // do sorteio de 6% de sortearInterrupcaoDeMonstro().
-    expeditionConfig.CHANCE_MONSTRO_PPM = 1_000_000;
+      // Força 100% de chance de interrupção — sem isso o teste dependeria
+      // do sorteio de 6% de sortearInterrupcaoDeMonstro().
+      expeditionConfig.CHANCE_MONSTRO_PPM = 1_000_000;
 
-    await expeditionService.coletar(personagem.id, regiao.id);
+      await expeditionService.coletar(personagem.id, regiao.id);
 
-    const personagemAtualizado = await Character.findByPk(personagem.id);
-    assert.ok(personagemAtualizado.encontro_pve, "coletar() deveria ter armado um encontro de emboscada");
-    assert.equal(personagemAtualizado.encontro_pve.nome, elegivel.nome);
-    assert.equal(personagemAtualizado.encontro_pve.origemExpedicao, true);
-  },
+      const personagemAtualizado = await Character.findByPk(personagem.id);
+      assert.ok(personagemAtualizado.encontro_pve, "coletar() deveria ter armado um encontro de emboscada");
+      assert.equal(personagemAtualizado.encontro_pve.nome, elegivel.nome);
+      assert.equal(personagemAtualizado.encontro_pve.origemExpedicao, true);
+    }),
 );
 
 testeComBanco(
   "coletar() em emboscada forçada: catálogo sem nenhum monstro elegível cai no gerador antigo (nunca trava a coleta)",
-  async () => {
-    const { usuario, personagem } = await criarPersonagem({ nivel: 5 });
-    usuariosCriados.push(usuario.id);
-    personagensCriados.push(personagem.id);
+  () =>
+    comCatalogoDeEmboscadaIsolado(async () => {
+      const { usuario, personagem } = await criarPersonagem({ nivel: 5 });
+      usuariosCriados.push(usuario.id);
+      personagensCriados.push(personagem.id);
 
-    const regiao = await criarRegiaoComRecurso("Silvicultura");
-    await expeditionService.listarProfissoes(personagem.id);
+      const regiao = await criarRegiaoComRecurso("Silvicultura");
+      await expeditionService.listarProfissoes(personagem.id);
 
-    await criarMonstroCatalogo({
-      nome: `Emboscada Bloqueada Only ${sufixo()}`,
-      nivel: 5,
-      disponivel_emboscada: false,
-    });
+      await criarMonstroCatalogo({
+        nome: `Emboscada Bloqueada Only ${sufixo()}`,
+        nivel: 5,
+        disponivel_emboscada: false,
+      });
 
-    expeditionConfig.CHANCE_MONSTRO_PPM = 1_000_000;
+      expeditionConfig.CHANCE_MONSTRO_PPM = 1_000_000;
 
-    await expeditionService.coletar(personagem.id, regiao.id);
+      await expeditionService.coletar(personagem.id, regiao.id);
 
-    const personagemAtualizado = await Character.findByPk(personagem.id);
-    assert.ok(personagemAtualizado.encontro_pve, "coletar() deveria ter armado um encontro de emboscada (fallback)");
-    // Gerador antigo (gerarInimigo) devolve dano_base, nunca dano_min/dano_max
-    // — assinatura usada aqui só pra confirmar que o fallback (e não o
-    // catálogo) foi quem montou esse inimigo.
-    assert.equal(personagemAtualizado.encontro_pve.dano_min, undefined);
-    assert.ok(typeof personagemAtualizado.encontro_pve.dano_base === "number");
-  },
+      const personagemAtualizado = await Character.findByPk(personagem.id);
+      assert.ok(personagemAtualizado.encontro_pve, "coletar() deveria ter armado um encontro de emboscada (fallback)");
+      // Gerador antigo (gerarInimigo) devolve dano_base, nunca dano_min/dano_max
+      // — assinatura usada aqui só pra confirmar que o fallback (e não o
+      // catálogo) foi quem montou esse inimigo.
+      assert.equal(personagemAtualizado.encontro_pve.dano_min, undefined);
+      assert.ok(typeof personagemAtualizado.encontro_pve.dano_base === "number");
+    }),
 );

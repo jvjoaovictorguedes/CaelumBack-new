@@ -72,7 +72,7 @@ module.exports = function registerGlobalChatHandlers(io) {
       }
     });
 
-    socket.on("globalchat:message", async ({ texto } = {}) => {
+    socket.on("globalchat:message", async ({ texto, idMensagemRespondida } = {}) => {
       const characterId = socket.characterId;
       if (!characterId) {
         return socket.emit("globalchat:erro", {
@@ -93,17 +93,16 @@ module.exports = function registerGlobalChatHandlers(io) {
       try {
         const personagem = await Character.findByPk(characterId, { attributes: ["id", "nome"] });
         if (!personagem) return;
-        await globalChatService.persistirMensagem({
+        const mensagemCriada = await globalChatService.persistirMensagem({
           idPersonagem: personagem.id,
           nomePersonagem: personagem.nome,
           texto: mensagem,
+          // Pedido do jogador: responder uma mensagem específica (igual
+          // WhatsApp) — Number.isInteger descarta qualquer lixo vindo do
+          // cliente (string, objeto, etc.), tratado como "não é resposta".
+          idMensagemRespondida: Number.isInteger(idMensagemRespondida) ? idMensagemRespondida : null,
         });
-        io.to(SALA_GLOBAL).emit("globalchat:message:new", {
-          idPersonagem: personagem.id,
-          nome: personagem.nome,
-          texto: mensagem,
-          data: new Date().toISOString(),
-        });
+        io.to(SALA_GLOBAL).emit("globalchat:message:new", mensagemCriada);
       } catch (error) {
         console.error("Erro ao enviar mensagem no chat global:", error);
       }
