@@ -13,6 +13,7 @@ const CharacterAlchemyProgress = require("../models/CharacterAlchemyProgress");
 const Item = require("../models/Item");
 const PlayerShopDemand = require("../models/PlayerShopDemand");
 const PlayerShopCommission = require("../models/PlayerShopCommission");
+const alchemyProgressionService = require("./alchemyProgressionService");
 
 const NOME_MIN = 3;
 const NOME_MAX = 100;
@@ -100,7 +101,16 @@ async function obterPerfilPublico(characterId) {
     },
     profissoes: {
       ferreiro: forja ? { nivel: forja.nivel, experiencia: forja.experiencia } : null,
-      alquimista: alquimia ? { nivel: alquimia.nivel, experiencia: alquimia.experiencia } : null,
+      // Bug real reportado: "nivel de alquimia não conta certo na Loja
+      // dos Aventureiros" — a coluna alquimia.nivel nunca era mantida em
+      // dia (alchemyService.js só gravava experiencia), então aqui
+      // sempre lia o valor travado em 1. Nível de Alquimia é SEMPRE
+      // derivado do XP total (mesmo critério que a própria tela de
+      // Alquimia usa em alchemyService.obterProgresso), nunca lido de
+      // uma coluna que pode estar desatualizada.
+      alquimista: alquimia
+        ? { nivel: alchemyProgressionService.nivelPorXpTotal(alquimia.experiencia), experiencia: alquimia.experiencia }
+        : null,
     },
     produtos,
     estatisticas: {
@@ -134,8 +144,12 @@ async function listarLojasPublicas({ busca, profissao, aceitaEncomendas, page, l
     const linhas = await CharacterForgeProgress.findAll({ where: { nivel: { [Op.gt]: 1 } }, attributes: ["id_personagem"], raw: true });
     idsPorProfissao = linhas.map((l) => l.id_personagem);
   } else if (profissao === "Alquimista") {
-    const linhas = await CharacterAlchemyProgress.findAll({ where: { nivel: { [Op.gt]: 1 } }, attributes: ["id_personagem"], raw: true });
-    idsPorProfissao = linhas.map((l) => l.id_personagem);
+    // Mesmo bug da coluna `nivel` desatualizada (ver obterPerfilPublico)
+    // — filtra pelo XP de verdade (nivelPorXpTotal), nunca pela coluna.
+    const linhas = await CharacterAlchemyProgress.findAll({ attributes: ["id_personagem", "experiencia"], raw: true });
+    idsPorProfissao = linhas
+      .filter((l) => alchemyProgressionService.nivelPorXpTotal(l.experiencia) > 1)
+      .map((l) => l.id_personagem);
   }
   if (idsPorProfissao) {
     if (idsPorProfissao.length === 0) {

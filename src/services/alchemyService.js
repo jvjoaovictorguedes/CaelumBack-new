@@ -176,10 +176,19 @@ async function prepararLote(characterId, recipeId, { quantity, idempotencyKey } 
       : xpBase;
     const ganho = alchemyProgressionService.aplicarGanhoDeXp(progressoAtual.experiencia, xpGanho);
 
+    // Bug real reportado: a coluna `nivel` nunca era atualizada aqui —
+    // só `experiencia` — então ficava travada no valor de criação (1)
+    // pra sempre, mesmo o personagem tendo subido de nível de verdade
+    // (o nível exibido na própria tela de Alquimia é sempre recalculado
+    // a partir do XP, nunca lido dessa coluna — só quem lê a coluna
+    // direto, como a Loja do Aventureiro, via o valor errado). Mesmo
+    // padrão que forgeSmeltingService.js já segue: grava `nivel` junto
+    // de `experiencia` a cada ganho de XP.
     const [progressoAtualizado] = await CharacterAlchemyProgress.upsert(
       {
         id_personagem: characterId,
         experiencia: ganho.xpTotal,
+        nivel: ganho.nivelDepois,
         total_produzido: (progressoAtual.total_produzido ?? 0) + quantidadeProduzida,
       },
       { transaction, returning: true },

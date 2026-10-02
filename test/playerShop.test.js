@@ -9,6 +9,8 @@ const User = require("../src/models/User");
 const Character = require("../src/models/Character");
 const PlayerShop = require("../src/models/PlayerShop");
 const CharacterForgeProgress = require("../src/models/CharacterForgeProgress");
+const CharacterAlchemyProgress = require("../src/models/CharacterAlchemyProgress");
+const alchemyProgressionService = require("../src/services/alchemyProgressionService");
 const Item = require("../src/models/Item");
 const CharacterInventory = require("../src/models/CharacterInventory");
 const MarketListing = require("../src/models/MarketListing");
@@ -54,6 +56,7 @@ test.after(async () => {
   if (personagensCriados.length > 0) {
     await PlayerShop.destroy({ where: { id_personagem: personagensCriados } });
     await CharacterForgeProgress.destroy({ where: { id_personagem: personagensCriados } });
+    await CharacterAlchemyProgress.destroy({ where: { id_personagem: personagensCriados } });
     await CharacterInventory.destroy({ where: { id_personagem: personagensCriados } });
     await Character.destroy({ where: { id: personagensCriados } });
   }
@@ -112,6 +115,44 @@ testeComBanco("loja: obterPerfilPublico devolve profissões reais e estatística
   assert.equal(perfil.estatisticas.demandas_concluidas, 0);
   assert.equal(perfil.estatisticas.encomendas_concluidas, 0);
 });
+
+// Bug real reportado: "o nível de alquimia não está contando certo na
+// Loja dos Aventureiros". Causa: alchemyService.js nunca gravava a
+// coluna `nivel` de CharacterAlchemyProgress (só `experiencia`), então
+// ficava travada em 1 pra sempre — e obterPerfilPublico/listarLojasPublicas
+// liam essa coluna direto. Simula exatamente essa coluna desatualizada
+// (nivel: 1, mas experiencia já de nível bem mais alto) pra provar que
+// agora o nível exibido/filtrado vem do XP, nunca da coluna.
+testeComBanco(
+  "loja: obterPerfilPublico deriva o nível de Alquimia do XP, mesmo com a coluna `nivel` desatualizada",
+  async () => {
+    const { personagem } = await novoPersonagem();
+    await playerShopService.criarOuAtualizarLoja(personagem.id, { nome: `Loja ${sufixo()}` });
+    // 500 de XP já passa do nível 1 (XP_NECESSARIO_POR_ETAPA[1] = 80).
+    await CharacterAlchemyProgress.create({ id_personagem: personagem.id, nivel: 1, experiencia: 500 });
+
+    const perfil = await playerShopService.obterPerfilPublico(personagem.id);
+    const nivelEsperado = alchemyProgressionService.nivelPorXpTotal(500);
+    assert.ok(nivelEsperado > 1, "pré-condição do teste: 500 de XP precisa valer mais que nível 1");
+    assert.equal(perfil.profissoes.alquimista.nivel, nivelEsperado);
+    assert.notEqual(perfil.profissoes.alquimista.nivel, 1, "não pode ficar travado no valor errado da coluna");
+  },
+);
+
+testeComBanco(
+  "loja: listarLojasPublicas(profissao=Alquimista) filtra pelo XP real, não pela coluna `nivel` desatualizada",
+  async () => {
+    const { personagem } = await novoPersonagem();
+    const nomeUnico = `Botica Exclusiva ${sufixo()}`;
+    await playerShopService.criarOuAtualizarLoja(personagem.id, { nome: nomeUnico });
+    // Mesma coluna travada em 1, só o XP reflete o nível real.
+    await CharacterAlchemyProgress.create({ id_personagem: personagem.id, nivel: 1, experiencia: 500 });
+
+    const resultado = await playerShopService.listarLojasPublicas({ profissao: "Alquimista", busca: nomeUnico });
+    assert.equal(resultado.lojas.length, 1, "precisa aparecer no filtro de Alquimista mesmo com a coluna nivel=1");
+    assert.equal(resultado.lojas[0].nome, nomeUnico);
+  },
+);
 
 testeComBanco("loja: obterPerfilPublico lança 404 quando o personagem não tem loja", async () => {
   const { personagem } = await novoPersonagem();

@@ -8,11 +8,13 @@
 // mais um multiplicador/bônus junto do que Enfraquecimento (WEAKEN) e
 // os buffs da Taverna já fazem.
 //
-// Instância: { atributo, valor, remainingTurns, sourceItemId }. Cada
-// atributo tem sua própria regra de combinação (ver somaDeAtributo):
-// múltiplos buffs do MESMO atributo empilham (somam), cada um com sua
-// própria duração — igual a POISON/BLEED no motor de Status, só que sem
-// stack cap (não é um dano periódico, é um bônus/atributo).
+// Instância: { atributo, valor, remainingTurns, sourceItemId }. Bug real
+// reportado: multiplos buffs do MESMO atributo empilhavam por soma (dois
+// elixires de +15% de dano viravam +30%, três +45%, sem teto nenhum —
+// só STATUS_RESISTANCE_PCT tinha um limite). Nunca pode acumular: no
+// máximo UMA instância por atributo fica ativa ao mesmo tempo (mesmo
+// princípio de "o maior prevalece, nunca soma" que concederEscudo já
+// usa pra GRANT_SHIELD) — ver aplicarBuff.
 
 const ATRIBUTOS_BUFAVEIS = [
   "DANO_SAIDA_PCT",
@@ -46,7 +48,11 @@ function erro(mensagem) {
 }
 
 // Nunca muta a lista recebida — mesma convenção pura do resto do motor
-// (statusEffectService/consumableEffectRegistry).
+// (statusEffectService/consumableEffectRegistry). Não empilha: só pode
+// existir UMA instância por atributo. Se já existe uma mais forte (ou
+// igual) ativa, a nova aplicação é descartada (não derruba o buff bom
+// por um elixir mais fraco bebido por engano); senão, a nova substitui
+// a antiga por completo (valor E duração) — nunca soma os dois.
 function aplicarBuff(lista, novoBuff) {
   if (!ATRIBUTOS_BUFAVEIS.includes(novoBuff.atributo)) {
     throw erro(`APPLY_COMBAT_BUFF com atributo inválido: ${novoBuff.atributo}`);
@@ -54,7 +60,12 @@ function aplicarBuff(lista, novoBuff) {
   if (!(novoBuff.remainingTurns > 0)) {
     throw erro(`APPLY_COMBAT_BUFF precisa de duration_turns > 0 (recebeu ${novoBuff.remainingTurns}).`);
   }
-  return [...lista, { ...novoBuff }];
+  const existente = lista.find((b) => b.atributo === novoBuff.atributo);
+  if (existente && existente.valor > novoBuff.valor) {
+    return [...lista];
+  }
+  const semEsseAtributo = lista.filter((b) => b.atributo !== novoBuff.atributo);
+  return [...semEsseAtributo, { ...novoBuff }];
 }
 
 // Fim de turno de quem carrega os buffs — mesmo princípio de

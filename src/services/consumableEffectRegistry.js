@@ -34,9 +34,10 @@ function cleanseCategory({ statusEffects, config }) {
 }
 
 // APPLY_COMBAT_BUFF (spec Caldeirão §13) — buff temporário de combate,
-// delegado inteiro pro combatBuffService (duração/empilhamento/
-// aplicação no cálculo de dano-defesa vivem só lá, igual CLEANSE_*
-// delega em statusEffectService). `config.atributo` é a whitelist de
+// delegado inteiro pro combatBuffService (duração/substituição por
+// atributo/aplicação no cálculo de dano-defesa vivem só lá, igual
+// CLEANSE_* delega em statusEffectService; nunca empilha por soma — ver
+// combatBuffService.aplicarBuff). `config.atributo` é a whitelist de
 // ATRIBUTOS_BUFAVEIS; `magnitude` é o valor do buff; `duration_turns`
 // vem direto da coluna ConsumableEffect.duration_turns (não de
 // `config`), igual todo outro efeito com duração.

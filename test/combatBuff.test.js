@@ -107,19 +107,47 @@ test("decrementarDuracoes decrementa e remove o que chegou a 0", () => {
   assert.equal(depois[0].remainingTurns, 1);
 });
 
-test("múltiplos buffs do mesmo atributo empilham (somam), cada um com sua própria duração", () => {
+// Bug real reportado: dois elixires de +15% de dano viravam +30%, três
+// +45%, sem teto nenhum (só STATUS_RESISTANCE_PCT tinha limite). Nunca
+// mais pode empilhar por soma — só uma instância por atributo.
+test("aplicarBuff NÃO empilha por soma — um segundo buff do mesmo atributo substitui o primeiro", () => {
+  let lista = combatBuffService.aplicarBuff([], { atributo: "DANO_SAIDA_PCT", valor: 15, remainingTurns: 3 });
+  lista = combatBuffService.aplicarBuff(lista, { atributo: "DANO_SAIDA_PCT", valor: 15, remainingTurns: 2 });
+  assert.equal(lista.length, 1, "nunca pode existir mais de uma instância do mesmo atributo");
+  assert.equal(combatBuffService.somaDeAtributo(lista, "DANO_SAIDA_PCT"), 15, "15% + 15% precisa continuar 15%, nunca 30%");
+  assert.equal(combatBuffService.modificadorDeDanoSaida(lista), 1.15);
+  assert.equal(lista[0].remainingTurns, 2, "a reaplicação substitui a duração também, não só ignora o valor");
+});
+
+test("aplicarBuff: um elixir mais fraco não derruba um buff mais forte já ativo", () => {
+  let lista = combatBuffService.aplicarBuff([], { atributo: "DANO_SAIDA_PCT", valor: 50, remainingTurns: 3 });
+  lista = combatBuffService.aplicarBuff(lista, { atributo: "DANO_SAIDA_PCT", valor: 15, remainingTurns: 5 });
+  assert.equal(lista.length, 1);
+  assert.equal(lista[0].valor, 50, "o buff fraco não substitui o forte");
+  assert.equal(lista[0].remainingTurns, 3, "duração do buff forte também não muda");
+});
+
+test("aplicarBuff: um elixir mais forte substitui um buff mais fraco já ativo", () => {
+  let lista = combatBuffService.aplicarBuff([], { atributo: "DANO_SAIDA_PCT", valor: 15, remainingTurns: 5 });
+  lista = combatBuffService.aplicarBuff(lista, { atributo: "DANO_SAIDA_PCT", valor: 50, remainingTurns: 3 });
+  assert.equal(lista.length, 1);
+  assert.equal(lista[0].valor, 50);
+  assert.equal(lista[0].remainingTurns, 3);
+});
+
+test("aplicarBuff: atributos diferentes continuam coexistindo normalmente (não é um limite de 1 buff total)", () => {
   let lista = combatBuffService.aplicarBuff([], { atributo: "DANO_SAIDA_PCT", valor: 20, remainingTurns: 3 });
-  lista = combatBuffService.aplicarBuff(lista, { atributo: "DANO_SAIDA_PCT", valor: 30, remainingTurns: 2 });
-  assert.equal(combatBuffService.somaDeAtributo(lista, "DANO_SAIDA_PCT"), 50);
-  assert.equal(combatBuffService.modificadorDeDanoSaida(lista), 1.5);
+  lista = combatBuffService.aplicarBuff(lista, { atributo: "DEFESA_FLAT", valor: 30, remainingTurns: 2 });
+  assert.equal(lista.length, 2);
+  assert.equal(combatBuffService.somaDeAtributo(lista, "DANO_SAIDA_PCT"), 20);
+  assert.equal(combatBuffService.bonusDeDefesa(lista), 30);
 
   const depoisDeUmTurno = combatBuffService.decrementarDuracoes(lista);
   assert.equal(depoisDeUmTurno.length, 2, "nenhum expira ainda (3->2 e 2->1)");
-  assert.equal(combatBuffService.somaDeAtributo(depoisDeUmTurno, "DANO_SAIDA_PCT"), 50);
 
   const depoisDeDoisTurnos = combatBuffService.decrementarDuracoes(depoisDeUmTurno);
-  assert.equal(depoisDeDoisTurnos.length, 1, "o buff que tinha duração 2 já expirou (2->1->0)");
-  assert.equal(combatBuffService.somaDeAtributo(depoisDeDoisTurnos, "DANO_SAIDA_PCT"), 20);
+  assert.equal(depoisDeDoisTurnos.length, 1, "o DEFESA_FLAT (duração 2) já expirou (2->1->0)");
+  assert.equal(depoisDeDoisTurnos[0].atributo, "DANO_SAIDA_PCT");
 });
 
 test("bonusDeDefesa soma só os buffs DEFESA_FLAT, nunca mistura com DANO_SAIDA_PCT", () => {

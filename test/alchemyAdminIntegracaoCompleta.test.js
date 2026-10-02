@@ -215,8 +215,12 @@ testeComBanco(
 );
 
 testeComBanco(
-  "DANO_SAIDA_PCT de DOIS itens diferentes (cada um administrado separadamente) empilha em combate real, batendo com a fórmula do buff único",
+  "DANO_SAIDA_PCT de DOIS itens diferentes (cada um administrado separadamente) NÃO empilha — só o mais forte dos dois vale",
   async () => {
+    // Bug real reportado pelo jogador: dois elixires de +X% de dano
+    // viravam +2X%, três +3X%, sem teto nenhum. Fixado em
+    // combatBuffService.aplicarBuff — só uma instância por atributo
+    // (o maior valor prevalece, nunca soma dois buffs do mesmo atributo).
     const itemFuria1 = await criarItemConsumivel("Elixir de Fúria Menor");
     await adminAlchemyService.createAdminConsumableEffect(
       itemFuria1.id,
@@ -244,16 +248,20 @@ testeComBanco(
 
       const turno2 = await chamarExecutarTurno(personagem.id, { type: "item", itemId: itemFuria2.id });
       assert.equal(turno2.statusCode, 200);
-      assert.equal(turno2.corpo.data.combatBuffs.player.length, 2, "os dois buffs de itens diferentes coexistem, nunca um sobrescreve o outro");
+      assert.equal(
+        turno2.corpo.data.combatBuffs.player.length,
+        1,
+        "o segundo elixir de DANO_SAIDA_PCT substitui o primeiro, nunca coexiste somando",
+      );
+      assert.equal(turno2.corpo.data.combatBuffs.player[0].valor, 30, "o mais forte (30%) prevalece sobre o mais fraco (20%)");
 
       // forca=10, nivel=5, Math.random=0.99 (sem crítico): dano_base = 18
-      // (mesma fórmula/constantes de combatBuff.test.js). Com os dois
-      // buffs somados (20% + 30% = 50%): round(18 * 1.5) = 27 — idêntico
-      // ao caso de um único item com 50%, provando que o empilhamento
-      // entre itens produz o MESMO resultado que o buff único já coberto.
+      // (mesma fórmula/constantes de combatBuff.test.js). Só o buff mais
+      // forte (30%) vale: round(18 * 1.3) = 23 — NUNCA 27 (que seria
+      // 20%+30% empilhados, o bug reportado).
       const turno3 = await chamarExecutarTurno(personagem.id, { type: "attack" });
       assert.equal(turno3.statusCode, 200);
-      assert.equal(turno3.corpo.data.danoCausadoNoInimigo, 27, "18 de base x 1.5 (20% + 30% empilhados de dois itens)");
+      assert.equal(turno3.corpo.data.danoCausadoNoInimigo, 23, "18 de base x 1.3 (só os 30% do elixir mais forte, nunca os dois somados)");
     } finally {
       Math.random = original;
     }
