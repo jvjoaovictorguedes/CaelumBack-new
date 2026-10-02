@@ -16,32 +16,31 @@ const PlayerShopCommissionOffer = require("../models/PlayerShopCommissionOffer")
 const PlayerShopCommissionLog = require("../models/PlayerShopCommissionLog");
 const equipmentInstanceService = require("./equipmentInstanceService");
 const { addStack, removeStack } = require("./inventoryService");
-
-const TAXA_ENCOMENDA = 0.08;
-const PRECO_MINIMO_UNITARIO = 1;
-const PRECO_MAXIMO_UNITARIO = 1_000_000;
-const QUANTIDADE_MAXIMA = 999_999;
-const PRAZO_ENTREGA_MINIMO_DIAS = 1;
-const PRAZO_ENTREGA_MAXIMO_DIAS = 60;
-const PRAZO_NEGOCIACAO_DIAS = 3;
+const adminPlayerShopConfigService = require("./adminPlayerShopConfigService");
 
 function erro(mensagem, statusCode = 400) {
   return Object.assign(new Error(mensagem), { statusCode });
 }
 
 function validarTermos({ quantidade, preco_unitario, prazo_entrega_dias }) {
+  const precoMinimo = adminPlayerShopConfigService.obter("playershop.precoMinimoUnitario");
+  const precoMaximo = adminPlayerShopConfigService.obter("playershop.precoMaximoUnitario");
+  const quantidadeMaxima = adminPlayerShopConfigService.obter("playershop.quantidadeMaxima");
+  const prazoEntregaMinimoDias = adminPlayerShopConfigService.obter("playershop.prazoEntregaMinimoDias");
+  const prazoEntregaMaximoDias = adminPlayerShopConfigService.obter("playershop.prazoEntregaMaximoDias");
+
   const qtd = Number(quantidade);
   const preco = Number(preco_unitario);
   const prazo = Number(prazo_entrega_dias);
 
-  if (!Number.isInteger(qtd) || qtd <= 0 || qtd > QUANTIDADE_MAXIMA) {
-    throw erro(`Quantidade deve ser um inteiro entre 1 e ${QUANTIDADE_MAXIMA}.`);
+  if (!Number.isInteger(qtd) || qtd <= 0 || qtd > quantidadeMaxima) {
+    throw erro(`Quantidade deve ser um inteiro entre 1 e ${quantidadeMaxima}.`);
   }
-  if (!Number.isInteger(preco) || preco < PRECO_MINIMO_UNITARIO || preco > PRECO_MAXIMO_UNITARIO) {
-    throw erro(`Preço unitário deve estar entre ${PRECO_MINIMO_UNITARIO} e ${PRECO_MAXIMO_UNITARIO}.`);
+  if (!Number.isInteger(preco) || preco < precoMinimo || preco > precoMaximo) {
+    throw erro(`Preço unitário deve estar entre ${precoMinimo} e ${precoMaximo}.`);
   }
-  if (!Number.isInteger(prazo) || prazo < PRAZO_ENTREGA_MINIMO_DIAS || prazo > PRAZO_ENTREGA_MAXIMO_DIAS) {
-    throw erro(`Prazo de entrega deve ser entre ${PRAZO_ENTREGA_MINIMO_DIAS} e ${PRAZO_ENTREGA_MAXIMO_DIAS} dias.`);
+  if (!Number.isInteger(prazo) || prazo < prazoEntregaMinimoDias || prazo > prazoEntregaMaximoDias) {
+    throw erro(`Prazo de entrega deve ser entre ${prazoEntregaMinimoDias} e ${prazoEntregaMaximoDias} dias.`);
   }
   return { qtd, preco, prazo };
 }
@@ -55,6 +54,8 @@ async function criarEncomenda(
   idPersonagemLojista,
   { id_item, quantidade, preco_unitario, prazo_entrega_dias, mensagem, descricao } = {},
 ) {
+  adminPlayerShopConfigService.verificarAtivo();
+
   const idItem = Number(id_item);
   const idLojista = Number(idPersonagemLojista);
   if (!Number.isInteger(idItem)) throw erro("id_item é obrigatório.");
@@ -76,7 +77,8 @@ async function criarEncomenda(
       throw erro("Equipamento é encomendado um de cada vez (quantidade deve ser 1).");
     }
 
-    const prazoNegociacao = new Date(Date.now() + PRAZO_NEGOCIACAO_DIAS * 24 * 60 * 60 * 1000);
+    const prazoNegociacaoDias = adminPlayerShopConfigService.obter("playershop.prazoNegociacaoDias");
+    const prazoNegociacao = new Date(Date.now() + prazoNegociacaoDias * 24 * 60 * 60 * 1000);
     const encomenda = await PlayerShopCommission.create(
       {
         id_personagem_lojista: idLojista,
@@ -308,7 +310,8 @@ async function entregarEncomenda(idEncomenda, idPersonagemLojista, { id_instanci
       await addStack(encomenda.id_personagem_cliente, encomenda.id_item, encomenda.quantidade_acordada, transaction);
     }
 
-    const taxa = Math.floor(encomenda.ouro_reservado * TAXA_ENCOMENDA);
+    const taxaEncomenda = adminPlayerShopConfigService.obter("playershop.taxaEncomenda");
+    const taxa = Math.floor(encomenda.ouro_reservado * taxaEncomenda);
     const valorLiquido = encomenda.ouro_reservado - taxa;
     // Ouro da encomenda já estava reservado (debitado do cliente no
     // aceite) — isto é só liberar o líquido pro lojista, nunca

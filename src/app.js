@@ -117,6 +117,7 @@ const adminInventoryRoutes = require("./routes/adminInventoryRoutes");
 const adminMusicRoutes = require("./routes/adminMusicRoutes");
 const musicRoutes = require("./routes/musicRoutes");
 const adminMarketRoutes = require("./routes/adminMarketRoutes");
+const adminPlayerShopRoutes = require("./routes/adminPlayerShopRoutes");
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -325,6 +326,7 @@ app.use("/api/admin/classes", adminClassRoutes);
 app.use("/api/admin/players", adminPlayerRoutes);
 app.use("/api/admin/inventory", adminInventoryRoutes);
 app.use("/api/admin/market", adminMarketRoutes);
+app.use("/api/admin/player-shops", adminPlayerShopRoutes);
 app.use("/api/admin/music", adminMusicRoutes);
 // Pública de propósito (sem authMiddleware) — snapshot de config e
 // streaming de áudio de música precisam carregar em qualquer tela do

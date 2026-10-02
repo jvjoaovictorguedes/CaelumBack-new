@@ -4,6 +4,7 @@ const playerShopService = require("../services/playerShopService");
 const marketService = require("../services/marketService");
 const playerShopDemandService = require("../services/playerShopDemandService");
 const playerShopCommissionService = require("../services/playerShopCommissionService");
+const adminPlayerShopConfigService = require("../services/adminPlayerShopConfigService");
 
 function tratarErro(res, error, mensagemPadrao) {
   const statusCode = error.statusCode || 500;
@@ -58,6 +59,8 @@ exports.criarProdutoDaLoja = async (req, res) => {
   const { id_item, quantidade, preco_unitario, id_instancia } = req.body;
 
   try {
+    adminPlayerShopConfigService.verificarAtivo();
+
     const loja = await playerShopService.obterMinhaLoja(idPersonagem);
     if (!loja) {
       return res.status(400).json({ message: "Crie sua loja antes de publicar um produto nela." });

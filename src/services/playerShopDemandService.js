@@ -16,13 +16,8 @@ const PlayerShopDemandDelivery = require("../models/PlayerShopDemandDelivery");
 const PlayerShop = require("../models/PlayerShop");
 const equipmentInstanceService = require("./equipmentInstanceService");
 const { addStack, removeStack } = require("./inventoryService");
+const adminPlayerShopConfigService = require("./adminPlayerShopConfigService");
 
-const PRECO_MINIMO_UNITARIO = 1;
-const PRECO_MAXIMO_UNITARIO = 1_000_000;
-const QUANTIDADE_MAXIMA = 999_999;
-const PRAZO_MINIMO_DIAS = 1;
-const PRAZO_MAXIMO_DIAS = 30;
-const PRAZO_PADRAO_DIAS = 7;
 const LIMITE_PAGINA_PADRAO = 20;
 const LIMITE_PAGINA_MAXIMO = 50;
 
@@ -31,20 +26,29 @@ function erro(mensagem, statusCode = 400) {
 }
 
 async function criarDemanda(idPersonagem, { id_item, quantidade, preco_unitario, prazo_dias } = {}) {
+  adminPlayerShopConfigService.verificarAtivo();
+
+  const precoMinimo = adminPlayerShopConfigService.obter("playershop.precoMinimoUnitario");
+  const precoMaximo = adminPlayerShopConfigService.obter("playershop.precoMaximoUnitario");
+  const quantidadeMaxima = adminPlayerShopConfigService.obter("playershop.quantidadeMaxima");
+  const prazoMinimoDias = adminPlayerShopConfigService.obter("playershop.prazoDemandaMinimoDias");
+  const prazoMaximoDias = adminPlayerShopConfigService.obter("playershop.prazoDemandaMaximoDias");
+  const prazoPadraoDias = adminPlayerShopConfigService.obter("playershop.prazoDemandaPadraoDias");
+
   const idItem = Number(id_item);
   const qtd = Number(quantidade);
   const preco = Number(preco_unitario);
-  const prazoDias = prazo_dias !== undefined ? Number(prazo_dias) : PRAZO_PADRAO_DIAS;
+  const prazoDias = prazo_dias !== undefined ? Number(prazo_dias) : prazoPadraoDias;
 
   if (!Number.isInteger(idItem)) throw erro("id_item é obrigatório.");
-  if (!Number.isInteger(qtd) || qtd <= 0 || qtd > QUANTIDADE_MAXIMA) {
-    throw erro(`Quantidade deve ser um inteiro entre 1 e ${QUANTIDADE_MAXIMA}.`);
+  if (!Number.isInteger(qtd) || qtd <= 0 || qtd > quantidadeMaxima) {
+    throw erro(`Quantidade deve ser um inteiro entre 1 e ${quantidadeMaxima}.`);
   }
-  if (!Number.isInteger(preco) || preco < PRECO_MINIMO_UNITARIO || preco > PRECO_MAXIMO_UNITARIO) {
-    throw erro(`Preço unitário deve estar entre ${PRECO_MINIMO_UNITARIO} e ${PRECO_MAXIMO_UNITARIO}.`);
+  if (!Number.isInteger(preco) || preco < precoMinimo || preco > precoMaximo) {
+    throw erro(`Preço unitário deve estar entre ${precoMinimo} e ${precoMaximo}.`);
   }
-  if (!Number.isInteger(prazoDias) || prazoDias < PRAZO_MINIMO_DIAS || prazoDias > PRAZO_MAXIMO_DIAS) {
-    throw erro(`Prazo deve ser entre ${PRAZO_MINIMO_DIAS} e ${PRAZO_MAXIMO_DIAS} dias.`);
+  if (!Number.isInteger(prazoDias) || prazoDias < prazoMinimoDias || prazoDias > prazoMaximoDias) {
+    throw erro(`Prazo deve ser entre ${prazoMinimoDias} e ${prazoMaximoDias} dias.`);
   }
 
   return sequelize.transaction(async (transaction) => {
