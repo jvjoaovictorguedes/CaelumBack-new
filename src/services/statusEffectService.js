@@ -15,7 +15,7 @@
 // lista, nunca muta o array recebido. Quem chama é responsável por
 // persistir o resultado de volta em encontro_pve/partyBattleState/etc.
 const crypto = require("crypto");
-const { REGRA_STACK, STACKS_MAXIMOS, ACTION_TYPE, definicaoDoStatus } = require("../config/statusEffectConfig");
+const { REGRA_STACK, STACKS_MAXIMOS, DOT_TOTAL_MAX_PCT_PER_TURN, ACTION_TYPE, definicaoDoStatus } = require("../config/statusEffectConfig");
 const { aplicarMitigacaoDeDefesa } = require("./combatFormulas");
 
 function listaVazia() {
@@ -124,23 +124,49 @@ function calcularDanoDoTick(instancia, vidaMaxima) {
 // "se DoT matar o ator antes da ação, a ação não acontece"). `defensor`
 // é o alvo do DoT, usado só pra mitigação por Defesa quando a política do
 // status for DEFENSE (ver statusEffectConfig.MITIGACAO_DOT_PADRAO).
-function processarTicksDeInicio({ vidaAtual, vidaMaxima, defensor, lista, log, nomeAlvo }) {
-  let vida = vidaAtual;
+// `contexto` (Habilidades V2.0 §11/§17, opcional) ativa o teto agregado
+// de DOT_TOTAL_MAX_PCT_PER_TURN: primeira passada calcula o dano (já
+// mitigado) de CADA DoT sem aplicar ainda, pra conhecer o TOTAL bruto
+// do turno antes de decidir se precisa escalar; se exceder o teto do
+// contexto, todos os ticks são reduzidos pelo MESMO fator (nunca corta
+// um status inteiro deixando outro intacto). Sem `contexto`, zero
+// mudança de comportamento (compatibilidade com todo chamador
+// existente). `eventos`, se um array for passado, recebe um registro
+// por tick aplicado — statusTickEvents separados pro payload de combate,
+// em vez de só o total agregado (danoStatusJogador/danoStatusInimigo).
+function processarTicksDeInicio({ vidaAtual, vidaMaxima, defensor, lista, log, nomeAlvo, contexto, eventos }) {
   const vidaMaximaEfetiva = vidaMaxima ?? defensor?.vida_maxima ?? 0;
+
+  const danosBrutos = [];
   for (const instancia of lista) {
-    if (vida <= 0) break;
     const def = definicaoDoStatus(instancia.key);
     if (!def?.ehDot) continue;
-
     let dano = calcularDanoDoTick(instancia, vidaMaximaEfetiva);
     if (def.mitigacao === "DEFENSE") {
       dano = aplicarMitigacaoDeDefesa(dano, defensor);
     }
     dano = Math.max(0, Math.round(dano));
     if (dano <= 0) continue;
+    danosBrutos.push({ key: instancia.key, nomeUi: def.nomeUi, dano });
+  }
+
+  let fatorEscala = 1;
+  const tetoPct = contexto ? DOT_TOTAL_MAX_PCT_PER_TURN[contexto] : null;
+  if (tetoPct != null && vidaMaximaEfetiva > 0) {
+    const totalBruto = danosBrutos.reduce((soma, d) => soma + d.dano, 0);
+    const teto = vidaMaximaEfetiva * (tetoPct / 100);
+    if (totalBruto > teto && totalBruto > 0) fatorEscala = teto / totalBruto;
+  }
+
+  let vida = vidaAtual;
+  for (const { key, nomeUi, dano: danoBruto } of danosBrutos) {
+    if (vida <= 0) break;
+    const dano = Math.max(0, Math.round(danoBruto * fatorEscala));
+    if (dano <= 0) continue;
 
     vida = Math.max(0, vida - dano);
-    log.push(`${nomeAlvo} sofreu ${dano} de dano de ${def.nomeUi}.`);
+    log.push(`${nomeAlvo} sofreu ${dano} de dano de ${nomeUi}.`);
+    if (eventos) eventos.push({ key, nomeUi, dano });
   }
   return vida;
 }

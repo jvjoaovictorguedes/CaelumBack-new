@@ -786,6 +786,13 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     let danoStatusInimigo = 0;
     let danoRecebidoContraAtaque = 0;
     let danoStatusJogador = 0;
+    // Habilidades V2.0 §11/§17 — statusTickEvents separados: um registro
+    // por DoT aplicado neste turno (key/nomeUi/dano), pra UI nunca ter
+    // que inferir "qual status causou quanto" só do total agregado
+    // acima (danoStatusJogador/danoStatusInimigo continuam existindo,
+    // inalterados, pra quem já consome só o total).
+    const statusTickEventsJogador = [];
+    const statusTickEventsInimigo = [];
 
     if (!jogadorBloqueadoNesteTurno) {
 
@@ -1495,8 +1502,10 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           criticoInimigo,
           danoCausadoNoInimigo,
           danoStatusInimigo,
+          statusTickEventsInimigo,
           danoRecebidoContraAtaque,
           danoStatusJogador,
+          statusTickEventsJogador,
         },
       });
     }
@@ -1523,6 +1532,8 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       lista: statusEffects.player,
       log,
       nomeAlvo: "Você",
+      contexto: "PVE",
+      eventos: statusTickEventsJogador,
     });
     danoStatusJogador = Math.max(0, vidaJogadorAntesDoTick - personagemAtual.vida_atual);
 
@@ -1603,8 +1614,10 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           criticoInimigo,
           danoCausadoNoInimigo,
           danoStatusInimigo,
+          statusTickEventsInimigo,
           danoRecebidoContraAtaque,
           danoStatusJogador,
+          statusTickEventsJogador,
         },
       });
     }
@@ -1792,8 +1805,10 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           criticoInimigo,
           danoCausadoNoInimigo,
           danoStatusInimigo,
+          statusTickEventsInimigo,
           danoRecebidoContraAtaque,
           danoStatusJogador,
+          statusTickEventsJogador,
         },
       });
     }
@@ -1813,6 +1828,8 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       lista: statusEffects.enemy,
       log,
       nomeAlvo: inimigoAtual.nome,
+      contexto: "PVE",
+      eventos: statusTickEventsInimigo,
     });
     danoStatusInimigo = Math.max(0, vidaInimigoAntesDoTick - inimigoAtual.vida_atual);
 
@@ -1883,8 +1900,10 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         criticoInimigo,
         danoCausadoNoInimigo,
         danoStatusInimigo,
+        statusTickEventsInimigo,
         danoRecebidoContraAtaque,
         danoStatusJogador,
+        statusTickEventsJogador,
       },
     });
 }

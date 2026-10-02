@@ -454,6 +454,11 @@ async function resolverTurnoComStatus({
     lista: listaAtacante,
     log,
     nomeAlvo: nomeAtacante,
+    // Habilidades V2.0 §11/§17 — duelEngine atende tanto o PvP
+    // assíncrono quanto o ao vivo; nenhum dos dois distingue modalidade
+    // Ranqueada/Torneio hoje, então PVP_CASUAL é o teto mais
+    // conservador disponível até essa distinção existir.
+    contexto: "PVP_CASUAL",
   });
   const morteAoFimDoTurno = vidaAntesDoTick > 0 && atacante.vida_atual <= 0;
 

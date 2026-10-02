@@ -38,6 +38,28 @@ const STACKS_MAXIMOS = {
   POISON: 5,
 };
 
+// Teto de dano periódico por turno, em % da Vida Máxima do alvo,
+// somando TODOS os DoTs ativos nele (Habilidades V2.0 §11/§17) — nunca
+// um teto por status individual, e sim um teto agregado pra impedir que
+// empilhar Burn+Bleed+Poison (de fontes diferentes: Power, arma,
+// monstro) vire dano incontrolável num único turno. Só entra em vigor
+// quando quem chama processarTicksDeInicio passa um `contexto` (opt-in
+// — combates antigos sem contexto continuam sem teto, nunca uma
+// mudança silenciosa de balanceamento). Quando o total bruto excede o
+// teto, TODOS os ticks daquele turno são escalados proporcionalmente
+// pra caber nele — nunca corta um status inteiro e deixa outro
+// intacto. Valores iniciais conservadores, ajustáveis sem migração
+// (puro catálogo em memória, como o resto deste arquivo).
+const DOT_TOTAL_MAX_PCT_PER_TURN = {
+  PVE: 50,
+  PARTY: 50,
+  GUILD_BOSS: 40,
+  WORLD_BOSS: 40,
+  PVP_CASUAL: 35,
+  RANKED: 35,
+  TOURNAMENT: 35,
+};
+
 // Tipos de ação que um status de controle pode bloquear (Evolução do
 // Motor de Status §6) — usado por combatController.resolverPermissaoDeAcao
 // em vez de checks espalhados por controller.
@@ -190,6 +212,7 @@ module.exports = {
   MITIGACAO,
   MITIGACAO_DOT_PADRAO,
   STACKS_MAXIMOS,
+  DOT_TOTAL_MAX_PCT_PER_TURN,
   ACTION_TYPE,
   TODAS_ACOES_DE_TURNO,
   CHAVES_VALIDAS,

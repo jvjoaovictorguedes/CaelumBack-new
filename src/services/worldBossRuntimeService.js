@@ -724,6 +724,7 @@ async function processarProximaAcao() {
         lista: statusBoss,
         log: [],
         nomeAlvo: snapshot.nome || "Ameaça Mundial",
+        contexto: "WORLD_BOSS",
       }),
     );
 

@@ -470,6 +470,7 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
       lista: listaJogador,
       log: [],
       nomeAlvo: personagem.nome,
+      contexto: "WORLD_BOSS",
     });
     const morreuNoTick = vidaAntesDoTick > 0 && atacanteEstado.vida_atual <= 0;
 

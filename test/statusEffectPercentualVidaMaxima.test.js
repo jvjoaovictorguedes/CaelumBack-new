@@ -112,6 +112,74 @@ test("aplicarStatus (BLEED/STACK_CAP): empilhar mantém o par potency/percentual
   assert.equal(lista[0].potency, 1);
 });
 
+// ---------------------------------------------------------------------
+// DOT_TOTAL_MAX_PCT_PER_TURN — teto agregado por contexto (Habilidades
+// V2.0 §11/§17)
+// ---------------------------------------------------------------------
+
+test("processarTicksDeInicio: sem contexto, nenhum teto é aplicado (comportamento de sempre)", () => {
+  const vidaFinal = statusEffectService.processarTicksDeInicio({
+    vidaAtual: 1000,
+    vidaMaxima: 1000,
+    defensor: { defesa: 0 },
+    lista: [
+      instancia({ key: "BURN", percentualVidaMaxima: 30 }),
+      instancia({ key: "BLEED", percentualVidaMaxima: 30, stacks: 1 }),
+      instancia({ key: "POISON", percentualVidaMaxima: 30, stacks: 1 }),
+    ],
+    log: [],
+    nomeAlvo: "Alvo",
+  });
+  assert.equal(vidaFinal, 100, "90% de dano bruto aplicado inteiro, sem contexto não há teto");
+});
+
+test("processarTicksDeInicio: com contexto, total ABAIXO do teto não sofre escalonamento algum", () => {
+  const eventos = [];
+  const vidaFinal = statusEffectService.processarTicksDeInicio({
+    vidaAtual: 1000,
+    vidaMaxima: 1000,
+    defensor: { defesa: 0 },
+    lista: [instancia({ key: "BURN", percentualVidaMaxima: 10 }), instancia({ key: "BLEED", percentualVidaMaxima: 10, stacks: 1 })],
+    log: [],
+    nomeAlvo: "Alvo",
+    contexto: "PVE", // teto 50% de 1000 = 500
+    eventos,
+  });
+  // bruto = 100 + 100 = 200, bem abaixo do teto de 500 — sem escalonamento.
+  assert.equal(vidaFinal, 800);
+  assert.equal(eventos.length, 2);
+  assert.deepEqual(eventos.map((e) => e.dano).sort(), [100, 100]);
+});
+
+test("processarTicksDeInicio: teto excedido escala TODOS os ticks proporcionalmente, nunca zera um e deixa outro intacto", () => {
+  const eventos = [];
+  const vidaFinal = statusEffectService.processarTicksDeInicio({
+    vidaAtual: 1000,
+    vidaMaxima: 1000,
+    defensor: { defesa: 0 },
+    lista: [
+      instancia({ key: "BURN", percentualVidaMaxima: 40 }),
+      instancia({ key: "BLEED", percentualVidaMaxima: 40, stacks: 1 }),
+      instancia({ key: "POISON", percentualVidaMaxima: 40, stacks: 1 }),
+    ],
+    log: [],
+    nomeAlvo: "Alvo",
+    contexto: "PVE", // teto 50% de 1000 = 500
+    eventos,
+  });
+  // bruto = 400*3 = 1200; teto 500; fator ≈ 0.41667 — cada tick de 400 vira ~167.
+  assert.equal(eventos.length, 3, "nenhum status foi zerado, todos ticaram (só reduzidos)");
+  const totalAplicado = eventos.reduce((soma, e) => soma + e.dano, 0);
+  // Arredondamento por tick pode passar o teto em no máximo alguns
+  // pontos (3 ticks, no pior caso ~1 unidade de arredondamento cada) —
+  // nunca uma folga grande, que indicaria o escalonamento não rodando.
+  assert.ok(totalAplicado <= 510, `total aplicado (${totalAplicado}) não pode estourar o teto de 500 por mais que o arredondamento explica`);
+  assert.ok(totalAplicado > 490, "escalonamento deve ficar bem próximo do teto, não zerar tudo");
+  assert.equal(vidaFinal, 1000 - totalAplicado);
+  const danos = eventos.map((e) => e.dano);
+  assert.ok(danos.every((d) => d === danos[0]), "os 3 ticks eram idênticos antes do teto, então devem continuar idênticos depois de escalados igualmente");
+});
+
 test("aplicarStatus: instância nova sem percentual (legado puro) continua funcionando como antes", () => {
   let lista = statusEffectService.aplicarStatus([], instancia({ key: "POISON", potency: 4, percentualVidaMaxima: null }));
   lista = statusEffectService.aplicarStatus(lista, instancia({ key: "POISON", potency: 4, percentualVidaMaxima: null }));
