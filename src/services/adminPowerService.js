@@ -11,6 +11,7 @@ const ClassAbilities = require("../models/ClassAbilities");
 const RaceAbilities = require("../models/RaceAbilities");
 const NatureAbilities = require("../models/NatureAbilities");
 const PowerStatusEffect = require("../models/PowerStatusEffect");
+const PowerCombatEffect = require("../models/PowerCombatEffect");
 const WeaponStatusEffect = require("../models/WeaponStatusEffect");
 const CharacterAbilities = require("../models/CharacterAbilities");
 const Class = require("../models/Class");
@@ -29,6 +30,18 @@ require("../controllers/characterController");
 ClassAbilities.belongsTo(Class, { foreignKey: "id_classe" });
 RaceAbilities.belongsTo(Race, { foreignKey: "id_raca" });
 const { CHAVES_VALIDAS, STATUS, STACKS_MAXIMOS } = require("../config/statusEffectConfig");
+const {
+  EFFECT_KEYS,
+  METADADOS_DO_EFEITO,
+  TARGETS,
+  REAPPLY_POLICIES_VALIDAS,
+  effectKeyValida,
+  targetValido,
+  reapplyPolicyValida,
+} = require("../config/combatModifierConfig");
+const { TRIGGERS, DESCRICAO_DO_TRIGGER, triggerValido } = require("../config/combatTriggerConfig");
+const { CONDITIONS, CONFIG_ESPERADA, conditionKeyValida, configBateComContrato } = require("../config/combatConditionConfig");
+const { CONTEXTOS_DE_COMBATE, ROTULO_DO_CONTEXTO } = require("../config/combatContextConfig");
 const { NIVEL_MAXIMO_HABILIDADE, multiplicadorEfeito, multiplicadorCustoMana, marcoDoNivel, custoParaEvoluir } = require("../services/abilityLevelService");
 const { potenciaEsperada } = require("../services/combatEffectResolver");
 const { registrarAcao } = require("./adminAuditService");
@@ -262,6 +275,131 @@ async function removeAdminPowerStatusEffect(idEfeito, { idAdmin, req }) {
   });
 }
 
+// ----------------------------------------------------- POWER COMBAT EFFECT
+// Habilidades V2.0 (doc "Habilidades V2.0" §7/§17) — Fase 4. Mesmo padrão
+// de addAdminPowerStatusEffect/updateAdminPowerStatusEffect acima, só que
+// pra PowerCombatEffect (buffs/debuffs numéricos, escudo, regen,
+// lifesteal, crítico, cura, Mana, cooldown, dispel, gatilho).
+const CAMPOS_COMBAT_EFFECT = [
+  "effect_key",
+  "target",
+  "trigger",
+  "magnitude_base",
+  "scale_attribute",
+  "scale_value",
+  "scale_with_ability_level",
+  "chance_ppm",
+  "duration_turns",
+  "stack_group",
+  "reapply_policy",
+  "max_stacks",
+  "condition_key",
+  "condition_config",
+  "dispellable",
+  "config",
+  "allow_pve",
+  "allow_party",
+  "allow_guild_boss",
+  "allow_world_boss",
+  "allow_pvp_casual",
+  "allow_ranked",
+  "allow_tournament",
+  "ativo",
+];
+
+function validarCombatEffectPayload(dados) {
+  if (dados.effect_key !== undefined && !effectKeyValida(dados.effect_key)) {
+    throw erro(`effect_key "${dados.effect_key}" não existe no catálogo canônico. Válidos: ${EFFECT_KEYS.join(", ")}.`);
+  }
+  if (dados.target !== undefined && !targetValido(dados.target)) {
+    throw erro(`target precisa ser um de: ${TARGETS.join(", ")}.`);
+  }
+  if (dados.trigger !== undefined && !triggerValido(dados.trigger)) {
+    throw erro(`trigger "${dados.trigger}" não existe no catálogo canônico. Válidos: ${TRIGGERS.join(", ")}.`);
+  }
+  if (dados.reapply_policy !== undefined && !reapplyPolicyValida(dados.reapply_policy)) {
+    throw erro(`reapply_policy precisa ser uma de: ${REAPPLY_POLICIES_VALIDAS.join(", ")}.`);
+  }
+  if (dados.scale_attribute != null && !ATRIBUTOS_VALIDOS.includes(dados.scale_attribute)) {
+    throw erro(`scale_attribute precisa ser um de: ${ATRIBUTOS_VALIDOS.join(", ")} (ou null).`);
+  }
+  if (dados.chance_ppm !== undefined && (!Number.isInteger(dados.chance_ppm) || dados.chance_ppm <= 0 || dados.chance_ppm > 1_000_000)) {
+    throw erro("chance_ppm precisa ser um inteiro entre 1 e 1.000.000 (100%).");
+  }
+  if (dados.duration_turns != null && (!Number.isInteger(dados.duration_turns) || dados.duration_turns < 1)) {
+    throw erro("duration_turns precisa ser um inteiro >= 1 (ou null pra sem duração/permanente enquanto a Power valer).");
+  }
+  if (dados.max_stacks != null && (!Number.isInteger(dados.max_stacks) || dados.max_stacks < 1)) {
+    throw erro("max_stacks precisa ser um inteiro >= 1 (ou null).");
+  }
+  if (dados.condition_key != null) {
+    if (!conditionKeyValida(dados.condition_key)) {
+      throw erro(`condition_key "${dados.condition_key}" não existe no catálogo canônico. Válidos: ${CONDITIONS.join(", ")}.`);
+    }
+    if (!configBateComContrato(dados.condition_key, dados.condition_config ?? {})) {
+      const contrato = CONFIG_ESPERADA[dados.condition_key];
+      throw erro(`condition_config precisa ter os campos: ${contrato.campos.join(", ")}.`);
+    }
+  }
+}
+
+async function listAdminPowerCombatEffects(idPower) {
+  return PowerCombatEffect.findAll({ where: { id_power: idPower }, order: [["id", "ASC"]] });
+}
+
+async function addAdminPowerCombatEffect(idPower, payload, { idAdmin, req }) {
+  const dados = somenteCampos(payload, CAMPOS_COMBAT_EFFECT);
+  if (!dados.effect_key) throw erro("effect_key é obrigatório.");
+  validarCombatEffectPayload(dados);
+
+  return sequelize.transaction(async (transaction) => {
+    const power = await Power.findByPk(idPower, { transaction });
+    if (!power) throw erro("Habilidade não encontrada.", 404);
+    const efeito = await PowerCombatEffect.create({ id_power: idPower, ...dados }, { transaction });
+    await registrarAcao({ idAdmin, acao: "criar", entidade: "PowerCombatEffect", idEntidade: efeito.id, dadosDepois: efeito.toJSON(), req, transaction });
+    return efeito;
+  });
+}
+
+async function updateAdminPowerCombatEffect(idEfeito, payload, { idAdmin, req }) {
+  const dados = somenteCampos(payload, CAMPOS_COMBAT_EFFECT);
+  validarCombatEffectPayload(dados);
+
+  return sequelize.transaction(async (transaction) => {
+    const efeito = await PowerCombatEffect.findByPk(idEfeito, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!efeito) throw erro("Efeito não encontrado.", 404);
+    const antes = efeito.toJSON();
+    await efeito.update(dados, { transaction });
+    await registrarAcao({ idAdmin, acao: "editar", entidade: "PowerCombatEffect", idEntidade: efeito.id, dadosAntes: antes, dadosDepois: efeito.toJSON(), req, transaction });
+    return efeito;
+  });
+}
+
+async function removeAdminPowerCombatEffect(idEfeito, { idAdmin, req }) {
+  return sequelize.transaction(async (transaction) => {
+    const efeito = await PowerCombatEffect.findByPk(idEfeito, { transaction });
+    if (!efeito) throw erro("Efeito não encontrado.", 404);
+    const antes = efeito.toJSON();
+    await efeito.destroy({ transaction });
+    await registrarAcao({ idAdmin, acao: "remover", entidade: "PowerCombatEffect", idEntidade: idEfeito, dadosAntes: antes, req, transaction });
+    return { removido: true };
+  });
+}
+
+// §17/§18 — catálogo publicado pro frontend construir o formulário
+// contextual (nunca hardcoded lá); "Potência base" nunca aparece
+// genérico — cada effect_key já vem com label/unidade reais.
+function combatEffectCatalog() {
+  return {
+    effectKeys: EFFECT_KEYS.map((chave) => ({ key: chave, ...METADADOS_DO_EFEITO[chave] })),
+    targets: TARGETS,
+    triggers: TRIGGERS.map((chave) => ({ key: chave, descricao: DESCRICAO_DO_TRIGGER[chave] })),
+    reapplyPolicies: REAPPLY_POLICIES_VALIDAS,
+    conditions: CONDITIONS.map((chave) => ({ key: chave, ...CONFIG_ESPERADA[chave] })),
+    contexts: CONTEXTOS_DE_COMBATE.map((chave) => ({ key: chave, rotulo: ROTULO_DO_CONTEXTO[chave] })),
+  };
+}
+
 // ----------------------------------------------------- WEAPON STATUS EFFECT
 async function listAdminWeaponStatusEffects(idItem) {
   return WeaponStatusEffect.findAll({ where: { id_item: idItem } });
@@ -394,6 +532,11 @@ module.exports = {
   addAdminPowerStatusEffect,
   updateAdminPowerStatusEffect,
   removeAdminPowerStatusEffect,
+  listAdminPowerCombatEffects,
+  addAdminPowerCombatEffect,
+  updateAdminPowerCombatEffect,
+  removeAdminPowerCombatEffect,
+  combatEffectCatalog,
   listAdminWeaponStatusEffects,
   addAdminWeaponStatusEffect,
   updateAdminWeaponStatusEffect,

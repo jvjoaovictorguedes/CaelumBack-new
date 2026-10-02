@@ -57,6 +57,7 @@ const worldBossDiscoveryService = require("../services/worldBossDiscoveryService
 const achievementService = require("../services/achievementService");
 const statusEffectService = require("../services/statusEffectService");
 const combatBuffService = require("../services/combatBuffService");
+const combatModifierService = require("../services/combatModifierService");
 const cooldownService = require("../services/cooldownService");
 const { resolverEfeitosDoUso } = require("../services/combatEffectResolver");
 const { resolverEfeitosDeArmaNoHit } = require("../services/weaponEffectResolver");
@@ -88,6 +89,17 @@ function estadoDeStatusECooldown(inimigoAtual) {
     cooldowns: inimigoAtual.cooldowns ?? { player: {}, enemy: {} },
     combatTurn: (inimigoAtual.combatTurn ?? 0) + 1,
   };
+}
+
+// Habilidades V2.0 §8/§15 — custo de Mana efetivo já com MANA_COST_PCT
+// passivo (PowerCombatEffect) por cima do que abilityLevelService já
+// desconta nos marcos 5/10. Usado nos DOIS lugares que hoje checam/
+// descontam mana (sempre a MESMA conta — ver comentário de
+// combatFormulas.custoManaEfetivo).
+function custoManaComModificadores(power, nivelHabilidade, modificadoresJogador) {
+  return Math.round(
+    custoManaEfetivo(power, nivelHabilidade) * combatModifierService.multiplicadorCustoMana(modificadoresJogador),
+  );
 }
 
 const NOMES_INIMIGOS = [
@@ -689,6 +701,19 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     const multiplicadorDanoTaverna = 1 + (bonusTaverna.PVE_DAMAGE_PCT ?? 0) / 100;
     const multiplicadorDefesaTaverna = 1 - (bonusTaverna.PVE_DEFENSE_PCT ?? 0) / 100;
 
+    // Habilidades V2.0 §7/§9/§26 (Fase 4) — modificadores PASSIVOS de
+    // Powers aprendidas (PowerCombatEffect), resolvidos UMA vez por
+    // turno/ação, nunca por golpe. combatBuffService continua intacto
+    // (buffs temporários de poção, Caldeirão §13) — este mapa é uma
+    // camada ADICIONAL por cima, nunca o substitui. Monstro de PvE não
+    // tem CharacterAbilities (nunca aprende Power), então o mapa dele é
+    // sempre vazio — resolverModificadoresDoPersonagem já trata isso.
+    const modificadoresJogador = await combatModifierService.resolverModificadoresDoPersonagem(
+      personagemAtual,
+      "PVE",
+      { transaction },
+    );
+
     if (personagemAtual.vida_atual <= 0) {
       return res.status(400).json({
         message:
@@ -818,9 +843,14 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
 
       nivelHabilidadeUsada = aprendeu.nivel_habilidade;
 
+      // MANA_COST_PCT passivo (Habilidades V2.0 §8/§15) — "nunca modifica
+      // Power.custo_mana no banco", só o custo EFETIVO desta checagem e
+      // do desconto real abaixo (custoManaComModificadores), sempre a
+      // MESMA conta nos dois lugares (mesmo critério já documentado em
+      // combatFormulas.custoManaEfetivo).
       if (
         personagemAtual.mana_atual <
-        custoManaEfetivo(poderUsado, nivelHabilidadeUsada)
+        custoManaComModificadores(poderUsado, nivelHabilidadeUsada, modificadoresJogador)
       ) {
         return res.status(400).json({
           message: "Mana insuficiente.",
@@ -879,7 +909,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
 
     if (poderUsado) {
       personagemAtual.mana_atual -=
-        custoManaEfetivo(poderUsado, nivelHabilidadeUsada);
+        custoManaComModificadores(poderUsado, nivelHabilidadeUsada, modificadoresJogador);
 
       // Cooldown só entra AGORA — a habilidade já passou por todas as
       // validações e foi consumida como ação válida (§35). Marcado como
@@ -899,13 +929,15 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         );
       // Enfraquecimento (§45) reduz o dano de SAÍDA de quem está com o
       // status, antes de qualquer mitigação do alvo. PVE_DAMAGE_PCT da
-      // Taverna e o buff DANO_SAIDA_PCT (ConsumableEffect
-      // APPLY_COMBAT_BUFF — spec Caldeirão §13) somam no mesmo passo,
-      // POR CIMA.
+      // Taverna, o buff DANO_SAIDA_PCT (ConsumableEffect
+      // APPLY_COMBAT_BUFF — spec Caldeirão §13) e DAMAGE_DEALT_PCT
+      // passivo (Habilidades V2.0 §7, PowerCombatEffect) somam no mesmo
+      // passo, POR CIMA.
       const dano = Math.round(
         danoBase *
           statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.player) *
           combatBuffService.modificadorDeDanoSaida(combatBuffs.player) *
+          combatModifierService.multiplicadorDanoSaida(modificadoresJogador) *
           multiplicadorDanoTaverna,
       );
 
@@ -997,13 +1029,19 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       }
 
       if (cura > 0 && !curaBloqueadaPorEsquiva) {
+        // HEALING_DONE_PCT passivo (Habilidades V2.0 §8/§15) — separado
+        // de HEALING_RECEIVED_PCT (cura recebida de QUALQUER fonte), que
+        // ainda não tem chokepoint único pra entrar (cura vem de Poder
+        // aqui, de item em outro handler) — documentado, não aplicado
+        // silenciosamente em só um dos dois caminhos.
+        const curaEfetiva = Math.round(cura * combatModifierService.multiplicadorCuraFeita(modificadoresJogador));
         personagemAtual.vida_atual = Math.min(
           vidaMaximaEfetiva,
-          personagemAtual.vida_atual + cura
+          personagemAtual.vida_atual + curaEfetiva
         );
 
         log.push(
-          `Você usou ${poderUsado.nome} e recuperou ${cura} de vida.`
+          `Você usou ${poderUsado.nome} e recuperou ${curaEfetiva} de vida.`
         );
       }
     }
@@ -1102,6 +1140,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           calcularDanoBasico(personagemAtual, contextoCriticoAtaque) *
             statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.player) *
             combatBuffService.modificadorDeDanoSaida(combatBuffs.player) *
+            combatModifierService.multiplicadorDanoSaida(modificadoresJogador) *
             multiplicadorDanoTaverna,
         );
         if (contextoCriticoAtaque.critico) criticoJogador = true;
@@ -1489,7 +1528,9 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     // turno do jogador), lido ANTES do decremento de combatBuffs.player
     // (mais abaixo), igual o tick de DoT lê statusEffects.player antes
     // de decrementar.
-    const regenVida = combatBuffService.regenDeVidaDoTurno(combatBuffs.player, vidaMaximaEfetiva);
+    const regenVida =
+      combatBuffService.regenDeVidaDoTurno(combatBuffs.player, vidaMaximaEfetiva) +
+      combatModifierService.regenVidaDoTurno(modificadoresJogador, vidaMaximaEfetiva);
     if (regenVida > 0) {
       const vidaAntesDoRegen = personagemAtual.vida_atual;
       personagemAtual.vida_atual = Math.min(vidaMaximaEfetiva, personagemAtual.vida_atual + regenVida);
@@ -1499,7 +1540,9 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       // de HEAL_HP_FLAT/PERCENT em consumableEffectRegistry.js).
       if (curouDeFato > 0) log.push(`Você regenerou ${curouDeFato} de vida.`);
     }
-    const regenMana = combatBuffService.regenDeManaDoTurno(combatBuffs.player, manaMaximaEfetiva);
+    const regenMana =
+      combatBuffService.regenDeManaDoTurno(combatBuffs.player, manaMaximaEfetiva) +
+      combatModifierService.regenManaDoTurno(modificadoresJogador, manaMaximaEfetiva);
     if (regenMana > 0) {
       const manaAntesDoRegen = personagemAtual.mana_atual;
       personagemAtual.mana_atual = Math.min(manaMaximaEfetiva, personagemAtual.mana_atual + regenMana);
@@ -1630,13 +1673,17 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         // pra esta chamada — nunca altera personagemAtual.defesa de
         // verdade (a mutação de vida_atual abaixo continua usando o
         // objeto real).
-        const defensorComBuffs = combatBuffService.bonusDeDefesa(combatBuffs.player)
-          ? { ...personagemAtual, defesa: (personagemAtual.defesa || 0) + combatBuffService.bonusDeDefesa(combatBuffs.player) }
+        const bonusDefesaTotal =
+          combatBuffService.bonusDeDefesa(combatBuffs.player) + combatModifierService.bonusDefesa(modificadoresJogador);
+        const defensorComBuffs = bonusDefesaTotal
+          ? { ...personagemAtual, defesa: (personagemAtual.defesa || 0) + bonusDefesaTotal }
           : personagemAtual;
         const danoRecebido = Math.max(
           1,
           Math.round(
-            aplicarMitigacaoDeDefesa(danoComCriticoInimigo, defensorComBuffs) * multiplicadorDefesaTaverna,
+            aplicarMitigacaoDeDefesa(danoComCriticoInimigo, defensorComBuffs) *
+              multiplicadorDefesaTaverna *
+              combatModifierService.multiplicadorDanoRecebido(modificadoresJogador),
           ),
         );
         danoRecebidoContraAtaque = danoRecebido;
@@ -1676,7 +1723,16 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
             turno: combatTurn,
           });
           for (const efeito of novosEfeitosDoMonstro) {
-            if (combatBuffService.resolverTentativaDeStatus(combatBuffs.player).resistiu) {
+            // Resistência a Status combina o buff temporário (Caldeirão
+            // §13) com STATUS_RESISTANCE_PCT passivo (Habilidades V2.0
+            // §8), sempre sob o MESMO teto global de 75% — nunca dois
+            // tetos independentes "empilhados" pra além do limite.
+            const chanceResistencia = Math.min(
+              combatBuffService.STATUS_RESISTANCE_MAXIMA,
+              combatBuffService.somaDeAtributo(combatBuffs.player, "STATUS_RESISTANCE_PCT") +
+                combatModifierService.resistenciaStatusPct(modificadoresJogador),
+            );
+            if (chanceResistencia > 0 && Math.random() * 100 < chanceResistencia) {
               log.push(`Você resistiu a ${definicaoDoStatus(efeito.key).nomeUi}!`);
               continue;
             }

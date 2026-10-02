@@ -29,9 +29,19 @@ powersRouter.post("/:id/status-effects", adminPowerController.adicionarStatusEff
 powersRouter.patch("/status-effects/:idEfeito", adminPowerController.atualizarStatusEffect);
 powersRouter.delete("/status-effects/:idEfeito", adminPowerController.removerStatusEffect);
 
+// Habilidades V2.0 (doc "Habilidades V2.0" §7/§17) — Fase 4.
+powersRouter.get("/:id/combat-effects", adminPowerController.listarCombatEffects);
+powersRouter.post("/:id/combat-effects", adminPowerController.adicionarCombatEffect);
+powersRouter.patch("/combat-effects/:idEfeito", adminPowerController.atualizarCombatEffect);
+powersRouter.delete("/combat-effects/:idEfeito", adminPowerController.removerCombatEffect);
+
 const statusEffectsRouter = express.Router();
 statusEffectsRouter.use(authMiddleware, adminMiddleware, requireAdminPermission("powers.manage"));
 statusEffectsRouter.get("/catalog", adminPowerController.catalogoDeStatus);
+
+const combatEffectsRouter = express.Router();
+combatEffectsRouter.use(authMiddleware, adminMiddleware, requireAdminPermission("powers.manage"));
+combatEffectsRouter.get("/catalog", adminPowerController.catalogoDeCombatEffects);
 
 const weaponStatusEffectsRouter = express.Router({ mergeParams: true });
 weaponStatusEffectsRouter.use(authMiddleware, adminMiddleware, requireAdminPermission("items.manage"));
@@ -40,4 +50,4 @@ weaponStatusEffectsRouter.post("/", adminPowerController.adicionarWeaponStatusEf
 weaponStatusEffectsRouter.patch("/:idEfeito", adminPowerController.atualizarWeaponStatusEffect);
 weaponStatusEffectsRouter.delete("/:idEfeito", adminPowerController.removerWeaponStatusEffect);
 
-module.exports = { powersRouter, statusEffectsRouter, weaponStatusEffectsRouter };
+module.exports = { powersRouter, statusEffectsRouter, combatEffectsRouter, weaponStatusEffectsRouter };

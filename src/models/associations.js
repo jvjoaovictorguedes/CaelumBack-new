@@ -656,6 +656,13 @@ Character.hasMany(UniqueFeatClaim, { foreignKey: "id_personagem", as: "proezasCo
 Power.hasOne(UniquePowerEffect, { foreignKey: "id_power", as: "efeitoUnico" });
 UniquePowerEffect.belongsTo(Power, { foreignKey: "id_power" });
 
+// Habilidades V2.0 (doc "Habilidades V2.0" §7) — Fase 4. Uma Power pode
+// ter VÁRIOS PowerCombatEffect (ex.: passiva com +crítico E +lifesteal
+// ao mesmo tempo) — hasMany, diferente do 1:1 de UniquePowerEffect.
+const PowerCombatEffect = require("./PowerCombatEffect");
+Power.hasMany(PowerCombatEffect, { foreignKey: "id_power", as: "efeitosDeCombate" });
+PowerCombatEffect.belongsTo(Power, { foreignKey: "id_power" });
+
 // Painel Administrativo de Músicas — ver spec "Painel Administrativo de
 // Músicas" §3. MusicAssignment/MusicPoolTrackAssignment pertencem a uma
 // MusicConfigVersion (draft/publicada/arquivada); tracks/pools são

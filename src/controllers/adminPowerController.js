@@ -149,6 +149,47 @@ exports.removerStatusEffect = async (req, res) => {
   }
 };
 
+// Power combat effects (Habilidades V2.0 §7/§17 — Fase 4)
+exports.listarCombatEffects = async (req, res) => {
+  try {
+    const efeitos = await adminPowerService.listAdminPowerCombatEffects(req.params.id);
+    res.status(200).json({ status: "success", data: { efeitos } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao listar efeitos de combate.");
+  }
+};
+
+exports.adicionarCombatEffect = async (req, res) => {
+  try {
+    const efeito = await adminPowerService.addAdminPowerCombatEffect(req.params.id, req.body ?? {}, { idAdmin: req.user.id, req });
+    res.status(201).json({ status: "success", data: { efeito } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao adicionar efeito de combate.");
+  }
+};
+
+exports.atualizarCombatEffect = async (req, res) => {
+  try {
+    const efeito = await adminPowerService.updateAdminPowerCombatEffect(req.params.idEfeito, req.body ?? {}, { idAdmin: req.user.id, req });
+    res.status(200).json({ status: "success", data: { efeito } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao atualizar efeito de combate.");
+  }
+};
+
+exports.removerCombatEffect = async (req, res) => {
+  try {
+    const resultado = await adminPowerService.removeAdminPowerCombatEffect(req.params.idEfeito, { idAdmin: req.user.id, req });
+    res.status(200).json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao remover efeito de combate.");
+  }
+};
+
+exports.catalogoDeCombatEffects = async (req, res) => {
+  res.status(200).json({ status: "success", data: { catalogo: adminPowerService.combatEffectCatalog() } });
+};
+
 // Weapon status effects (montado sob /admin/items/:idItem/weapon-status-effects)
 exports.listarWeaponStatusEffects = async (req, res) => {
   try {
