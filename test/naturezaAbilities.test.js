@@ -352,3 +352,106 @@ testeComBanco("comprarPoder: permite comprar normalmente depois de adquirir a Ev
   assert.equal(statusCode, 201, JSON.stringify(corpo));
   assert.equal(corpo.data.dinheiro, 350);
 });
+
+// Bug real reportado pelo jogador: comprarPoder/comprarEvolucao marcavam
+// is_active:true sem checar MAX_HABILIDADES_ATIVAS_COMBATE (5) — um
+// personagem comprando/evoluindo além do limite entrava em combate com
+// mais de 5 poderes Ativos marcados (mesma causa raiz já corrigida uma
+// vez em concederPoderesIniciais/concederHabilidadesDeEvolucao, só que
+// nunca tinha chegado nesses dois call sites). Cria 5 Ativos já
+// marcados pra simular quem já está no teto.
+async function marcarCincoAtivasPreExistentes(idPersonagem) {
+  const linhas = [];
+  for (let i = 0; i < 5; i += 1) {
+    const power = await criarPowerTeste();
+    linhas.push({ id_personagem: idPersonagem, id_power: power.id, level_learned: 1, is_active: true });
+  }
+  await CharacterAbilities.bulkCreate(linhas);
+}
+
+testeComBanco("comprarPoder: nunca fura MAX_HABILIDADES_ATIVAS_COMBATE (5) — o 6º poder Ativo comprado fica is_active:false", async () => {
+  const power = await criarPowerTeste({ tipo_poder: "Ativo" });
+  await NatureAbilities.create({ natureza_magica: "Fogo", id_poder: power.id, nivel_aprendizagem: 1, custo_ouro: 150 });
+
+  const { personagem } = await criarPersonagem({ nivel: 50 });
+  await marcarCincoAtivasPreExistentes(personagem.id);
+  const personagemDb = await Character.findByPk(personagem.id);
+  personagemDb.dinheiro = 500;
+  await personagemDb.save();
+
+  const chamada = reqRes({ id: personagem.id, idPower: power.id }, {});
+  await characterController.comprarPoder(chamada.req, chamada.res);
+  const { statusCode, corpo } = chamada.resultado();
+  assert.equal(statusCode, 201, JSON.stringify(corpo));
+
+  const ability = await CharacterAbilities.findOne({ where: { id_personagem: personagem.id, id_power: power.id } });
+  assert.equal(ability.is_active, false, "sem vaga livre — compra tem que entrar inativa, nunca furar o limite");
+
+  const totalAtivos = await CharacterAbilities.count({
+    where: { id_personagem: personagem.id, is_active: true },
+    include: [{ model: Power, attributes: [], where: { tipo_poder: "Ativo" } }],
+  });
+  assert.equal(totalAtivos, 5, "nunca pode passar de 5 Ativos marcados, mesmo depois da compra");
+});
+
+testeComBanco("comprarPoder: poder Passivo comprado fica sempre is_active, mesmo com os 5 Ativos já ocupados (Passivo nunca entra nessa conta)", async () => {
+  const power = await criarPowerTeste({ tipo_poder: "Passivo" });
+  await NatureAbilities.create({ natureza_magica: "Fogo", id_poder: power.id, nivel_aprendizagem: 1, custo_ouro: 150 });
+
+  const { personagem } = await criarPersonagem({ nivel: 50 });
+  await marcarCincoAtivasPreExistentes(personagem.id);
+  const personagemDb = await Character.findByPk(personagem.id);
+  personagemDb.dinheiro = 500;
+  await personagemDb.save();
+
+  const chamada = reqRes({ id: personagem.id, idPower: power.id }, {});
+  await characterController.comprarPoder(chamada.req, chamada.res);
+  const { statusCode } = chamada.resultado();
+  assert.equal(statusCode, 201);
+
+  const ability = await CharacterAbilities.findOne({ where: { id_personagem: personagem.id, id_power: power.id } });
+  assert.equal(ability.is_active, true, "Passivo é sempre ativo, nunca disputa vaga com os Ativos");
+});
+
+testeComBanco("comprarEvolucao: nunca fura MAX_HABILIDADES_ATIVAS_COMBATE — poder Ativo concedido pela evolução fica is_active:false sem vaga", async () => {
+  const power = await criarPowerTeste({ tipo_poder: "Ativo" });
+  const { personagem } = await criarPersonagem({ nivel: 50 });
+  const evolucao = await criarEvolucaoQueConcede(personagem, power, { nivel_necessario: 1 });
+  await marcarCincoAtivasPreExistentes(personagem.id);
+  const personagemDb = await Character.findByPk(personagem.id);
+  personagemDb.dinheiro = 500;
+  await personagemDb.save();
+
+  const chamada = reqRes({ id: personagem.id, evolutionId: evolucao.id }, {});
+  await characterController.comprarEvolucao(chamada.req, chamada.res);
+  const { statusCode, corpo } = chamada.resultado();
+  assert.equal(statusCode, 200, JSON.stringify(corpo));
+
+  const ability = await CharacterAbilities.findOne({ where: { id_personagem: personagem.id, id_power: power.id } });
+  assert.ok(ability, "evolução tem que ter concedido o poder mesmo sem vaga ativa");
+  assert.equal(ability.is_active, false, "sem vaga livre — poder da evolução entra inativo, nunca fura o limite");
+
+  const totalAtivos = await CharacterAbilities.count({
+    where: { id_personagem: personagem.id, is_active: true },
+    include: [{ model: Power, attributes: [], where: { tipo_poder: "Ativo" } }],
+  });
+  assert.equal(totalAtivos, 5, "nunca pode passar de 5 Ativos marcados, mesmo depois da evolução");
+});
+
+testeComBanco("comprarEvolucao: poder Passivo concedido pela evolução fica sempre is_active, mesmo com os 5 Ativos já ocupados", async () => {
+  const power = await criarPowerTeste({ tipo_poder: "Passivo" });
+  const { personagem } = await criarPersonagem({ nivel: 50 });
+  const evolucao = await criarEvolucaoQueConcede(personagem, power, { nivel_necessario: 1 });
+  await marcarCincoAtivasPreExistentes(personagem.id);
+  const personagemDb = await Character.findByPk(personagem.id);
+  personagemDb.dinheiro = 500;
+  await personagemDb.save();
+
+  const chamada = reqRes({ id: personagem.id, evolutionId: evolucao.id }, {});
+  await characterController.comprarEvolucao(chamada.req, chamada.res);
+  const { statusCode } = chamada.resultado();
+  assert.equal(statusCode, 200);
+
+  const ability = await CharacterAbilities.findOne({ where: { id_personagem: personagem.id, id_power: power.id } });
+  assert.equal(ability.is_active, true, "Passivo concedido por evolução é sempre ativo");
+});

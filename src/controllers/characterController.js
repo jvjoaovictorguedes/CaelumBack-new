@@ -1098,12 +1098,29 @@ exports.comprarPoder = async (req, res) => {
       character.dinheiro -= custoOuro;
       await character.save({ transaction });
 
+      // Bug real reportado: comprar um poder Ativo aqui marcava
+      // is_active:true sem checar MAX_HABILIDADES_ATIVAS_COMBATE (5) —
+      // um personagem comprando poderes além do limite entrava em
+      // combate com mais de 5 marcados, mesma causa raiz já corrigida
+      // em concederPoderesIniciais/concederHabilidadesDeEvolucao (ver
+      // comentário ali). Passivo nunca entra nessa conta (sempre ativo).
+      const poderComprado = await Power.findByPk(idPower, { transaction });
+      let podeAtivar = true;
+      if (poderComprado?.tipo_poder === "Ativo") {
+        const jaAtivas = await CharacterAbilities.count({
+          where: { id_personagem: character.id, is_active: true },
+          include: [{ model: Power, attributes: [], where: { tipo_poder: "Ativo" } }],
+          transaction,
+        });
+        podeAtivar = jaAtivas < MAX_HABILIDADES_ATIVAS_COMBATE;
+      }
+
       const characterAbility = await CharacterAbilities.create(
         {
           id_personagem: character.id,
           id_power: idPower,
           level_learned: nivelNecessario,
-          is_active: true,
+          is_active: podeAtivar,
         },
         { transaction },
       );
@@ -1273,13 +1290,28 @@ exports.comprarEvolucao = async (req, res) => {
       );
 
       if (evolucao.id_power_concedido) {
+        // Mesmo bug/mesma correção de comprarPoder acima: um poder Ativo
+        // concedido por Evolução de Natureza/Classe nunca pode furar
+        // MAX_HABILIDADES_ATIVAS_COMBATE (5). Passivo fica de fora da
+        // conta (sempre ativo).
+        const poderConcedido = await Power.findByPk(evolucao.id_power_concedido, { transaction });
+        let podeAtivar = true;
+        if (poderConcedido?.tipo_poder === "Ativo") {
+          const jaAtivas = await CharacterAbilities.count({
+            where: { id_personagem: character.id, is_active: true },
+            include: [{ model: Power, attributes: [], where: { tipo_poder: "Ativo" } }],
+            transaction,
+          });
+          podeAtivar = jaAtivas < MAX_HABILIDADES_ATIVAS_COMBATE;
+        }
+
         await CharacterAbilities.findOrCreate({
           where: { id_personagem: character.id, id_power: evolucao.id_power_concedido },
           defaults: {
             id_personagem: character.id,
             id_power: evolucao.id_power_concedido,
             level_learned: character.nivel,
-            is_active: true,
+            is_active: podeAtivar,
           },
           transaction,
         });
