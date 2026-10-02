@@ -13,8 +13,6 @@ const User = require("../src/models/User");
 const GameSetting = require("../src/models/GameSetting");
 const GuildLevelConfig = require("../src/models/GuildLevelConfig");
 const GuildBossConfig = require("../src/models/GuildBossConfig");
-const GuildBossAbility = require("../src/models/GuildBossAbility");
-const Power = require("../src/models/Power");
 
 const guildSettingsService = require("../src/services/guildSettingsService");
 const adminGuildService = require("../src/services/adminGuildService");
@@ -49,24 +47,6 @@ async function criarUsuarioAdmin() {
 
 const nivelDeTesteCriado = [];
 const bossesCriados = [];
-const powersCriados = [];
-
-async function criarPowerDeTeste(overrides = {}) {
-  const power = await Power.create({
-    nome: `Power Teste Boss Guilda ${sufixo()}`,
-    descricao: "teste",
-    tipo_poder: "Ativo",
-    custo_mana: 0,
-    dano_base: 50,
-    escala_atributo: "Forca",
-    valor_escala: 1,
-    tipo_dano: "Fisico",
-    cooldown: 2,
-    ...overrides,
-  });
-  powersCriados.push(power.id);
-  return power;
-}
 
 test.after(async () => {
   if (!temBanco) return;
@@ -75,11 +55,7 @@ test.after(async () => {
   // (node --test).
   await GameSetting.destroy({ where: { chave: guildSettingsService.GRUPOS } });
   if (nivelDeTesteCriado.length > 0) await GuildLevelConfig.destroy({ where: { nivel: nivelDeTesteCriado } });
-  if (bossesCriados.length > 0) {
-    await GuildBossAbility.destroy({ where: { id_guild_boss_config: bossesCriados } });
-    await GuildBossConfig.destroy({ where: { id: bossesCriados } });
-  }
-  if (powersCriados.length > 0) await Power.destroy({ where: { id: powersCriados } });
+  if (bossesCriados.length > 0) await GuildBossConfig.destroy({ where: { id: bossesCriados } });
   await sequelize.close();
 });
 
@@ -228,93 +204,4 @@ testeComBanco("boss: criarBoss valida rank, impede duplicata e atualizarBoss edi
   const editado = await adminGuildService.atualizarBoss(boss.id, { vida_total: 750000 }, { idAdmin: admin.id });
   assert.equal(editado.vida_total, 750000);
   assert.equal(editado.rank, "S", "editar outro campo não deveria mexer no rank");
-});
-
-// ------------------------------------------------ HABILIDADES DO BOSS
-// Pedido do dono do projeto: Boss da Guilda ganha habilidades "igual
-// no Boss Mundial" — mesmo padrão de WorldBossAbility (vínculo Boss ->
-// Power reutilizado). Testes cobrem só a camada admin (CRUD +
-// validação); a seleção/telegraph em combate é testada em
-// bossAbilityAiService.test.js (puro) e guildBossLiveBattle.test.js
-// (socket).
-testeComBanco("habilidades do boss: criarHabilidadeBoss valida tipo_alvo/id_power e listarHabilidadesBoss filtra por boss", async () => {
-  const admin = await criarUsuarioAdmin();
-  const power = await criarPowerDeTeste();
-  const boss = await adminGuildService.criarBoss(
-    { rank: "A", nome_chefe: `Chefe Habilidade ${sufixo()}`, descricao: "teste", vida_total: 100000, janela_horas: 24 },
-    { idAdmin: admin.id },
-  );
-  bossesCriados.push(boss.id);
-
-  await assert.rejects(
-    () => adminGuildService.criarHabilidadeBoss(boss.id, { id_power: power.id, tipo_alvo: "TIPO_INVALIDO" }, { idAdmin: admin.id }),
-    (erro) => {
-      assert.equal(erro.statusCode, 400);
-      assert.match(erro.message, /tipo_alvo/);
-      return true;
-    },
-  );
-
-  await assert.rejects(
-    () => adminGuildService.criarHabilidadeBoss(boss.id, { id_power: 999999999, tipo_alvo: "ALEATORIO" }, { idAdmin: admin.id }),
-    (erro) => {
-      assert.equal(erro.statusCode, 404);
-      return true;
-    },
-  );
-
-  const habilidade = await adminGuildService.criarHabilidadeBoss(
-    boss.id,
-    { id_power: power.id, tipo_alvo: "MENOR_VIDA", peso_uso: 3, prioridade: 1, tempo_conjuracao_ms: 1500, cooldown_rodadas_override: 4 },
-    { idAdmin: admin.id },
-  );
-  assert.equal(habilidade.id_guild_boss_config, boss.id);
-  assert.equal(habilidade.tipo_alvo, "MENOR_VIDA");
-  assert.equal(habilidade.ativo, true, "ativo default precisa ser true");
-
-  const outroBoss = await adminGuildService.criarBoss(
-    { rank: "C", nome_chefe: `Outro Chefe ${sufixo()}`, descricao: "teste", vida_total: 100000, janela_horas: 24 },
-    { idAdmin: admin.id },
-  );
-  bossesCriados.push(outroBoss.id);
-
-  const listaDoBoss = await adminGuildService.listarHabilidadesBoss(boss.id);
-  assert.equal(listaDoBoss.length, 1);
-  assert.equal(listaDoBoss[0].id, habilidade.id);
-
-  const listaDoOutro = await adminGuildService.listarHabilidadesBoss(outroBoss.id);
-  assert.equal(listaDoOutro.length, 0, "habilidade de um boss não pode aparecer na listagem de outro");
-});
-
-testeComBanco("habilidades do boss: atualizarHabilidadeBoss edita parcialmente e excluirHabilidadeBoss remove de verdade", async () => {
-  const admin = await criarUsuarioAdmin();
-  const power = await criarPowerDeTeste();
-  const boss = await adminGuildService.criarBoss(
-    { rank: "B", nome_chefe: `Chefe Edicao ${sufixo()}`, descricao: "teste", vida_total: 100000, janela_horas: 24 },
-    { idAdmin: admin.id },
-  );
-  bossesCriados.push(boss.id);
-
-  const habilidade = await adminGuildService.criarHabilidadeBoss(
-    boss.id,
-    { id_power: power.id, tipo_alvo: "ALEATORIO", peso_uso: 1, prioridade: 0 },
-    { idAdmin: admin.id },
-  );
-
-  const editada = await adminGuildService.atualizarHabilidadeBoss(habilidade.id, { prioridade: 9, tipo_alvo: "TODOS" }, { idAdmin: admin.id });
-  assert.equal(editada.prioridade, 9);
-  assert.equal(editada.tipo_alvo, "TODOS");
-  assert.equal(editada.id_power, power.id, "campo não enviado no patch precisa permanecer intacto");
-
-  await adminGuildService.excluirHabilidadeBoss(habilidade.id, { idAdmin: admin.id });
-  const listaDepois = await adminGuildService.listarHabilidadesBoss(boss.id);
-  assert.equal(listaDepois.length, 0, "excluir precisa remover de verdade (não é soft-delete aqui — habilidade de boss não aparece em nenhuma outra tela)");
-
-  await assert.rejects(
-    () => adminGuildService.atualizarHabilidadeBoss(habilidade.id, { prioridade: 1 }, { idAdmin: admin.id }),
-    (erro) => {
-      assert.equal(erro.statusCode, 404);
-      return true;
-    },
-  );
 });

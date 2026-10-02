@@ -150,14 +150,49 @@ function resolverDanoBasico({ snapshot, fase, furiaPct, alvoBase, alvoDefesa }) 
 // habilidade volta a ficar elegível (threshold fixo), não um contador
 // decrescente — sobrevive a um restart sem precisar decrementar nada a
 // cada tick (§9.1), e casa com o resto do runtime_state (tudo aqui é
-// "quando" já persistido, nunca "quanto falta"). A seleção em si
-// (cooldownDaHabilidade/habilidadeDisponivel/habilidadesElegiveis/
-// escolherHabilidade) mora em bossAbilityAiService.js — extraída pra
-// ser reaproveitada pelo Boss da Guilda, nunca uma segunda cópia.
-const { habilidadesElegiveis, escolherHabilidade, cooldownDaHabilidade } = require("./bossAbilityAiService");
+// "quando" já persistido, nunca "quanto falta").
+function cooldownDaHabilidade(ability) {
+  return ability.cooldown_override ?? ability.power_snapshot?.cooldown ?? 0;
+}
 
 function custoManaDaHabilidade(ability) {
   return custoManaEfetivo(ability.power_snapshot, 1);
+}
+
+function habilidadeDisponivel(cooldowns, ability, bossActionSeqDaAcao) {
+  const threshold = cooldowns?.[String(ability.id_ability)];
+  return !threshold || bossActionSeqDaAcao >= threshold;
+}
+
+// §6.3 passos 2/3 — fases_permitidas guarda id de WorldBossPhase (não
+// ordem); só bate com faseId se o snapshot tiver congelado esse id em
+// cada fase (worldBossLifecycleService.montarSnapshot). NULL/vazio =
+// elegível em toda fase.
+function habilidadesElegiveis(abilities, { faseId, manaAtual, cooldowns, bossActionSeqDaAcao }) {
+  return (abilities || []).filter((ability) => {
+    if (!ability.power_snapshot) return false;
+    if (Array.isArray(ability.fases_permitidas) && ability.fases_permitidas.length > 0 && !ability.fases_permitidas.includes(faseId)) {
+      return false;
+    }
+    if (!habilidadeDisponivel(cooldowns, ability, bossActionSeqDaAcao)) return false;
+    if (custoManaDaHabilidade(ability) > manaAtual) return false;
+    return true;
+  });
+}
+
+// §6.3 passo 4 — só concorrem entre si as de MAIOR prioridade elegível;
+// o sorteio por peso_uso decide só entre essas, nunca entre todas.
+function escolherHabilidade(elegiveis) {
+  if (elegiveis.length === 0) return null;
+  const maiorPrioridade = Math.max(...elegiveis.map((a) => a.prioridade || 0));
+  const candidatas = elegiveis.filter((a) => (a.prioridade || 0) === maiorPrioridade);
+  const pesoTotal = candidatas.reduce((soma, a) => soma + Math.max(1, a.peso_uso || 1), 0);
+  let alvo = Math.random() * pesoTotal;
+  for (const candidata of candidatas) {
+    alvo -= Math.max(1, candidata.peso_uso || 1);
+    if (alvo < 0) return candidata;
+  }
+  return candidatas[candidatas.length - 1];
 }
 
 // §6.4 — seleção de alvo sempre no SERVIDOR, nunca aceita do cliente.
@@ -553,7 +588,7 @@ async function processarProximaAcao() {
         faseId: fase.id,
         manaAtual,
         cooldowns: cooldownsAtuais,
-        sequenciaDaAcao: bossActionSeqDaAcao,
+        bossActionSeqDaAcao,
       });
       abilityEscolhida = escolherHabilidade(elegiveis);
     }
