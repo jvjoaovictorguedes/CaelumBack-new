@@ -32,6 +32,7 @@ const { sortearMonstroDaZona } = require("../services/adventureRollService");
 const { persistirEstadoFinalDoMembro, calcularPenalidadeDiferencaNivel } = require("../services/partyBattleService");
 const { registrarProgressoContrato } = require("../services/adventureGuildObjectiveService");
 const { custoManaEfetivo } = require("../services/combatFormulas");
+const combatModifierService = require("../services/combatModifierService");
 const {
   online,
   chaveOnline,
@@ -727,6 +728,16 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
   const atacante = batalha.membros.get(characterId);
   batalha.contadorTurno += 1;
 
+  // Habilidades V2.0 §7/§9/§11/§26 (Fase 5) — modificadores PASSIVOS do
+  // aliado que agiu, mesmo contexto PARTY do teto de DoT. O monstro
+  // nunca tem CharacterAbilities — resolverModificadoresDoPersonagem só
+  // é chamado pro lado que É de verdade um Character, igual ao PvE
+  // solo nunca resolve isso pro inimigo.
+  const modificadoresAtacante = await combatModifierService.resolverModificadoresDoPersonagem(
+    atacante.estado,
+    "PARTY",
+  );
+
   // Motor de Status (Evolução do Motor de Status) — mesma engrenagem do
   // Duelo ao vivo/PvE solo: ticks de DoT no FIM do turno de quem agiu
   // (nunca na hora do golpe que aplicou o status), bloqueio de ação por
@@ -760,6 +771,7 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
     itemIdArmaAtacante: atacante.estado.arma_equipada?.id_item ?? null,
     nomeAtacante: atacante.nome,
     nomeDefensor: batalha.inimigo.nome,
+    modificadoresAtacante,
   });
   atacante.status = statusAtacante;
   batalha.inimigo.status = statusDefensor;
@@ -907,6 +919,12 @@ async function executarTurnoMonstro(io, battleId) {
   const alvo = vivos[Math.floor(Math.random() * vivos.length)];
   batalha.contadorTurno += 1;
 
+  // Habilidades V2.0 §7/§9/§11/§26 (Fase 5) — modificadores PASSIVOS do
+  // membro que está sendo atacado (defensor aqui), mesmo critério de
+  // executarTurnoAliado acima: só resolvido pro lado que é um Character
+  // de verdade.
+  const modificadoresDefensor = await combatModifierService.resolverModificadoresDoPersonagem(alvo.estado, "PARTY");
+
   // Mesmo motor de executarTurnoAliado, agora do lado do monstro —
   // `efeitosDeStatusAtacante` é o catálogo configurado no admin (ideia
   // #3 da fila de melhorias), rolado igual ao proc de arma do jogador:
@@ -937,6 +955,7 @@ async function executarTurnoMonstro(io, battleId) {
     efeitosDeStatusAtacante: batalha.inimigo.efeitosDeStatus,
     nomeAtacante: batalha.inimigo.nome,
     nomeDefensor: alvo.nome,
+    modificadoresDefensor,
   });
   batalha.inimigo.status = statusAtacante;
   alvo.status = statusDefensor;

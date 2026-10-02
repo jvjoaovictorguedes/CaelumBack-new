@@ -25,6 +25,26 @@ const {
   EFFECT_KEYS_DE_MANA,
 } = require("./consumableEffectRegistry");
 const combatBuffService = require("./combatBuffService");
+const combatModifierService = require("./combatModifierService");
+
+// Habilidades V2.0 §7/§9/§26 (Fase 5) — combina a resistência a status
+// do buff temporário (Caldeirão §13) com STATUS_RESISTANCE_PCT passivo
+// (PowerCombatEffect), sob o MESMO teto global de 75%, exatamente como
+// combatController.js (PvE) já faz pro jogador — nunca dois tetos
+// independentes "empilhados" além do limite. `modificadoresDefensor`
+// default vazio faz esta função se comportar como
+// combatBuffService.resolverTentativaDeStatus de sempre pra quem ainda
+// não resolveu modificadores (nenhum chamador existente muda de
+// comportamento sem passar o Map).
+function resistiuAoStatus(buffsDefensor, modificadoresDefensor) {
+  const chance = Math.min(
+    combatBuffService.STATUS_RESISTANCE_MAXIMA,
+    combatBuffService.somaDeAtributo(buffsDefensor, "STATUS_RESISTANCE_PCT") +
+      combatModifierService.resistenciaStatusPct(modificadoresDefensor ?? new Map()),
+  );
+  if (chance <= 0) return false;
+  return Math.random() * 100 < chance;
+}
 
 // acao: { tipo: "attack" }, { tipo: "power", power: <Power> } ou
 // { tipo: "item", item: <Item>, efeito: <ConsumableProperties>,
@@ -69,6 +89,14 @@ function aplicarAcao({
   // `novoEscudoDefensor`, já descontado).
   escudoAtacante = null,
   escudoDefensor = null,
+  // Habilidades V2.0 §7/§9/§26 (Fase 5) — modificadores PASSIVOS de
+  // Powers aprendidas (PowerCombatEffect), resolvidos UMA vez por turno
+  // por quem chama (resolverTurnoComStatus), mesma convenção de
+  // combatController.js (PvE): Map vazio default faz esta função se
+  // comportar EXATAMENTE como antes pra todo chamador que ainda não
+  // resolveu modificadores (pvpController async legado, testes antigos).
+  modificadoresAtacante = new Map(),
+  modificadoresDefensor = new Map(),
 }) {
   let dano = 0;
   let cura = 0;
@@ -79,10 +107,12 @@ function aplicarAcao({
   let novosBuffsAtacante = buffsAtacante;
   let novoEscudoAtacante = escudoAtacante;
   let novoEscudoDefensor = escudoDefensor;
-  const bonusDefesaDefensor = combatBuffService.bonusDeDefesa(buffsDefensor);
+  const bonusDefesaDefensor =
+    combatBuffService.bonusDeDefesa(buffsDefensor) + combatModifierService.bonusDefesa(modificadoresDefensor);
   const defensorComBuffs = bonusDefesaDefensor
     ? { ...defensor, defesa: (defensor.defesa || 0) + bonusDefesaDefensor }
     : defensor;
+  const multiplicadorDanoRecebido = combatModifierService.multiplicadorDanoRecebido(modificadoresDefensor);
   // Precisão/Crítico (Velocidade) — mesmo `contexto` opcional de
   // combatFormulas.calcularDanoBasico/calcularEfeitoPoder, pra quem
   // chama (resolverTurnoComStatus, abaixo, e por tabela pvpController/
@@ -97,7 +127,10 @@ function aplicarAcao({
     const contextoCritico = {};
     const efeito = calcularEfeitoPoder(acao.power, atacante, nivelHabilidade, contextoCritico);
     dano = Math.round(efeito.dano * multiplicadorDano);
-    cura = efeito.cura;
+    // HEALING_DONE_PCT passivo (Habilidades V2.0 §8/§15) — mesmo ponto
+    // de combatController.js (PvE): só a cura de Power, nunca a de item
+    // (resolvida fora daqui, no registry).
+    cura = Math.round(efeito.cura * combatModifierService.multiplicadorCuraFeita(modificadoresAtacante));
     critico = Boolean(contextoCritico.critico);
   } else if (acao.tipo === "item" && acao.efeito) {
     // Consumível como ação de duelo — consome o turno igual um ataque ou
@@ -189,11 +222,13 @@ function aplicarAcao({
       const danoBase = Math.round(calcularDanoBasico(atacante, contextoCritico) * multiplicadorDano);
       critico = Boolean(contextoCritico.critico);
       dano = aplicarMitigacaoDeDefesa(danoBase, defensorComBuffs);
+      dano = Math.max(1, Math.round(dano * multiplicadorDanoRecebido));
       const absorcao1 = combatBuffService.absorverDano(novoEscudoDefensor, dano);
       novoEscudoDefensor = absorcao1.escudo;
       defensor.vida_atual = Math.max(0, defensor.vida_atual - absorcao1.danoResidual);
     } else {
       dano = aplicarMitigacaoDeDefesa(dano, defensorComBuffs);
+      dano = Math.max(1, Math.round(dano * multiplicadorDanoRecebido));
       const absorcao2 = combatBuffService.absorverDano(novoEscudoDefensor, dano);
       novoEscudoDefensor = absorcao2.escudo;
       defensor.vida_atual = Math.max(0, defensor.vida_atual - absorcao2.danoResidual);
@@ -281,6 +316,14 @@ async function resolverTurnoComStatus({
   efeitosDeStatusAtacante,
   nomeAtacante,
   nomeDefensor,
+  // Habilidades V2.0 §7/§9/§11/§26 (Fase 5) — modificadores PASSIVOS de
+  // Powers aprendidas, resolvidos uma vez por turno/ação por QUEM CHAMA
+  // (combatModifierService.resolverModificadoresDoPersonagem, mesmo
+  // contexto PVP_CASUAL/PARTY usado no tick de DoT abaixo) e passados
+  // prontos. Map vazio default — nenhum chamador existente muda de
+  // comportamento sem resolver e passar os modificadores de verdade.
+  modificadoresAtacante = new Map(),
+  modificadoresDefensor = new Map(),
 }) {
   const log = [];
   let listaAtacante = statusAtacante;
@@ -358,15 +401,19 @@ async function resolverTurnoComStatus({
     manaMaxAtacante,
     blindPotency: blindDoAtacante?.potency ?? 0,
     // DANO_SAIDA_PCT (ConsumableEffect APPLY_COMBAT_BUFF — spec
-    // Caldeirão §13) soma no mesmo passo que Enfraquecimento, igual ao
-    // PvE em combatController.js.
+    // Caldeirão §13) soma no mesmo passo que Enfraquecimento e o
+    // DAMAGE_DEALT_PCT passivo (Habilidades V2.0 §7/§9), igual ao PvE em
+    // combatController.js.
     multiplicadorDano:
       statusEffectService.multiplicadorDeDanoDeSaida(listaAtacante) *
-      combatBuffService.modificadorDeDanoSaida(buffsAtacante),
+      combatBuffService.modificadorDeDanoSaida(buffsAtacante) *
+      combatModifierService.multiplicadorDanoSaida(modificadoresAtacante),
     buffsAtacante,
     buffsDefensor,
     escudoAtacante,
     escudoDefensor,
+    modificadoresAtacante,
+    modificadoresDefensor,
   });
   let listaBuffsAtacante = resultado.novosBuffsAtacante ?? buffsAtacante;
   let escudoAtacanteAtual = resultado.novoEscudoAtacante ?? escudoAtacante;
@@ -389,7 +436,7 @@ async function resolverTurnoComStatus({
     // tentativa de status, igual ao PvE em combatController.js: resolve
     // ANTES de aplicar, nunca depois.
     for (const efeito of efeitosNoInimigo) {
-      if (combatBuffService.resolverTentativaDeStatus(buffsDefensor).resistiu) {
+      if (resistiuAoStatus(buffsDefensor, modificadoresDefensor)) {
         log.push(`${nomeDefensor} resistiu a ${definicaoDoStatus(efeito.key).nomeUi}!`);
         continue;
       }
@@ -406,7 +453,7 @@ async function resolverTurnoComStatus({
         turno,
       });
       for (const efeito of novosEfeitosDeArma) {
-        if (combatBuffService.resolverTentativaDeStatus(buffsDefensor).resistiu) {
+        if (resistiuAoStatus(buffsDefensor, modificadoresDefensor)) {
           log.push(`${nomeDefensor} resistiu ao efeito da arma de ${nomeAtacante}!`);
           continue;
         }
@@ -427,7 +474,7 @@ async function resolverTurnoComStatus({
         turno,
       });
       for (const efeito of novosEfeitosDeMonstro) {
-        if (combatBuffService.resolverTentativaDeStatus(buffsDefensor).resistiu) {
+        if (resistiuAoStatus(buffsDefensor, modificadoresDefensor)) {
           log.push(`${nomeDefensor} resistiu ao efeito de ${nomeAtacante}!`);
           continue;
         }
@@ -467,7 +514,10 @@ async function resolverTurnoComStatus({
   // turno do atacante), lido ANTES do decremento de listaBuffsAtacante
   // logo abaixo.
   if (!morteAoFimDoTurno) {
-    const regenVida = combatBuffService.regenDeVidaDoTurno(listaBuffsAtacante, vidaMaxAtacante ?? atacante.vida_atual);
+    const vidaMaximaParaRegen = vidaMaxAtacante ?? atacante.vida_atual;
+    const regenVida =
+      combatBuffService.regenDeVidaDoTurno(listaBuffsAtacante, vidaMaximaParaRegen) +
+      combatModifierService.regenVidaDoTurno(modificadoresAtacante, vidaMaximaParaRegen);
     if (regenVida > 0) {
       const vidaAntesDoRegen = atacante.vida_atual;
       const tetoVida = vidaMaxAtacante ?? atacante.vida_atual + regenVida;
@@ -477,7 +527,10 @@ async function resolverTurnoComStatus({
       // 10" seria enganoso (mesmo critério de HEAL_HP_FLAT/PERCENT).
       if (curouDeFato > 0) log.push(`${nomeAtacante} regenerou ${curouDeFato} de vida.`);
     }
-    const regenMana = combatBuffService.regenDeManaDoTurno(listaBuffsAtacante, manaMaxAtacante ?? atacante.mana_atual);
+    const manaMaximaParaRegen = manaMaxAtacante ?? atacante.mana_atual;
+    const regenMana =
+      combatBuffService.regenDeManaDoTurno(listaBuffsAtacante, manaMaximaParaRegen) +
+      combatModifierService.regenManaDoTurno(modificadoresAtacante, manaMaximaParaRegen);
     if (regenMana > 0) {
       const manaAntesDoRegen = atacante.mana_atual;
       const tetoMana = manaMaxAtacante ?? atacante.mana_atual + regenMana;

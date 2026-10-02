@@ -61,6 +61,7 @@ const { EVENT_STATUS, COMBAT_SESSION_STATUS, GAME_SETTINGS_DEFAULT } = require("
 const gameSettingCache = require("./gameSettingCache");
 const uniqueFeatService = require("./uniqueFeatService");
 const uniqueFeatPublicService = require("./uniqueFeatPublicService");
+const combatModifierService = require("./combatModifierService");
 
 function erro(mensagem, statusCode = 400) {
   return Object.assign(new Error(mensagem), { statusCode });
@@ -415,6 +416,16 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
     }
     const efeitosNoBoss = efeitosConfigurados.filter((e) => e.target && e.target !== "Self");
 
+    // Habilidades V2.0 §7/§9/§11/§26 (Fase 5) — modificadores PASSIVOS
+    // do jogador (DAMAGE_DEALT_PCT/HEALING_DONE_PCT), mesmo contexto
+    // WORLD_BOSS do teto de DoT. O boss nunca tem CharacterAbilities,
+    // então nunca é resolvido aqui (mesmo critério do §2 acima: zero
+    // modificadores "de graça" pro boss).
+    const modificadoresJogador = await combatModifierService.resolverModificadoresDoPersonagem(
+      atacanteEstado,
+      "WORLD_BOSS",
+    );
+
     const blindDoJogador = listaJogador.find((s) => s.key === "BLIND");
     const resultado = aplicarAcao({
       atacante: atacanteEstado,
@@ -423,7 +434,10 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
       vidaMaxAtacante: vidaMax,
       manaMaxAtacante: manaMax,
       blindPotency: blindDoJogador?.potency ?? 0,
-      multiplicadorDano: statusEffectService.multiplicadorDeDanoDeSaida(listaJogador),
+      multiplicadorDano:
+        statusEffectService.multiplicadorDeDanoDeSaida(listaJogador) *
+        combatModifierService.multiplicadorDanoSaida(modificadoresJogador),
+      modificadoresAtacante: modificadoresJogador,
     });
 
     const hpDepois = Math.max(0, Math.round(bossDefensor.vida_atual));

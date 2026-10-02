@@ -25,6 +25,7 @@ const {
   comMultiplicadoresDeClasse,
   custoManaEfetivo,
 } = require("../services/combatFormulas");
+const combatModifierService = require("../services/combatModifierService");
 const { resolverTurnoComStatus } = require("../services/duelEngine");
 const { buscarPoderesDoPersonagem, aplicarResultadoDuelo } = require("../controllers/pvpController");
 const { listarConsumiveisDeCombate } = require("../services/combatConsumablesService");
@@ -583,6 +584,17 @@ async function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
 
   duelo.acoes += 1;
 
+  // Habilidades V2.0 §7/§9/§11/§26 (Fase 5) — modificadores PASSIVOS de
+  // Powers aprendidas (PowerCombatEffect), resolvidos uma vez por turno
+  // pros dois lados, mesmo contexto PVP_CASUAL que já vale pro teto de
+  // DoT (duelEngine.resolverTurnoComStatus). `duelo.ranked`/torneio
+  // ainda não distinguem contexto aqui — ver mesmo comentário em
+  // duelEngine.js.
+  const [modificadoresAtacante, modificadoresDefensor] = await Promise.all([
+    combatModifierService.resolverModificadoresDoPersonagem(atacanteInfo.estado, "PVP_CASUAL"),
+    combatModifierService.resolverModificadoresDoPersonagem(defensorInfo.estado, "PVP_CASUAL"),
+  ]);
+
   // Motor de Status (Evolução do Motor de Status) — mesma engrenagem do
   // PvE (combatController.js), agora também no duelo ao vivo (casual,
   // ranqueado e torneio, que reaproveitam esta mesma função): ticks de
@@ -623,6 +635,8 @@ async function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
     itemIdArmaAtacante: atacanteInfo.estado.arma_equipada?.id_item ?? null,
     nomeAtacante: atacanteInfo.nome,
     nomeDefensor: defensorInfo.nome,
+    modificadoresAtacante,
+    modificadoresDefensor,
   });
   duelo.statusEffects[chave] = statusAtacante;
   duelo.statusEffects[outraChave] = statusDefensor;

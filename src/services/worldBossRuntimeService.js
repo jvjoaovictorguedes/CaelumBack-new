@@ -34,6 +34,7 @@ const statusEffectService = require("./statusEffectService");
 const { resolverEfeitosDoUso } = require("./combatEffectResolver");
 const { ACTION_TYPE } = require("../config/statusEffectConfig");
 const { emitGlobal } = require("../socket/worldBossSocket");
+const combatModifierService = require("./combatModifierService");
 const { EVENT_STATUS, COMBAT_SESSION_STATUS } = require("../config/worldBossConfig");
 const crypto = require("crypto");
 
@@ -114,7 +115,12 @@ function aplicarStatusNoBoss(lista, instancia, statusResistances) {
 // for salvar do relógio em si). Nunca decide sozinho DERROTADO/
 // contribution: só calcula dano e deixa a persistência pro chamador,
 // que já está dentro da mesma transação/lock.
-function resolverDanoBasico({ snapshot, fase, furiaPct, alvoBase, alvoDefesa }) {
+// Habilidades V2.0 §7/§9/§11/§26 (Fase 5) — `multiplicadorDanoRecebido`
+// (DAMAGE_TAKEN_PCT passivo do alvo) default 1 faz esta função se
+// comportar exatamente como antes pra quem não resolveu modificadores;
+// `alvoDefesa` já vem com DEFENSE_FLAT somado por quem chama (mesmo
+// padrão de bonusDefesaDefensor em duelEngine.js).
+function resolverDanoBasico({ snapshot, fase, furiaPct, alvoBase, alvoDefesa, multiplicadorDanoRecebido = 1 }) {
   const atacante = {
     forca: snapshot.forca,
     agilidade: snapshot.agilidade,
@@ -135,7 +141,8 @@ function resolverDanoBasico({ snapshot, fase, furiaPct, alvoBase, alvoDefesa }) 
   const danoBase = calcularDanoBasico(atacante, contextoCritico);
   const danoFase = danoBase * (1 + Number(fase.modificador_dano_percentual || 0) / 100);
   const danoComFuria = danoFase * (1 + furiaPct / 100);
-  const danoFinal = aplicarMitigacaoDeDefesa(Math.round(danoComFuria), { defesa: alvoDefesa });
+  const danoMitigado = aplicarMitigacaoDeDefesa(Math.round(danoComFuria), { defesa: alvoDefesa });
+  const danoFinal = Math.max(1, Math.round(danoMitigado * multiplicadorDanoRecebido));
 
   return { dano: danoFinal, esquivou: false, critico: Boolean(contextoCritico.critico) };
 }
@@ -271,7 +278,7 @@ async function selecionarAlvos(tipoAlvo, quantidadeAlvos, eventId, transaction) 
 // (resolverDanoBasico): o Boss fica mais forte na fase seguinte
 // independente do tipo de ataque. escala_com_furia decide só o dano —
 // cura/buff do Boss nunca escala com Fúria (§5.5).
-function resolverEfeitoDeHabilidade({ snapshot, fase, furiaPct, ability, alvoBase, alvoDefesa }) {
+function resolverEfeitoDeHabilidade({ snapshot, fase, furiaPct, ability, alvoBase, alvoDefesa, multiplicadorDanoRecebido = 1 }) {
   const atacante = {
     forca: snapshot.forca,
     agilidade: snapshot.agilidade,
@@ -292,7 +299,13 @@ function resolverEfeitoDeHabilidade({ snapshot, fase, furiaPct, ability, alvoBas
 
   const danoFinal =
     efeito.dano > 0
-      ? aplicarMitigacaoDeDefesa(Math.round(efeito.dano * modificadorFase * escalaFuria), { defesa: alvoDefesa })
+      ? Math.max(
+          1,
+          Math.round(
+            aplicarMitigacaoDeDefesa(Math.round(efeito.dano * modificadorFase * escalaFuria), { defesa: alvoDefesa }) *
+              multiplicadorDanoRecebido,
+          ),
+        )
       : 0;
 
   return { dano: danoFinal, cura: efeito.cura, esquivou: false, critico: Boolean(contextoCritico.critico) };
@@ -351,7 +364,19 @@ async function aplicarEfeitoDeHabilidadeEmAlvos({ characterIds, snapshot, fase, 
     const efetivo = await carregarPersonagemEfetivo(characterId, transaction);
     if (!efetivo) continue;
     const { personagem, base, vidaMax } = efetivo;
-    const efeito = resolverEfeitoDeHabilidade({ snapshot, fase, furiaPct, ability, alvoBase: base, alvoDefesa: base.defesa || 0 });
+    // Habilidades V2.0 §7/§9/§11/§26 (Fase 5) — modificadores PASSIVOS
+    // do alvo (DEFENSE_FLAT soma na Defesa, DAMAGE_TAKEN_PCT multiplica
+    // o dano já mitigado), mesmo contexto WORLD_BOSS do teto de DoT.
+    const modificadoresAlvo = await combatModifierService.resolverModificadoresDoPersonagem(base, "WORLD_BOSS");
+    const efeito = resolverEfeitoDeHabilidade({
+      snapshot,
+      fase,
+      furiaPct,
+      ability,
+      alvoBase: base,
+      alvoDefesa: (base.defesa || 0) + combatModifierService.bonusDefesa(modificadoresAlvo),
+      multiplicadorDanoRecebido: combatModifierService.multiplicadorDanoRecebido(modificadoresAlvo),
+    });
     let derrotado = false;
 
     if (!efeito.esquivou && efeito.dano > 0) {
@@ -662,7 +687,17 @@ async function processarProximaAcao() {
         const efetivo = await carregarPersonagemEfetivo(alvoBasico.character_id, transaction);
         if (efetivo) {
           const { personagem, base, vidaMax } = efetivo;
-          danoInfo = resolverDanoBasico({ snapshot, fase, furiaPct, alvoBase: base, alvoDefesa: base.defesa || 0 });
+          // Habilidades V2.0 §7/§9/§11/§26 (Fase 5) — mesmo critério de
+          // aplicarEfeitoDeHabilidadeEmAlvos acima.
+          const modificadoresAlvo = await combatModifierService.resolverModificadoresDoPersonagem(base, "WORLD_BOSS");
+          danoInfo = resolverDanoBasico({
+            snapshot,
+            fase,
+            furiaPct,
+            alvoBase: base,
+            alvoDefesa: (base.defesa || 0) + combatModifierService.bonusDefesa(modificadoresAlvo),
+            multiplicadorDanoRecebido: combatModifierService.multiplicadorDanoRecebido(modificadoresAlvo),
+          });
           let alvoDerrotado = false;
 
           if (!danoInfo.esquivou && danoInfo.dano > 0) {

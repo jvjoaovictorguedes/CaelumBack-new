@@ -52,6 +52,7 @@ const GuildBossConfig = require("../models/GuildBossConfig");
 const GuildLog = require("../models/GuildLog");
 const { aplicarAcao } = require("../services/duelEngine");
 const { custoManaEfetivo } = require("../services/combatFormulas");
+const combatModifierService = require("../services/combatModifierService");
 // Cooldown real de Powers dentro da luta ao vivo — MESMO motor que o
 // Boss Mundial usa (worldBossCombatService.js) e o combate solo da
 // Aventura (combatController.js), nunca um paralelo: "cooldown 3"
@@ -408,12 +409,24 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
   try {
     const atacante = batalha.membros.get(characterId);
     const chefeEstado = { defesa: batalha.defesaChefe, agilidade: 0, vida_atual: batalha.vidaRestante };
+    // Habilidades V2.0 §7/§9/§11/§26 (Fase 5) — modificadores PASSIVOS
+    // do aliado (chefe nunca tem CharacterAbilities, então o lado dele
+    // fica com o Map vazio default de aplicarAcao). DAMAGE_DEALT_PCT
+    // entra no `multiplicadorDano` explícito aqui porque este arquivo
+    // chama aplicarAcao direto, sem passar por resolverTurnoComStatus
+    // (que faria essa mesma composição por conta própria).
+    const modificadoresAtacante = await combatModifierService.resolverModificadoresDoPersonagem(
+      atacante.estado,
+      "GUILD_BOSS",
+    );
     const { nomeAcao, dano, cura, manaCurada, esquivou, critico } = aplicarAcao({
       atacante: atacante.estado,
       defensor: chefeEstado,
       acao,
       vidaMaxAtacante: atacante.vidaMax,
       manaMaxAtacante: atacante.manaMax,
+      multiplicadorDano: combatModifierService.multiplicadorDanoSaida(modificadoresAtacante),
+      modificadoresAtacante,
     });
 
     // Fim do "turno" deste ator (§ mesma semântica do Boss Mundial):
@@ -585,7 +598,7 @@ function executarTurnoChefe(io, battleId) {
   batalha.timer = setTimeout(() => resolverAcaoDoChefe(io, battleId), guildConfig.BOSS_AO_VIVO_TELEGRAPH_MS);
 }
 
-function resolverAcaoDoChefe(io, battleId) {
+async function resolverAcaoDoChefe(io, battleId) {
   const batalha = batalhas.get(battleId);
   if (!batalha) return;
 
@@ -596,11 +609,19 @@ function resolverAcaoDoChefe(io, battleId) {
 
   const alvo = vivos[Math.floor(Math.random() * vivos.length)];
   const chefeAtacante = { forca: forcaChefeParaRodada(batalha), nivel: 1, agilidade: 0 };
+  // Habilidades V2.0 §7/§9/§11/§26 (Fase 5) — modificadores PASSIVOS do
+  // membro atacado (DEFENSE_FLAT/DAMAGE_TAKEN_PCT), resolvidos aqui
+  // porque este arquivo chama aplicarAcao direto.
+  const modificadoresDefensor = await combatModifierService.resolverModificadoresDoPersonagem(
+    alvo.estado,
+    "GUILD_BOSS",
+  );
   const { nomeAcao, dano, esquivou, critico } = aplicarAcao({
     atacante: chefeAtacante,
     defensor: alvo.estado,
     acao: { tipo: "attack" },
     vidaMaxAtacante: undefined,
+    modificadoresDefensor,
   });
 
   io.to(batalha.sala).emit("guildboss:turno-resultado", {

@@ -26,6 +26,7 @@ const {
 const { resolverTurnoComStatus } = require("../services/duelEngine");
 const statusEffectService = require("../services/statusEffectService");
 const WeaponStatusEffect = require("../models/WeaponStatusEffect");
+const combatModifierService = require("../services/combatModifierService");
 const {
   buscarBonusDeAtributos,
   personagemComBonus,
@@ -118,13 +119,18 @@ async function simularDuelo({ desafiante, desafiado, poderesDesafiante, poderesD
   const estadoA = { ...desafiante, vida_atual: vidaMaxA, mana_atual: manaMaxA };
   const estadoB = { ...desafiado, vida_atual: vidaMaxB, mana_atual: manaMaxB };
 
-  const [armaEfeitosA, armaEfeitosB] = await Promise.all([
+  const [armaEfeitosA, armaEfeitosB, modificadoresA, modificadoresB] = await Promise.all([
     estadoA.arma_equipada?.id_item
       ? WeaponStatusEffect.findAll({ where: { id_item: estadoA.arma_equipada.id_item, ativo: true } })
       : [],
     estadoB.arma_equipada?.id_item
       ? WeaponStatusEffect.findAll({ where: { id_item: estadoB.arma_equipada.id_item, ativo: true } })
       : [],
+    // Habilidades V2.0 §7/§9/§11/§26 (Fase 5) — modificadores PASSIVOS
+    // de Powers aprendidas, resolvidos UMA vez por duelo (nunca mudam
+    // no meio da simulação), mesmo contexto PVP_CASUAL do duelo ao vivo.
+    combatModifierService.resolverModificadoresDoPersonagem(estadoA, "PVP_CASUAL"),
+    combatModifierService.resolverModificadoresDoPersonagem(estadoB, "PVP_CASUAL"),
   ]);
 
   const primeiro = estadoA.velocidade >= estadoB.velocidade ? "A" : "B";
@@ -144,6 +150,8 @@ async function simularDuelo({ desafiante, desafiado, poderesDesafiante, poderesD
     const vidaMaxAtacante = chave === "A" ? vidaMaxA : vidaMaxB;
     const manaMaxAtacante = chave === "A" ? manaMaxA : manaMaxB;
     const armaEfeitosAtacante = chave === "A" ? armaEfeitosA : armaEfeitosB;
+    const modificadoresAtacante = chave === "A" ? modificadoresA : modificadoresB;
+    const modificadoresDefensor = chave === "A" ? modificadoresB : modificadoresA;
 
     const nomeAtacante = chave === "A" ? desafiante.nome : desafiado.nome;
     const nomeDefensor = chave === "A" ? desafiado.nome : desafiante.nome;
@@ -172,6 +180,8 @@ async function simularDuelo({ desafiante, desafiado, poderesDesafiante, poderesD
       itemIdArmaAtacante: atacante.arma_equipada?.id_item ?? null,
       nomeAtacante,
       nomeDefensor,
+      modificadoresAtacante,
+      modificadoresDefensor,
     });
     if (chave === "A") {
       statusA = statusAtacante;
