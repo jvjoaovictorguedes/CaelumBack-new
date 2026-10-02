@@ -11,6 +11,7 @@ const MarketTransaction = require("../models/MarketTransaction");
 const CharacterForgeProgress = require("../models/CharacterForgeProgress");
 const CharacterAlchemyProgress = require("../models/CharacterAlchemyProgress");
 const Item = require("../models/Item");
+const PlayerShopDemand = require("../models/PlayerShopDemand");
 
 const NOME_MIN = 3;
 const NOME_MAX = 100;
@@ -66,7 +67,7 @@ async function obterPerfilPublico(characterId) {
   if (!loja) throw erro("Esse personagem não tem uma loja.", 404);
   if (!personagem) throw erro("Personagem não encontrado.", 404);
 
-  const [produtos, transacoesConcluidas] = await Promise.all([
+  const [produtos, transacoesConcluidas, demandasConcluidas] = await Promise.all([
     MarketListing.findAll({
       where: { id_personagem_vendedor: characterId, status: "Ativo" },
       include: [{ model: Item, as: "item" }],
@@ -78,6 +79,7 @@ async function obterPerfilPublico(characterId) {
       attributes: ["id", "preco_total", "valor_liquido_vendedor"],
       raw: true,
     }),
+    PlayerShopDemand.count({ where: { id_personagem: characterId, status: "Concluida" } }),
   ]);
 
   const ouroMovimentado = transacoesConcluidas.reduce((soma, t) => soma + t.valor_liquido_vendedor, 0);
@@ -100,9 +102,9 @@ async function obterPerfilPublico(characterId) {
       produtos_ativos: produtos.length,
       vendas_concluidas: transacoesConcluidas.length,
       ouro_movimentado: ouroMovimentado,
-      // Preenchido de verdade nas Fases 5/6 — mantém o formato estável
-      // desde já pro frontend.
-      demandas_concluidas: 0,
+      demandas_concluidas: demandasConcluidas,
+      // Preenchido de verdade na Fase 6 — mantém o formato estável desde
+      // já pro frontend.
       encomendas_concluidas: 0,
       encomendas_canceladas: 0,
       encomendas_expiradas: 0,

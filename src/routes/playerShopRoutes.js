@@ -17,6 +17,27 @@ router
 
 router.post("/mine/listings", authMiddleware, carregarPersonagemAtual, playerShopController.criarProdutoDaLoja);
 
+router
+  .route("/mine/demands")
+  .post(authMiddleware, carregarPersonagemAtual, playerShopController.criarDemanda)
+  .get(authMiddleware, carregarPersonagemAtual, playerShopController.listarMinhasDemandas);
+
+// Demandas são globais (qualquer personagem pode ver/entregar), por isso
+// vivem fora de "/mine" — mas ainda precisam vir antes de "/:characterId".
+router.get("/demands", authMiddleware, playerShopController.listarDemandasAbertas);
+router.post(
+  "/demands/:idDemanda/cancel",
+  authMiddleware,
+  carregarPersonagemAtual,
+  playerShopController.cancelarDemanda,
+);
+router.post(
+  "/demands/:idDemanda/deliver",
+  authMiddleware,
+  carregarPersonagemAtual,
+  playerShopController.entregarNaDemanda,
+);
+
 router.get("/:characterId", authMiddleware, playerShopController.obterLoja);
 
 module.exports = router;

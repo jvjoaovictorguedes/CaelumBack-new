@@ -21,6 +21,8 @@ const CharacterMissionProgress = require("./CharacterMissionProgress");
 const MarketListing = require("./MarketListing");
 const MarketTransaction = require("./MarketTransaction");
 const PlayerShop = require("./PlayerShop");
+const PlayerShopDemand = require("./PlayerShopDemand");
+const PlayerShopDemandDelivery = require("./PlayerShopDemandDelivery");
 const PvPSeason = require("./PvPSeason");
 const CharacterPvpSeason = require("./CharacterPvpSeason");
 const RankedMatch = require("./RankedMatch");
@@ -140,6 +142,14 @@ MarketListing.hasMany(MarketTransaction, { foreignKey: "id_listing", as: "transa
 // Loja do Aventureiro V2 — perfil comercial (1 por personagem).
 PlayerShop.belongsTo(Character, { foreignKey: "id_personagem", as: "personagem" });
 Character.hasOne(PlayerShop, { foreignKey: "id_personagem", as: "loja" });
+
+// Loja do Aventureiro V2 §6 — demanda do lojista (ele compra de outros
+// jogadores) + histórico imutável de cada entrega.
+PlayerShopDemand.belongsTo(Character, { foreignKey: "id_personagem", as: "lojista" });
+PlayerShopDemand.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+PlayerShopDemand.hasMany(PlayerShopDemandDelivery, { foreignKey: "id_demanda", as: "entregas" });
+PlayerShopDemandDelivery.belongsTo(PlayerShopDemand, { foreignKey: "id_demanda", as: "demanda" });
+PlayerShopDemandDelivery.belongsTo(Character, { foreignKey: "id_personagem_fornecedor", as: "fornecedor" });
 MarketTransaction.belongsTo(MarketListing, { foreignKey: "id_listing", as: "listing" });
 MarketTransaction.belongsTo(Item, { foreignKey: "id_item", as: "item" });
 MarketTransaction.belongsTo(Character, { foreignKey: "id_personagem_vendedor", as: "vendedor" });

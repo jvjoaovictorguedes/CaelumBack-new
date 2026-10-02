@@ -2,6 +2,7 @@
 // (mesmo padrão do resto do projeto).
 const playerShopService = require("../services/playerShopService");
 const marketService = require("../services/marketService");
+const playerShopDemandService = require("../services/playerShopDemandService");
 
 function tratarErro(res, error, mensagemPadrao) {
   const statusCode = error.statusCode || 500;
@@ -76,6 +77,60 @@ exports.criarProdutoDaLoja = async (req, res) => {
     return res
       .status(statusCode)
       .json({ message: error.statusCode ? error.message : "Erro interno do servidor ao publicar produto." });
+  }
+};
+
+// POST /api/player-shops/mine/demands
+exports.criarDemanda = async (req, res) => {
+  try {
+    const demanda = await playerShopDemandService.criarDemanda(req.personagemAtual.id, req.body ?? {});
+    res.status(201).json({ status: "success", message: "Demanda publicada!", data: { demanda } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao publicar demanda.");
+  }
+};
+
+// GET /api/player-shops/mine/demands
+exports.listarMinhasDemandas = async (req, res) => {
+  try {
+    const demandas = await playerShopDemandService.listarMinhasDemandas(req.personagemAtual.id);
+    res.status(200).json({ status: "success", data: { demandas } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao listar suas demandas.");
+  }
+};
+
+// POST /api/player-shops/demands/:idDemanda/cancel
+exports.cancelarDemanda = async (req, res) => {
+  try {
+    const idDemanda = Number(req.params.idDemanda);
+    const demanda = await playerShopDemandService.cancelarDemanda(idDemanda, req.personagemAtual.id);
+    res.status(200).json({ status: "success", data: { demanda } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao cancelar demanda.");
+  }
+};
+
+// POST /api/player-shops/demands/:idDemanda/deliver
+exports.entregarNaDemanda = async (req, res) => {
+  try {
+    const idDemanda = Number(req.params.idDemanda);
+    const { quantidade } = req.body ?? {};
+    const resultado = await playerShopDemandService.entregarItem(idDemanda, req.personagemAtual.id, quantidade);
+    res.status(200).json({ status: "success", message: "Entrega registrada!", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao entregar na demanda.");
+  }
+};
+
+// GET /api/player-shops/demands?id_item=&page=&limit=
+exports.listarDemandasAbertas = async (req, res) => {
+  try {
+    const { id_item, page, limit } = req.query;
+    const resultado = await playerShopDemandService.listarDemandasAbertas({ idItem: id_item, page, limit });
+    res.status(200).json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao listar demandas.");
   }
 };
 
