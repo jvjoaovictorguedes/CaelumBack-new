@@ -5,9 +5,12 @@ const { sequelize } = require("../config/database");
 // fórmulas em linguagem simples), organizados por categoria livre
 // (mesma convenção de PatchNote.feature: STRING solta, sem ENUM rígido
 // — o admin cria categorias novas só escrevendo o nome, sem migration).
-// conteudo é TEXTO PLANO com parágrafos separados por linha em branco
-// (mesma convenção de PatchNote.descricao) — sem markdown, esta base
-// nunca usou uma lib de markdown em lugar nenhum.
+// conteudo é MARKDOWN (pedido do jogador: "formatação de texto, negrito,
+// imagens, etc") — negrito/itálico/títulos/listas/links/imagens/citação/
+// tabela (react-markdown + remark-gfm no frontend, que nunca renderiza
+// HTML bruto embutido no texto, então não precisa de sanitização aqui).
+// Texto antigo sem sintaxe nenhuma continua exibindo igual (um parágrafo
+// sem símbolos de markdown vira só um parágrafo).
 const WikiArticle = sequelize.define(
   "WikiArticle",
   {
