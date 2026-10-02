@@ -15,6 +15,8 @@ router
   .get(authMiddleware, carregarPersonagemAtual, playerShopController.obterMinhaLoja)
   .put(authMiddleware, carregarPersonagemAtual, playerShopController.atualizarMinhaLoja);
 
+router.post("/mine/listings", authMiddleware, carregarPersonagemAtual, playerShopController.criarProdutoDaLoja);
+
 router.get("/:characterId", authMiddleware, playerShopController.obterLoja);
 
 module.exports = router;
