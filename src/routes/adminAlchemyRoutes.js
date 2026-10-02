@@ -13,4 +13,12 @@ router.get("/recipes", adminAlchemyController.listarReceitas);
 router.post("/recipes", adminAlchemyController.criarReceita);
 router.patch("/recipes/:id", adminAlchemyController.atualizarReceita);
 
+// Construtor de Efeitos (spec Caldeirão §12) — escopado por Item, não por
+// receita (um Item pode ganhar ConsumableEffect mesmo fora do Caldeirão).
+router.get("/effect-types", adminAlchemyController.listarTiposDeEfeito);
+router.get("/items/:idItem/effects", adminAlchemyController.listarEfeitosDoItem);
+router.post("/items/:idItem/effects", adminAlchemyController.criarEfeito);
+router.patch("/effects/:id", adminAlchemyController.atualizarEfeito);
+router.delete("/effects/:id", adminAlchemyController.excluirEfeito);
+
 module.exports = router;

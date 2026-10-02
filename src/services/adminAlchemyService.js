@@ -6,7 +6,11 @@ const { sequelize } = require("../config/database");
 const AlchemyRecipe = require("../models/AlchemyRecipe");
 const AlchemyRecipeIngredient = require("../models/AlchemyRecipeIngredient");
 const Item = require("../models/Item");
+const ConsumableEffect = require("../models/ConsumableEffect");
 const { registrarAcao } = require("./adminAuditService");
+const { CONSUMABLE_EFFECT_HANDLERS, efeitoConhecido } = require("./consumableEffectRegistry");
+const { ATRIBUTOS_BUFAVEIS } = require("./combatBuffService");
+const { CHAVES_VALIDAS } = require("../config/statusEffectConfig");
 
 function erro(mensagem, statusCode = 400) {
   const e = new Error(mensagem);
@@ -59,15 +63,31 @@ async function anexarItensResolvidos(receitas) {
     if (r.id_item_receita) idsItens.add(r.id_item_receita);
     for (const ing of r.ingredientes ?? []) idsItens.add(ing.id_item);
   }
-  const itens = idsItens.size
-    ? await Item.findAll({ where: { id: [...idsItens] }, attributes: ["id", "nome", "tipo_item", "imagem_url"] })
-    : [];
+  const idsItensResultado = [...new Set(receitas.map((r) => r.id_item_resultado))];
+  const [itens, efeitos] = await Promise.all([
+    idsItens.size
+      ? Item.findAll({ where: { id: [...idsItens] }, attributes: ["id", "nome", "tipo_item", "imagem_url"] })
+      : [],
+    // Construtor de Efeitos (spec Caldeirão §12) — pré-carregado em lote
+    // (mesmo princípio do resto desta função) pro Admin já exibir os
+    // efeitos de cada receita na listagem, sem N+1 por linha.
+    idsItensResultado.length
+      ? ConsumableEffect.findAll({ where: { id_item: idsItensResultado }, order: [["id", "ASC"]] })
+      : [],
+  ]);
   const porId = new Map(itens.map((i) => [i.id, i]));
+  const efeitosPorItem = new Map();
+  for (const efeito of efeitos) {
+    const lista = efeitosPorItem.get(efeito.id_item) ?? [];
+    lista.push(efeito.toJSON());
+    efeitosPorItem.set(efeito.id_item, lista);
+  }
   return receitas.map((r) => ({
     ...r.toJSON(),
     item_resultado: porId.get(r.id_item_resultado) ?? null,
     item_receita: r.id_item_receita ? (porId.get(r.id_item_receita) ?? null) : null,
     ingredientes: (r.ingredientes ?? []).map((ing) => ({ ...ing.toJSON(), item: porId.get(ing.id_item) ?? null })),
+    efeitos_consumivel: efeitosPorItem.get(r.id_item_resultado) ?? [],
   }));
 }
 
@@ -231,4 +251,181 @@ async function updateAdminAlchemyRecipe(id, payload, { idAdmin, req }) {
   });
 }
 
-module.exports = { listAdminAlchemyRecipes, createAdminAlchemyRecipe, updateAdminAlchemyRecipe };
+// ---------------------------------------------------------------------
+// Construtor de Efeitos (spec Caldeirão §12) — CRUD de ConsumableEffect
+// escopado por Item (id_item é a FK real; o admin sempre chega aqui a
+// partir do item_resultado de uma receita, mas o endpoint em si não
+// sabe nada de receita — um Item pode ganhar efeito mesmo sem vir do
+// Caldeirão). Nunca duplica a whitelist/validação de config — sempre
+// reaproveita consumableEffectRegistry/combatBuffService/
+// statusEffectConfig, a mesma fonte de verdade que resolve o efeito de
+// verdade no combate.
+// ---------------------------------------------------------------------
+
+const CAMPOS_EFEITO = ["effect_key", "magnitude", "duration_turns", "config", "ativo"];
+
+// Chaves que fazem sentido num consumível de uso direto (self, sem
+// duração "de combate turno a turno" nem bônus de atributo) — nenhuma
+// delas é um ConsumableEffect sem handler, então basta existir no
+// registry. GRANT_SHIELD/APPLY_COMBAT_BUFF exigem duration_turns > 0;
+// as demais (cura/mana/cleanse) ignoram duration_turns.
+const EFFECT_KEYS_COM_DURACAO = ["APPLY_COMBAT_BUFF", "GRANT_SHIELD"];
+
+// Metadados pro frontend montar o formulário certo pra cada effect_key
+// sem precisar reimplementar a whitelist — single source of truth
+// continua sendo consumableEffectRegistry.CONSUMABLE_EFFECT_HANDLERS,
+// isto aqui só descreve CAMPOS, nunca COMPORTAMENTO.
+function listEffectTypes() {
+  return Object.keys(CONSUMABLE_EFFECT_HANDLERS).map((effectKey) => ({
+    effect_key: effectKey,
+    exige_duracao: EFFECT_KEYS_COM_DURACAO.includes(effectKey),
+    exige_atributo_buff: effectKey === "APPLY_COMBAT_BUFF",
+    atributos_buff: effectKey === "APPLY_COMBAT_BUFF" ? ATRIBUTOS_BUFAVEIS : undefined,
+    exige_status_key: effectKey === "CLEANSE_STATUS",
+    status_keys: effectKey === "CLEANSE_STATUS" ? CHAVES_VALIDAS : undefined,
+    exige_category: effectKey === "CLEANSE_CATEGORY",
+    categorias: effectKey === "CLEANSE_CATEGORY" ? ["DOT", "CONTROLE"] : undefined,
+    exige_magnitude: effectKey !== "CLEANSE_STATUS" && effectKey !== "CLEANSE_CATEGORY",
+  }));
+}
+
+// Mesma validação que o motor de combate já faz na hora de EXECUTAR o
+// efeito (consumableEffectRegistry handlers) — replicada aqui só pra
+// dar erro 400 explicativo na hora de CADASTRAR, em vez de deixar o
+// jogo falhar silenciosamente (spec §12) só quando alguém usar o item.
+// Nunca é a fonte de verdade: se as regras divergirem, o motor de
+// combate que decide o que realmente acontece.
+function validarConfigDoEfeito(effectKey, config, duration_turns, magnitude) {
+  if (!efeitoConhecido(effectKey)) {
+    throw erro(`effect_key desconhecida: ${effectKey}. Valores aceitos: ${Object.keys(CONSUMABLE_EFFECT_HANDLERS).join(", ")}.`);
+  }
+  if (EFFECT_KEYS_COM_DURACAO.includes(effectKey) && !(Number(duration_turns) > 0)) {
+    throw erro(`${effectKey} precisa de duration_turns > 0.`);
+  }
+  if (effectKey === "APPLY_COMBAT_BUFF") {
+    if (!config?.atributo || !ATRIBUTOS_BUFAVEIS.includes(config.atributo)) {
+      throw erro(`APPLY_COMBAT_BUFF precisa de config.atributo em: ${ATRIBUTOS_BUFAVEIS.join(", ")}.`);
+    }
+  }
+  if (effectKey === "CLEANSE_STATUS") {
+    if (!config?.status_key || !CHAVES_VALIDAS.includes(config.status_key)) {
+      throw erro(`CLEANSE_STATUS precisa de config.status_key em: ${CHAVES_VALIDAS.join(", ")}.`);
+    }
+  }
+  if (effectKey === "CLEANSE_CATEGORY") {
+    if (!config?.category || !["DOT", "CONTROLE"].includes(config.category)) {
+      throw erro("CLEANSE_CATEGORY precisa de config.category em: DOT, CONTROLE.");
+    }
+  }
+  if (effectKey !== "CLEANSE_STATUS" && effectKey !== "CLEANSE_CATEGORY" && !(Number(magnitude) !== 0)) {
+    throw erro(`${effectKey} precisa de magnitude diferente de 0.`);
+  }
+}
+
+async function listAdminConsumableEffects(idItem) {
+  const item = await Item.findByPk(idItem);
+  if (!item) throw erro("Item não encontrado.", 404);
+  const efeitos = await ConsumableEffect.findAll({ where: { id_item: idItem }, order: [["id", "ASC"]] });
+  return efeitos.map((e) => e.toJSON());
+}
+
+async function createAdminConsumableEffect(idItem, payload, { idAdmin, req }) {
+  const dados = somenteCampos(payload, CAMPOS_EFEITO);
+  if (!dados.effect_key) throw erro("effect_key é obrigatório.");
+  validarConfigDoEfeito(dados.effect_key, dados.config ?? null, dados.duration_turns, dados.magnitude);
+
+  return sequelize.transaction(async (transaction) => {
+    const item = await Item.findByPk(idItem, { transaction });
+    if (!item) throw erro("Item não encontrado.", 404);
+    if (item.tipo_item !== "Consumivel") {
+      throw erro("Só um Item do tipo Consumível pode ganhar ConsumableEffect.");
+    }
+
+    const efeito = await ConsumableEffect.create(
+      {
+        id_item: idItem,
+        effect_key: dados.effect_key,
+        magnitude: dados.magnitude ?? 0,
+        duration_turns: dados.duration_turns ?? null,
+        config: dados.config ?? null,
+        ativo: dados.ativo ?? true,
+      },
+      { transaction },
+    );
+
+    await registrarAcao({
+      idAdmin,
+      acao: "criar",
+      entidade: "ConsumableEffect",
+      idEntidade: efeito.id,
+      dadosDepois: efeito.toJSON(),
+      req,
+      transaction,
+    });
+
+    return efeito.toJSON();
+  });
+}
+
+async function updateAdminConsumableEffect(id, payload, { idAdmin, req }) {
+  const dados = somenteCampos(payload, CAMPOS_EFEITO);
+
+  return sequelize.transaction(async (transaction) => {
+    const efeito = await ConsumableEffect.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!efeito) throw erro("Efeito não encontrado.", 404);
+    const antes = efeito.toJSON();
+
+    const effectKeyFinal = dados.effect_key ?? efeito.effect_key;
+    const configFinal = dados.config !== undefined ? dados.config : efeito.config;
+    const durationFinal = dados.duration_turns !== undefined ? dados.duration_turns : efeito.duration_turns;
+    const magnitudeFinal = dados.magnitude !== undefined ? dados.magnitude : efeito.magnitude;
+    validarConfigDoEfeito(effectKeyFinal, configFinal, durationFinal, magnitudeFinal);
+
+    await efeito.update(dados, { transaction });
+
+    await registrarAcao({
+      idAdmin,
+      acao: "editar",
+      entidade: "ConsumableEffect",
+      idEntidade: efeito.id,
+      dadosAntes: antes,
+      dadosDepois: efeito.toJSON(),
+      req,
+      transaction,
+    });
+
+    return efeito.toJSON();
+  });
+}
+
+async function deleteAdminConsumableEffect(id, { idAdmin, req }) {
+  return sequelize.transaction(async (transaction) => {
+    const efeito = await ConsumableEffect.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!efeito) throw erro("Efeito não encontrado.", 404);
+    const antes = efeito.toJSON();
+    await efeito.destroy({ transaction });
+
+    await registrarAcao({
+      idAdmin,
+      acao: "excluir",
+      entidade: "ConsumableEffect",
+      idEntidade: id,
+      dadosAntes: antes,
+      req,
+      transaction,
+    });
+
+    return { id };
+  });
+}
+
+module.exports = {
+  listAdminAlchemyRecipes,
+  createAdminAlchemyRecipe,
+  updateAdminAlchemyRecipe,
+  listEffectTypes,
+  listAdminConsumableEffects,
+  createAdminConsumableEffect,
+  updateAdminConsumableEffect,
+  deleteAdminConsumableEffect,
+};
