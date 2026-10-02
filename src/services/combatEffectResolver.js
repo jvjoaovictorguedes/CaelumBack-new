@@ -25,6 +25,11 @@ async function efeitosConfiguradosDoPoder(power) {
     potency_base: l.potency_base,
     potency_scale_attribute: l.potency_scale_attribute,
     potency_scale_value: l.potency_scale_value,
+    // Habilidades V2.0 §4/§21 — null = linha ainda no modo legado
+    // (potency_base como dano absoluto). Nunca escalado por atributo
+    // (§4 "evitar escala direta por atributo como padrão" pros DoTs
+    // percentuais) — é sempre o valor cru configurado pelo Admin.
+    percentual_vida_maxima: l.percentual_vida_maxima,
     target: l.target,
   }));
 }
@@ -62,6 +67,7 @@ async function resolverEfeitosDoUso({ power, personagemCaster, casterActorId, tu
       remainingTurns: config.duration_turns,
       stacks: 1,
       potency: potenciaEsperada(config, personagemCaster),
+      percentualVidaMaxima: config.percentual_vida_maxima ?? null,
       appliedAtTurn: turno,
       target: config.target,
     });

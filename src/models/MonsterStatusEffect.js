@@ -22,6 +22,9 @@ const MonsterStatusEffect = sequelize.define(
     chance_ppm: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
     duration_turns: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 1 },
     potency_base: { type: DataTypes.FLOAT, allowNull: false, defaultValue: 0 },
+    // Habilidades V2.0 §4/§21 — mesma magnitude V2 de PowerStatusEffect/
+    // WeaponStatusEffect (nullable = modo legado).
+    percentual_vida_maxima: { type: DataTypes.FLOAT, allowNull: true },
     ativo: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
   },
   { tableName: "monster_status_effects" },

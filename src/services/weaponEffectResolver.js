@@ -26,6 +26,9 @@ function resolverEfeitosDeArmaNoHit({ efeitosDaArma, personagemCaster, casterAct
       remainingTurns: efeito.duration_turns,
       stacks: 1,
       potency: potenciaEsperada(efeito, personagemCaster),
+      // Habilidades V2.0 §16 — Poison de arma e Poison de Power entram
+      // no MESMO pool/semântica; null = linha ainda no modo legado.
+      percentualVidaMaxima: efeito.percentual_vida_maxima ?? null,
       appliedAtTurn: turno,
       // Proc de arma em ataque básico é sempre ofensivo nesta v1 (§12.1
       // "target: Enemy nesta v1 para procs ofensivos").

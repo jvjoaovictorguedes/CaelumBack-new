@@ -449,6 +449,7 @@ async function resolverTurnoComStatus({
   const vidaAntesDoTick = atacante.vida_atual;
   atacante.vida_atual = statusEffectService.processarTicksDeInicio({
     vidaAtual: atacante.vida_atual,
+    vidaMaxima: vidaMaxAtacante ?? atacante.vida_atual,
     defensor: atacante,
     lista: listaAtacante,
     log,

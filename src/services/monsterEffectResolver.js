@@ -28,6 +28,8 @@ function resolverEfeitosDeMonstroNoHit({ efeitosDeStatus, turno }) {
       // Sem scale attribute (monstro usa stats fixos, §5.3/§9.3) — a
       // potência é exatamente o que o admin cadastrou.
       potency: efeito.potency_base,
+      // Habilidades V2.0 §4/§21 — null = linha ainda no modo legado.
+      percentualVidaMaxima: efeito.percentual_vida_maxima ?? null,
       appliedAtTurn: turno,
     });
   }

@@ -137,6 +137,7 @@ async function carregarLutador(characterId, { vidaCheia = true, contexto = "PVP_
       potency_base: e.potency_base,
       potency_scale_attribute: e.potency_scale_attribute,
       potency_scale_value: e.potency_scale_value,
+      percentual_vida_maxima: e.percentual_vida_maxima,
       trigger: e.trigger,
       ativo: e.ativo,
     })),

@@ -719,6 +719,7 @@ async function processarProximaAcao() {
       1,
       statusEffectService.processarTicksDeInicio({
         vidaAtual: hpAntesDoDot,
+        vidaMaxima: hpMax,
         defensor: { defesa: snapshot.defesa || 0 },
         lista: statusBoss,
         log: [],

@@ -234,10 +234,22 @@ function validarStatusEffectPayload(dados) {
   if (dados.duration_turns !== undefined && (!Number.isInteger(dados.duration_turns) || dados.duration_turns < 1)) {
     throw erro("duration_turns precisa ser um inteiro >= 1.");
   }
+  // Habilidades V2.0 §4/§21 — campo opcional (null = status continua no
+  // modo legado, potency_base como dano absoluto). Quando informado, o
+  // Admin está migrando ESTA linha pra % de Vida Máxima explicitamente.
+  if (
+    dados.percentual_vida_maxima != null &&
+    (typeof dados.percentual_vida_maxima !== "number" ||
+      Number.isNaN(dados.percentual_vida_maxima) ||
+      dados.percentual_vida_maxima < 0 ||
+      dados.percentual_vida_maxima > 100)
+  ) {
+    throw erro("percentual_vida_maxima precisa ser um número entre 0 e 100 (ou null).");
+  }
 }
 
 async function addAdminPowerStatusEffect(idPower, payload, { idAdmin, req }) {
-  const dados = somenteCampos(payload, ["status_key", "chance_ppm", "duration_turns", "potency_base", "potency_scale_attribute", "potency_scale_value", "target", "ativo"]);
+  const dados = somenteCampos(payload, ["status_key", "chance_ppm", "duration_turns", "potency_base", "potency_scale_attribute", "potency_scale_value", "percentual_vida_maxima", "target", "ativo"]);
   if (!dados.status_key || dados.duration_turns == null) throw erro("status_key e duration_turns são obrigatórios.");
   validarStatusEffectPayload(dados);
 
@@ -251,7 +263,7 @@ async function addAdminPowerStatusEffect(idPower, payload, { idAdmin, req }) {
 }
 
 async function updateAdminPowerStatusEffect(idEfeito, payload, { idAdmin, req }) {
-  const dados = somenteCampos(payload, ["status_key", "chance_ppm", "duration_turns", "potency_base", "potency_scale_attribute", "potency_scale_value", "target", "ativo"]);
+  const dados = somenteCampos(payload, ["status_key", "chance_ppm", "duration_turns", "potency_base", "potency_scale_attribute", "potency_scale_value", "percentual_vida_maxima", "target", "ativo"]);
   validarStatusEffectPayload(dados);
 
   return sequelize.transaction(async (transaction) => {
@@ -406,7 +418,7 @@ async function listAdminWeaponStatusEffects(idItem) {
 }
 
 async function addAdminWeaponStatusEffect(idItem, payload, { idAdmin, req }) {
-  const dados = somenteCampos(payload, ["status_key", "chance_ppm", "duration_turns", "potency_base", "potency_scale_attribute", "potency_scale_value", "trigger", "ativo"]);
+  const dados = somenteCampos(payload, ["status_key", "chance_ppm", "duration_turns", "potency_base", "potency_scale_attribute", "potency_scale_value", "percentual_vida_maxima", "trigger", "ativo"]);
   if (!dados.status_key) throw erro("status_key é obrigatório.");
   validarStatusEffectPayload(dados);
   const trigger = dados.trigger ?? "BASIC_ATTACK_HIT";
@@ -424,7 +436,7 @@ async function addAdminWeaponStatusEffect(idItem, payload, { idAdmin, req }) {
 }
 
 async function updateAdminWeaponStatusEffect(idEfeito, payload, { idAdmin, req }) {
-  const dados = somenteCampos(payload, ["status_key", "chance_ppm", "duration_turns", "potency_base", "potency_scale_attribute", "potency_scale_value", "trigger", "ativo"]);
+  const dados = somenteCampos(payload, ["status_key", "chance_ppm", "duration_turns", "potency_base", "potency_scale_attribute", "potency_scale_value", "percentual_vida_maxima", "trigger", "ativo"]);
   validarStatusEffectPayload(dados);
   if (dados.trigger && !TRIGGERS_SUPORTADOS.includes(dados.trigger)) {
     throw erro(`trigger "${dados.trigger}" não é suportado pelo motor. Suportados: ${TRIGGERS_SUPORTADOS.join(", ")}.`);

@@ -542,6 +542,7 @@ module.exports = function registerPartyHandlers(io) {
           chance_ppm: e.chance_ppm,
           duration_turns: e.duration_turns,
           potency_base: e.potency_base,
+          percentual_vida_maxima: e.percentual_vida_maxima,
           ativo: e.ativo,
         }));
         inimigo.status = [];

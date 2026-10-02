@@ -29,6 +29,12 @@ const PowerStatusEffect = sequelize.define(
       allowNull: true,
     },
     potency_scale_value: { type: DataTypes.FLOAT, allowNull: false, defaultValue: 0 },
+    // Habilidades V2.0 §4/§21 — magnitude V2 (% da Vida máxima do
+    // portador por tick/stack), nullable de propósito: null = ainda no
+    // modo legado (potency_base como dano absoluto, ver
+    // statusEffectService.calcularDanoDoTick). As duas colunas
+    // coexistem até o Admin migrar cada linha explicitamente.
+    percentual_vida_maxima: { type: DataTypes.FLOAT, allowNull: true },
     target: {
       type: DataTypes.ENUM("Self", "Enemy"),
       allowNull: false,

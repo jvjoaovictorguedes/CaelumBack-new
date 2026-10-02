@@ -21,6 +21,11 @@ const WeaponStatusEffect = sequelize.define(
       allowNull: true,
     },
     potency_scale_value: { type: DataTypes.FLOAT, allowNull: false, defaultValue: 0 },
+    // Habilidades V2.0 §4/§16/§21 — mesma magnitude V2 de
+    // PowerStatusEffect, nullable (null = modo legado). Arma e Power
+    // compartilham a MESMA semântica de Status (§16 "não deixar armas
+    // presas em potency absoluto enquanto habilidades usam percentual").
+    percentual_vida_maxima: { type: DataTypes.FLOAT, allowNull: true },
     // v1: só BASIC_ATTACK_HIT dispara proc de arma (§13).
     trigger: { type: DataTypes.STRING(30), allowNull: false, defaultValue: "BASIC_ATTACK_HIT" },
     ativo: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },

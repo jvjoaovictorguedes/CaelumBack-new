@@ -479,6 +479,7 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
         chance_ppm: e.chance_ppm,
         duration_turns: e.duration_turns,
         potency_base: e.potency_base,
+        percentual_vida_maxima: e.percentual_vida_maxima,
         ativo: e.ativo,
       }));
 
@@ -527,6 +528,7 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
           potency_base: e.potency_base,
           potency_scale_attribute: e.potency_scale_attribute,
           potency_scale_value: e.potency_scale_value,
+          percentual_vida_maxima: e.percentual_vida_maxima,
           trigger: e.trigger,
           ativo: e.ativo,
         })),
@@ -1516,6 +1518,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     const vidaJogadorAntesDoTick = personagemAtual.vida_atual;
     personagemAtual.vida_atual = statusEffectService.processarTicksDeInicio({
       vidaAtual: personagemAtual.vida_atual,
+      vidaMaxima: vidaMaximaEfetiva,
       defensor: personagemAtual,
       lista: statusEffects.player,
       log,
@@ -1805,6 +1808,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     const vidaInimigoAntesDoTick = inimigoAtual.vida_atual;
     inimigoAtual.vida_atual = statusEffectService.processarTicksDeInicio({
       vidaAtual: inimigoAtual.vida_atual,
+      vidaMaxima: inimigoAtual.vida_maxima ?? 0,
       defensor: inimigoAtual,
       lista: statusEffects.enemy,
       log,

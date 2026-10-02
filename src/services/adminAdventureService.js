@@ -774,6 +774,18 @@ function validarStatusEffectDeMonstro(dados) {
   if (dados.potency_base == null || typeof dados.potency_base !== "number" || Number.isNaN(dados.potency_base)) {
     throw erro("potency_base precisa ser um número.");
   }
+  // Habilidades V2.0 §4/§21 — campo opcional (null = status continua no
+  // modo legado, potency_base como dano absoluto). Quando informado, o
+  // Admin está migrando ESTA linha pra % de Vida Máxima explicitamente.
+  if (
+    dados.percentual_vida_maxima != null &&
+    (typeof dados.percentual_vida_maxima !== "number" ||
+      Number.isNaN(dados.percentual_vida_maxima) ||
+      dados.percentual_vida_maxima < 0 ||
+      dados.percentual_vida_maxima > 100)
+  ) {
+    throw erro("percentual_vida_maxima precisa ser um número entre 0 e 100.");
+  }
 }
 
 async function sincronizarStatusEffectsMonstro(idMonstro, payload, { idAdmin, req }) {
@@ -799,6 +811,7 @@ async function sincronizarStatusEffectsMonstro(idMonstro, payload, { idAdmin, re
         chance_ppm: efeito.chance_ppm,
         duration_turns: efeito.duration_turns,
         potency_base: efeito.potency_base,
+        percentual_vida_maxima: efeito.percentual_vida_maxima ?? null,
         ativo: efeito.ativo ?? true,
       };
       const existente = porStatusKey.get(efeito.status_key);

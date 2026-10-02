@@ -39,24 +39,31 @@ function aplicarStatus(lista, novaInstancia) {
   }
 
   switch (def.stack) {
-    // BURN: sem stack; reaplicar renova duração e mantém a maior potência.
-    case REGRA_STACK.RENEW_MAX_POTENCY:
+    // BURN: sem stack; reaplicar renova duração e mantém a instância
+    // mais forte — potency e percentualVidaMaxima SEMPRE da mesma
+    // instância vencedora (Habilidades V2.0 §21: nunca misturar um
+    // potency legado de uma aplicação com o percentual da outra).
+    case REGRA_STACK.RENEW_MAX_POTENCY: {
+      const vencedor = maisForte(existente, novaInstancia);
       return [
         ...resto,
-        { ...novaInstancia, stacks: 1, potency: Math.max(existente.potency, novaInstancia.potency) },
+        { ...novaInstancia, stacks: 1, potency: vencedor.potency, percentualVidaMaxima: vencedor.percentualVidaMaxima ?? null },
       ];
+    }
 
     // BLEED/POISON: empilha até o cap; cada stack aumenta o tick
     // (ver calcularDanoDoTick); reaplicar sempre atualiza a duração pro
     // maior valor entre a existente e a nova.
     case REGRA_STACK.STACK_CAP: {
       const cap = STACKS_MAXIMOS[novaInstancia.key] ?? 1;
+      const vencedor = maisForte(existente, novaInstancia);
       return [
         ...resto,
         {
           ...novaInstancia,
           stacks: Math.min(cap, existente.stacks + 1),
-          potency: Math.max(existente.potency, novaInstancia.potency),
+          potency: vencedor.potency,
+          percentualVidaMaxima: vencedor.percentualVidaMaxima ?? null,
           remainingTurns: Math.max(existente.remainingTurns, novaInstancia.remainingTurns),
         },
       ];
@@ -71,19 +78,44 @@ function aplicarStatus(lista, novaInstancia) {
       ];
 
     // WEAKEN/PARALYZE/BLIND: sem stack; fica com a maior potência,
-    // duração é a da aplicação mais recente.
-    case REGRA_STACK.MAX_INTENSITY:
+    // duração é a da aplicação mais recente. Esses três já são
+    // percentuais hoje (sem percentualVidaMaxima), então maisForte()
+    // compara potency normalmente.
+    case REGRA_STACK.MAX_INTENSITY: {
+      const vencedor = maisForte(existente, novaInstancia);
       return [
         ...resto,
-        { ...novaInstancia, stacks: 1, potency: Math.max(existente.potency, novaInstancia.potency) },
+        { ...novaInstancia, stacks: 1, potency: vencedor.potency, percentualVidaMaxima: vencedor.percentualVidaMaxima ?? null },
       ];
+    }
 
     default:
       return [...resto, novaInstancia];
   }
 }
 
-function calcularDanoDoTick(instancia) {
+// Compara duas instâncias do MESMO status e devolve a mais forte,
+// olhando percentualVidaMaxima quando presente (modo novo) ou potency
+// (modo legado) — nunca os dois critérios de instâncias diferentes
+// (Habilidades V2.0 §4/§21: fonte diferente não muda a matemática, mas
+// cada instância carrega seu PRÓPRIO par potency/percentualVidaMaxima
+// coerente, vindo de um único efeito configurado).
+function maisForte(a, b) {
+  const intensidadeA = a.percentualVidaMaxima ?? a.potency ?? 0;
+  const intensidadeB = b.percentualVidaMaxima ?? b.potency ?? 0;
+  return intensidadeB > intensidadeA ? b : a;
+}
+
+// Dano do tick (§21): se a instância tiver percentualVidaMaxima
+// configurado (modo novo), o tick é uma fração da Vida Máxima do alvo —
+// nunca escalado por stacks fora da própria fórmula (stacks multiplica
+// a fração, igual ao modo legado multiplica potency). Sem
+// percentualVidaMaxima (null), comportamento 100% inalterado: dano
+// absoluto de potency * stacks.
+function calcularDanoDoTick(instancia, vidaMaxima) {
+  if (instancia.percentualVidaMaxima != null) {
+    return Math.round((vidaMaxima || 0) * (instancia.percentualVidaMaxima / 100) * instancia.stacks);
+  }
   return Math.round(instancia.potency * instancia.stacks);
 }
 
@@ -92,14 +124,15 @@ function calcularDanoDoTick(instancia) {
 // "se DoT matar o ator antes da ação, a ação não acontece"). `defensor`
 // é o alvo do DoT, usado só pra mitigação por Defesa quando a política do
 // status for DEFENSE (ver statusEffectConfig.MITIGACAO_DOT_PADRAO).
-function processarTicksDeInicio({ vidaAtual, defensor, lista, log, nomeAlvo }) {
+function processarTicksDeInicio({ vidaAtual, vidaMaxima, defensor, lista, log, nomeAlvo }) {
   let vida = vidaAtual;
+  const vidaMaximaEfetiva = vidaMaxima ?? defensor?.vida_maxima ?? 0;
   for (const instancia of lista) {
     if (vida <= 0) break;
     const def = definicaoDoStatus(instancia.key);
     if (!def?.ehDot) continue;
 
-    let dano = calcularDanoDoTick(instancia);
+    let dano = calcularDanoDoTick(instancia, vidaMaximaEfetiva);
     if (def.mitigacao === "DEFENSE") {
       dano = aplicarMitigacaoDeDefesa(dano, defensor);
     }

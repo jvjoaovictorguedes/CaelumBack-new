@@ -465,6 +465,7 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
     const vidaAntesDoTick = atacanteEstado.vida_atual;
     atacanteEstado.vida_atual = statusEffectService.processarTicksDeInicio({
       vidaAtual: atacanteEstado.vida_atual,
+      vidaMaxima: vidaMax,
       defensor: atacanteEstado,
       lista: listaJogador,
       log: [],
