@@ -11,6 +11,10 @@ router
   .post(authMiddleware, adminMiddleware, itemController.createItem)
   .get(itemController.getAllItems);
 
+// Precisa vir ANTES de "/:id" — senão o Express casaria "/search" como
+// se fosse um :id literal "search".
+router.get("/search", authMiddleware, itemController.buscarParaSelecao);
+
 router
   .route("/:id")
   .get(itemController.getItemById)

@@ -1,5 +1,6 @@
 // src/controllers/itemController.js
 const Item = require("../models/Item");
+const itemService = require("../services/itemService");
 const WeaponProperties = require("../models/WeaponProperties");
 const ArmorProperties = require("../models/ArmorProperties");
 const ConsumableProperties = require("../models/ConsumableProperties");
@@ -48,6 +49,27 @@ exports.createItem = async (req, res) => {
 };
 
 // Obter todos os itens
+// Busca pública pra seletor de item (pedido do jogador: "nenhum jogador
+// sabe id do produto") — usada pela Loja do Aventureiro ao publicar uma
+// Demanda ou uma Encomenda, onde o alvo é "qualquer item do jogo", não
+// só o que o próprio personagem já tem (esse caso busca em
+// /inventory/v2). Mesma filtragem de elegibilidade que os services que
+// CRIAM esses registros já aplicam (ver itemService.js) — nunca deixar
+// escolher aqui algo que o backend ia rejeitar na hora de publicar.
+exports.buscarParaSelecao = async (req, res) => {
+  try {
+    const { q, apenas_estocaveis } = req.query;
+    const itens = await itemService.buscarItensNegociaveis({
+      busca: q,
+      apenasEstocaveis: apenas_estocaveis === "true",
+    });
+    res.status(200).json({ status: "success", data: { itens } });
+  } catch (error) {
+    console.error("Erro ao buscar itens para seleção:", error);
+    res.status(500).json({ message: "Erro interno do servidor ao buscar itens." });
+  }
+};
+
 exports.getAllItems = async (req, res) => {
   try {
     // Inclui as propriedades específicas (dano de arma, defesa/atributos
