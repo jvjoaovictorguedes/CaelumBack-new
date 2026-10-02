@@ -50,24 +50,50 @@ const ACTION_TYPE = {
 
 const TODAS_ACOES_DE_TURNO = [ACTION_TYPE.BASIC_ATTACK, ACTION_TYPE.POWER, ACTION_TYPE.ITEM];
 
+// Unidade de magnitude pro Admin (Habilidades V2.0 §4/§17 — "o campo
+// genérico 'Potência base' deve desaparecer da experiência do Admin; o
+// label deve refletir a unidade real"). `unidadeHoje` é como `potency`
+// É INTERPRETADO ATUALMENTE no motor (ver habilidadesV2Caracterizacao.
+// test.js: BURN/BLEED/POISON ainda são dano ABSOLUTO, não percentual);
+// `unidadeAlvoV2` é o que a migração da Fase 7 vai tornar verdade. Até
+// lá as duas colunas DIVERGEM de propósito pra essa lacuna ficar
+// visível em qualquer lugar que leia este catálogo — nunca silenciada.
+const UNIDADE = {
+  ABSOLUTA: "ABSOLUTA",
+  PERCENTUAL_VIDA_MAXIMA: "PERCENTUAL_VIDA_MAXIMA",
+  PERCENTUAL_DANO_CAUSADO: "PERCENTUAL_DANO_CAUSADO",
+  PERCENTUAL_CHANCE: "PERCENTUAL_CHANCE",
+  PERCENTUAL_ERRO_ADICIONAL: "PERCENTUAL_ERRO_ADICIONAL",
+  SEM_MAGNITUDE: "SEM_MAGNITUDE",
+};
+
 const STATUS = {
   BURN: {
     nomeUi: "Queimadura",
     ehDot: true,
     stack: REGRA_STACK.RENEW_MAX_POTENCY,
     mitigacao: MITIGACAO_DOT_PADRAO,
+    unidadeHoje: UNIDADE.ABSOLUTA,
+    unidadeAlvoV2: UNIDADE.PERCENTUAL_VIDA_MAXIMA,
+    labelAdminMagnitude: "Dano por tick (% da Vida Máxima)",
   },
   BLEED: {
     nomeUi: "Sangramento",
     ehDot: true,
     stack: REGRA_STACK.STACK_CAP,
     mitigacao: MITIGACAO_DOT_PADRAO,
+    unidadeHoje: UNIDADE.ABSOLUTA,
+    unidadeAlvoV2: UNIDADE.PERCENTUAL_VIDA_MAXIMA,
+    labelAdminMagnitude: "Dano por stack/tick (% da Vida Máxima)",
   },
   POISON: {
     nomeUi: "Veneno",
     ehDot: true,
     stack: REGRA_STACK.STACK_CAP,
     mitigacao: MITIGACAO_DOT_PADRAO,
+    unidadeHoje: UNIDADE.ABSOLUTA,
+    unidadeAlvoV2: UNIDADE.PERCENTUAL_VIDA_MAXIMA,
+    labelAdminMagnitude: "Dano por stack/tick (% da Vida Máxima)",
   },
   SILENCE: {
     nomeUi: "Silêncio",
@@ -77,6 +103,9 @@ const STATUS = {
     // Bloqueia habilidades ativas; ataque básico e item continuam
     // permitidos (§4 do catálogo canônico).
     bloqueiaAcoes: [ACTION_TYPE.POWER],
+    unidadeHoje: UNIDADE.SEM_MAGNITUDE,
+    unidadeAlvoV2: UNIDADE.SEM_MAGNITUDE,
+    labelAdminMagnitude: null,
   },
   WEAKEN: {
     nomeUi: "Enfraquecimento",
@@ -87,6 +116,9 @@ const STATUS = {
     // `potency`% enquanto ativo — aplicado como multiplicador sobre o
     // dano já calculado, depois de toda a rolagem normal.
     modificaSaidaDeDano: true,
+    unidadeHoje: UNIDADE.PERCENTUAL_DANO_CAUSADO,
+    unidadeAlvoV2: UNIDADE.PERCENTUAL_DANO_CAUSADO,
+    labelAdminMagnitude: "Redução do dano causado (%)",
   },
   // Hard control (§4/§5.1) — o ator não executa nenhuma ação; é
   // removido imediatamente ao receber DANO DIRETO (não DoT, e não pelo
@@ -99,6 +131,9 @@ const STATUS = {
     mitigacao: MITIGACAO.NONE,
     bloqueiaAcoes: [ACTION_TYPE.BASIC_ATTACK, ACTION_TYPE.POWER, ACTION_TYPE.ITEM],
     quebraPorDanoDireto: true,
+    unidadeHoje: UNIDADE.SEM_MAGNITUDE,
+    unidadeAlvoV2: UNIDADE.SEM_MAGNITUDE,
+    labelAdminMagnitude: null,
   },
   // Hard control (§5.2) — igual a Freeze na ação bloqueada, mas dano
   // recebido NUNCA remove Stun (só a duração expirando).
@@ -108,6 +143,9 @@ const STATUS = {
     stack: REGRA_STACK.RENEW_MAX_DURATION,
     mitigacao: MITIGACAO.NONE,
     bloqueiaAcoes: [ACTION_TYPE.BASIC_ATTACK, ACTION_TYPE.POWER, ACTION_TYPE.ITEM],
+    unidadeHoje: UNIDADE.SEM_MAGNITUDE,
+    unidadeAlvoV2: UNIDADE.SEM_MAGNITUDE,
+    labelAdminMagnitude: null,
   },
   // Controle probabilístico (§5.3) — `potency` é a chance percentual
   // (0..100) de perder a ação NESTE turno; uma única rolagem por
@@ -120,6 +158,9 @@ const STATUS = {
     mitigacao: MITIGACAO.NONE,
     controleProbabilistico: true,
     bloqueiaAcoes: [ACTION_TYPE.BASIC_ATTACK, ACTION_TYPE.POWER, ACTION_TYPE.ITEM],
+    unidadeHoje: UNIDADE.PERCENTUAL_CHANCE,
+    unidadeAlvoV2: UNIDADE.PERCENTUAL_CHANCE,
+    labelAdminMagnitude: "Chance de perder a ação (%)",
   },
   // Precisão (§5.4) — `potency` é a chance ADICIONAL de errar (pontos
   // percentuais, 0..100) do ATACANTE afetado; não bloqueia ação, só
@@ -131,6 +172,9 @@ const STATUS = {
     stack: REGRA_STACK.MAX_INTENSITY,
     mitigacao: MITIGACAO.NONE,
     afetaAcerto: true,
+    unidadeHoje: UNIDADE.PERCENTUAL_ERRO_ADICIONAL,
+    unidadeAlvoV2: UNIDADE.PERCENTUAL_ERRO_ADICIONAL,
+    labelAdminMagnitude: "Chance adicional de erro (%)",
   },
 };
 
@@ -149,5 +193,6 @@ module.exports = {
   ACTION_TYPE,
   TODAS_ACOES_DE_TURNO,
   CHAVES_VALIDAS,
+  UNIDADE,
   definicaoDoStatus,
 };
