@@ -3,6 +3,7 @@
 const playerShopService = require("../services/playerShopService");
 const marketService = require("../services/marketService");
 const playerShopDemandService = require("../services/playerShopDemandService");
+const playerShopCommissionService = require("../services/playerShopCommissionService");
 
 function tratarErro(res, error, mensagemPadrao) {
   const statusCode = error.statusCode || 500;
@@ -131,6 +132,73 @@ exports.listarDemandasAbertas = async (req, res) => {
     res.status(200).json({ status: "success", data: resultado });
   } catch (error) {
     tratarErro(res, error, "Erro interno do servidor ao listar demandas.");
+  }
+};
+
+// POST /api/player-shops/:characterId/commissions — cliente abre uma
+// encomenda direcionada ao lojista dono de :characterId.
+exports.criarEncomenda = async (req, res) => {
+  try {
+    const idLojista = Number(req.params.characterId);
+    const encomenda = await playerShopCommissionService.criarEncomenda(req.personagemAtual.id, idLojista, req.body ?? {});
+    res.status(201).json({ status: "success", message: "Encomenda enviada!", data: { encomenda } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao criar encomenda.");
+  }
+};
+
+// GET /api/player-shops/mine/commissions — minhas encomendas (enviadas + recebidas)
+exports.listarMinhasEncomendas = async (req, res) => {
+  try {
+    const resultado = await playerShopCommissionService.listarMinhasEncomendas(req.personagemAtual.id);
+    res.status(200).json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao listar suas encomendas.");
+  }
+};
+
+// GET /api/player-shops/commissions/:idEncomenda
+exports.obterEncomenda = async (req, res) => {
+  try {
+    const idEncomenda = Number(req.params.idEncomenda);
+    const encomenda = await playerShopCommissionService.obterEncomenda(idEncomenda, req.personagemAtual.id);
+    res.status(200).json({ status: "success", data: { encomenda } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao carregar a encomenda.");
+  }
+};
+
+// POST /api/player-shops/commissions/:idEncomenda/counter-offer
+exports.contraProporEncomenda = async (req, res) => {
+  try {
+    const idEncomenda = Number(req.params.idEncomenda);
+    const resultado = await playerShopCommissionService.contraPropor(idEncomenda, req.personagemAtual.id, req.body ?? {});
+    res.status(200).json({ status: "success", message: "Contraproposta enviada!", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao enviar contraproposta.");
+  }
+};
+
+// POST /api/player-shops/commissions/:idEncomenda/accept { proposal_version }
+exports.aceitarEncomenda = async (req, res) => {
+  try {
+    const idEncomenda = Number(req.params.idEncomenda);
+    const { proposal_version } = req.body ?? {};
+    const encomenda = await playerShopCommissionService.aceitarOferta(idEncomenda, req.personagemAtual.id, proposal_version);
+    res.status(200).json({ status: "success", message: "Encomenda aceita! Ouro reservado.", data: { encomenda } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao aceitar encomenda.");
+  }
+};
+
+// POST /api/player-shops/commissions/:idEncomenda/decline
+exports.recusarEncomenda = async (req, res) => {
+  try {
+    const idEncomenda = Number(req.params.idEncomenda);
+    const encomenda = await playerShopCommissionService.recusar(idEncomenda, req.personagemAtual.id);
+    res.status(200).json({ status: "success", data: { encomenda } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao recusar encomenda.");
   }
 };
 

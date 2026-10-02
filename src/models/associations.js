@@ -23,6 +23,9 @@ const MarketTransaction = require("./MarketTransaction");
 const PlayerShop = require("./PlayerShop");
 const PlayerShopDemand = require("./PlayerShopDemand");
 const PlayerShopDemandDelivery = require("./PlayerShopDemandDelivery");
+const PlayerShopCommission = require("./PlayerShopCommission");
+const PlayerShopCommissionOffer = require("./PlayerShopCommissionOffer");
+const PlayerShopCommissionLog = require("./PlayerShopCommissionLog");
 const PvPSeason = require("./PvPSeason");
 const CharacterPvpSeason = require("./CharacterPvpSeason");
 const RankedMatch = require("./RankedMatch");
@@ -150,6 +153,16 @@ PlayerShopDemand.belongsTo(Item, { foreignKey: "id_item", as: "item" });
 PlayerShopDemand.hasMany(PlayerShopDemandDelivery, { foreignKey: "id_demanda", as: "entregas" });
 PlayerShopDemandDelivery.belongsTo(PlayerShopDemand, { foreignKey: "id_demanda", as: "demanda" });
 PlayerShopDemandDelivery.belongsTo(Character, { foreignKey: "id_personagem_fornecedor", as: "fornecedor" });
+
+// Loja do Aventureiro V2 §7 — Encomenda (negociação direcionada) +
+// contrapropostas versionadas + log de eventos.
+PlayerShopCommission.belongsTo(Character, { foreignKey: "id_personagem_lojista", as: "lojista" });
+PlayerShopCommission.belongsTo(Character, { foreignKey: "id_personagem_cliente", as: "cliente" });
+PlayerShopCommission.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+PlayerShopCommission.hasMany(PlayerShopCommissionOffer, { foreignKey: "id_encomenda", as: "ofertas" });
+PlayerShopCommissionOffer.belongsTo(PlayerShopCommission, { foreignKey: "id_encomenda", as: "encomenda" });
+PlayerShopCommission.hasMany(PlayerShopCommissionLog, { foreignKey: "id_encomenda", as: "logs" });
+PlayerShopCommissionLog.belongsTo(PlayerShopCommission, { foreignKey: "id_encomenda", as: "encomenda" });
 MarketTransaction.belongsTo(MarketListing, { foreignKey: "id_listing", as: "listing" });
 MarketTransaction.belongsTo(Item, { foreignKey: "id_item", as: "item" });
 MarketTransaction.belongsTo(Character, { foreignKey: "id_personagem_vendedor", as: "vendedor" });

@@ -38,6 +38,41 @@ router.post(
   playerShopController.entregarNaDemanda,
 );
 
+router.get("/mine/commissions", authMiddleware, carregarPersonagemAtual, playerShopController.listarMinhasEncomendas);
+
+// Encomendas também vivem fora de "/mine" (precisam vir antes de
+// "/:characterId") — cada uma pertence a um cliente+lojista específicos,
+// validado dentro do service (playerShopCommissionService).
+router.get("/commissions/:idEncomenda", authMiddleware, carregarPersonagemAtual, playerShopController.obterEncomenda);
+router.post(
+  "/commissions/:idEncomenda/counter-offer",
+  authMiddleware,
+  carregarPersonagemAtual,
+  playerShopController.contraProporEncomenda,
+);
+router.post(
+  "/commissions/:idEncomenda/accept",
+  authMiddleware,
+  carregarPersonagemAtual,
+  playerShopController.aceitarEncomenda,
+);
+router.post(
+  "/commissions/:idEncomenda/decline",
+  authMiddleware,
+  carregarPersonagemAtual,
+  playerShopController.recusarEncomenda,
+);
+
 router.get("/:characterId", authMiddleware, playerShopController.obterLoja);
+
+// Precisa vir DEPOIS de "/:characterId" por design: cria uma encomenda
+// PARA o personagem dono de :characterId (o cliente é quem está
+// autenticado, não quem está na URL).
+router.post(
+  "/:characterId/commissions",
+  authMiddleware,
+  carregarPersonagemAtual,
+  playerShopController.criarEncomenda,
+);
 
 module.exports = router;
