@@ -273,6 +273,27 @@ exports.comprarAnuncio = async (req, res) => {
   }
 };
 
+exports.editarPrecoAnuncio = async (req, res) => {
+  const id_personagem = req.personagemAtual.id;
+  const { id } = req.params;
+  const { preco_unitario } = req.body ?? {};
+
+  try {
+    const listing = await marketService.updateListingPrice({
+      idListing: id,
+      idPersonagem: id_personagem,
+      precoUnitario: preco_unitario,
+    });
+    return res.status(200).json({ status: "success", message: "Preço atualizado!", data: { listing } });
+  } catch (error) {
+    const statusCode = error.statusCode || 500;
+    if (statusCode === 500) console.error("Erro ao editar preço do anúncio:", error);
+    return res
+      .status(statusCode)
+      .json({ message: error.statusCode ? error.message : "Erro interno do servidor ao editar o preço." });
+  }
+};
+
 exports.cancelarAnuncio = async (req, res) => {
   const id_personagem = req.personagemAtual.id;
   const { id } = req.params;

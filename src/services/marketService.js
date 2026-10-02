@@ -219,6 +219,35 @@ async function buyListing({ idListing, idPersonagemComprador, quantidade }) {
   });
 }
 
+// Editar preço de um anúncio ativo (pedido do jogador na Loja do
+// Aventureiro: "faltou editar o preço" — sem isso só dava pra cancelar
+// e republicar, perdendo o histórico/posição do anúncio). Só mexe no
+// preço, nunca em quantidade/item — isso continua exigindo cancelar e
+// criar outro.
+async function updateListingPrice({ idListing, idPersonagem, precoUnitario }) {
+  const preco = Number(precoUnitario);
+  if (!Number.isInteger(preco) || preco < PRECO_MINIMO_UNITARIO || preco > PRECO_MAXIMO_UNITARIO) {
+    throw erro(`Preço unitário precisa ser um inteiro entre ${PRECO_MINIMO_UNITARIO} e ${PRECO_MAXIMO_UNITARIO}.`);
+  }
+
+  return sequelize.transaction(async (transaction) => {
+    const listing = await MarketListing.findByPk(idListing, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    if (!listing || listing.status !== "Ativo") {
+      throw erro("Este anúncio não está mais ativo.", 404);
+    }
+    if (listing.id_personagem_vendedor !== idPersonagem) {
+      throw erro("Este anúncio não é seu.", 403);
+    }
+
+    listing.preco_unitario = preco;
+    await listing.save({ transaction });
+    return listing;
+  });
+}
+
 async function cancelListing({ idListing, idPersonagem }) {
   return sequelize.transaction(async (transaction) => {
     const listing = await MarketListing.findByPk(idListing, {
@@ -247,4 +276,4 @@ async function cancelListing({ idListing, idPersonagem }) {
   });
 }
 
-module.exports = { getConfig, createListing, buyListing, cancelListing };
+module.exports = { getConfig, createListing, buyListing, cancelListing, updateListingPrice };

@@ -183,3 +183,67 @@ test("mercado: obterConfig expõe taxa_mercado (mesma constante usada em comprar
   assert.equal(res.body.data.preco_minimo_unitario, PRECO_MINIMO_UNITARIO);
   assert.equal(res.body.data.preco_maximo_unitario, PRECO_MAXIMO_UNITARIO);
 });
+
+// Pedido do jogador ("Loja do Aventureiro ... faltou editar o preço") —
+// antes só dava pra cancelar e republicar o anúncio inteiro.
+testeComBanco("mercado: editarPrecoAnuncio atualiza o preço de um anúncio ativo do próprio vendedor", async () => {
+  const { personagem: vendedor } = await novoPersonagem();
+  const item = await Item.create({
+    nome: `Item de Teste ${sufixo()}`,
+    descricao: "Teste.",
+    tipo_item: "Consumivel",
+    raridade: "Comum",
+    negociavel_mercado: true,
+  });
+  itensCriados.push(item.id);
+
+  const listing = await MarketListing.create({
+    id_personagem_vendedor: vendedor.id,
+    id_item: item.id,
+    quantidade_total: 3,
+    quantidade_restante: 3,
+    preco_unitario: 10,
+    status: "Ativo",
+  });
+  listingsCriadas.push(listing.id);
+
+  const req = { params: { id: listing.id }, body: { preco_unitario: 25 }, personagemAtual: { id: vendedor.id } };
+  const res = fakeRes();
+  await marketController.editarPrecoAnuncio(req, res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.data.listing.preco_unitario, 25);
+  await listing.reload();
+  assert.equal(listing.preco_unitario, 25);
+});
+
+testeComBanco("mercado: editarPrecoAnuncio recusa quando o anúncio não é do personagem autenticado", async () => {
+  const { personagem: vendedor } = await novoPersonagem();
+  const { personagem: outro } = await novoPersonagem();
+  const item = await Item.create({
+    nome: `Item de Teste ${sufixo()}`,
+    descricao: "Teste.",
+    tipo_item: "Consumivel",
+    raridade: "Comum",
+    negociavel_mercado: true,
+  });
+  itensCriados.push(item.id);
+
+  const listing = await MarketListing.create({
+    id_personagem_vendedor: vendedor.id,
+    id_item: item.id,
+    quantidade_total: 1,
+    quantidade_restante: 1,
+    preco_unitario: 10,
+    status: "Ativo",
+  });
+  listingsCriadas.push(listing.id);
+
+  const req = { params: { id: listing.id }, body: { preco_unitario: 999 }, personagemAtual: { id: outro.id } };
+  const res = fakeRes();
+  await marketController.editarPrecoAnuncio(req, res);
+
+  assert.equal(res.statusCode, 403);
+  await listing.reload();
+  assert.equal(listing.preco_unitario, 10, "preço não pode mudar quando quem pediu não é o dono");
+});

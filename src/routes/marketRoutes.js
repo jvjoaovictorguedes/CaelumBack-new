@@ -19,7 +19,10 @@ router
   .post(authMiddleware, carregarPersonagemAtual, marketController.criarAnuncio);
 
 router.route("/listings/:id/buy").post(authMiddleware, carregarPersonagemAtual, marketController.comprarAnuncio);
-router.route("/listings/:id").delete(authMiddleware, carregarPersonagemAtual, marketController.cancelarAnuncio);
+router
+  .route("/listings/:id")
+  .patch(authMiddleware, carregarPersonagemAtual, marketController.editarPrecoAnuncio)
+  .delete(authMiddleware, carregarPersonagemAtual, marketController.cancelarAnuncio);
 
 router.route("/price-history/:idItem").get(authMiddleware, marketController.historicoPreco);
 
