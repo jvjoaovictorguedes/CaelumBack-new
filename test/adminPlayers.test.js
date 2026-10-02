@@ -56,7 +56,13 @@ async function novoPersonagem(nome) {
   usuariosCriados.push(usuario.id);
   personagensCriados.push(personagem.id);
   if (nome) {
-    personagem.nome = `${nome} ${sufixo()}`;
+    // Nunca acrescenta outro sufixo() aqui — o único call site que passa
+    // `nome` (busca por nome de personagem) já embute o seu próprio
+    // sufixo() pra montar a string de busca; somar mais um aqui estourava
+    // varchar(50) de Character.nome (bug real, não flake: reproduzia toda
+    // vez, já que pid+timestamp do sufixo() sozinho já usa boa parte dos
+    // 50 caracteres).
+    personagem.nome = nome;
     await personagem.save();
   }
   return { usuario, personagem };

@@ -90,3 +90,12 @@ exports.excluirEfeito = async (req, res) => {
     tratarErro(res, error, "Erro interno do servidor ao excluir efeito de consumível.");
   }
 };
+
+exports.preverEfeitos = async (req, res) => {
+  try {
+    const preview = await adminAlchemyService.previewAdminConsumableEffects(req.params.idItem, req.query ?? {});
+    res.status(200).json({ status: "success", data: { preview } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao simular os efeitos do item.");
+  }
+};

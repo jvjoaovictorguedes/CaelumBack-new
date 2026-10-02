@@ -21,4 +21,8 @@ router.post("/items/:idItem/effects", adminAlchemyController.criarEfeito);
 router.patch("/effects/:id", adminAlchemyController.atualizarEfeito);
 router.delete("/effects/:id", adminAlchemyController.excluirEfeito);
 
+// Preview server-side (spec Caldeirão §19) — simula o uso do item com
+// vida/mana/buffs/escudo hipotéticos, sem ler/gravar nenhum Character real.
+router.get("/items/:idItem/preview", adminAlchemyController.preverEfeitos);
+
 module.exports = router;

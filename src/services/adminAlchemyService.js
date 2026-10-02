@@ -9,7 +9,16 @@ const Item = require("../models/Item");
 const ConsumableEffect = require("../models/ConsumableEffect");
 const { registrarAcao } = require("./adminAuditService");
 const { CONSUMABLE_EFFECT_HANDLERS, efeitoConhecido } = require("./consumableEffectRegistry");
-const { ATRIBUTOS_BUFAVEIS } = require("./combatBuffService");
+const consumableEffectService = require("./consumableEffectService");
+const {
+  ATRIBUTOS_BUFAVEIS,
+  STATUS_RESISTANCE_MAXIMA,
+  somaDeAtributo,
+  modificadorDeDanoSaida,
+  bonusDeDefesa,
+  regenDeVidaDoTurno,
+  regenDeManaDoTurno,
+} = require("./combatBuffService");
 const { CHAVES_VALIDAS } = require("../config/statusEffectConfig");
 
 function erro(mensagem, statusCode = 400) {
@@ -419,6 +428,82 @@ async function deleteAdminConsumableEffect(id, { idAdmin, req }) {
   });
 }
 
+// ---------------------------------------------------------------------
+// Preview server-side (spec Caldeirão §19) — simula o uso do item com
+// vida/mana/buffs/escudo/status HIPOTÉTICOS (nunca lê/grava um
+// Character de verdade: é só uma calculadora pro admin conferir o
+// catálogo antes de publicar), reaproveitando o MESMO
+// consumableEffectService.aplicarEfeitosDoItem que PvE/fora-de-combate
+// usam de verdade — nunca duplica a ordem/precedência dos handlers
+// aqui. STATUS_RESISTANCE nunca roda RNG num preview (resolverTentativaDeStatus
+// é só pra uma tentativa de verdade em combate): mostra a CHANCE
+// calculada (já com o teto de 75%), nunca um resultado sorteado.
+// ---------------------------------------------------------------------
+
+function resumoDeBuffs(combatBuffs, { vidaMaxima, manaMaxima }) {
+  return {
+    dano_saida_multiplicador: modificadorDeDanoSaida(combatBuffs),
+    defesa_bonus: bonusDeDefesa(combatBuffs),
+    regen_vida_por_turno: regenDeVidaDoTurno(combatBuffs, vidaMaxima),
+    regen_mana_por_turno: regenDeManaDoTurno(combatBuffs, manaMaxima),
+    status_resistance_chance: Math.min(STATUS_RESISTANCE_MAXIMA, somaDeAtributo(combatBuffs, "STATUS_RESISTANCE_PCT")),
+  };
+}
+
+async function previewAdminConsumableEffects(idItem, hipotetico = {}) {
+  const item = await Item.findByPk(idItem);
+  if (!item) throw erro("Item não encontrado.", 404);
+
+  const vidaMaxima = hipotetico.vidaMaxima != null ? Number(hipotetico.vidaMaxima) : 100;
+  const manaMaxima = hipotetico.manaMaxima != null ? Number(hipotetico.manaMaxima) : 100;
+  if (!(vidaMaxima > 0) || !(manaMaxima > 0)) {
+    throw erro("vidaMaxima e manaMaxima hipotéticos precisam ser > 0.");
+  }
+  const vidaAtual = hipotetico.vidaAtual != null ? Number(hipotetico.vidaAtual) : vidaMaxima;
+  const manaAtual = hipotetico.manaAtual != null ? Number(hipotetico.manaAtual) : manaMaxima;
+  const quantidade = hipotetico.quantidade != null ? Number(hipotetico.quantidade) : 1;
+  const combatBuffsAntes = Array.isArray(hipotetico.combatBuffs) ? hipotetico.combatBuffs : [];
+  const escudoAntes = hipotetico.escudoAtual ?? null;
+  const statusEffectsAntes = Array.isArray(hipotetico.statusEffects) ? hipotetico.statusEffects : [];
+
+  const resultado = await consumableEffectService.aplicarEfeitosDoItem({
+    idItem,
+    statusEffects: statusEffectsAntes,
+    combatBuffs: combatBuffsAntes,
+    escudoAtual: escudoAntes,
+    vidaAtual,
+    vidaMaxima,
+    manaAtual,
+    manaMaxima,
+    quantidade,
+    nomeAlvo: "Personagem de teste",
+  });
+
+  return {
+    item: { id: item.id, nome: item.nome },
+    hipotetico: { vidaAtual, vidaMaxima, manaAtual, manaMaxima, quantidade },
+    antes: {
+      vidaAtual,
+      manaAtual,
+      statusEffects: statusEffectsAntes,
+      combatBuffs: combatBuffsAntes,
+      escudo: escudoAntes,
+      resumo: resumoDeBuffs(combatBuffsAntes, { vidaMaxima, manaMaxima }),
+    },
+    depois: {
+      vidaAtual: resultado.vidaAtual,
+      manaAtual: resultado.manaAtual,
+      statusEffects: resultado.statusEffects,
+      combatBuffs: resultado.combatBuffs,
+      escudo: resultado.escudo,
+      resumo: resumoDeBuffs(resultado.combatBuffs, { vidaMaxima, manaMaxima }),
+    },
+    curaVida: resultado.curaVida,
+    curaMana: resultado.curaMana,
+    log: resultado.log,
+  };
+}
+
 module.exports = {
   listAdminAlchemyRecipes,
   createAdminAlchemyRecipe,
@@ -428,4 +513,5 @@ module.exports = {
   createAdminConsumableEffect,
   updateAdminConsumableEffect,
   deleteAdminConsumableEffect,
+  previewAdminConsumableEffects,
 };
