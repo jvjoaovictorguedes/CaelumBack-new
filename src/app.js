@@ -86,7 +86,7 @@ const adminPatchNoteRoutes = require("./routes/adminPatchNoteRoutes");
 const adminGameSettingRoutes = require("./routes/adminGameSettingRoutes");
 const adminAdventureRoutes = require("./routes/adminAdventureRoutes");
 const adminEquipmentSetRoutes = require("./routes/adminEquipmentSetRoutes");
-const { powersRouter: adminPowersRouter, statusEffectsRouter: adminStatusEffectsRouter, combatEffectsRouter: adminCombatEffectsRouter, weaponStatusEffectsRouter: adminWeaponStatusEffectsRouter } = require("./routes/adminPowerRoutes");
+const { powersRouter: adminPowersRouter, statusEffectsRouter: adminStatusEffectsRouter, combatEffectsRouter: adminCombatEffectsRouter, weaponStatusEffectsRouter: adminWeaponStatusEffectsRouter, powerBookRouter: adminPowerBookRouter } = require("./routes/adminPowerRoutes");
 const { adminMediaRouter, mediaServingRouter } = require("./routes/adminMediaRoutes");
 const adminMissionRoutes = require("./routes/adminMissionRoutes");
 const adminSpoilConfigRoutes = require("./routes/adminSpoilConfigRoutes");
@@ -303,6 +303,7 @@ app.use("/api/admin/powers", adminPowersRouter);
 app.use("/api/admin/status-effects", adminStatusEffectsRouter);
 app.use("/api/admin/combat-effects", adminCombatEffectsRouter);
 app.use("/api/admin/items/:idItem/weapon-status-effects", adminWeaponStatusEffectsRouter);
+app.use("/api/admin/items/:idItem/power-book", adminPowerBookRouter);
 app.use("/api/admin/media", adminMediaRouter);
 // Pública de propósito (sem authMiddleware) — imagem_url de Item/Power/
 // etc pode apontar pra cá, e telas de jogador comuns carregam isso num

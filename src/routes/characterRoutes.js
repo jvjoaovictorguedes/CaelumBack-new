@@ -61,6 +61,12 @@ router
   .route("/:id/powers/:idPower/purchase")
   .post(authMiddleware, exigirDonoDoPersonagem("id"), characterController.comprarPoder);
 
+// Habilidades V2.0 §13 — Livro de Habilidade (consome o item do
+// inventário e concede a Power permanentemente via CharacterAbilities).
+router
+  .route("/:id/power-books/:idItem/learn")
+  .post(authMiddleware, exigirDonoDoPersonagem("id"), characterController.aprenderPorLivroDeHabilidade);
+
 // Árvore de evoluções (ver comentário em characterController.getEvolucoesDisponiveis)
 // — ainda sem tela pública, mas a API já fica pronta e protegida do
 // mesmo jeito que o resto: leitura é dono-ou-admin, compra é só dono.

@@ -17,6 +17,7 @@ const CharacterAbilities = require("../models/CharacterAbilities");
 const Class = require("../models/Class");
 const Race = require("../models/Race");
 const Item = require("../models/Item");
+const PowerBook = require("../models/PowerBook");
 // Efeito colateral necessário: ClassAbilities/RaceAbilities só ganham a
 // associação belongsTo(Power) quando characterController é carregado
 // (mesmo padrão de test/helpers/db.js) — sem isso, include: [Power]
@@ -524,6 +525,64 @@ async function previewPowerStatus(idPower, valorAtributoExemplo) {
   return { power_id: power.id, nome: power.nome, dano_base: power.dano_base, valor_atributo_exemplo: valorAtributoExemplo, efeitos };
 }
 
+// ------------------------------------------- POWER BOOK (Livro de Habilidade)
+// Habilidades V2.0 §13 — uma linha por Item tipo_item="LivroHabilidade",
+// vinculando ao Power concedido + requisitos opcionais (nivel_minimo/
+// id_classe/id_raca/natureza_magica/id_power_prerequisito/
+// nivel_power_prerequisito). Keyed por id_item (unique): um livro = um
+// poder, nunca uma segunda linha pro mesmo item.
+const CAMPOS_POWER_BOOK = [
+  "id_power",
+  "nivel_minimo",
+  "id_classe",
+  "id_raca",
+  "natureza_magica",
+  "id_power_prerequisito",
+  "nivel_power_prerequisito",
+  "ativo",
+];
+
+async function getAdminPowerBook(idItem) {
+  return PowerBook.findOne({ where: { id_item: idItem } });
+}
+
+async function upsertAdminPowerBook(idItem, payload, { idAdmin, req }) {
+  const dados = somenteCampos(payload, CAMPOS_POWER_BOOK);
+  if (!dados.id_power) throw erro("id_power é obrigatório.");
+
+  return sequelize.transaction(async (transaction) => {
+    const item = await Item.findByPk(idItem, { transaction });
+    if (!item) throw erro("Item não encontrado.", 404);
+    if (item.tipo_item !== "LivroHabilidade") {
+      throw erro('Só itens do tipo "LivroHabilidade" podem ter um PowerBook configurado.');
+    }
+    const power = await Power.findByPk(dados.id_power, { transaction });
+    if (!power) throw erro("Habilidade (id_power) não encontrada.", 404);
+
+    const existente = await PowerBook.findOne({ where: { id_item: idItem }, transaction, lock: transaction.LOCK.UPDATE });
+    if (existente) {
+      const antes = existente.toJSON();
+      await existente.update(dados, { transaction });
+      await registrarAcao({ idAdmin, acao: "editar", entidade: "PowerBook", idEntidade: existente.id, dadosAntes: antes, dadosDepois: existente.toJSON(), req, transaction });
+      return existente;
+    }
+    const criado = await PowerBook.create({ id_item: idItem, ...dados }, { transaction });
+    await registrarAcao({ idAdmin, acao: "criar", entidade: "PowerBook", idEntidade: criado.id, dadosDepois: criado.toJSON(), req, transaction });
+    return criado;
+  });
+}
+
+async function removeAdminPowerBook(idItem, { idAdmin, req }) {
+  return sequelize.transaction(async (transaction) => {
+    const existente = await PowerBook.findOne({ where: { id_item: idItem }, transaction });
+    if (!existente) throw erro("Este item não tem PowerBook configurado.", 404);
+    const antes = existente.toJSON();
+    await existente.destroy({ transaction });
+    await registrarAcao({ idAdmin, acao: "remover", entidade: "PowerBook", idEntidade: antes.id, dadosAntes: antes, req, transaction });
+    return { removido: true };
+  });
+}
+
 module.exports = {
   CHAVES_VALIDAS,
   TRIGGERS_SUPORTADOS,
@@ -556,4 +615,7 @@ module.exports = {
   statusCatalog,
   previewPowerEvolution,
   previewPowerStatus,
+  getAdminPowerBook,
+  upsertAdminPowerBook,
+  removeAdminPowerBook,
 };

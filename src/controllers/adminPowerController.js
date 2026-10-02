@@ -250,3 +250,32 @@ exports.previewStatus = async (req, res) => {
     tratarErro(res, error, "Erro interno do servidor ao simular status.");
   }
 };
+
+// PowerBook / Livro de Habilidade (montado sob /admin/items/:idItem/power-book
+// — Habilidades V2.0 §13).
+exports.obterPowerBook = async (req, res) => {
+  try {
+    const powerBook = await adminPowerService.getAdminPowerBook(req.params.idItem);
+    res.status(200).json({ status: "success", data: { power_book: powerBook } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao buscar o Livro de Habilidade.");
+  }
+};
+
+exports.salvarPowerBook = async (req, res) => {
+  try {
+    const powerBook = await adminPowerService.upsertAdminPowerBook(req.params.idItem, req.body ?? {}, { idAdmin: req.user.id, req });
+    res.status(200).json({ status: "success", data: { power_book: powerBook } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao salvar o Livro de Habilidade.");
+  }
+};
+
+exports.removerPowerBook = async (req, res) => {
+  try {
+    const resultado = await adminPowerService.removeAdminPowerBook(req.params.idItem, { idAdmin: req.user.id, req });
+    res.status(200).json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao remover o Livro de Habilidade.");
+  }
+};

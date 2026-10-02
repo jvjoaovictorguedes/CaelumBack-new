@@ -50,4 +50,12 @@ weaponStatusEffectsRouter.post("/", adminPowerController.adicionarWeaponStatusEf
 weaponStatusEffectsRouter.patch("/:idEfeito", adminPowerController.atualizarWeaponStatusEffect);
 weaponStatusEffectsRouter.delete("/:idEfeito", adminPowerController.removerWeaponStatusEffect);
 
-module.exports = { powersRouter, statusEffectsRouter, combatEffectsRouter, weaponStatusEffectsRouter };
+// Livro de Habilidade (montado sob /admin/items/:idItem/power-book —
+// Habilidades V2.0 §13).
+const powerBookRouter = express.Router({ mergeParams: true });
+powerBookRouter.use(authMiddleware, adminMiddleware, requireAdminPermission("items.manage"));
+powerBookRouter.get("/", adminPowerController.obterPowerBook);
+powerBookRouter.put("/", adminPowerController.salvarPowerBook);
+powerBookRouter.delete("/", adminPowerController.removerPowerBook);
+
+module.exports = { powersRouter, statusEffectsRouter, combatEffectsRouter, weaponStatusEffectsRouter, powerBookRouter };

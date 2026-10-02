@@ -31,6 +31,7 @@ const {
   comMultiplicadoresDeClasse,
 } = require("../services/combatFormulas");
 const { sortearNaturezaMagica } = require("../services/naturezaMagicaService");
+const powerLearningService = require("../services/powerLearningService");
 const {
   NOME_ITEM_FRAGMENTO,
   NIVEL_MAXIMO_HABILIDADE,
@@ -1138,6 +1139,25 @@ exports.comprarPoder = async (req, res) => {
     }
     console.error("Erro ao comprar poder:", error);
     res.status(500).json({ message: "Erro interno do servidor ao comprar poder." });
+  }
+};
+
+// POST /characters/:id/power-books/:idItem/learn (Habilidades V2.0 §13)
+// — usa um Livro de Habilidade do inventário pra aprender permanentemente
+// a Power vinculada. Toda a validação/concessão vive em
+// powerLearningService; aqui é só tradução HTTP.
+exports.aprenderPorLivroDeHabilidade = async (req, res) => {
+  try {
+    const characterId = Number(req.params.id);
+    const idItem = Number(req.params.idItem);
+    const resultado = await powerLearningService.aprenderPorLivro(characterId, idItem);
+    res.status(201).json({ status: "success", data: resultado });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message });
+    }
+    console.error("Erro ao aprender por Livro de Habilidade:", error);
+    res.status(500).json({ message: "Erro interno do servidor ao aprender por Livro de Habilidade." });
   }
 };
 
