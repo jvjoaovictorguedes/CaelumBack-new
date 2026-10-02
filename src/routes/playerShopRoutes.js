@@ -62,6 +62,18 @@ router.post(
   carregarPersonagemAtual,
   playerShopController.recusarEncomenda,
 );
+router.post(
+  "/commissions/:idEncomenda/deliver",
+  authMiddleware,
+  carregarPersonagemAtual,
+  playerShopController.entregarEncomenda,
+);
+router.post(
+  "/commissions/:idEncomenda/cancel",
+  authMiddleware,
+  carregarPersonagemAtual,
+  playerShopController.cancelarEncomenda,
+);
 
 router.get("/:characterId", authMiddleware, playerShopController.obterLoja);
 

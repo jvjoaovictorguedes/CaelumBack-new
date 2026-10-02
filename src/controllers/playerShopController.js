@@ -202,6 +202,28 @@ exports.recusarEncomenda = async (req, res) => {
   }
 };
 
+// POST /api/player-shops/commissions/:idEncomenda/deliver { id_instancia? }
+exports.entregarEncomenda = async (req, res) => {
+  try {
+    const idEncomenda = Number(req.params.idEncomenda);
+    const encomenda = await playerShopCommissionService.entregarEncomenda(idEncomenda, req.personagemAtual.id, req.body ?? {});
+    res.status(200).json({ status: "success", message: "Encomenda entregue!", data: { encomenda } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao entregar encomenda.");
+  }
+};
+
+// POST /api/player-shops/commissions/:idEncomenda/cancel
+exports.cancelarEncomenda = async (req, res) => {
+  try {
+    const idEncomenda = Number(req.params.idEncomenda);
+    const encomenda = await playerShopCommissionService.cancelarAposAceite(idEncomenda, req.personagemAtual.id);
+    res.status(200).json({ status: "success", data: { encomenda } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao cancelar encomenda.");
+  }
+};
+
 // GET /api/player-shops/:characterId
 exports.obterLoja = async (req, res) => {
   try {

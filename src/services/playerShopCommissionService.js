@@ -15,7 +15,9 @@ const PlayerShopCommission = require("../models/PlayerShopCommission");
 const PlayerShopCommissionOffer = require("../models/PlayerShopCommissionOffer");
 const PlayerShopCommissionLog = require("../models/PlayerShopCommissionLog");
 const equipmentInstanceService = require("./equipmentInstanceService");
+const { addStack, removeStack } = require("./inventoryService");
 
+const TAXA_ENCOMENDA = 0.08;
 const PRECO_MINIMO_UNITARIO = 1;
 const PRECO_MAXIMO_UNITARIO = 1_000_000;
 const QUANTIDADE_MAXIMA = 999_999;
@@ -268,6 +270,88 @@ async function recusar(idEncomenda, idPersonagem) {
   });
 }
 
+// Entrega (Fase 7 — doc §8): transfere o item combinado do lojista pro
+// cliente (stack via inventoryService, equipamento via a transferência
+// DIRETA nova de equipmentInstanceService — nunca via reserveForMarket,
+// a encomenda não precisa passar pelo Mercado) e SÓ DEPOIS liquida o
+// financeiro: taxa calculada sobre o valor congelado no aceite, líquido
+// creditado no lojista direto (P2P, nunca goldService.concederOuro),
+// ouro_reservado zerado, status final. Ordem de locks: Encomenda ->
+// Characters (ordem crescente de id) -> Item/InventoryEntry ou
+// EquipmentInstance -> log -> status final.
+async function entregarEncomenda(idEncomenda, idPersonagemLojista, { id_instancia } = {}) {
+  return sequelize.transaction(async (transaction) => {
+    const encomenda = await PlayerShopCommission.findByPk(idEncomenda, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!encomenda) throw erro("Encomenda não encontrada.", 404);
+    if (encomenda.id_personagem_lojista !== idPersonagemLojista) {
+      throw erro("Só o lojista desta encomenda pode entregá-la.", 403);
+    }
+    if (encomenda.status !== "Aceita") {
+      throw erro("Esta encomenda precisa estar Aceita (termos travados) antes de ser entregue.", 409);
+    }
+
+    const [primeiroId, segundoId] = [encomenda.id_personagem_cliente, encomenda.id_personagem_lojista].sort((a, b) => a - b);
+    const primeiro = await Character.findByPk(primeiroId, { transaction, lock: transaction.LOCK.UPDATE });
+    const segundo = await Character.findByPk(segundoId, { transaction, lock: transaction.LOCK.UPDATE });
+    const lojista = primeiroId === idPersonagemLojista ? primeiro : segundo;
+    if (!lojista) throw erro("Personagem não encontrado.", 404);
+
+    const item = await Item.findByPk(encomenda.id_item, { transaction });
+    if (!item) throw erro("Item não encontrado.", 404);
+
+    if (equipmentInstanceService.ehInstanciavel(item.tipo_item)) {
+      if (!id_instancia) throw erro("id_instancia é obrigatório pra entregar este equipamento.");
+      await equipmentInstanceService.transferDireto(idPersonagemLojista, id_instancia, encomenda.id_personagem_cliente, transaction);
+      encomenda.id_instancia_acordada = id_instancia;
+    } else {
+      await removeStack(idPersonagemLojista, encomenda.id_item, encomenda.quantidade_acordada, transaction);
+      await addStack(encomenda.id_personagem_cliente, encomenda.id_item, encomenda.quantidade_acordada, transaction);
+    }
+
+    const taxa = Math.floor(encomenda.ouro_reservado * TAXA_ENCOMENDA);
+    const valorLiquido = encomenda.ouro_reservado - taxa;
+    // Ouro da encomenda já estava reservado (debitado do cliente no
+    // aceite) — isto é só liberar o líquido pro lojista, nunca
+    // goldService.concederOuro.
+    lojista.dinheiro += valorLiquido;
+    await lojista.save({ transaction });
+
+    encomenda.ouro_reservado = 0;
+    encomenda.status = "Concluida";
+    encomenda.concluido_em = new Date();
+    await encomenda.save({ transaction });
+
+    await registrarLog(encomenda.id, "entregue", { taxa, valor_liquido: valorLiquido }, transaction);
+    return encomenda;
+  });
+}
+
+// Cancelamento DEPOIS do aceite (antes da entrega) — reembolso integral
+// pro cliente, já que nada foi entregue ainda. Idempotente: só mexe se
+// ainda estiver "Aceita"; chamar duas vezes nunca credita 2x.
+async function cancelarAposAceite(idEncomenda, idPersonagem) {
+  return sequelize.transaction(async (transaction) => {
+    const encomenda = await PlayerShopCommission.findByPk(idEncomenda, { transaction, lock: transaction.LOCK.UPDATE });
+    if (!encomenda) throw erro("Encomenda não encontrada.", 404);
+    if (!papelDoPersonagem(encomenda, idPersonagem)) throw erro("Esta encomenda não é sua.", 403);
+    if (encomenda.status !== "Aceita") {
+      throw erro("Esta encomenda não está mais no estado Aceita (ou já foi entregue/cancelada).", 409);
+    }
+
+    const cliente = await Character.findByPk(encomenda.id_personagem_cliente, { transaction, lock: transaction.LOCK.UPDATE });
+    if (cliente && encomenda.ouro_reservado > 0) {
+      cliente.dinheiro += encomenda.ouro_reservado;
+      await cliente.save({ transaction });
+    }
+    encomenda.ouro_reservado = 0;
+    encomenda.status = "Cancelada";
+    encomenda.cancelado_em = new Date();
+    await encomenda.save({ transaction });
+    await registrarLog(encomenda.id, "cancelada_apos_aceite", null, transaction);
+    return encomenda;
+  });
+}
+
 async function listarMinhasEncomendas(idPersonagem) {
   const [comoCliente, comoLojista] = await Promise.all([
     PlayerShopCommission.findAll({
@@ -303,6 +387,8 @@ module.exports = {
   contraPropor,
   aceitarOferta,
   recusar,
+  entregarEncomenda,
+  cancelarAposAceite,
   listarMinhasEncomendas,
   obterEncomenda,
   expirarSeNecessario,

@@ -235,6 +235,46 @@ async function transfer(idInstancia, idNovoPersonagem, transaction) {
   return instancia;
 }
 
+// Transferência DIRETA de dono (Inventario -> Inventario), sem passar
+// pelo estado intermediário "Mercado" — usada na entrega de Encomenda
+// (Loja do Aventureiro V2 §7/§8: "a encomenda não precisa reservar o
+// equipamento durante toda a produção, só validar+transferir de forma
+// atômica no clique final de entrega"). Mesmas validações de posse/
+// estado/loadout que reserveForMarket teria feito, só que termina com o
+// dono já trocado em vez de ficar "Mercado" esperando um comprador.
+async function transferDireto(idPersonagemAtual, idInstancia, idNovoPersonagem, transaction) {
+  const instancia = await CharacterEquipmentInstance.findOne({
+    where: { id: idInstancia },
+    transaction,
+    lock: transaction.LOCK.UPDATE,
+  });
+  if (!instancia) throw erro("Equipamento não encontrado.", 404);
+  if (instancia.id_personagem !== Number(idPersonagemAtual)) {
+    throw erro("Este equipamento não pertence a você.", 403);
+  }
+  if (instancia.estado !== ESTADOS.INVENTARIO) {
+    throw erro("Esse equipamento precisa estar no inventário (não equipado, não anunciado no Mercado) pra ser entregue.", 400);
+  }
+
+  const CharacterFishingLoadout = require("../models/CharacterFishingLoadout");
+  const loadout = await CharacterFishingLoadout.findOne({
+    where: { id_personagem: idPersonagemAtual, id_instancia_vara: idInstancia },
+    transaction,
+    lock: transaction.LOCK.UPDATE,
+  });
+  if (loadout) {
+    throw erro("Desequipe a vara de pesca (Loadout de Pesca) antes de entregar este equipamento.", 400);
+  }
+  const { instanciaEquipadaEmFerraria } = require("./forgeToolService");
+  if (await instanciaEquipadaEmFerraria(idPersonagemAtual, idInstancia, transaction)) {
+    throw erro("Desequipe essa ferramenta da Ferraria antes de entregar este equipamento.", 400);
+  }
+
+  instancia.id_personagem = idNovoPersonagem;
+  await instancia.save({ transaction });
+  return instancia;
+}
+
 // Todas as instâncias de um personagem, com Item + propriedades base já
 // incluídas — base pra formatarInstancia (inventário v2) e pro Mercado.
 async function listarInstancias(idPersonagem, transaction) {
@@ -334,6 +374,7 @@ module.exports = {
   reserveForMarket,
   releaseFromMarket,
   transfer,
+  transferDireto,
   listarInstancias,
   formatarInstancia,
   formatarEquipado,

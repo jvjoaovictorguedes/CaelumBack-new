@@ -12,6 +12,7 @@ const CharacterForgeProgress = require("../models/CharacterForgeProgress");
 const CharacterAlchemyProgress = require("../models/CharacterAlchemyProgress");
 const Item = require("../models/Item");
 const PlayerShopDemand = require("../models/PlayerShopDemand");
+const PlayerShopCommission = require("../models/PlayerShopCommission");
 
 const NOME_MIN = 3;
 const NOME_MAX = 100;
@@ -67,20 +68,24 @@ async function obterPerfilPublico(characterId) {
   if (!loja) throw erro("Esse personagem não tem uma loja.", 404);
   if (!personagem) throw erro("Personagem não encontrado.", 404);
 
-  const [produtos, transacoesConcluidas, demandasConcluidas] = await Promise.all([
-    MarketListing.findAll({
-      where: { id_personagem_vendedor: characterId, status: "Ativo" },
-      include: [{ model: Item, as: "item" }],
-      order: [["createdAt", "DESC"]],
-      limit: 100,
-    }),
-    MarketTransaction.findAll({
-      where: { id_personagem_vendedor: characterId },
-      attributes: ["id", "preco_total", "valor_liquido_vendedor"],
-      raw: true,
-    }),
-    PlayerShopDemand.count({ where: { id_personagem: characterId, status: "Concluida" } }),
-  ]);
+  const [produtos, transacoesConcluidas, demandasConcluidas, encomendasConcluidas, encomendasCanceladas, encomendasExpiradas] =
+    await Promise.all([
+      MarketListing.findAll({
+        where: { id_personagem_vendedor: characterId, status: "Ativo" },
+        include: [{ model: Item, as: "item" }],
+        order: [["createdAt", "DESC"]],
+        limit: 100,
+      }),
+      MarketTransaction.findAll({
+        where: { id_personagem_vendedor: characterId },
+        attributes: ["id", "preco_total", "valor_liquido_vendedor"],
+        raw: true,
+      }),
+      PlayerShopDemand.count({ where: { id_personagem: characterId, status: "Concluida" } }),
+      PlayerShopCommission.count({ where: { id_personagem_lojista: characterId, status: "Concluida" } }),
+      PlayerShopCommission.count({ where: { id_personagem_lojista: characterId, status: "Cancelada" } }),
+      PlayerShopCommission.count({ where: { id_personagem_lojista: characterId, status: "Expirada" } }),
+    ]);
 
   const ouroMovimentado = transacoesConcluidas.reduce((soma, t) => soma + t.valor_liquido_vendedor, 0);
 
@@ -103,11 +108,9 @@ async function obterPerfilPublico(characterId) {
       vendas_concluidas: transacoesConcluidas.length,
       ouro_movimentado: ouroMovimentado,
       demandas_concluidas: demandasConcluidas,
-      // Preenchido de verdade na Fase 6 — mantém o formato estável desde
-      // já pro frontend.
-      encomendas_concluidas: 0,
-      encomendas_canceladas: 0,
-      encomendas_expiradas: 0,
+      encomendas_concluidas: encomendasConcluidas,
+      encomendas_canceladas: encomendasCanceladas,
+      encomendas_expiradas: encomendasExpiradas,
     },
   };
 }
