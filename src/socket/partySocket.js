@@ -189,9 +189,6 @@ module.exports = function registerPartyHandlers(io) {
         hostId: characterId,
         membros: new Map(),
         ordem: [],
-        // Área de Caça da última batalha iniciada — null até a primeira
-        // vez (ver iniciarBatalhaDeGrupo/party:continuar).
-        ultimaZonaId: null,
       };
       grupo.membros.set(characterId, { id: anfitriao.id, nome: anfitriao.nome, classe: null, pronto: false });
       grupo.ordem.push(characterId);
@@ -231,7 +228,6 @@ module.exports = function registerPartyHandlers(io) {
           hostId: idConvidante,
           membros: new Map(),
           ordem: [],
-          ultimaZonaId: null,
         };
         grupos.set(grupo.id, grupo);
       } else if (grupo.hostId !== idConvidante) {
@@ -400,52 +396,252 @@ module.exports = function registerPartyHandlers(io) {
         return socket.emit("party:erro", { mensagem: "Ainda tem gente que não marcou 'pronto'." });
       }
 
-      await iniciarBatalhaDeGrupo(io, socket, grupo, partyId, idZona);
-    });
+      try {
+        const zona = await AdventureZone.findByPk(idZona);
+        if (!zona) {
+          return socket.emit("party:erro", { mensagem: "Área de caça inválida." });
+        }
+        const monstrosDaZona = await AdventureZoneMonster.findAll({
+          where: { id_area: zona.id, ativo: true },
+          // Mesmo fix de combatController.js — ativo:true só no vínculo
+          // não impede um monstro DESATIVADO globalmente de continuar
+          // sendo sorteado pra batalha em grupo.
+          include: [{ model: AdventureMonster, as: "monstro", where: { ativo: true }, required: true }],
+        });
+        if (monstrosDaZona.length === 0) {
+          return socket.emit("party:erro", { mensagem: "Área de Caça sem monstros configurados." });
+        }
 
-    // Pedido do jogador ("Sugestão de Melhoria no Fluxo de Batalha"):
-    // depois de uma vitória, o anfitrião pode mandar o grupo direto pra
-    // PRÓXIMA luta na MESMA Área de Caça (grupo.ultimaZonaId, guardado
-    // dentro de iniciarBatalhaDeGrupo) sem reabrir o seletor de zona nem
-    // exigir que todo mundo marque "pronto" de novo — mesma ideia de
-    // "Buscar outro inimigo" da Aventura solo. Reaproveita TODA a lógica
-    // de iniciarBatalhaDeGrupo (sorteio de monstro, escala por tamanho
-    // de grupo, penalidade de diferença de nível, motor de status/IA) —
-    // só troca o GATE de entrada: aqui não dá pra pular a checagem de
-    // "vida > 0" nem de nível mínimo da zona (ainda protege contra
-    // entrar derrotado ou numa zona que o grupo não pode mais encarar,
-    // ex.: alguém saiu e o resto é de nível menor), só a de "pronto",
-    // porque ninguém precisa reconfirmar participação numa luta que já
-    // estava disputando segundos atrás.
-    socket.on("party:continuar", async () => {
-      const characterId = socket.characterId;
-      if (!characterId) return;
-      const partyId = grupoPorPersonagem.get(characterId);
-      if (!partyId) return socket.emit("party:erro", { mensagem: "Você não está em nenhum grupo." });
-      const grupo = grupos.get(partyId);
-      if (!grupo) return;
-      if (grupo.hostId !== characterId) {
-        return socket.emit("party:erro", { mensagem: "Só o anfitrião pode continuar a aventura." });
-      }
-      if (grupo.emBatalha) {
-        return socket.emit("party:erro", { mensagem: "O grupo já está em batalha." });
-      }
-      if (grupo.membros.size < partyBattleConfig.TAMANHO_MINIMO_GRUPO) {
-        return socket.emit("party:erro", { mensagem: `Precisa de pelo menos ${partyBattleConfig.TAMANHO_MINIMO_GRUPO} aventureiros pra formar um grupo.` });
-      }
-      if (!grupo.ultimaZonaId) {
-        return socket.emit("party:erro", { mensagem: "Nenhuma Área de Caça anterior pra continuar — escolha uma pra iniciar." });
-      }
-      // Quem entrou no grupo DEPOIS da última luta (ou nunca marcou
-      // pronto) ainda precisa confirmar pelo menos uma vez — "pronto"
-      // fica grudado de uma batalha pra outra (ver finalizarBatalha),
-      // mas nunca arrasta ninguém que nunca concordou em lutar.
-      const naoProntos = grupo.ordem.filter((id) => !grupo.membros.get(id)?.pronto);
-      if (naoProntos.length > 0) {
-        return socket.emit("party:erro", { mensagem: "Ainda tem gente que não marcou 'pronto'." });
-      }
+        // vidaCheia: false — batalha de grupo entra com a vida/mana REAL
+        // de cada um (bug reportado: iniciar a party curava geral de
+        // graça, mesmo pra quem já estava machucado). Ver comentário em
+        // carregarLutador (pvpLiveSocket.js) sobre por que Duelo/
+        // Ranqueado/Torneio continuam entrando com vida cheia normalmente.
+        // Proezas Únicas §11 — Party é PERMITIDO pra Legado (a menos que
+        // o UniquePowerEffect específico diga o contrário via
+        // allow_party), então passa o contexto certo em vez de deixar
+        // cair no default de duelo casual.
+        const membros = await Promise.all(
+          grupo.ordem.map((id) => carregarLutador(id, { vidaCheia: false, contexto: "PARTY" })),
+        );
+        if (membros.some((m) => !m)) {
+          return socket.emit("party:erro", { mensagem: "Não foi possível carregar todos os personagens do grupo." });
+        }
+        // Motor de Status (mesmo princípio do Duelo ao vivo/PvE solo) —
+        // lista de instâncias ATIVAS de cada aliado, vazia no início do
+        // encontro; `armaEfeitos` já veio pronto de carregarLutador.
+        for (const membro of membros) {
+          membro.status = [];
+          // Buffs de combate (ConsumableEffect APPLY_COMBAT_BUFF — spec
+          // Caldeirão §13) — mesmo princípio do `status` acima.
+          membro.combatBuffs = [];
+        }
+        const derrotados = membros.filter((m) => m.estado.vida_atual <= 0);
+        if (derrotados.length > 0) {
+          return socket.emit("party:erro", {
+            mensagem: `${derrotados.map((m) => m.nome).join(", ")} está derrotado e precisa se recuperar antes de entrar em batalha.`,
+          });
+        }
 
-      await iniciarBatalhaDeGrupo(io, socket, grupo, partyId, grupo.ultimaZonaId);
+        // Reformulação V2 dos Monstros (§4.3) — nivel_jogador_minimo só
+        // decide ELEGIBILIDADE de aparição; usa o nível do membro MAIS
+        // BAIXO do grupo, então um vínculo só entra no pool se TODO
+        // mundo já pode enfrentá-lo, não só a média.
+        const menorNivelDoGrupo = Math.min(...membros.map((m) => m.estado.nivel || 1));
+
+        // Gate de ENTRADA na zona (pedido do jogador, mesmo campo que
+        // adventureService.entrarNaZona usa na Aventura solo) — usa o
+        // mesmo critério "todo mundo precisa poder entrar" do filtro de
+        // monstro logo abaixo, nunca só a média do grupo.
+        if (menorNivelDoGrupo < zona.nivel_jogador_minimo) {
+          return socket.emit("party:erro", {
+            mensagem: `O grupo precisa ter todo mundo nível ${zona.nivel_jogador_minimo}+ pra entrar em "${zona.nome}".`,
+          });
+        }
+
+        const monstrosElegiveis = monstrosDaZona.filter(
+          (zm) => menorNivelDoGrupo >= (zm.nivel_jogador_minimo ?? 1),
+        );
+        if (monstrosElegiveis.length === 0) {
+          return socket.emit("party:erro", {
+            mensagem: "Nenhuma criatura dessa Área de Caça está disponível pro nível do grupo ainda.",
+          });
+        }
+
+        // Pedido do jogador: calcula a penalidade ANTES de sortear o
+        // monstro (não depende dele, só da diferença de nível dentro do
+        // grupo), guardada na `batalha` pra ser aplicada na recompensa
+        // quando a luta terminar (finalizarBatalha).
+        const penalidadeDiferencaNivel = calcularPenalidadeDiferencaNivel({
+          niveisDosMembros: membros.map((m) => m.estado.nivel),
+          config: partyBattleConfig,
+        });
+
+        const escolhido = sortearMonstroDaZona(monstrosElegiveis);
+        const monstro = escolhido.monstro;
+
+        // Reformulação V2 dos Monstros (§9) — Party usa os MESMOS stats
+        // fixos do monstro, sem sorteio de nível nem RNG de variação.
+        // O único modificador CONTEXTUAL (nunca persistido em
+        // AdventureMonster) é a escala pelo TAMANHO do grupo: N aliados
+        // batem nele por rodada, então precisa aguentar os N golpes —
+        // esse bônus extra, por cabeça além do mínimo de
+        // partyBattleConfig.TAMANHO_MINIMO_GRUPO, empilha em cima disso um pouco mais de
+        // vida e dano (moderado — o resto do design já favorece ir em
+        // grupo: XP/ouro cheios pra todo mundo, não divididos).
+        const tamanhoGrupo = Math.max(1, membros.length);
+        const aventureirosExtras = Math.max(0, grupo.ordem.length - partyBattleConfig.TAMANHO_MINIMO_GRUPO);
+        const fatorDificuldadeGrupo = {
+          vida: 1 + aventureirosExtras * partyBattleConfig.FATOR_DIFICULDADE_VIDA_POR_EXTRA,
+          dano: 1 + aventureirosExtras * partyBattleConfig.FATOR_DIFICULDADE_DANO_POR_EXTRA,
+        };
+
+        const vidaMaxima = Math.max(
+          20,
+          Math.round(monstro.vida_maxima * tamanhoGrupo * fatorDificuldadeGrupo.vida),
+        );
+        const danoMin = Math.max(0, Math.round(monstro.dano_min * fatorDificuldadeGrupo.dano));
+        const danoMax = Math.max(danoMin, Math.round(monstro.dano_max * fatorDificuldadeGrupo.dano));
+
+        const inimigo = {
+          // Guilda dos Aventureiros (§23/§45) — id do catálogo, preservado
+          // pra poder alimentar contrato de Rank "matar monstro
+          // específico"/"matar na região" na vitória (finalizarBatalha),
+          // mesmo critério do encontro solo (combatController.js).
+          id_monstro: monstro.id,
+          nome: monstro.nome,
+          nivel: monstro.nivel,
+          forca: Math.max(1, Math.round((danoMin + danoMax) / 2)),
+          vitalidade: Math.max(1, Math.round(vidaMaxima / 5)),
+          agilidade: monstro.agilidade,
+          velocidade: monstro.velocidade,
+          vida_maxima: vidaMaxima,
+          vida_atual: vidaMaxima,
+          dano_min: danoMin,
+          dano_max: danoMax,
+          // Especificação "Admin de Aventura + Defesa/Poder de Monstros"
+          // v3 (§12.1) — Defesa NUNCA escala com fatorDificuldadeGrupo
+          // (só vida/dano escalam por tamanho de grupo); preservada tal
+          // qual configurada no catálogo.
+          defesa: monstro.defesa ?? 0,
+          xp_recompensa: monstro.xp_recompensa,
+          ouro_recompensa: monstro.ouro_recompensa,
+        };
+        // imagem_url serve de sprite de combate (sprite_key fixo foi
+        // removido, ver AdventureMonster.js).
+        inimigo.imagem_url = monstro.imagem_url ?? null;
+
+        // Motor de Status (mesmo princípio do PvE solo em
+        // combatController.js) — captura os efeitos de status
+        // configurados no monstro UMA vez, no início da batalha, pra
+        // executarTurnoMonstro nunca consultar o banco a cada golpe.
+        // `status` é a lista de instâncias ATIVAS nele, vazia no início.
+        const efeitosDeStatusDoMonstro = await MonsterStatusEffect.findAll({
+          where: { id_monstro: monstro.id, ativo: true },
+        });
+        inimigo.efeitosDeStatus = efeitosDeStatusDoMonstro.map((e) => ({
+          status_key: e.status_key,
+          chance_ppm: e.chance_ppm,
+          duration_turns: e.duration_turns,
+          potency_base: e.potency_base,
+          percentual_vida_maxima: e.percentual_vida_maxima,
+          ativo: e.ativo,
+        }));
+        inimigo.status = [];
+        inimigo.combatBuffs = [];
+
+        // IA de Combate PvE & Habilidades de Monstros V1 (§8.2) — mesmo
+        // princípio de efeitosDeStatus acima: pré-carrega MonsterAbility
+        // UMA vez, no início da batalha. Monstro sem nenhuma ability ativa
+        // = array vazio = combatAiService.chooseAction sempre devolve
+        // "attack" (comportamento 100% legado, §12.1). `cooldowns` é novo
+        // SÓ pro monstro (Party não rastreia cooldown de Power nenhum
+        // hoje, nem do lado dos aliados) — nunca afeta Powers de jogador.
+        inimigo.habilidades = await monsterCombatAdapter.construirHabilidadesParaEncontro(monstro.id, {
+          capabilidadesExecutaveis: monsterCombatAdapter.CAPABILITIES_EXECUTAVEIS_PARTY_V1,
+        });
+        inimigo.ai_profile = monstro.ai_profile ?? "BASIC";
+        inimigo.cooldowns = {};
+
+        const battleId = proximaBatalhaId++;
+        const sala = `party-batalha:${battleId}`;
+        const batalha = {
+          id: battleId,
+          sala,
+          partyId,
+          zona: { id: zona.id, nome: zona.nome },
+          ordem: grupo.ordem.slice(),
+          membros: new Map(membros.map((m) => [chaveOnline(m.id), m])),
+          inimigo,
+          turnoIndex: 0,
+          fase: "aliados", // "aliados" (percorrendo a ordem) | "monstro"
+          rodada: 1,
+          timer: null,
+          processandoAcao: false,
+          penalidadeDiferencaNivel,
+          // Motor de Status — contador monotônico de turnos reais da
+          // batalha (aliado OU monstro agindo), nunca reaproveitado nem
+          // zerado por rodada: é o que resolverTurnoComStatus usa pra
+          // nunca rerrolar Paralyze duas vezes no mesmo turno de quem já
+          // agiu (mesmo papel de duelo.acoes no Duelo ao vivo).
+          contadorTurno: 0,
+        };
+        batalhas.set(battleId, batalha);
+        for (const id of grupo.ordem) {
+          batalhaPorPersonagem.set(id, battleId);
+        }
+
+        const socketsDoGrupo = io.sockets.adapter.rooms.get(`party:${partyId}`);
+        for (const socketId of socketsDoGrupo || []) {
+          io.sockets.sockets.get(socketId)?.join(sala);
+        }
+
+        // O grupo continua existindo durante a batalha (só trava convite/
+        // expulsão/novo início enquanto emBatalha) — antes ele era
+        // apagado aqui, e como nada o recriava depois, terminar uma
+        // aventura em grupo desfazia o grupo inteiro mesmo sem o
+        // anfitrião ter saído (bug reportado). Ele volta pro lobby (ver
+        // finalizarBatalha) quando a batalha termina.
+        grupo.emBatalha = true;
+
+        io.to(sala).emit("party:batalha-iniciada", {
+          battleId,
+          zona: batalha.zona,
+          inimigo: {
+            nome: inimigo.nome,
+            nivel: inimigo.nivel,
+            vida_atual: inimigo.vida_atual,
+            vida_maxima: inimigo.vida_maxima,
+            imagem_url: inimigo.imagem_url,
+          },
+          membros: membros.map((m) => ({
+            id: m.id,
+            nome: m.nome,
+            genero: m.genero,
+            classe: m.classe,
+            vidaMax: m.vidaMax,
+            manaMax: m.manaMax,
+            vida: m.estado.vida_atual,
+            mana: m.estado.mana_atual,
+            poderes: poderesPublicos(m.poderes),
+            consumiveis: m.consumiveis,
+          })),
+          ordem: batalha.ordem,
+          turnoDe: batalha.ordem[0],
+          prazoSegundos: partyBattleConfig.PRAZO_TURNO_MS / 1000,
+          // Transparência: se a recompensa vai sair reduzida pela
+          // diferença de nível dentro do grupo, o grupo sabe disso ANTES
+          // de lutar, não só ao ver o número final menor em party:batalha-fim.
+          penalidadeDiferencaNivel: penalidadeDiferencaNivel.aplicada
+            ? { multiplicador: penalidadeDiferencaNivel.multiplicador, diferencaNivel: penalidadeDiferencaNivel.diferenca }
+            : null,
+        });
+
+        iniciarTimerDeTurnoGrupo(io, battleId);
+      } catch (error) {
+        console.error("Erro ao iniciar batalha em grupo:", error);
+        socket.emit("party:erro", { mensagem: "Não foi possível iniciar a aventura em grupo." });
+      }
     });
 
     socket.on("party:acao", async ({ tipo, idPoder, idItem } = {}) => {
@@ -520,269 +716,6 @@ module.exports = function registerPartyHandlers(io) {
     });
   });
 };
-
-// Lógica de iniciar uma batalha em grupo (sorteio de monstro, escala
-// por tamanho de grupo, penalidade de diferença de nível, motor de
-// status/IA) — extraída de party:iniciar pra ser reaproveitada por
-// party:continuar (ver registerPartyHandlers acima) sem duplicar nada.
-// Quem chama já validou host/emBatalha/tamanho mínimo/"pronto" (cada
-// evento com a regra certa pro seu caso); esta função só cuida de
-// validar a zona/monstros e montar a batalha em si.
-async function iniciarBatalhaDeGrupo(io, socket, grupo, partyId, idZona) {
-  try {
-    const zona = await AdventureZone.findByPk(idZona);
-    if (!zona) {
-      return socket.emit("party:erro", { mensagem: "Área de caça inválida." });
-    }
-    const monstrosDaZona = await AdventureZoneMonster.findAll({
-      where: { id_area: zona.id, ativo: true },
-      // Mesmo fix de combatController.js — ativo:true só no vínculo
-      // não impede um monstro DESATIVADO globalmente de continuar
-      // sendo sorteado pra batalha em grupo.
-      include: [{ model: AdventureMonster, as: "monstro", where: { ativo: true }, required: true }],
-    });
-    if (monstrosDaZona.length === 0) {
-      return socket.emit("party:erro", { mensagem: "Área de Caça sem monstros configurados." });
-    }
-
-    // vidaCheia: false — batalha de grupo entra com a vida/mana REAL
-    // de cada um (bug reportado: iniciar a party curava geral de
-    // graça, mesmo pra quem já estava machucado). Ver comentário em
-    // carregarLutador (pvpLiveSocket.js) sobre por que Duelo/
-    // Ranqueado/Torneio continuam entrando com vida cheia normalmente.
-    // Proezas Únicas §11 — Party é PERMITIDO pra Legado (a menos que
-    // o UniquePowerEffect específico diga o contrário via
-    // allow_party), então passa o contexto certo em vez de deixar
-    // cair no default de duelo casual.
-    const membros = await Promise.all(
-      grupo.ordem.map((id) => carregarLutador(id, { vidaCheia: false, contexto: "PARTY" })),
-    );
-    if (membros.some((m) => !m)) {
-      return socket.emit("party:erro", { mensagem: "Não foi possível carregar todos os personagens do grupo." });
-    }
-    // Motor de Status (mesmo princípio do Duelo ao vivo/PvE solo) —
-    // lista de instâncias ATIVAS de cada aliado, vazia no início do
-    // encontro; `armaEfeitos` já veio pronto de carregarLutador.
-    for (const membro of membros) {
-      membro.status = [];
-      // Buffs de combate (ConsumableEffect APPLY_COMBAT_BUFF — spec
-      // Caldeirão §13) — mesmo princípio do `status` acima.
-      membro.combatBuffs = [];
-    }
-    const derrotados = membros.filter((m) => m.estado.vida_atual <= 0);
-    if (derrotados.length > 0) {
-      return socket.emit("party:erro", {
-        mensagem: `${derrotados.map((m) => m.nome).join(", ")} está derrotado e precisa se recuperar antes de entrar em batalha.`,
-      });
-    }
-
-    // Reformulação V2 dos Monstros (§4.3) — nivel_jogador_minimo só
-    // decide ELEGIBILIDADE de aparição; usa o nível do membro MAIS
-    // BAIXO do grupo, então um vínculo só entra no pool se TODO
-    // mundo já pode enfrentá-lo, não só a média.
-    const menorNivelDoGrupo = Math.min(...membros.map((m) => m.estado.nivel || 1));
-
-    // Gate de ENTRADA na zona (pedido do jogador, mesmo campo que
-    // adventureService.entrarNaZona usa na Aventura solo) — usa o
-    // mesmo critério "todo mundo precisa poder entrar" do filtro de
-    // monstro logo abaixo, nunca só a média do grupo. Continua valendo
-    // em party:continuar — alguém pode ter saído e deixado o resto do
-    // grupo abaixo do nível mínimo da mesma zona de antes.
-    if (menorNivelDoGrupo < zona.nivel_jogador_minimo) {
-      return socket.emit("party:erro", {
-        mensagem: `O grupo precisa ter todo mundo nível ${zona.nivel_jogador_minimo}+ pra entrar em "${zona.nome}".`,
-      });
-    }
-
-    const monstrosElegiveis = monstrosDaZona.filter(
-      (zm) => menorNivelDoGrupo >= (zm.nivel_jogador_minimo ?? 1),
-    );
-    if (monstrosElegiveis.length === 0) {
-      return socket.emit("party:erro", {
-        mensagem: "Nenhuma criatura dessa Área de Caça está disponível pro nível do grupo ainda.",
-      });
-    }
-
-    // Pedido do jogador: calcula a penalidade ANTES de sortear o
-    // monstro (não depende dele, só da diferença de nível dentro do
-    // grupo), guardada na `batalha` pra ser aplicada na recompensa
-    // quando a luta terminar (finalizarBatalha).
-    const penalidadeDiferencaNivel = calcularPenalidadeDiferencaNivel({
-      niveisDosMembros: membros.map((m) => m.estado.nivel),
-      config: partyBattleConfig,
-    });
-
-    const escolhido = sortearMonstroDaZona(monstrosElegiveis);
-    const monstro = escolhido.monstro;
-
-    // Reformulação V2 dos Monstros (§9) — Party usa os MESMOS stats
-    // fixos do monstro, sem sorteio de nível nem RNG de variação.
-    // O único modificador CONTEXTUAL (nunca persistido em
-    // AdventureMonster) é a escala pelo TAMANHO do grupo: N aliados
-    // batem nele por rodada, então precisa aguentar os N golpes —
-    // esse bônus extra, por cabeça além do mínimo de
-    // partyBattleConfig.TAMANHO_MINIMO_GRUPO, empilha em cima disso um pouco mais de
-    // vida e dano (moderado — o resto do design já favorece ir em
-    // grupo: XP/ouro cheios pra todo mundo, não divididos).
-    const tamanhoGrupo = Math.max(1, membros.length);
-    const aventureirosExtras = Math.max(0, grupo.ordem.length - partyBattleConfig.TAMANHO_MINIMO_GRUPO);
-    const fatorDificuldadeGrupo = {
-      vida: 1 + aventureirosExtras * partyBattleConfig.FATOR_DIFICULDADE_VIDA_POR_EXTRA,
-      dano: 1 + aventureirosExtras * partyBattleConfig.FATOR_DIFICULDADE_DANO_POR_EXTRA,
-    };
-
-    const vidaMaxima = Math.max(
-      20,
-      Math.round(monstro.vida_maxima * tamanhoGrupo * fatorDificuldadeGrupo.vida),
-    );
-    const danoMin = Math.max(0, Math.round(monstro.dano_min * fatorDificuldadeGrupo.dano));
-    const danoMax = Math.max(danoMin, Math.round(monstro.dano_max * fatorDificuldadeGrupo.dano));
-
-    const inimigo = {
-      // Guilda dos Aventureiros (§23/§45) — id do catálogo, preservado
-      // pra poder alimentar contrato de Rank "matar monstro
-      // específico"/"matar na região" na vitória (finalizarBatalha),
-      // mesmo critério do encontro solo (combatController.js).
-      id_monstro: monstro.id,
-      nome: monstro.nome,
-      nivel: monstro.nivel,
-      forca: Math.max(1, Math.round((danoMin + danoMax) / 2)),
-      vitalidade: Math.max(1, Math.round(vidaMaxima / 5)),
-      agilidade: monstro.agilidade,
-      velocidade: monstro.velocidade,
-      vida_maxima: vidaMaxima,
-      vida_atual: vidaMaxima,
-      dano_min: danoMin,
-      dano_max: danoMax,
-      // Especificação "Admin de Aventura + Defesa/Poder de Monstros"
-      // v3 (§12.1) — Defesa NUNCA escala com fatorDificuldadeGrupo
-      // (só vida/dano escalam por tamanho de grupo); preservada tal
-      // qual configurada no catálogo.
-      defesa: monstro.defesa ?? 0,
-      xp_recompensa: monstro.xp_recompensa,
-      ouro_recompensa: monstro.ouro_recompensa,
-    };
-    // imagem_url serve de sprite de combate (sprite_key fixo foi
-    // removido, ver AdventureMonster.js).
-    inimigo.imagem_url = monstro.imagem_url ?? null;
-
-    // Motor de Status (mesmo princípio do PvE solo em
-    // combatController.js) — captura os efeitos de status
-    // configurados no monstro UMA vez, no início da batalha, pra
-    // executarTurnoMonstro nunca consultar o banco a cada golpe.
-    // `status` é a lista de instâncias ATIVAS nele, vazia no início.
-    const efeitosDeStatusDoMonstro = await MonsterStatusEffect.findAll({
-      where: { id_monstro: monstro.id, ativo: true },
-    });
-    inimigo.efeitosDeStatus = efeitosDeStatusDoMonstro.map((e) => ({
-      status_key: e.status_key,
-      chance_ppm: e.chance_ppm,
-      duration_turns: e.duration_turns,
-      potency_base: e.potency_base,
-      percentual_vida_maxima: e.percentual_vida_maxima,
-      ativo: e.ativo,
-    }));
-    inimigo.status = [];
-    inimigo.combatBuffs = [];
-
-    // IA de Combate PvE & Habilidades de Monstros V1 (§8.2) — mesmo
-    // princípio de efeitosDeStatus acima: pré-carrega MonsterAbility
-    // UMA vez, no início da batalha. Monstro sem nenhuma ability ativa
-    // = array vazio = combatAiService.chooseAction sempre devolve
-    // "attack" (comportamento 100% legado, §12.1). `cooldowns` é novo
-    // SÓ pro monstro (Party não rastreia cooldown de Power nenhum
-    // hoje, nem do lado dos aliados) — nunca afeta Powers de jogador.
-    inimigo.habilidades = await monsterCombatAdapter.construirHabilidadesParaEncontro(monstro.id, {
-      capabilidadesExecutaveis: monsterCombatAdapter.CAPABILITIES_EXECUTAVEIS_PARTY_V1,
-    });
-    inimigo.ai_profile = monstro.ai_profile ?? "BASIC";
-    inimigo.cooldowns = {};
-
-    const battleId = proximaBatalhaId++;
-    const sala = `party-batalha:${battleId}`;
-    const batalha = {
-      id: battleId,
-      sala,
-      partyId,
-      zona: { id: zona.id, nome: zona.nome },
-      ordem: grupo.ordem.slice(),
-      membros: new Map(membros.map((m) => [chaveOnline(m.id), m])),
-      inimigo,
-      turnoIndex: 0,
-      fase: "aliados", // "aliados" (percorrendo a ordem) | "monstro"
-      rodada: 1,
-      timer: null,
-      processandoAcao: false,
-      penalidadeDiferencaNivel,
-      // Motor de Status — contador monotônico de turnos reais da
-      // batalha (aliado OU monstro agindo), nunca reaproveitado nem
-      // zerado por rodada: é o que resolverTurnoComStatus usa pra
-      // nunca rerrolar Paralyze duas vezes no mesmo turno de quem já
-      // agiu (mesmo papel de duelo.acoes no Duelo ao vivo).
-      contadorTurno: 0,
-    };
-    batalhas.set(battleId, batalha);
-    for (const id of grupo.ordem) {
-      batalhaPorPersonagem.set(id, battleId);
-    }
-
-    // Guardado pra party:continuar reusar sem precisar que o cliente
-    // mande idZona de novo — mesma Área de Caça da última luta até o
-    // anfitrião trocar explicitamente (iniciando com outra zona).
-    grupo.ultimaZonaId = zona.id;
-
-    const socketsDoGrupo = io.sockets.adapter.rooms.get(`party:${partyId}`);
-    for (const socketId of socketsDoGrupo || []) {
-      io.sockets.sockets.get(socketId)?.join(sala);
-    }
-
-    // O grupo continua existindo durante a batalha (só trava convite/
-    // expulsão/novo início enquanto emBatalha) — antes ele era
-    // apagado aqui, e como nada o recriava depois, terminar uma
-    // aventura em grupo desfazia o grupo inteiro mesmo sem o
-    // anfitrião ter saído (bug reportado). Ele volta pro lobby (ver
-    // finalizarBatalha) quando a batalha termina.
-    grupo.emBatalha = true;
-
-    io.to(sala).emit("party:batalha-iniciada", {
-      battleId,
-      zona: batalha.zona,
-      inimigo: {
-        nome: inimigo.nome,
-        nivel: inimigo.nivel,
-        vida_atual: inimigo.vida_atual,
-        vida_maxima: inimigo.vida_maxima,
-        imagem_url: inimigo.imagem_url,
-      },
-      membros: membros.map((m) => ({
-        id: m.id,
-        nome: m.nome,
-        genero: m.genero,
-        classe: m.classe,
-        vidaMax: m.vidaMax,
-        manaMax: m.manaMax,
-        vida: m.estado.vida_atual,
-        mana: m.estado.mana_atual,
-        poderes: poderesPublicos(m.poderes),
-        consumiveis: m.consumiveis,
-      })),
-      ordem: batalha.ordem,
-      turnoDe: batalha.ordem[0],
-      prazoSegundos: partyBattleConfig.PRAZO_TURNO_MS / 1000,
-      // Transparência: se a recompensa vai sair reduzida pela
-      // diferença de nível dentro do grupo, o grupo sabe disso ANTES
-      // de lutar, não só ao ver o número final menor em party:batalha-fim.
-      penalidadeDiferencaNivel: penalidadeDiferencaNivel.aplicada
-        ? { multiplicador: penalidadeDiferencaNivel.multiplicador, diferencaNivel: penalidadeDiferencaNivel.diferenca }
-        : null,
-    });
-
-    iniciarTimerDeTurnoGrupo(io, battleId);
-  } catch (error) {
-    console.error("Erro ao iniciar batalha em grupo:", error);
-    socket.emit("party:erro", { mensagem: "Não foi possível iniciar a aventura em grupo." });
-  }
-}
 
 function iniciarTimerDeTurnoGrupo(io, battleId) {
   const batalha = batalhas.get(battleId);
@@ -1296,22 +1229,15 @@ async function finalizarBatalha(io, battleId, vitoria, motivo = vitoria ? "comba
   // O grupo sobrevive à aventura — só o anfitrião desfazendo (saindo,
   // ver removerDoGrupo) encerra o grupo de verdade. Terminar uma run
   // (vitória, derrota ou abandono por desconexão) só devolve todo mundo
-  // pro lobby. Se o próprio anfitrião já tiver saído/desfeito o grupo
-  // durante a batalha, `grupo` não existe mais aqui — nada a restaurar.
-  //
-  // Pedido do jogador: NÃO zera mais `pronto` de ninguém aqui. Antes
-  // isso forçava o grupo inteiro a marcar "pronto" de novo depois de
-  // CADA luta só pra encarar a próxima na mesma Área de Caça — com
-  // "pronto" ficando "grudado" entre uma batalha e outra, o anfitrião
-  // pode usar party:continuar (ver mais abaixo) pra ir direto pra
-  // próxima sem essa dança toda, igual "Buscar outro inimigo" na
-  // Aventura solo. Quem ENTRA no grupo nesse meio tempo continua
-  // nascendo com pronto:false (ver party:convidar/responder-convite) —
-  // ninguém é arrastado pra uma luta sem ter confirmado pronto pelo
-  // menos uma vez.
+  // pro lobby, prontos pra encarar outra sem precisar se convidar de
+  // novo. Se o próprio anfitrião já tiver saído/desfeito o grupo durante
+  // a batalha, `grupo` não existe mais aqui — nada a restaurar.
   const grupo = grupos.get(batalha.partyId);
   if (grupo) {
     grupo.emBatalha = false;
+    for (const membro of grupo.membros.values()) {
+      membro.pronto = false;
+    }
     emitirGrupoAtualizado(io, grupo);
   }
 }
