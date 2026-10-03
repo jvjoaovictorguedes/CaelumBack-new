@@ -282,6 +282,36 @@ testeComBanco("construirHabilidadesParaEncontro carrega só capabilities execut�
   await monstro.destroy();
 });
 
+testeComBanco("construirHabilidadesParaEncontro nunca inclui Power Passivo (§4.5 — passiva não entra na seleção de ação)", async () => {
+  const monstro = await AdventureMonster.create({
+    nome: `Monstro IA Passiva ${sufixo()}`,
+    nivel: 5,
+    vida_maxima: 100,
+    dano_min: 5,
+    dano_max: 10,
+    agilidade: 5,
+    velocidade: 5,
+    xp_recompensa: 10,
+    ouro_recompensa: 10,
+  });
+  const powerPassivo = await Power.create({
+    nome: `Power Passivo Encontro ${sufixo()}`,
+    descricao: "teste",
+    tipo_poder: "Passivo",
+    escala_atributo: "Forca",
+    usage_scope: "MONSTER",
+    dano_base: 50,
+  });
+  await MonsterAbility.create({ id_monstro: monstro.id, id_power: powerPassivo.id });
+
+  const habilidades = await construirHabilidadesParaEncontro(monstro.id);
+  assert.equal(habilidades.length, 0, "Power Passivo nunca pode virar uma ação escolhível");
+
+  await MonsterAbility.destroy({ where: { id_monstro: monstro.id } });
+  await powerPassivo.destroy();
+  await monstro.destroy();
+});
+
 test.after(async () => {
   if (temBanco) await sequelize.close();
 });

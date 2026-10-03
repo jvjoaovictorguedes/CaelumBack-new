@@ -109,6 +109,14 @@ async function construirHabilidadesParaEncontro(idMonstro, { transaction, capabi
   for (const ability of abilities) {
     const power = await carregarPowerComEfeitos(ability.id_power, { transaction });
     if (!power) continue;
+    // §4.5 — passiva nunca entra na seleção de ação (seria aplicada no
+    // snapshot/COMBAT_START pelo motor central de modificadores, não
+    // "escolhida" a cada turno). Essa aplicação em si ainda não existe
+    // pro lado do monstro nesta V1 (mesma lacuna de OFFENSIVE_BUFF/
+    // DEFENSIVE_BUFF documentada no topo do arquivo) — uma Passiva
+    // vinculada aqui simplesmente não produz efeito nenhum ainda, nunca
+    // vira uma ação escolhível por engano.
+    if (power.tipo_poder !== "Ativo") continue;
 
     const capabilities = Array.from(classificarPower(power));
     const capabilitiesExecutaveis = capabilities.filter((c) => capabilidadesExecutaveis.includes(c));
@@ -462,6 +470,7 @@ async function construirHabilidadesParaGuildBoss(idGuildBossConfig, { transactio
   for (const ability of abilities) {
     const power = await carregarPowerComEfeitos(ability.id_power, { transaction });
     if (!power) continue;
+    if (power.tipo_poder !== "Ativo") continue; // §4.5 — mesma regra de Solo/Party acima.
 
     const capabilities = Array.from(classificarPower(power)).filter((c) => CAPABILITIES_EXECUTAVEIS_GUILD_BOSS_V1.includes(c));
     if (capabilities.length === 0) continue;
