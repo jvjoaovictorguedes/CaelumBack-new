@@ -18,11 +18,21 @@ const useSsl = process.env.DB_SSL === "true";
 const databaseSource = databaseUrl
   ? "DATABASE_URL/POSTGRES_URL"
   : "DB_*/PG* variables";
+// max:10 ficava pequeno demais pra tráfego real de produção — com
+// vários jogadores simultâneos, cada navegação/ação de combate
+// disputa essas 10 conexões, e quem não consegue uma fica preso no
+// acquire (até 30s) esperando alguém liberar. Sintoma reportado:
+// lentidão variável (1s, depois 5s, depois 3s) só em produção, nunca
+// em dev (sem tráfego concorrente de verdade) — assinatura clássica de
+// fila de conexão, não de query lenta nem de bug de código. O
+// container tem recursos de sobra (24 vCPU/24GB no Railway); o limite
+// era só este número. DB_POOL_MAX permite ajustar sem deploy se o
+// Postgres gerenciado tiver um teto de conexões mais apertado.
 const databaseOptions = {
   dialect: "postgres",
   logging: false,
   pool: {
-    max: 10,
+    max: Number(process.env.DB_POOL_MAX) || 25,
     min: 0,
     acquire: 30000,
     idle: 10000,
