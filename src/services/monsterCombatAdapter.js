@@ -1,9 +1,16 @@
-// IA de Combate PvE & Habilidades de Monstros V1 (§8.1) — Adapter da
-// Aventura Solo: converte estado REAL de combate (inimigoAtual/
-// personagemAtual/statusEffects/combatBuffs/escudo/cooldowns) pro DTO do
+// IA de Combate PvE & Habilidades de Monstros V1 (§8.1/§8.2) — Adapter
+// de Aventura Solo E Party: converte estado REAL de combate pro DTO do
 // combatAiService puro, e executa a decisão "power" reaproveitando os
 // MESMOS serviços que o resto do motor já usa (nunca uma fórmula
 // paralela de dano/cura/status — §1.2 "não reescrever o motor").
+//
+// Solo (combatController.js) e Party (partySocket.js) têm shapes de
+// estado DIFERENTES (Solo: par único {statusEffects:{player,enemy},
+// combatBuffs, escudo}; Party: N membros, cada um com .status/
+// .combatBuffs/.estado, e o monstro sem escudo/regen wired no motor
+// hoje — ver nota §8.2 abaixo) — por isso cada modo tem seu próprio par
+// decidirAcao*/executarPoder*, nunca forçando uma abstração única que
+// esconderia essa diferença real.
 //
 // Escopo de EXECUÇÃO desta V1 (decisão documentada, não é lacuna
 // escondida): monstro não tem pool de Mana nem atributos pra escalar
@@ -49,6 +56,23 @@ const { rolarCritico, aplicarMitigacaoDeDefesa, MULTIPLICADOR_DANO_CRITICO } = r
 // ação "escolhida" que não faz nada).
 const CAPABILITIES_EXECUTAVEIS_V1 = ["DAMAGE", "DEBUFF_CONTROL", "HEAL_HP", "REGEN_HP", "SHIELD", "CLEANSE_SELF", "DISPEL_TARGET"];
 
+// §8.2 — Party (partySocket.js) nunca teve escudo (GRANT_SHIELD) nem
+// regen-por-turno wired no motor pra NENHUM ator (nem personagem, nem
+// monstro) — diferente de Solo, onde escudo.enemy/combatBuffs.enemy já
+// são lidos linha a linha do processarTurno hoje. Plugar SHIELD/REGEN_HP
+// em Party exigiria tocar o pipeline de dano de TODO combate em grupo
+// (jogador->monstro e monstro->jogador), não só o caminho com IA — fora
+// de escopo desta V1 (§1.2 "não reescrever o motor"). Uma MonsterAbility
+// cuja Power só tem SHIELD/REGEN_HP nunca vira candidata em Party.
+const CAPABILITIES_EXECUTAVEIS_PARTY_V1 = ["DAMAGE", "DEBUFF_CONTROL", "HEAL_HP", "CLEANSE_SELF", "DISPEL_TARGET"];
+
+const TIPO_COMBAT_EFFECT_PARA_CAPABILITY = {
+  SHIELD: "SHIELD",
+  REGEN_HP: "REGEN_HP",
+  CLEANSE_SELF: "CLEANSE_SELF",
+  DISPEL_TARGET: "DISPEL_TARGET",
+};
+
 function combatEffectExecutavel(efeito) {
   if (efeito.effect_key === "GRANT_SHIELD" || efeito.effect_key === "SHIELD_ON_CAST") {
     return { tipo: "SHIELD", magnitude: efeito.magnitude_base, durationTurns: efeito.duration_turns ?? 1 };
@@ -73,7 +97,7 @@ function combatEffectExecutavel(efeito) {
 // em combatController.gerarInimigoParaPersonagem. Devolve um array
 // plano, serializável em JSONB (encontro_pve), sem instância Sequelize
 // nenhuma sobrevivendo pro próximo turno.
-async function construirHabilidadesParaEncontro(idMonstro, { transaction } = {}) {
+async function construirHabilidadesParaEncontro(idMonstro, { transaction, capabilidadesExecutaveis = CAPABILITIES_EXECUTAVEIS_V1 } = {}) {
   const abilities = await MonsterAbility.findAll({
     where: { id_monstro: idMonstro, ativo: true },
     include: [{ model: MonsterAbilityCondition, as: "condicoes", where: { ativo: true }, required: false }],
@@ -86,7 +110,7 @@ async function construirHabilidadesParaEncontro(idMonstro, { transaction } = {})
     if (!power) continue;
 
     const capabilities = Array.from(classificarPower(power));
-    const capabilitiesExecutaveis = capabilities.filter((c) => CAPABILITIES_EXECUTAVEIS_V1.includes(c));
+    const capabilitiesExecutaveis = capabilities.filter((c) => capabilidadesExecutaveis.includes(c));
     if (capabilitiesExecutaveis.length === 0) continue;
 
     resultado.push({
@@ -114,7 +138,7 @@ async function construirHabilidadesParaEncontro(idMonstro, { transaction } = {})
         : [],
       combatEffectsExecutaveis: (power.efeitosDeCombate ?? [])
         .map(combatEffectExecutavel)
-        .filter(Boolean),
+        .filter((efeito) => efeito && capabilitiesExecutaveis.includes(TIPO_COMBAT_EFFECT_PARA_CAPABILITY[efeito.tipo])),
       conditions: (ability.condicoes ?? []).map((c) => ({
         key: c.condition_key,
         config: c.config,
@@ -286,9 +310,140 @@ function executarPoder({
   return { criticoInimigo, danoRecebidoContraAtaque };
 }
 
+// §8.2 — Party: mesmo DTO do combatAiService, mas `opponents` é TODO
+// membro vivo do grupo (não um único alvo pré-sorteado), porque
+// target_policy (LOWEST_HP/HIGHEST_HP/RANDOM/ALL) só faz sentido quando
+// a IA realmente escolhe entre vários alvos — §6.3 "Party/Bosses podem
+// usar políticas de alvo". Quando a decisão cai em "attack" (sem
+// ability elegível), quem chama ignora `targetIds` e mantém o sorteio
+// aleatório ORIGINAL do Party (nunca muda o alvo do ataque básico
+// legado — regressão zero).
+function decidirAcaoGrupo({ inimigo, membrosVivos, cooldowns, combatTurn }) {
+  const actor = {
+    id: "enemy",
+    hpAtual: inimigo.vida_atual,
+    hpMaxima: inimigo.vida_maxima,
+    manaAtual: Infinity,
+    manaMaxima: Infinity,
+    statuses: (inimigo.status ?? []).map((s) => s.key),
+    buffs: (inimigo.combatBuffs ?? []).map((b) => b.atributo),
+    hasShield: false,
+  };
+  const opponents = membrosVivos.map((m) => ({
+    id: m.id,
+    hpAtual: m.estado.vida_atual,
+    hpMaxima: m.vidaMax,
+    alive: m.estado.vida_atual > 0,
+    statuses: (m.status ?? []).map((s) => s.key),
+    buffs: (m.combatBuffs ?? []).map((b) => b.atributo),
+  }));
+  const abilities = (inimigo.habilidades ?? []).map((h) => ({
+    id: h.id,
+    powerId: h.powerId,
+    capabilities: new Set(h.capabilities),
+    prioridadeBase: h.prioridadeBase,
+    pesoUso: h.pesoUso,
+    manaCost: 0,
+    cooldownAtual: cooldownService.turnosRestantes(cooldowns ?? {}, h.powerId),
+    targetPolicy: h.targetPolicy,
+    isPassive: false,
+    conditions: h.conditions,
+  }));
+
+  return chooseAction({
+    context: "PARTY",
+    aiProfile: inimigo.ai_profile ?? "BASIC",
+    actor,
+    opponents,
+    abilities,
+    phase: null,
+    turn: combatTurn,
+    history: [],
+  });
+}
+
+// §8.2 — execução da Power escolhida em Party. Mesma matemática de
+// executarPoder (dano/status/cura/cleanse/dispel), só adaptada ao shape
+// de Party: `inimigo` é `batalha.inimigo` direto (tem .status/
+// .combatBuffs/.vida_atual própios, sem wrapper {player,enemy});
+// `alvoEstado`/`alvoStatus`/`alvoBuffs` vêm do membro atacado. SHIELD/
+// REGEN_HP não entram aqui de propósito — ver
+// CAPABILITIES_EXECUTAVEIS_PARTY_V1 no topo do arquivo.
+function executarPoderEmGrupo({ habilidade, inimigo, alvoEstado, alvoStatus, alvoBuffs, modificadoresDefensor, combatTurn, log }) {
+  let criticoInimigo = false;
+  let dano = 0;
+  let novoStatusDefensor = alvoStatus;
+  let novoStatusAtacante = inimigo.status ?? [];
+
+  if (habilidade.danoBase > 0) {
+    const danoEnfraquecido = Math.round(
+      Math.max(1, habilidade.danoBase) * statusEffectService.multiplicadorDeDanoDeSaida(novoStatusAtacante),
+    );
+    if (rolarCritico(inimigo)) criticoInimigo = true;
+    const danoComCritico = criticoInimigo ? Math.round(danoEnfraquecido * MULTIPLICADOR_DANO_CRITICO) : danoEnfraquecido;
+    const bonusDefesaTotal =
+      combatBuffService.bonusDeDefesa(alvoBuffs ?? []) + combatModifierService.bonusDefesa(modificadoresDefensor ?? new Map());
+    const defensorComBuffs = bonusDefesaTotal ? { ...alvoEstado, defesa: (alvoEstado.defesa || 0) + bonusDefesaTotal } : alvoEstado;
+    dano = Math.max(1, Math.round(aplicarMitigacaoDeDefesa(danoComCritico, defensorComBuffs)));
+
+    alvoEstado.vida_atual = Math.max(0, alvoEstado.vida_atual - dano);
+    log.push(
+      criticoInimigo
+        ? `${inimigo.nome} usou ${habilidade.nome} e causou ${dano} de dano. ACERTO CRÍTICO!`
+        : `${inimigo.nome} usou ${habilidade.nome} e causou ${dano} de dano.`,
+    );
+
+    const quebraFreeze = statusEffectService.removerFreezeAoReceberDanoDireto(novoStatusDefensor, dano);
+    novoStatusDefensor = quebraFreeze.lista;
+    if (quebraFreeze.quebrou) log.push("O alvo descongelou com o impacto!");
+  } else {
+    log.push(`${inimigo.nome} usou ${habilidade.nome}!`);
+  }
+
+  if (habilidade.statusEffects.length > 0) {
+    const novosEfeitos = resolverEfeitosDeMonstroNoHit({ efeitosDeStatus: habilidade.statusEffects, turno: combatTurn });
+    for (const efeito of novosEfeitos) {
+      const chanceResistencia = Math.min(
+        combatBuffService.STATUS_RESISTANCE_MAXIMA,
+        combatBuffService.somaDeAtributo(alvoBuffs ?? [], "STATUS_RESISTANCE_PCT") +
+          combatModifierService.resistenciaStatusPct(modificadoresDefensor ?? new Map()),
+      );
+      if (chanceResistencia > 0 && Math.random() * 100 < chanceResistencia) {
+        log.push(`Resistiu a ${definicaoDoStatus(efeito.key).nomeUi}!`);
+        continue;
+      }
+      novoStatusDefensor = statusEffectService.aplicarStatus(novoStatusDefensor, efeito);
+      log.push(`${inimigo.nome} aplicou ${definicaoDoStatus(efeito.key).nomeUi} por ${efeito.remainingTurns} turno(s)!`);
+    }
+  }
+
+  if (habilidade.curaBase > 0) {
+    const vidaAntes = inimigo.vida_atual;
+    inimigo.vida_atual = Math.min(inimigo.vida_maxima, inimigo.vida_atual + habilidade.curaBase);
+    if (inimigo.vida_atual > vidaAntes) log.push(`${inimigo.nome} recuperou ${inimigo.vida_atual - vidaAntes} de vida!`);
+  }
+
+  let novosBuffsDefensor = alvoBuffs;
+  for (const efeito of habilidade.combatEffectsExecutaveis ?? []) {
+    if (efeito.tipo === "CLEANSE_SELF") {
+      const resultado = executarEfeito(efeito.effectKey, { statusEffects: novoStatusAtacante, config: efeito.config });
+      if (resultado.aplicado) log.push(`${inimigo.nome} se livrou de um efeito negativo!`);
+      novoStatusAtacante = resultado.statusEffects;
+    } else if (efeito.tipo === "DISPEL_TARGET" && (novosBuffsDefensor ?? []).length > 0) {
+      novosBuffsDefensor = novosBuffsDefensor.slice(0, -1);
+      log.push(`${inimigo.nome} removeu um efeito benéfico do alvo!`);
+    }
+  }
+
+  return { criticoInimigo, dano, statusAtacante: novoStatusAtacante, statusDefensor: novoStatusDefensor, buffsDefensor: novosBuffsDefensor };
+}
+
 module.exports = {
   CAPABILITIES_EXECUTAVEIS_V1,
+  CAPABILITIES_EXECUTAVEIS_PARTY_V1,
   construirHabilidadesParaEncontro,
   decidirAcao,
   executarPoder,
+  decidirAcaoGrupo,
+  executarPoderEmGrupo,
 };

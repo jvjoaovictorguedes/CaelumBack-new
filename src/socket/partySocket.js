@@ -31,8 +31,10 @@ const { rolarDropDeVitoria } = require("../services/dropService");
 const { sortearMonstroDaZona } = require("../services/adventureRollService");
 const { persistirEstadoFinalDoMembro, calcularPenalidadeDiferencaNivel } = require("../services/partyBattleService");
 const { registrarProgressoContrato } = require("../services/adventureGuildObjectiveService");
-const { custoManaEfetivo } = require("../services/combatFormulas");
+const { custoManaEfetivo, resolverResultadoDeAcerto } = require("../services/combatFormulas");
 const combatModifierService = require("../services/combatModifierService");
+const statusEffectService = require("../services/statusEffectService");
+const { definicaoDoStatus, ACTION_TYPE } = require("../config/statusEffectConfig");
 const {
   online,
   chaveOnline,
@@ -41,6 +43,8 @@ const {
   registrarAoIdentificar,
 } = require("./pvpLiveSocket");
 const partyBattleConfig = require("../config/partyBattleConfig");
+const cooldownService = require("../services/cooldownService");
+const monsterCombatAdapter = require("../services/monsterCombatAdapter");
 
 // partyId -> { id, hostId, membros: Map<charId,{id,nome,classe,pronto}>, ordem: [charId] }
 const grupos = new Map();
@@ -549,6 +553,19 @@ module.exports = function registerPartyHandlers(io) {
         inimigo.status = [];
         inimigo.combatBuffs = [];
 
+        // IA de Combate PvE & Habilidades de Monstros V1 (§8.2) — mesmo
+        // princípio de efeitosDeStatus acima: pré-carrega MonsterAbility
+        // UMA vez, no início da batalha. Monstro sem nenhuma ability ativa
+        // = array vazio = combatAiService.chooseAction sempre devolve
+        // "attack" (comportamento 100% legado, §12.1). `cooldowns` é novo
+        // SÓ pro monstro (Party não rastreia cooldown de Power nenhum
+        // hoje, nem do lado dos aliados) — nunca afeta Powers de jogador.
+        inimigo.habilidades = await monsterCombatAdapter.construirHabilidadesParaEncontro(monstro.id, {
+          capabilidadesExecutaveis: monsterCombatAdapter.CAPABILITIES_EXECUTAVEIS_PARTY_V1,
+        });
+        inimigo.ai_profile = monstro.ai_profile ?? "BASIC";
+        inimigo.cooldowns = {};
+
         const battleId = proximaBatalhaId++;
         const sala = `party-batalha:${battleId}`;
         const batalha = {
@@ -919,8 +936,34 @@ async function executarTurnoMonstro(io, battleId) {
     return finalizarBatalha(io, battleId, false);
   }
 
-  const alvo = vivos[Math.floor(Math.random() * vivos.length)];
   batalha.contadorTurno += 1;
+
+  // IA de Combate PvE & Habilidades de Monstros V1 (§8.2) — decide
+  // attack/power ANTES de sortear alvo: monstro sem nenhuma
+  // MonsterAbility pré-carregada sempre devolve "attack" (§12.1), então
+  // o sorteio aleatório de alvo abaixo continua IDÊNTICO a antes nesse
+  // caso (regressão zero). Só quando a IA escolhe uma ability de verdade
+  // é que o alvo passa a vir da target_policy dela (§6.3).
+  const decisaoIA = monsterCombatAdapter.decidirAcaoGrupo({
+    inimigo: batalha.inimigo,
+    membrosVivos: vivos,
+    cooldowns: batalha.inimigo.cooldowns,
+    combatTurn: batalha.contadorTurno,
+  });
+  const habilidadeEscolhida =
+    decisaoIA.type === "power" ? (batalha.inimigo.habilidades ?? []).find((h) => h.id === decisaoIA.abilityId) : null;
+
+  const alvo = habilidadeEscolhida
+    ? vivos.find((m) => m.id === decisaoIA.targetIds[0]) ?? vivos[Math.floor(Math.random() * vivos.length)]
+    : vivos[Math.floor(Math.random() * vivos.length)];
+
+  if (habilidadeEscolhida) {
+    batalha.inimigo.cooldowns = cooldownService.iniciarCooldown(
+      batalha.inimigo.cooldowns,
+      habilidadeEscolhida.powerId,
+      habilidadeEscolhida.cooldownConfigurado,
+    );
+  }
 
   // Habilidades V2.0 §7/§9/§11/§26 (Fase 5) — modificadores PASSIVOS do
   // membro que está sendo atacado (defensor aqui), mesmo critério de
@@ -928,41 +971,104 @@ async function executarTurnoMonstro(io, battleId) {
   // de verdade.
   const modificadoresDefensor = await combatModifierService.resolverModificadoresDoPersonagem(alvo.estado, "PARTY");
 
-  // Mesmo motor de executarTurnoAliado, agora do lado do monstro —
-  // `efeitosDeStatusAtacante` é o catálogo configurado no admin (ideia
-  // #3 da fila de melhorias), rolado igual ao proc de arma do jogador:
-  // só dispara em ataque básico que de fato causa dano, nunca na hora
-  // de causar (isso aqui só REGISTRA a instância) — o dano do status em
-  // si só sai depois, no tick de fim de turno de quem ESTÁ com ele.
-  const {
-    nomeAcao,
-    dano,
-    esquivou,
-    critico,
-    bloqueado,
-    statusAtacante,
-    statusDefensor,
-    buffsAtacante,
-    log: logStatus,
-  } = await resolverTurnoComStatus({
-    atacante: batalha.inimigo,
-    defensor: alvo.estado,
-    acao: { tipo: "attack" },
-    vidaMaxAtacante: batalha.inimigo.vida_maxima,
-    statusAtacante: batalha.inimigo.status,
-    statusDefensor: alvo.status,
-    buffsAtacante: batalha.inimigo.combatBuffs,
-    buffsDefensor: alvo.combatBuffs,
-    turno: batalha.contadorTurno,
-    casterActorId: "inimigo",
-    efeitosDeStatusAtacante: batalha.inimigo.efeitosDeStatus,
-    nomeAtacante: batalha.inimigo.nome,
-    nomeDefensor: alvo.nome,
-    modificadoresDefensor,
-  });
-  batalha.inimigo.status = statusAtacante;
-  alvo.status = statusDefensor;
-  batalha.inimigo.combatBuffs = buffsAtacante ?? batalha.inimigo.combatBuffs;
+  let nomeAcao;
+  let dano;
+  let esquivou = false;
+  let critico = false;
+  let bloqueado = false;
+  let logStatus;
+
+  if (habilidadeEscolhida) {
+    // IA de Combate PvE & Habilidades de Monstros V1 — mesmo roll de
+    // bloqueio/acerto que resolverTurnoComStatus faz internamente pro
+    // ataque básico (statusEffectService.resolverAcoesBloqueadasDoTurno
+    // + resolverResultadoDeAcerto), aplicado aqui explicitamente porque a
+    // execução da Power é delegada pro adapter, não pro duelEngine.
+    const controle = statusEffectService.resolverAcoesBloqueadasDoTurno(batalha.inimigo.status, batalha.contadorTurno);
+    batalha.inimigo.status = controle.lista;
+    if (controle.bloqueadas.has(ACTION_TYPE.BASIC_ATTACK)) {
+      nomeAcao = "Ação bloqueada";
+      dano = 0;
+      bloqueado = true;
+      logStatus = [`${batalha.inimigo.nome} está ${definicaoDoStatus(controle.motivoBloqueioTotal).nomeUi} e não conseguiu agir!`];
+    } else {
+      const resultadoAcerto = resolverResultadoDeAcerto({
+        atacante: batalha.inimigo,
+        defensor: alvo.estado,
+        blindPotency: batalha.inimigo.status.find((s) => s.key === "BLIND")?.potency ?? 0,
+        modificadoresDefensor,
+      });
+      if (!resultadoAcerto.hit) {
+        nomeAcao = habilidadeEscolhida.nome;
+        dano = 0;
+        esquivou = true;
+        logStatus = [
+          resultadoAcerto.reason === "BLIND_MISS"
+            ? `${batalha.inimigo.nome}, cego, errou o ataque!`
+            : `${alvo.nome} esquivou do ataque de ${batalha.inimigo.nome}!`,
+        ];
+      } else {
+        const log = [];
+        const resultadoPower = monsterCombatAdapter.executarPoderEmGrupo({
+          habilidade: habilidadeEscolhida,
+          inimigo: batalha.inimigo,
+          alvoEstado: alvo.estado,
+          alvoStatus: alvo.status,
+          alvoBuffs: alvo.combatBuffs,
+          modificadoresDefensor,
+          combatTurn: batalha.contadorTurno,
+          log,
+        });
+        nomeAcao = habilidadeEscolhida.nome;
+        dano = resultadoPower.dano;
+        critico = resultadoPower.criticoInimigo;
+        batalha.inimigo.status = resultadoPower.statusAtacante;
+        alvo.status = resultadoPower.statusDefensor;
+        alvo.combatBuffs = resultadoPower.buffsDefensor ?? alvo.combatBuffs;
+        logStatus = log;
+      }
+    }
+  } else {
+    // Mesmo motor de executarTurnoAliado, agora do lado do monstro —
+    // `efeitosDeStatusAtacante` é o catálogo configurado no admin (ideia
+    // #3 da fila de melhorias), rolado igual ao proc de arma do jogador:
+    // só dispara em ataque básico que de fato causa dano, nunca na hora
+    // de causar (isso aqui só REGISTRA a instância) — o dano do status em
+    // si só sai depois, no tick de fim de turno de quem ESTÁ com ele.
+    const resultado = await resolverTurnoComStatus({
+      atacante: batalha.inimigo,
+      defensor: alvo.estado,
+      acao: { tipo: "attack" },
+      vidaMaxAtacante: batalha.inimigo.vida_maxima,
+      statusAtacante: batalha.inimigo.status,
+      statusDefensor: alvo.status,
+      buffsAtacante: batalha.inimigo.combatBuffs,
+      buffsDefensor: alvo.combatBuffs,
+      turno: batalha.contadorTurno,
+      casterActorId: "inimigo",
+      efeitosDeStatusAtacante: batalha.inimigo.efeitosDeStatus,
+      nomeAtacante: batalha.inimigo.nome,
+      nomeDefensor: alvo.nome,
+      modificadoresDefensor,
+    });
+    nomeAcao = resultado.nomeAcao;
+    dano = resultado.dano;
+    esquivou = resultado.esquivou;
+    critico = resultado.critico;
+    bloqueado = resultado.bloqueado;
+    logStatus = resultado.log;
+    batalha.inimigo.status = resultado.statusAtacante;
+    alvo.status = resultado.statusDefensor;
+    batalha.inimigo.combatBuffs = resultado.buffsAtacante ?? batalha.inimigo.combatBuffs;
+  }
+
+  // Fim do turno do monstro (§8.1 equivalente de Party) — cooldown recém
+  // iniciado neste MESMO turno não decrementa ainda (mesma semântica de
+  // Solo/personagem: só os turnos SEGUINTES contam).
+  batalha.inimigo.cooldowns = cooldownService.decrementarCooldowns(
+    batalha.inimigo.cooldowns,
+    habilidadeEscolhida ? new Set([cooldownService.chaveDoPoder(habilidadeEscolhida.powerId)]) : undefined,
+  );
 
   io.to(batalha.sala).emit("party:turno-resultado", {
     battleId,
