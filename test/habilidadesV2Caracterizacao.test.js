@@ -17,10 +17,13 @@
 //    contexto (PvE/PvP) — a função nem recebe esse parâmetro. A seção
 //    11 da V2 pede pra formalizar "PvE/PvP por default", o que já é
 //    verdade hoje só porque não existe filtro nenhum.
-// 4. ClassEvolutionEffect: das 11 effect_keys do ENUM, só
-//    DAMAGE_REDUCTION é interpretada em combate hoje — criar uma linha
-//    LIFESTEAL não quebra nada, mas também não faz NADA (constatação
-//    que a seção 15/16 da V2 pede pra resolver).
+// 4. ClassEvolutionEffect: `resolverBonusDeEfeitosDeEvolucao` (usada por
+//    equipmentBonusService, resultado { defesa }) só soma DAMAGE_REDUCTION
+//    — isso NÃO MUDOU. As outras 7 effect_keys agora SÃO interpretadas
+//    (item 8 da Habilidades V2.0), mas por um caminho diferente:
+//    classEvolutionEffectService.resolverModificadoresDeEfeitosDeEvolucao,
+//    mesclado por combatModifierService.resolverModificadoresDoPersonagem
+//    (ver habilidadesV2ClassEvolutionEffects.test.js).
 // combatBuffService (buffs de poção não empilham mais) já tem
 // caracterização própria em combatBuff.test.js — não duplicado aqui.
 // cooldownService (bloqueia N turnos) já tem test/cooldownService.test.js
@@ -183,7 +186,7 @@ testeComBanco(
 // ---------------------------------------------------------------------
 
 testeComBanco(
-  "CARACTERIZAÇÃO (hoje): ClassEvolutionEffect LIFESTEAL não contribui nada ao combate (só DAMAGE_REDUCTION está implementado)",
+  "CARACTERIZAÇÃO (hoje): ClassEvolutionEffect LIFESTEAL não contribui a `defesa` de resolverBonusDeEfeitosDeEvolucao (esse campo é só DAMAGE_REDUCTION; LIFESTEAL agora vive em combatModifierService — ver teste dedicado)",
   async () => {
     const { personagem } = await criarPersonagem({ nivel: 50 });
     const caminho = await ClassEvolutionPath.create({

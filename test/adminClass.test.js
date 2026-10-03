@@ -210,15 +210,19 @@ testeComBanco("effects: catálogo fechado só aceita effect_key implementada (§
   const efeito = await adminClassService.criarEfeito(caminho.id, { effect_key: "DAMAGE_REDUCTION", valor: 15 }, ctx);
   assert.equal(efeito.valor, 15);
 
+  // RAGE_STACK/LOW_HP_DAMAGE/SHIELD_ON_CAST são as únicas 3 effect_keys
+  // ainda fora de EFFECT_KEYS_IMPLEMENTADAS (item 8 da Habilidades V2.0
+  // implementou as outras 7 — ver classEvolutionCombatModifiers.test.js).
   await assert.rejects(
-    () => adminClassService.criarEfeito(caminho.id, { effect_key: "LIFESTEAL", valor: 10 }, ctx),
+    () => adminClassService.criarEfeito(caminho.id, { effect_key: "RAGE_STACK", valor: 10 }, ctx),
     (err) => err.statusCode === 400,
   );
 
   const catalogo = adminClassService.catalogoEfeitos();
   assert.equal(catalogo.length, 11);
   assert.ok(catalogo.find((e) => e.effect_key === "DAMAGE_REDUCTION").implementado);
-  assert.ok(!catalogo.find((e) => e.effect_key === "LIFESTEAL").implementado);
+  assert.ok(catalogo.find((e) => e.effect_key === "LIFESTEAL").implementado);
+  assert.ok(!catalogo.find((e) => e.effect_key === "RAGE_STACK").implementado);
 });
 
 testeComBanco("buscarClasseComArvore: retorna caminhos com requisitos/habilidades/efeitos aninhados", async () => {

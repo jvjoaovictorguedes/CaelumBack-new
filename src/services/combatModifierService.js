@@ -37,6 +37,7 @@ const {
 const { triggerValido } = require("../config/combatTriggerConfig");
 const { contextoValido, CONTEXTOS_DE_COMBATE } = require("../config/combatContextConfig");
 const { multiplicadorEfeito: multiplicadorPorNivelHabilidade } = require("./abilityLevelService");
+const { resolverModificadoresDeEfeitosDeEvolucao } = require("./classEvolutionEffectService");
 
 function erro(mensagem, statusCode = 500) {
   return Object.assign(new Error(mensagem), { statusCode });
@@ -203,7 +204,23 @@ async function resolverModificadoresDoPersonagem(personagem, contexto, { transac
     }
   }
 
-  return resolverModificadores(linhasAplicaveis);
+  const modificadores = resolverModificadores(linhasAplicaveis);
+
+  // Item 8 — soma por cima os modificadores de ClassEvolutionEffect
+  // (LIFESTEAL/MANA_COST_REDUCTION/COOLDOWN_REDUCTION/CRITICAL_CHANCE/
+  // CRITICAL_DAMAGE/DODGE_BONUS/HEALING_BONUS), mesmo Map, nenhuma
+  // fórmula duplicada: quem chama este serviço (duelEngine, pvpController,
+  // pvpLiveSocket, partySocket, guildBossSocket, worldBossCombatService,
+  // combatController) já ganha as duas fontes combinadas de graça.
+  // DAMAGE_REDUCTION fica de fora daqui de propósito — já é somado em
+  // `defesa` por equipmentBonusService, somar DEFENSE_FLAT aqui também
+  // contaria em dobro.
+  const modificadoresDeEvolucao = await resolverModificadoresDeEfeitosDeEvolucao(personagem.id, transaction);
+  for (const [chave, valor] of modificadoresDeEvolucao) {
+    modificadores.set(chave, (modificadores.get(chave) ?? 0) + valor);
+  }
+
+  return modificadores;
 }
 
 function valorDoModificador(mapaModificadores, effectKey) {

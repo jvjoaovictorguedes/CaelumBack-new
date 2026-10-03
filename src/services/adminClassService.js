@@ -663,6 +663,12 @@ async function simularEvolucao({ id_classe, id_caminho_estagio1, id_caminho_esta
   }
 
   const bonus = { forca: 0, vitalidade: 0, agilidade: 0, inteligencia: 0, velocidade: 0, defesa: 0 };
+  // Item 8 — efeitos de modificador (os 7 effect_keys resolvidos por
+  // classEvolutionEffectService.EFFECT_KEY_PARA_MODIFICADOR), crus
+  // (valor * sinal, sem passar pelos getters de combatModifierService,
+  // já que aqui não há personagem real pra combinar com buffs/Power) —
+  // só pra Admin enxergar o que cada caminho concede antes de publicar.
+  const efeitosDeModificador = [];
   const habilidadesConcedidas = [];
   for (const caminho of [caminho1, caminho2].filter(Boolean)) {
     bonus.forca += caminho.bonus_forca;
@@ -671,7 +677,12 @@ async function simularEvolucao({ id_classe, id_caminho_estagio1, id_caminho_esta
     bonus.inteligencia += caminho.bonus_inteligencia;
     bonus.velocidade += caminho.bonus_velocidade;
     for (const efeito of caminho.efeitos ?? []) {
-      if (efeito.ativo && efeito.effect_key === "DAMAGE_REDUCTION") bonus.defesa += efeito.valor;
+      if (!efeito.ativo) continue;
+      if (efeito.effect_key === "DAMAGE_REDUCTION") {
+        bonus.defesa += efeito.valor;
+      } else if (EFFECT_KEYS_IMPLEMENTADAS.includes(efeito.effect_key)) {
+        efeitosDeModificador.push({ effect_key: efeito.effect_key, valor: efeito.valor, caminho: caminho.nome });
+      }
     }
     for (const vinculo of caminho.habilidadesConcedidas ?? []) {
       if (vinculo.auto_conceder) habilidadesConcedidas.push({ id_power: vinculo.id_power, nome: vinculo.power?.nome ?? null });
@@ -683,6 +694,7 @@ async function simularEvolucao({ id_classe, id_caminho_estagio1, id_caminho_esta
     caminho_estagio1: caminho1 ? { id: caminho1.id, nome: caminho1.nome } : null,
     caminho_estagio2: caminho2 ? { id: caminho2.id, nome: caminho2.nome } : null,
     bonus_total: bonus,
+    efeitos_de_modificador: efeitosDeModificador,
     habilidades_concedidas: habilidadesConcedidas,
   };
 }
