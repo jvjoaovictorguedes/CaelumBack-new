@@ -723,4 +723,25 @@ CharacterClassEvolutionModel.belongsTo(ClassEvolutionPathModel, { foreignKey: "i
 CharacterClassEvolutionModel.belongsTo(Character, { foreignKey: "id_personagem", as: "personagem" });
 Character.hasMany(CharacterClassEvolutionModel, { foreignKey: "id_personagem", as: "evolucoesDeClasse" });
 
+// IA de Combate PvE & Habilidades de Monstros V1 (§4.2/§4.3/§8.3) —
+// MonsterAbility é o vínculo Power<->AdventureMonster; condições ficam
+// em tabela filha (uma ability pode ter zero, uma ou várias). Mesma
+// forma pra GuildBossAbility, só que vinculada a GuildBossConfig.
+const AdventureMonsterModel = require("./AdventureMonster");
+const MonsterAbility = require("./MonsterAbility");
+const MonsterAbilityCondition = require("./MonsterAbilityCondition");
+const GuildBossConfigModel = require("./GuildBossConfig");
+const GuildBossAbility = require("./GuildBossAbility");
+
+AdventureMonsterModel.hasMany(MonsterAbility, { foreignKey: "id_monstro", as: "habilidades" });
+MonsterAbility.belongsTo(AdventureMonsterModel, { foreignKey: "id_monstro", as: "monstro" });
+MonsterAbility.belongsTo(Power, { foreignKey: "id_power", as: "power" });
+
+MonsterAbility.hasMany(MonsterAbilityCondition, { foreignKey: "id_monster_ability", as: "condicoes" });
+MonsterAbilityCondition.belongsTo(MonsterAbility, { foreignKey: "id_monster_ability", as: "habilidade" });
+
+GuildBossConfigModel.hasMany(GuildBossAbility, { foreignKey: "id_guild_boss_config", as: "habilidades" });
+GuildBossAbility.belongsTo(GuildBossConfigModel, { foreignKey: "id_guild_boss_config", as: "bossConfig" });
+GuildBossAbility.belongsTo(Power, { foreignKey: "id_power", as: "power" });
+
 module.exports = {};

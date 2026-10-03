@@ -81,6 +81,18 @@ const Power = sequelize.define("Power", {
     allowNull: false,
     defaultValue: "NORMAL",
   },
+  // IA de Combate PvE & Habilidades de Monstros V1 (§4.1) — INDEPENDENTE
+  // de acquisition_scope (que só diz COMO um personagem aprende). Diz
+  // QUEM pode usar esta Power como ator de combate: CHARACTER (default
+  // seguro — nenhuma Power existente muda de comportamento), MONSTER
+  // (só monstro, via MonsterAbility/GuildBossAbility/WorldBossAbility —
+  // nunca aprendida por CharacterAbilities/Livro de Habilidade/Classe/
+  // Raça/grant normal) ou BOTH.
+  usage_scope: {
+    type: DataTypes.ENUM("CHARACTER", "MONSTER", "BOTH"),
+    allowNull: false,
+    defaultValue: "CHARACTER",
+  },
 });
 
 module.exports = Power;

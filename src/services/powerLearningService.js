@@ -16,6 +16,7 @@ const Power = require("../models/Power");
 const PowerBook = require("../models/PowerBook");
 const inventoryService = require("./inventoryService");
 const { MAX_HABILIDADES_ATIVAS_COMBATE } = require("./abilityLevelService");
+const { garantirPowerUsavelPorPersonagem } = require("./powerUsageScopeGuard");
 // Efeito colateral necessário: CharacterAbilities só ganha a associação
 // belongsTo(Power) quando characterAbilitiesController é carregado
 // (mesmo padrão de combatModifierService.js/test/helpers/db.js).
@@ -80,6 +81,7 @@ async function grantPower({ characterId, idPower, levelLearned, transaction }) {
 
   const power = await Power.findByPk(idPower, { transaction });
   if (!power) throw erro("Habilidade não encontrada.", 404);
+  garantirPowerUsavelPorPersonagem(power);
 
   let podeAtivar = true;
   if (power.tipo_poder === "Ativo") {

@@ -54,6 +54,15 @@ const AdventureMonster = sequelize.define(
     // escolhe quais monstros do catálogo podem aparecer nela (ver
     // migration 20270114010000-monstro-disponivel-emboscada.js).
     disponivel_emboscada: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+    // IA de Combate PvE & Habilidades de Monstros V1 (§4.4) — BASIC
+    // (default, nenhum monstro muda de comportamento até o Admin montar
+    // uma build de verdade em MonsterAbility) -> TACTICAL -> BOSS ->
+    // ELITE_BOSS (reservado ao Templo, não liberado nesta V1).
+    ai_profile: {
+      type: DataTypes.ENUM("BASIC", "TACTICAL", "BOSS", "ELITE_BOSS"),
+      allowNull: false,
+      defaultValue: "BASIC",
+    },
   },
   {
     tableName: "AdventureMonsters",

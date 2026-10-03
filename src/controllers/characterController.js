@@ -84,6 +84,7 @@ CharacterEquipment.belongsTo(Item, { foreignKey: "id_item", as: "item" });
 // dois controllers antigos) derrubaria com "ClassAbilities is not
 // associated to Power!" ao tentar `include: [{ model: Power }]`.
 const Power = require("../models/Power");
+const { garantirPowerUsavelPorPersonagem } = require("../services/powerUsageScopeGuard");
 ClassAbilities.belongsTo(Power, { foreignKey: "id_poder" });
 RaceAbilities.belongsTo(Power, { foreignKey: "id_power" });
 NatureAbilities.belongsTo(Power, { foreignKey: "id_poder" });
@@ -1106,6 +1107,7 @@ exports.comprarPoder = async (req, res) => {
       // em concederPoderesIniciais/concederHabilidadesDeEvolucao (ver
       // comentário ali). Passivo nunca entra nessa conta (sempre ativo).
       const poderComprado = await Power.findByPk(idPower, { transaction });
+      garantirPowerUsavelPorPersonagem(poderComprado);
       let podeAtivar = true;
       if (poderComprado?.tipo_poder === "Ativo") {
         const jaAtivas = await CharacterAbilities.count({
@@ -1315,6 +1317,7 @@ exports.comprarEvolucao = async (req, res) => {
         // MAX_HABILIDADES_ATIVAS_COMBATE (5). Passivo fica de fora da
         // conta (sempre ativo).
         const poderConcedido = await Power.findByPk(evolucao.id_power_concedido, { transaction });
+        garantirPowerUsavelPorPersonagem(poderConcedido);
         let podeAtivar = true;
         if (poderConcedido?.tipo_poder === "Ativo") {
           const jaAtivas = await CharacterAbilities.count({

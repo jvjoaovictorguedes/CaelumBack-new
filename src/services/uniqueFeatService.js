@@ -12,8 +12,10 @@ const UniqueFeatClaim = require("../models/UniqueFeatClaim");
 const CharacterAbilities = require("../models/CharacterAbilities");
 const CharacterAchievement = require("../models/CharacterAchievement");
 const CharacterTitle = require("../models/CharacterTitle");
+const Power = require("../models/Power");
 const triggerRegistry = require("./uniqueFeatTriggerRegistry");
 const { triggerKeyValida } = require("../config/uniqueFeatConfig");
+const { garantirPowerUsavelPorPersonagem } = require("./powerUsageScopeGuard");
 
 function erro(mensagem, statusCode = 400) {
   const e = new Error(mensagem);
@@ -52,6 +54,8 @@ async function tryClaimAtomic({ feat, character, triggerKey, triggerSnapshot, so
       // NUNCA findOrCreate: se já existir uma linha aqui é corrupção/
       // grant manual anterior — a transaction (e o savepoint) devem
       // falhar de verdade, nunca esconder o problema (§8).
+      const powerDaRecompensa = await Power.findByPk(feat.id_power_reward, { transaction: savepoint });
+      garantirPowerUsavelPorPersonagem(powerDaRecompensa);
       await CharacterAbilities.create(
         {
           id_personagem: character.id,

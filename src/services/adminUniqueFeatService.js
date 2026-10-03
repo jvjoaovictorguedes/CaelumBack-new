@@ -13,6 +13,7 @@ const Achievement = require("../models/Achievement");
 const Title = require("../models/Title");
 const Character = require("../models/Character");
 const CharacterAbilities = require("../models/CharacterAbilities");
+const { garantirPowerUsavelPorPersonagem } = require("./powerUsageScopeGuard");
 const CharacterAchievement = require("../models/CharacterAchievement");
 const CharacterTitle = require("../models/CharacterTitle");
 const { registrarAcao } = require("./adminAuditService");
@@ -414,6 +415,8 @@ async function transferirClaim(idClaim, { idPersonagemNovo, motivo, idAdmin, req
     if (!novoPersonagem) throw erro("Personagem de destino não encontrado.", 404);
 
     const feat = await UniqueFeat.findByPk(claim.id_unique_feat, { transaction });
+    const powerDaRecompensa = await Power.findByPk(feat.id_power_reward, { transaction });
+    garantirPowerUsavelPorPersonagem(powerDaRecompensa);
     const antigoPersonagemId = claim.id_personagem;
     const antes = claim.toJSON();
 

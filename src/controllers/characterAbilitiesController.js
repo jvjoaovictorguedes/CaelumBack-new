@@ -14,6 +14,7 @@ const {
   multiplicadorEfeito,
   multiplicadorCustoMana,
 } = require("../services/abilityLevelService");
+const { garantirPowerUsavelPorPersonagem } = require("../services/powerUsageScopeGuard");
 
 // Sem essas associações, qualquer include: [{model: Character}, {model: Power}]
 // abaixo derruba a chamada com "CharacterAbilities is not associated to X!".
@@ -26,6 +27,11 @@ CharacterAbilities.belongsTo(Power, { foreignKey: "id_power" });
 // Criar uma nova habilidade de personagem
 exports.createCharacterAbility = async (req, res) => {
   try {
+    const power = await Power.findByPk(req.body.id_power);
+    if (!power) {
+      return res.status(404).json({ status: "fail", message: "Habilidade não encontrada." });
+    }
+    garantirPowerUsavelPorPersonagem(power);
     const newCharacterAbility = await CharacterAbilities.create(req.body);
     res.status(201).json({
       status: "success",
@@ -40,6 +46,9 @@ exports.createCharacterAbility = async (req, res) => {
       return res
         .status(409)
         .json({ message: "Este personagem já possui este poder." });
+    }
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({ message: error.message });
     }
     res
       .status(500)
