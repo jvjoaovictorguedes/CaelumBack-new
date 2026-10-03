@@ -8,6 +8,8 @@ const AdventureMonster = require("../models/AdventureMonster");
 const { Op } = require("sequelize");
 const AdventureMonsterLoot = require("../models/AdventureMonsterLoot");
 const Item = require("../models/Item");
+const MonsterAbility = require("../models/MonsterAbility");
+const Power = require("../models/Power");
 const CharacterMonsterKill = require("../models/CharacterMonsterKill");
 const { calcularMaestriaDaRegiao } = require("./masteryService");
 const {
@@ -120,6 +122,32 @@ async function obterRegiao(idPersonagem, idZona) {
     lootsPorMonstro.set(loot.id_monstro, lista);
   }
 
+  // IA de Combate PvE & Habilidades de Monstros V1 (§10.2) — "não precisa
+  // revelar toda a build imediatamente... derrotar a criatura pode
+  // revelar o conjunto completo conforme regra do Bestiário". V1 usa a
+  // via mais simples do documento: monstro já descoberto (mesma regra
+  // de nome/imagem/drops acima) revela a LISTA de habilidades (nome/
+  // tipo), nunca os números internos (dano_base/prioridade/condições —
+  // isso fica só no Admin). Mesmo padrão de "busca tudo de uma vez" dos
+  // loots acima, zero N+1.
+  const abilities = idsMonstros.length
+    ? await MonsterAbility.findAll({
+        where: { id_monstro: idsMonstros, ativo: true },
+        include: [{ model: Power, as: "power", attributes: ["nome", "tipo_poder", "descricao"] }],
+      })
+    : [];
+  const abilitiesPorMonstro = new Map();
+  for (const ability of abilities) {
+    if (!ability.power) continue;
+    const lista = abilitiesPorMonstro.get(ability.id_monstro) ?? [];
+    lista.push({
+      nome: ability.power.nome,
+      tipo_poder: ability.power.tipo_poder,
+      descricao: ability.power.descricao,
+    });
+    abilitiesPorMonstro.set(ability.id_monstro, lista);
+  }
+
   // Mistério do Bestiário — uma linha "???" por monstro não descoberto
   // já entregava o TOTAL da zona de graça (bastava contar os cards).
   // Enquanto a zona não estiver 100% descoberta, nem a QUANTIDADE de
@@ -142,11 +170,13 @@ async function obterRegiao(idPersonagem, idZona) {
     monstrosDescobertos.push({
       descoberto: true,
       nome: v.monstro.nome,
-      // AdventureMonster não tem campo de "tipo"/habilidades/resistências
-      // separado (combate é resolvido pelos stats fixos do próprio
-      // monstro, não por ficha de skills) — a ficha usa o que REALMENTE
-      // existe (§7: nunca duplicar/inventar atributo que não é real),
-      // daí "raridade" aqui é o tipo de aparição da zona (Comum/Raro).
+      // "raridade" aqui é o tipo de aparição da zona (Comum/Raro), não
+      // uma raridade do monstro em si — resistências a Status ainda não
+      // têm ficha própria pro Bestiário (§10.2 "faixas qualitativas
+      // conforme forem testadas" fica pra uma iteração futura); IA de
+      // Combate PvE V1 (§10.2) já revela `habilidades` abaixo pra
+      // monstro já descoberto, nome/tipo_poder/descricao da Power —
+      // nunca os números internos (dano_base/prioridade/condições).
       //
       // Reformulação V2 dos Monstros (§4.3/§9.3) — nível é o ÚNICO,
       // FIXO, de AdventureMonster.nivel; não existe mais faixa
@@ -161,6 +191,7 @@ async function obterRegiao(idPersonagem, idZona) {
       abates: kill.quantidade,
       requisito_proximo_nivel: proximoNivel ? REQUISITOS_ABATES_POR_NIVEL[proximoNivel][v.tipo_aparicao] : null,
       drops: lootsPorMonstro.get(v.monstro.id) ?? [],
+      habilidades: abilitiesPorMonstro.get(v.monstro.id) ?? [],
     });
   }
 

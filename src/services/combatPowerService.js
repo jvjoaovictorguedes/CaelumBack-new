@@ -32,6 +32,8 @@ const {
   UTILITY_CAP_CONTROLE,
 } = require("../config/combatPowerConfig");
 const WeaponStatusEffect = require("../models/WeaponStatusEffect");
+const AdventureMonster = require("../models/AdventureMonster");
+const { construirHabilidadesParaEncontro } = require("./monsterCombatAdapter");
 
 function ehpAjustado(personagem) {
   const vidaMax = vidaMaximaDe(personagem);
@@ -202,6 +204,87 @@ function calcularPoderMonstro(enemySnapshot) {
   };
 }
 
+// IA de Combate PvE & Habilidades de Monstros V1 (§9.1) — mesmo
+// otimizador guloso de otimizarJanelaDeDano acima, só que pro lado do
+// monstro: compara o ataque básico (danoMedio) contra cada MonsterAbility
+// com capability DAMAGE (danoBase PLANO, nunca escala_atributo — mesma
+// decisão de escopo de monsterCombatAdapter.js, monstro não tem
+// atributo pra escalar), respeitando só cooldown (nunca Mana — monstro
+// não tem pool nesta V1, ver mesmo arquivo).
+function otimizarJanelaDeDanoMonstro({ danoMedioBasico, habilidades, horizonte }) {
+  let cooldowns = {};
+  let danoTotal = 0;
+
+  for (let acao = 0; acao < horizonte; acao += 1) {
+    let melhor = { dano: Math.max(1, danoMedioBasico), usouAbility: null };
+    for (const habilidade of habilidades) {
+      if (!habilidade.danoBase || habilidade.danoBase <= 0) continue;
+      if (!cooldownService.podeUsar(cooldowns, habilidade.powerId)) continue;
+      if (habilidade.danoBase > melhor.dano) melhor = { dano: habilidade.danoBase, usouAbility: habilidade };
+    }
+
+    danoTotal += melhor.dano;
+    const chavesNesteTurno = new Set();
+    if (melhor.usouAbility) {
+      cooldowns = cooldownService.iniciarCooldown(cooldowns, melhor.usouAbility.powerId, melhor.usouAbility.cooldownConfigurado);
+      chavesNesteTurno.add(cooldownService.chaveDoPoder(melhor.usouAbility.powerId));
+    }
+    cooldowns = cooldownService.decrementarCooldowns(cooldowns, chavesNesteTurno);
+  }
+  return danoTotal;
+}
+
+// Wrapper assíncrono (§9.1) — carrega o monstro + MonsterAbility
+// (reaproveitando monsterCombatAdapter.construirHabilidadesParaEncontro,
+// nunca uma segunda query/filtro de capabilities paralelo) e devolve
+// dpr/ehp/utilityFactor/combatPower com a build de verdade. Preserva
+// calcularPoderMonstro (função pura acima) como FALLBACK pra monstro sem
+// nenhuma ability executável — mesmo resultado de antes desta V1, §9.1
+// "preservar a função pura atual como fallback".
+async function calcularPoderMonstroComBuild(idMonstro) {
+  const monstro = await AdventureMonster.findByPk(idMonstro);
+  if (!monstro) return null;
+
+  const enemySnapshot = {
+    vida_maxima: monstro.vida_maxima,
+    dano_min: monstro.dano_min,
+    dano_max: monstro.dano_max,
+    defesa: monstro.defesa ?? 0,
+  };
+
+  const habilidades = await construirHabilidadesParaEncontro(idMonstro);
+  if (habilidades.length === 0) {
+    return calcularPoderMonstro(enemySnapshot);
+  }
+
+  const danoMedioBasico = (Math.max(0, monstro.dano_min ?? 0) + Math.max(0, monstro.dano_max ?? 0)) / 2;
+  const dpr = otimizarJanelaDeDanoMonstro({ danoMedioBasico, habilidades, horizonte: HORIZONTE_PADRAO });
+  // ehpAjustado é fórmula de CHARACTER (lê vitalidade/nível, ignora
+  // vida_maxima — ver vidaMaximaDe em combatFormulas.js); pra monstro
+  // replica a MESMA conta que calcularPoderMonstro já usa acima, nunca
+  // uma segunda constante de mitigação.
+  const defesaMonstro = monstro.defesa ?? 0;
+  const mitigacaoMonstro = defesaMonstro / (defesaMonstro + CONSTANTE_MITIGACAO_DEFESA);
+  const ehp = Math.max(1, monstro.vida_maxima || 1) / Math.max(0.01, 1 - mitigacaoMonstro);
+
+  // Utilidade (§9.2 "chance/impacto de Status de controle de forma
+  // conservadora") — reaproveita fatorDeUtilidade tal qual, mesma lógica
+  // de personagem: cada ability com status configurado (DEBUFF_CONTROL)
+  // entra como uma fonte separada.
+  const fontesDeEfeito = habilidades.map((h) => ({ efeitosDeStatus: h.statusEffects ?? [] }));
+  const utilityFactor = fatorDeUtilidade(fontesDeEfeito);
+  const rawPower = Math.sqrt(Math.max(1, dpr) * Math.max(1, ehp));
+
+  return {
+    version: COMBAT_POWER_VERSION,
+    dpr,
+    ehp,
+    utilityFactor,
+    rawPower,
+    combatPower: Math.round(rawPower * POWER_DISPLAY_SCALE * utilityFactor),
+  };
+}
+
 // Delta de Poder ao equipar (§8) — recebe os bônus JÁ calculados (atual
 // vs. se equipar) de quem chama (ex.: inventoryController, que já sabe
 // resolver "bônus se eu equipar este item" via equipmentBonusService) e
@@ -231,6 +314,7 @@ module.exports = {
   calcularPoderPersonagemDeSnapshot,
   calcularPoderPersonagem,
   calcularPoderMonstro,
+  calcularPoderMonstroComBuild,
   calcularDeltaPoderAoEquipar,
   compararPoderes,
 };
