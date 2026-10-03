@@ -2,6 +2,7 @@
 // adminAdventureService.
 const adminAdventureService = require("../services/adminAdventureService");
 const adventureBalanceSimulationService = require("../services/adventureBalanceSimulationService");
+const monsterAbilityService = require("../services/monsterAbilityService");
 
 function tratarErro(res, error, mensagemPadrao) {
   const statusCode = error.statusCode || 500;
@@ -219,6 +220,31 @@ exports.sincronizarStatusEffectsMonstro = async (req, res) => {
     res.status(200).json({ status: "success", data: { efeitos } });
   } catch (error) {
     tratarErro(res, error, "Erro interno do servidor ao sincronizar os efeitos de status do monstro.");
+  }
+};
+
+// IA de Combate PvE & Habilidades de Monstros V1 (§10.1/§11.2) — mesmo
+// padrão de sincronizarStatusEffectsMonstro acima (PUT substitui a lista
+// inteira de habilidades do monstro).
+exports.listarAbilitiesMonstro = async (req, res) => {
+  try {
+    const abilities = await monsterAbilityService.listarAbilitiesDoMonstro(req.params.id);
+    res.status(200).json({ status: "success", data: { abilities } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao listar as habilidades do monstro.");
+  }
+};
+
+exports.sincronizarAbilitiesMonstro = async (req, res) => {
+  try {
+    const abilities = await monsterAbilityService.sincronizarAbilitiesMonstro(
+      req.params.id,
+      req.body?.abilities ?? [],
+      { idAdmin: req.user.id, req },
+    );
+    res.status(200).json({ status: "success", data: { abilities } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao sincronizar as habilidades do monstro.");
   }
 };
 

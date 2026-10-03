@@ -171,6 +171,10 @@ const CAMPOS_MONSTRO = [
   "defesa",
   "ativo",
   "disponivel_emboscada",
+  // IA de Combate PvE & Habilidades de Monstros V1 (§4.4/§10.1) — rida
+  // os mesmos endpoints de criar/editar monstro; validação de enum já é
+  // garantida pelo model (ENUM do Postgres rejeita valor fora da lista).
+  "ai_profile",
 ];
 
 // CHECK constraints do banco (migration 20261208010000) já bloqueiam

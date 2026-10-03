@@ -17,4 +17,20 @@ function garantirPowerUsavelPorPersonagem(power) {
   }
 }
 
-module.exports = { garantirPowerUsavelPorPersonagem };
+// Simétrico ao de cima — usado por monsterAbilityService/GuildBossAbility
+// antes de vincular uma Power a um monstro/boss: usage_scope CHARACTER
+// (o default de toda Power já existente) nunca pode virar habilidade de
+// combate de criatura, senão toda Power de personagem viraria candidata
+// a build de monstro sem o admin ter decidido isso de propósito.
+function garantirPowerUsavelPorMonstro(power) {
+  if (!power) {
+    throw erro("Power não encontrada.");
+  }
+  if (power.usage_scope === "CHARACTER") {
+    throw erro(
+      `A Power "${power.nome ?? power.id}" é usage_scope CHARACTER — precisa ser MONSTER ou BOTH pra virar habilidade de monstro.`,
+    );
+  }
+}
+
+module.exports = { garantirPowerUsavelPorPersonagem, garantirPowerUsavelPorMonstro };
