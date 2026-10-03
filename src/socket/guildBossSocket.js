@@ -67,6 +67,7 @@ const { atacarBossAoVivo, expirarSeNecessario, tempoRestanteCooldown } = require
 // require, ignorando qualquer ajuste feito depois no admin.
 const guildConfig = require("../config/guildConfig");
 const { online, chaveOnline, carregarLutador, poderesPublicos } = require("./pvpLiveSocket");
+const monsterCombatAdapter = require("../services/monsterCombatAdapter");
 const { emitParaGuild } = require("./guildSocket");
 
 async function registrarLog(idGuild, tipo, { responsavel, detalhes, transaction } = {}) {
@@ -193,6 +194,13 @@ async function criarBatalha(io, idGuild, tentativa, characterIdInicial, socketIn
   // com o mapa vazio, igual toda sessão nova do Boss Mundial.
   lutador.cooldowns = {};
 
+  // IA de Combate PvE & Habilidades de Monstros V1 (§8.3) — pré-carrega
+  // GuildBossAbility UMA vez, no início da batalha (mesmo princípio de
+  // Solo/Party). Boss sem nenhuma ability ativa = array vazio =
+  // combatAiService.chooseAction sempre devolve "attack" (comportamento
+  // 100% legado, §12.1).
+  const habilidadesChefe = await monsterCombatAdapter.construirHabilidadesParaGuildBoss(tentativa.id_guild_boss_config);
+
   const battleId = proximaBatalhaId++;
   const sala = salaBatalha(battleId);
   const batalha = {
@@ -216,6 +224,8 @@ async function criarBatalha(io, idGuild, tentativa, characterIdInicial, socketIn
     rodada: 1,
     timer: null,
     processandoAcao: false,
+    habilidadesChefe,
+    cooldownsChefe: {},
   };
   batalhas.set(battleId, batalha);
   batalhaPorGuild.set(idGuild, battleId);
@@ -561,17 +571,25 @@ function avancarTurnoAliado(io, battleId) {
 // calcularDanoBasico (via aplicarAcao) fabricando uma "força" que
 // produz o dano-alvo da rodada, mesmo truque já usado em
 // combatController.gerarInimigoDeGrupo pro monstro de grupo da Aventura.
-function forcaChefeParaRodada(batalha) {
-  const danoAlvo = batalha.danoBaseChefe * (1 + guildConfig.BOSS_AO_VIVO_FATOR_ESCALADA_DANO * (batalha.rodada - 1));
+function forcaParaDanoAlvo(danoBase, rodada) {
+  const danoAlvo = danoBase * (1 + guildConfig.BOSS_AO_VIVO_FATOR_ESCALADA_DANO * (rodada - 1));
   return Math.max(1, Math.round((danoAlvo - 4) / 0.9));
 }
 
-// Boss da Guilda não tem habilidade/IA própria (o CRUD/seleção
-// ponderada de poder — GuildBossAbility/bossAbilityAiService — era um
-// WIP nunca validado de ponta a ponta e ficou de fora da Fase 1; ver
-// combatController/worldBossRuntimeService pra quando isso existir de
-// verdade). O chefe sempre dá um ataque básico, mas AVISA a sala com um
-// telegraph mínimo antes de resolver — igual em espírito ao
+function forcaChefeParaRodada(batalha) {
+  return forcaParaDanoAlvo(batalha.danoBaseChefe, batalha.rodada);
+}
+
+// IA de Combate PvE & Habilidades de Monstros V1 (§7/§8.3) — o chefe
+// agora PODE ter GuildBossAbility de verdade (monsterCombatAdapter.
+// decidirAcaoChefe), sem HEAL/REGEN_HP/SHIELD (Hard rule de Boss
+// coletivo, validada no cadastro — ver monsterAbilityService) e sem
+// Status/buff/escudo nenhum (este modo não rastreia isso pra NINGUÉM
+// ainda, nem jogador nem chefe — ver nota de escopo em
+// monsterCombatAdapter.js). Boss sem nenhuma ability continua com o
+// ataque básico escalado por rodada de sempre. O chefe sempre dá uma
+// ação, mas AVISA a sala com um telegraph mínimo antes de resolver —
+// igual em espírito ao
 // "cast_pendente" do World Boss (pedido do jogador: "ritmo de turno
 // igual à Ameaça Mundial" — sem isso, o contra-ataque resolvia
 // instantâneo, sem nenhuma pausa perceptível). `batalha.fase` vira
@@ -610,8 +628,38 @@ async function resolverAcaoDoChefe(io, battleId) {
     return finalizarBatalha(io, battleId, false, null, "grupo_derrotado");
   }
 
-  const alvo = vivos[Math.floor(Math.random() * vivos.length)];
-  const chefeAtacante = { forca: forcaChefeParaRodada(batalha), nivel: 1, agilidade: 0 };
+  // IA de Combate PvE & Habilidades de Monstros V1 (§8.3) — decide
+  // attack/power ANTES de sortear alvo; sem nenhuma GuildBossAbility
+  // configurada, chooseAction sempre devolve "attack" (§12.1) e o
+  // sorteio aleatório abaixo continua IDÊNTICO a antes (regressão zero).
+  const decisaoIA = monsterCombatAdapter.decidirAcaoChefe({
+    vidaRestante: batalha.vidaRestante,
+    vidaTotal: batalha.vidaTotal,
+    habilidades: batalha.habilidadesChefe,
+    cooldowns: batalha.cooldownsChefe,
+    vivos,
+    rodada: batalha.rodada,
+  });
+  const habilidadeEscolhida =
+    decisaoIA.type === "power" ? (batalha.habilidadesChefe ?? []).find((h) => h.id === decisaoIA.abilityId) : null;
+
+  const alvo = habilidadeEscolhida
+    ? vivos.find((m) => m.id === decisaoIA.targetIds[0]) ?? vivos[Math.floor(Math.random() * vivos.length)]
+    : vivos[Math.floor(Math.random() * vivos.length)];
+
+  if (habilidadeEscolhida) {
+    batalha.cooldownsChefe = cooldownService.iniciarCooldown(
+      batalha.cooldownsChefe,
+      habilidadeEscolhida.powerId,
+      habilidadeEscolhida.cooldownConfigurado,
+    );
+  }
+
+  const chefeAtacante = {
+    forca: habilidadeEscolhida ? forcaParaDanoAlvo(habilidadeEscolhida.danoBase, batalha.rodada) : forcaChefeParaRodada(batalha),
+    nivel: 1,
+    agilidade: 0,
+  };
   // Habilidades V2.0 §7/§9/§11/§26 (Fase 5) — modificadores PASSIVOS do
   // membro atacado (DEFENSE_FLAT/DAMAGE_TAKEN_PCT), resolvidos aqui
   // porque este arquivo chama aplicarAcao direto.
@@ -619,13 +667,27 @@ async function resolverAcaoDoChefe(io, battleId) {
     alvo.estado,
     "GUILD_BOSS",
   );
-  const { nomeAcao, dano, esquivou, critico } = aplicarAcao({
+  const resultadoAcao = aplicarAcao({
     atacante: chefeAtacante,
     defensor: alvo.estado,
     acao: { tipo: "attack" },
     vidaMaxAtacante: undefined,
     modificadoresDefensor,
   });
+  const { dano, esquivou, critico } = resultadoAcao;
+  // Nome da ação: a própria Power quando a IA escolheu uma
+  // GuildBossAbility, senão o nome que aplicarAcao já dá pro ataque
+  // básico (ex.: "Ataque Básico") — única diferença visível de "qual
+  // ação o chefe usou" nesta V1 (sem status/buff pra mostrar).
+  const nomeAcao = habilidadeEscolhida ? habilidadeEscolhida.nome : resultadoAcao.nomeAcao;
+
+  // Fim do turno do chefe (§8.1 equivalente) — cooldown recém-iniciado
+  // neste MESMO turno não decrementa ainda, mesma semântica de Solo/
+  // Party/personagem.
+  batalha.cooldownsChefe = cooldownService.decrementarCooldowns(
+    batalha.cooldownsChefe,
+    habilidadeEscolhida ? new Set([cooldownService.chaveDoPoder(habilidadeEscolhida.powerId)]) : undefined,
+  );
 
   io.to(batalha.sala).emit("guildboss:turno-resultado", {
     battleId,

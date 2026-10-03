@@ -18,5 +18,7 @@ router.post("/levels", adminGuildController.upsertNivel);
 router.get("/bosses", adminGuildController.listarBosses);
 router.post("/bosses", adminGuildController.criarBoss);
 router.patch("/bosses/:id", adminGuildController.atualizarBoss);
+router.get("/bosses/:id/abilities", adminGuildController.listarAbilitiesDoBoss);
+router.put("/bosses/:id/abilities", adminGuildController.sincronizarAbilitiesDoBoss);
 
 module.exports = router;

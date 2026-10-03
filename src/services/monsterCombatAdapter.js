@@ -39,6 +39,7 @@
 //     V1 deliberada (o documento não detalha esse caso).
 const MonsterAbility = require("../models/MonsterAbility");
 const MonsterAbilityCondition = require("../models/MonsterAbilityCondition");
+const GuildBossAbility = require("../models/GuildBossAbility");
 const { carregarPowerComEfeitos, classificarPower } = require("./powerCapabilityService");
 const { chooseAction } = require("./combatAiService");
 const cooldownService = require("./cooldownService");
@@ -310,6 +311,20 @@ function executarPoder({
   return { criticoInimigo, danoRecebidoContraAtaque };
 }
 
+// §7/§8.3 — Guild Boss V1: combate deste modo NÃO TEM NENHUMA lista de
+// status/combatBuffs/escudo hoje, nem pro jogador nem pro chefe (ver
+// guildBossSocket.js — zero statusEffectService/combatBuffService
+// importado nesse arquivo). Plugar DEBUFF_CONTROL/CLEANSE_SELF/
+// DISPEL_TARGET exigiria criar esse estado do zero pra TODO combate de
+// Guild Boss (jogador vs chefe, não só o turno com IA) — fora de escopo
+// desta V1 (§1.2 "não reescrever o motor"). Só DAMAGE é executável; o
+// "ataque básico" já escalava por rodada (forcaChefeParaRodada) e a
+// ability reusa o MESMO truque de força sintética, só com outra base.
+// GuildBossAbility também não tem condições (não existe
+// GuildBossAbilityCondition nesta V1) — a IA aqui só pontua por
+// prioridade_base/peso_uso/jitter, sem condições situacionais.
+const CAPABILITIES_EXECUTAVEIS_GUILD_BOSS_V1 = ["DAMAGE"];
+
 // §8.2 — Party: mesmo DTO do combatAiService, mas `opponents` é TODO
 // membro vivo do grupo (não um único alvo pré-sorteado), porque
 // target_policy (LOWEST_HP/HIGHEST_HP/RANDOM/ALL) só faz sentido quando
@@ -438,12 +453,92 @@ function executarPoderEmGrupo({ habilidade, inimigo, alvoEstado, alvoStatus, alv
   return { criticoInimigo, dano, statusAtacante: novoStatusAtacante, statusDefensor: novoStatusDefensor, buffsDefensor: novosBuffsDefensor };
 }
 
+// §7/§8.3 — mesmo princípio de construirHabilidadesParaEncontro, mas
+// pra GuildBossAbility (sem condições — ver nota de escopo acima).
+async function construirHabilidadesParaGuildBoss(idGuildBossConfig, { transaction } = {}) {
+  const abilities = await GuildBossAbility.findAll({ where: { id_guild_boss_config: idGuildBossConfig, ativo: true }, transaction });
+
+  const resultado = [];
+  for (const ability of abilities) {
+    const power = await carregarPowerComEfeitos(ability.id_power, { transaction });
+    if (!power) continue;
+
+    const capabilities = Array.from(classificarPower(power)).filter((c) => CAPABILITIES_EXECUTAVEIS_GUILD_BOSS_V1.includes(c));
+    if (capabilities.length === 0) continue;
+
+    resultado.push({
+      id: ability.id,
+      powerId: power.id,
+      nome: power.nome,
+      capabilities,
+      prioridadeBase: ability.prioridade_base,
+      pesoUso: ability.peso_uso,
+      targetPolicy: ability.target_policy,
+      cooldownConfigurado: ability.cooldown_override ?? power.cooldown ?? null,
+      danoBase: power.dano_base ?? 0,
+      conditions: [],
+    });
+  }
+  return resultado;
+}
+
+// §8.3 — DTO do combatAiService pro turno do chefe. `vivos` são os
+// membros vivos da batalha (mesmo shape de Party: .id/.estado.vida_atual/
+// .vidaMax); vida do chefe vem de batalha.vidaRestante/vidaTotal (já
+// existem, únicos campos de HP que este modo rastreia pro chefe).
+function decidirAcaoChefe({ vidaRestante, vidaTotal, habilidades, cooldowns, vivos, rodada }) {
+  const actor = {
+    id: "chefe",
+    hpAtual: vidaRestante,
+    hpMaxima: vidaTotal,
+    manaAtual: Infinity,
+    manaMaxima: Infinity,
+    statuses: [],
+    buffs: [],
+    hasShield: false,
+  };
+  const opponents = vivos.map((m) => ({
+    id: m.id,
+    hpAtual: m.estado.vida_atual,
+    hpMaxima: m.vidaMax,
+    alive: m.estado.vida_atual > 0,
+    statuses: [],
+    buffs: [],
+  }));
+  const abilities = (habilidades ?? []).map((h) => ({
+    id: h.id,
+    powerId: h.powerId,
+    capabilities: new Set(h.capabilities),
+    prioridadeBase: h.prioridadeBase,
+    pesoUso: h.pesoUso,
+    manaCost: 0,
+    cooldownAtual: cooldownService.turnosRestantes(cooldowns ?? {}, h.powerId),
+    targetPolicy: h.targetPolicy,
+    isPassive: false,
+    conditions: [],
+  }));
+
+  return chooseAction({
+    context: "GUILD_BOSS",
+    aiProfile: "BOSS",
+    actor,
+    opponents,
+    abilities,
+    phase: null,
+    turn: rodada,
+    history: [],
+  });
+}
+
 module.exports = {
   CAPABILITIES_EXECUTAVEIS_V1,
   CAPABILITIES_EXECUTAVEIS_PARTY_V1,
+  CAPABILITIES_EXECUTAVEIS_GUILD_BOSS_V1,
   construirHabilidadesParaEncontro,
   decidirAcao,
   executarPoder,
   decidirAcaoGrupo,
   executarPoderEmGrupo,
+  construirHabilidadesParaGuildBoss,
+  decidirAcaoChefe,
 };

@@ -3,6 +3,7 @@
 // Níveis/Boss/Missões), mesmo padrão de adminExpeditionController.
 const guildSettingsService = require("../services/guildSettingsService");
 const adminGuildService = require("../services/adminGuildService");
+const monsterAbilityService = require("../services/monsterAbilityService");
 
 function tratarErro(res, error, mensagemPadrao) {
   const statusCode = error.statusCode || 500;
@@ -79,5 +80,29 @@ exports.atualizarBoss = async (req, res) => {
     res.status(200).json({ status: "success", data: boss });
   } catch (error) {
     tratarErro(res, error, "Erro interno do servidor ao atualizar boss de guilda.");
+  }
+};
+
+// IA de Combate PvE & Habilidades de Monstros V1 (§7/§8.3) — mesmo
+// padrão de PUT substitui a lista inteira já usado em adminAdventureController.
+exports.listarAbilitiesDoBoss = async (req, res) => {
+  try {
+    const abilities = await monsterAbilityService.listarAbilitiesDoGuildBoss(Number(req.params.id));
+    res.status(200).json({ status: "success", data: { abilities } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao listar as habilidades do Boss da Guilda.");
+  }
+};
+
+exports.sincronizarAbilitiesDoBoss = async (req, res) => {
+  try {
+    const abilities = await monsterAbilityService.sincronizarAbilitiesGuildBoss(
+      Number(req.params.id),
+      req.body?.abilities ?? [],
+      { idAdmin: req.user.id, req },
+    );
+    res.status(200).json({ status: "success", data: { abilities } });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao sincronizar as habilidades do Boss da Guilda.");
   }
 };
