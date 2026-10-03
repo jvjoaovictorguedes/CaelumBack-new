@@ -62,6 +62,7 @@ const cooldownService = require("../services/cooldownService");
 const { resolverEfeitosDoUso } = require("../services/combatEffectResolver");
 const { resolverEfeitosDeArmaNoHit } = require("../services/weaponEffectResolver");
 const { resolverEfeitosDeMonstroNoHit } = require("../services/monsterEffectResolver");
+const monsterCombatAdapter = require("../services/monsterCombatAdapter");
 const { definicaoDoStatus, ACTION_TYPE } = require("../config/statusEffectConfig");
 const { calcularMaestriaDaRegiao } = require("../services/masteryService");
 const AdventureZone = require("../models/AdventureZone");
@@ -482,6 +483,16 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
         percentual_vida_maxima: e.percentual_vida_maxima,
         ativo: e.ativo,
       }));
+
+      // IA de Combate PvE & Habilidades de Monstros V1 (§8.1) — mesmo
+      // princípio de efeitosDeStatus acima: pré-carrega MonsterAbility
+      // UMA vez, no início do encontro. Monstro sem nenhuma ability ativa
+      // = array vazio = combatAiService.chooseAction sempre devolve
+      // "attack" (comportamento 100% legado, ver §12.1).
+      inimigo.habilidades = await monsterCombatAdapter.construirHabilidadesParaEncontro(escolhido.id_monstro, {
+        transaction,
+      });
+      inimigo.ai_profile = monstro.ai_profile ?? "BASIC";
 
       // Caçadas §6 — compõe um SEGUNDO multiplicador por cima do perfil
       // normal, só no snapshot deste encontro e só se o alvo sorteado
@@ -1690,6 +1701,33 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         `${inimigoAtual.nome} está ${definicaoDoStatus(controleDoTurnoInimigo.motivoBloqueioTotal).nomeUi} e não conseguiu agir!`,
       );
     } else {
+      // IA de Combate PvE & Habilidades de Monstros V1 (§8.1) — monstro
+      // sem nenhuma MonsterAbility pré-carregada (inimigoAtual.habilidades
+      // vazio ou ausente em encontro antigo) faz chooseAction devolver
+      // sempre "attack" (§12.1), então este bloco é 100% transparente pro
+      // comportamento legado até um Admin configurar uma build de verdade.
+      const decisaoIA = monsterCombatAdapter.decidirAcao({
+        inimigoAtual,
+        personagemAtual,
+        vidaMaximaJogador: vidaMaximaEfetiva,
+        statusEffects,
+        combatBuffs,
+        escudo,
+        cooldowns,
+        combatTurn,
+      });
+      const habilidadeEscolhida =
+        decisaoIA.type === "power" ? (inimigoAtual.habilidades ?? []).find((h) => h.id === decisaoIA.abilityId) : null;
+
+      if (habilidadeEscolhida) {
+        cooldowns.enemy = cooldownService.iniciarCooldown(
+          cooldowns.enemy,
+          habilidadeEscolhida.powerId,
+          habilidadeEscolhida.cooldownConfigurado,
+        );
+        cooldownsEnemyAplicadosNesteTurno.add(cooldownService.chaveDoPoder(habilidadeEscolhida.powerId));
+      }
+
       const blindDoInimigo = statusEffects.enemy.find((s) => s.key === "BLIND");
       const resultadoAcerto = resolverResultadoDeAcerto({
         atacante: inimigoAtual,
@@ -1704,6 +1742,25 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
             ? `${inimigoAtual.nome}, cego, errou o ataque!`
             : `Você esquivou do ataque de ${inimigoAtual.nome}!`,
         );
+      } else if (habilidadeEscolhida) {
+        // IA de Combate PvE & Habilidades de Monstros V1 — execução
+        // delegada pro adapter, que reaproveita os MESMOS serviços do
+        // ataque básico abaixo (nunca uma fórmula paralela de dano/
+        // cura/status, ver nota de escopo em monsterCombatAdapter.js).
+        const resultadoPower = monsterCombatAdapter.executarPoder({
+          habilidade: habilidadeEscolhida,
+          inimigoAtual,
+          personagemAtual,
+          statusEffects,
+          combatBuffs,
+          escudo,
+          modificadoresJogador,
+          multiplicadorDefesaTaverna,
+          combatTurn,
+          log,
+        });
+        criticoInimigo = resultadoPower.criticoInimigo;
+        danoRecebidoContraAtaque = resultadoPower.danoRecebidoContraAtaque;
       } else {
         // Reformulação V2 dos Monstros (§5.3) — o RNG de dano do monstro
         // fica EXPLÍCITO só no intervalo dano_min..dano_max cadastrado;
@@ -1812,9 +1869,11 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       }
     }
 
-    // Fim do turno do INIMIGO (§23 passos 8/9, parte cooldown) — hoje
-    // sempre vazio (monstro de PvE ainda não usa Power nenhuma, só
-    // ataque básico), mas fica pronto.
+    // Fim do turno do INIMIGO (§23 passos 8/9, parte cooldown) — IA de
+    // Combate PvE V1: `cooldownsEnemyAplicadosNesteTurno` agora pode vir
+    // preenchido pelo branch `habilidadeEscolhida` acima (cooldown recém-
+    // iniciado não decrementa no mesmo turno, mesma semântica de
+    // iniciarCooldown/decrementarCooldowns do personagem).
     cooldowns.enemy = cooldownService.decrementarCooldowns(cooldowns.enemy, cooldownsEnemyAplicadosNesteTurno);
 
     // ==========================================================
