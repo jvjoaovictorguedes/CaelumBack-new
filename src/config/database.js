@@ -18,11 +18,22 @@ const useSsl = process.env.DB_SSL === "true";
 const databaseSource = databaseUrl
   ? "DATABASE_URL/POSTGRES_URL"
   : "DB_*/PG* variables";
+// max:10 esgotava de verdade sob carga concorrente real — validado com
+// teste de carga local (20 "jogadores" simultâneos repetindo o ciclo
+// completo de combate via HTTP contra o backend real): com max:10, as
+// ações de combate chegavam a 30-40s (batendo exatamente no timeout de
+// acquire abaixo — fila de conexão esgotada); com max:15, o mesmo teste
+// não passou de ~10s em um único pico isolado, e o throughput geral
+// subiu ~6x. max:25 deu ganho só marginal sobre 15, então fica o valor
+// mais conservador. O Postgres gerenciado de produção aceita até 500
+// conexões (`SHOW max_connections`), então 15 tem folga enorme — não é
+// o teto do Postgres que limitava, era só este número da aplicação.
+// DB_POOL_MAX permite ajustar sem novo deploy se precisar.
 const databaseOptions = {
   dialect: "postgres",
   logging: false,
   pool: {
-    max: 10,
+    max: Number(process.env.DB_POOL_MAX) || 15,
     min: 0,
     acquire: 30000,
     idle: 10000,
