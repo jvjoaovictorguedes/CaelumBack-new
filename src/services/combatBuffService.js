@@ -16,6 +16,12 @@
 // princípio de "o maior prevalece, nunca soma" que concederEscudo já
 // usa pra GRANT_SHIELD) — ver aplicarBuff.
 
+// Habilidades V2.0 (item 3) — generaliza stacking por stack_group,
+// reaproveitando o MESMO catálogo de políticas que
+// combatModifierService.resolverModificadores já usa pros
+// PowerCombatEffect passivos (nunca um segundo enum paralelo).
+const { REAPPLY_POLICIES, reapplyPolicyValida } = require("../config/combatModifierConfig");
+
 const ATRIBUTOS_BUFAVEIS = [
   "DANO_SAIDA_PCT",
   "DEFESA_FLAT",
@@ -48,11 +54,26 @@ function erro(mensagem) {
 }
 
 // Nunca muta a lista recebida — mesma convenção pura do resto do motor
-// (statusEffectService/consumableEffectRegistry). Não empilha: só pode
-// existir UMA instância por atributo. Se já existe uma mais forte (ou
-// igual) ativa, a nova aplicação é descartada (não derruba o buff bom
-// por um elixir mais fraco bebido por engano); senão, a nova substitui
-// a antiga por completo (valor E duração) — nunca soma os dois.
+// (statusEffectService/consumableEffectRegistry).
+//
+// SEM stack_group (a maioria dos consumíveis hoje): comportamento
+// ORIGINAL, intocado — no máximo UMA instância por atributo, a mais
+// forte prevalece (nunca soma). Dois elixires de +15% de dano nunca
+// viram +30%.
+//
+// COM stack_group (item 3 — Habilidades V2.0): generaliza pra qualquer
+// política do catálogo de combatModifierConfig.REAPPLY_POLICIES, MESMA
+// semântica que combatModifierService.resolverModificadores já usa:
+//   - STACK: várias instâncias coexistem (até max_stacks) — somaDeAtributo
+//     já soma TODAS as entradas do mesmo atributo, nunca precisou mudar.
+//   - STRONGEST: mantém a maior magnitude válida do grupo.
+//   - REFRESH: mantém a magnitude existente, renova só a duração.
+//   - REPLACE: a nova aplicação substitui por completo (valor E duração).
+//   - BLOCK_WHILE_ACTIVE: enquanto o grupo tiver QUALQUER instância ativa,
+//     uma nova aplicação não faz nada.
+//   - UNIQUE_SOURCE: uma instância por sourceItemId dentro do grupo —
+//     fontes diferentes (duas poções diferentes do mesmo stack_group)
+//     coexistem; a MESMA fonte reaplicando substitui a própria instância.
 function aplicarBuff(lista, novoBuff) {
   if (!ATRIBUTOS_BUFAVEIS.includes(novoBuff.atributo)) {
     throw erro(`APPLY_COMBAT_BUFF com atributo inválido: ${novoBuff.atributo}`);
@@ -60,12 +81,58 @@ function aplicarBuff(lista, novoBuff) {
   if (!(novoBuff.remainingTurns > 0)) {
     throw erro(`APPLY_COMBAT_BUFF precisa de duration_turns > 0 (recebeu ${novoBuff.remainingTurns}).`);
   }
-  const existente = lista.find((b) => b.atributo === novoBuff.atributo);
-  if (existente && existente.valor > novoBuff.valor) {
+
+  if (!novoBuff.stack_group) {
+    const existente = lista.find((b) => b.atributo === novoBuff.atributo && !b.stack_group);
+    if (existente && existente.valor > novoBuff.valor) {
+      return [...lista];
+    }
+    const semEsseAtributo = lista.filter((b) => !(b.atributo === novoBuff.atributo && !b.stack_group));
+    // Shape EXATO de antes (atributo/valor/remainingTurns/sourceItemId) —
+    // nunca grava stack_group/reapply_policy/max_stacks nulos só porque
+    // o chamador (consumableEffectRegistry) sempre passa essas chaves.
+    return [
+      ...semEsseAtributo,
+      { atributo: novoBuff.atributo, valor: novoBuff.valor, remainingTurns: novoBuff.remainingTurns, sourceItemId: novoBuff.sourceItemId ?? null },
+    ];
+  }
+
+  if (!reapplyPolicyValida(novoBuff.reapply_policy)) {
+    throw erro(`APPLY_COMBAT_BUFF com stack_group precisa de reapply_policy válida (recebeu "${novoBuff.reapply_policy}").`);
+  }
+
+  const doGrupo = lista.filter((b) => b.stack_group === novoBuff.stack_group);
+  const foraDoGrupo = lista.filter((b) => b.stack_group !== novoBuff.stack_group);
+
+  if (novoBuff.reapply_policy === REAPPLY_POLICIES.STACK) {
+    const maxStacks = novoBuff.max_stacks ?? doGrupo.length + 1;
+    const ordenadas = [...doGrupo, { ...novoBuff }].sort((a, b) => Math.abs(b.valor) - Math.abs(a.valor));
+    return [...foraDoGrupo, ...ordenadas.slice(0, maxStacks)];
+  }
+
+  if (novoBuff.reapply_policy === REAPPLY_POLICIES.BLOCK_WHILE_ACTIVE) {
+    return doGrupo.length > 0 ? [...lista] : [...foraDoGrupo, { ...novoBuff }];
+  }
+
+  if (novoBuff.reapply_policy === REAPPLY_POLICIES.UNIQUE_SOURCE) {
+    const semMesmaFonte = doGrupo.filter((b) => b.sourceItemId !== novoBuff.sourceItemId);
+    return [...foraDoGrupo, ...semMesmaFonte, { ...novoBuff }];
+  }
+
+  // REFRESH / REPLACE / STRONGEST — colapsam o grupo pra UMA instância.
+  const existenteDoGrupo = doGrupo[0];
+  if (novoBuff.reapply_policy === REAPPLY_POLICIES.REFRESH && existenteDoGrupo) {
+    return [...foraDoGrupo, { ...existenteDoGrupo, remainingTurns: novoBuff.remainingTurns }];
+  }
+  if (
+    novoBuff.reapply_policy === REAPPLY_POLICIES.STRONGEST &&
+    existenteDoGrupo &&
+    Math.abs(existenteDoGrupo.valor) >= Math.abs(novoBuff.valor)
+  ) {
     return [...lista];
   }
-  const semEsseAtributo = lista.filter((b) => b.atributo !== novoBuff.atributo);
-  return [...semEsseAtributo, { ...novoBuff }];
+  // REPLACE (ou STRONGEST com o novo vencendo).
+  return [...foraDoGrupo, { ...novoBuff }];
 }
 
 // Fim de turno de quem carrega os buffs — mesmo princípio de
