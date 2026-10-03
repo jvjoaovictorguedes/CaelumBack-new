@@ -26,6 +26,8 @@ const { registrarAcao } = require("./adminAuditService");
 const { GAME_SETTINGS_DEFAULT, COMBAT_SESSION_STATUS } = require("../config/worldBossConfig");
 const { CHAVES_VALIDAS: STATUS_KEYS_VALIDAS } = require("../config/statusEffectConfig");
 const worldBossRuntimeService = require("./worldBossRuntimeService");
+const { carregarPowerComEfeitos, classificarPower } = require("./powerCapabilityService");
+const { powerPermitidaNoContexto, motivoDeRejeicao } = require("./combatContextPolicyService");
 const { calcularEfeitoPoderEsperado, custoManaEfetivo } = require("./combatFormulas");
 
 function erro(mensagem, statusCode = 400) {
@@ -566,7 +568,7 @@ async function getAdminWorldBossMetrics() {
 
 const TIPOS_ALVO_VALIDOS = ["ALEATORIO", "MAIOR_DANO", "MENOR_VIDA", "N_ALEATORIOS", "TODOS", "SELF"];
 
-async function validarHabilidade(dados, { transaction } = {}) {
+async function validarHabilidade(dados, { transaction, idPowerExistente } = {}) {
   const erros = [];
   if (dados.id_power !== undefined) {
     if (!Number.isInteger(dados.id_power)) {
@@ -574,6 +576,23 @@ async function validarHabilidade(dados, { transaction } = {}) {
     } else {
       const power = await Power.findByPk(dados.id_power, { transaction });
       if (!power) erros.push("id_power não aponta pra nenhum Power existente.");
+    }
+  }
+  // IA de Combate PvE & Habilidades de Monstros V1 (§7 "Hard rule de
+  // Boss coletivo") — World Boss nunca pode receber Power que cure HP,
+  // regenere HP ou conceda Shield, nem por request/Admin forjado.
+  // Compartilha a MESMA policy central de Guild Boss (combatContextPolicyService),
+  // nunca uma segunda regra paralela — §8.4 "compatibilidade primeiro":
+  // só a validação de cadastro é nova aqui, escolherHabilidade() do
+  // runtime continua intocado.
+  const idPowerParaChecar = dados.id_power ?? idPowerExistente;
+  if (idPowerParaChecar != null) {
+    const power = await carregarPowerComEfeitos(idPowerParaChecar, { transaction });
+    if (power) {
+      const capabilities = classificarPower(power);
+      if (!powerPermitidaNoContexto(capabilities, "WORLD_BOSS")) {
+        erros.push(`Power "${power.nome}" não pode ser vinculada à Ameaça Mundial: ${motivoDeRejeicao(capabilities, "WORLD_BOSS")}`);
+      }
     }
   }
   if (dados.tipo_alvo !== undefined && !TIPOS_ALVO_VALIDOS.includes(dados.tipo_alvo)) {
@@ -639,7 +658,7 @@ async function updateAdminWorldBossAbility(idConfig, idAbility, dados, { idAdmin
       lock: transaction.LOCK.UPDATE,
     });
     if (!habilidade) throw erro("Habilidade não encontrada.", 404);
-    await validarHabilidade(dados, { transaction });
+    await validarHabilidade(dados, { transaction, idPowerExistente: habilidade.id_power });
     const antes = habilidade.toJSON();
     await habilidade.update(dados, { transaction });
     await registrarAcao({ idAdmin, acao: "editar", entidade: "WorldBossAbility", idEntidade: habilidade.id, dadosAntes: antes, dadosDepois: habilidade.toJSON(), req, transaction });

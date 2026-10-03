@@ -2733,13 +2733,21 @@ testeComBanco("admin preview de habilidade: reaproveita calcularEfeitoPoderEsper
     furia_por_acao_pct: 5,
     limite_furia_pct: 20,
   });
+  // IA de Combate PvE & Habilidades de Monstros V1 (§7, Hard rule de
+  // Boss coletivo) — Power não pode mais ter cura_base aqui: World Boss
+  // nunca pode receber uma Power que cure HP (checklist de aceite
+  // "Guild/World Boss não conseguem curar... por request/Admin
+  // forjado"), validado em createAdminWorldBossAbility/
+  // updateAdminWorldBossAbility. A asserção de "cura nunca escala"
+  // ficou sem sentido pra World Boss (nenhuma Power com cura pode ser
+  // vinculada), removida; a cobertura de dano/furia/fase abaixo continua
+  // de pé com uma Power só de dano.
   const power = await Power.create({
     nome: `Poder Preview ${sufixo()}`,
     descricao: "teste",
     tipo_poder: "Ativo",
     escala_atributo: "Forca",
     dano_base: 10,
-    cura_base: 30,
     valor_escala: 2,
     custo_mana: 15,
     cooldown: 4,
@@ -2755,13 +2763,11 @@ testeComBanco("admin preview de habilidade: reaproveita calcularEfeitoPoderEsper
   const acao1 = preview.estimativas.find((e) => e.acao === 1);
   const acao10 = preview.estimativas.find((e) => e.acao === 10);
   // Efeito bruto determinístico (nivel=1 -> bonusNivel=0, multClasse Fisico=1, multNivelHabilidade(1)=1):
-  // dano = (dano_base=10 + forca=100 * valor_escala=2) = 210; cura = (cura_base=30 + 100*2) = 230.
+  // dano = (dano_base=10 + forca=100 * valor_escala=2) = 210.
   assert.equal(acao1.furia_pct, 5);
   assert.equal(acao1.dano, Math.round(210 * 1.1 * 1.05));
   assert.equal(acao10.furia_pct, 20, "capado em limite_furia_pct=20 da fase");
   assert.equal(acao10.dano, Math.round(210 * 1.1 * 1.2));
-  assert.equal(acao1.cura, 230, "cura nunca escala com o modificador de dano da fase nem com Fúria (§5.5)");
-  assert.equal(acao1.cura, acao10.cura, "cura idêntica em qualquer contagem de ação");
 });
 
 testeComBanco("admin ciclo atual: getStatusOperacional inclui runtime_v2 (mana/fase/ranking/participantes) só quando ACTIVE", async () => {
