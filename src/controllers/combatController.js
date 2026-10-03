@@ -715,6 +715,26 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       "PVE",
       { transaction },
     );
+    // Item 7 — gatilhos reativos ON_HIT/ON_KILL do jogador, mesma
+    // resolução única por turno/ação que os modificadores passivos acima.
+    const gatilhosJogador = await combatModifierService.resolverGatilhosDoPersonagem(personagemAtual, "PVE", {
+      transaction,
+    });
+    // Aplica um proc (ON_HIT a cada golpe que causou dano, ON_KILL só
+    // quando ESSE MESMO golpe derrubou o inimigo) — chamado nos dois
+    // pontos onde dano é debitado da Vida do inimigo (poder e ataque
+    // básico), nunca duplicado.
+    function aplicarProcDoJogador(triggerKey, inimigoFoiDerrotado) {
+      if (triggerKey === "ON_KILL" && !inimigoFoiDerrotado) return;
+      const proc = combatModifierService.processarGatilho(gatilhosJogador.get(triggerKey) ?? []);
+      const regen = combatModifierService.regenInstantanea(proc, vidaMaximaEfetiva, manaMaximaEfetiva);
+      if (regen.vida > 0) {
+        personagemAtual.vida_atual = Math.min(vidaMaximaEfetiva, personagemAtual.vida_atual + regen.vida);
+      }
+      if (regen.mana > 0) {
+        personagemAtual.mana_atual = Math.min(manaMaximaEfetiva, personagemAtual.mana_atual + regen.mana);
+      }
+    }
 
     if (personagemAtual.vida_atual <= 0) {
       return res.status(400).json({
@@ -1019,6 +1039,8 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
               personagemAtual.vida_atual + curaPorRouboPoder,
             );
           }
+          aplicarProcDoJogador("ON_HIT", false);
+          if (inimigoAtual.vida_atual <= 0) aplicarProcDoJogador("ON_KILL", true);
 
           log.push(
             contextoCriticoPoder.critico
@@ -1194,6 +1216,8 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
             personagemAtual.vida_atual + curaPorRouboAtaque,
           );
         }
+        aplicarProcDoJogador("ON_HIT", false);
+        if (inimigoAtual.vida_atual <= 0) aplicarProcDoJogador("ON_KILL", true);
 
         log.push(
           contextoCriticoAtaque.critico

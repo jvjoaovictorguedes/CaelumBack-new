@@ -119,7 +119,7 @@ async function simularDuelo({ desafiante, desafiado, poderesDesafiante, poderesD
   const estadoA = { ...desafiante, vida_atual: vidaMaxA, mana_atual: manaMaxA };
   const estadoB = { ...desafiado, vida_atual: vidaMaxB, mana_atual: manaMaxB };
 
-  const [armaEfeitosA, armaEfeitosB, modificadoresA, modificadoresB] = await Promise.all([
+  const [armaEfeitosA, armaEfeitosB, modificadoresA, modificadoresB, gatilhosA, gatilhosB] = await Promise.all([
     estadoA.arma_equipada?.id_item
       ? WeaponStatusEffect.findAll({ where: { id_item: estadoA.arma_equipada.id_item, ativo: true } })
       : [],
@@ -131,6 +131,10 @@ async function simularDuelo({ desafiante, desafiado, poderesDesafiante, poderesD
     // no meio da simulação), mesmo contexto PVP_CASUAL do duelo ao vivo.
     combatModifierService.resolverModificadoresDoPersonagem(estadoA, "PVP_CASUAL"),
     combatModifierService.resolverModificadoresDoPersonagem(estadoB, "PVP_CASUAL"),
+    // Item 7 — gatilhos reativos ON_HIT/ON_KILL, mesmo princípio: UMA
+    // resolução por duelo, nunca por golpe.
+    combatModifierService.resolverGatilhosDoPersonagem(estadoA, "PVP_CASUAL"),
+    combatModifierService.resolverGatilhosDoPersonagem(estadoB, "PVP_CASUAL"),
   ]);
 
   const primeiro = estadoA.velocidade >= estadoB.velocidade ? "A" : "B";
@@ -152,6 +156,7 @@ async function simularDuelo({ desafiante, desafiado, poderesDesafiante, poderesD
     const armaEfeitosAtacante = chave === "A" ? armaEfeitosA : armaEfeitosB;
     const modificadoresAtacante = chave === "A" ? modificadoresA : modificadoresB;
     const modificadoresDefensor = chave === "A" ? modificadoresB : modificadoresA;
+    const gatilhosAtacante = chave === "A" ? gatilhosA : gatilhosB;
 
     const nomeAtacante = chave === "A" ? desafiante.nome : desafiado.nome;
     const nomeDefensor = chave === "A" ? desafiado.nome : desafiante.nome;
@@ -182,6 +187,7 @@ async function simularDuelo({ desafiante, desafiado, poderesDesafiante, poderesD
       nomeDefensor,
       modificadoresAtacante,
       modificadoresDefensor,
+      gatilhosAtacante,
     });
     if (chave === "A") {
       statusA = statusAtacante;

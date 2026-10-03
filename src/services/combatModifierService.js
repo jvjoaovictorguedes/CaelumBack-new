@@ -223,6 +223,108 @@ async function resolverModificadoresDoPersonagem(personagem, contexto, { transac
   return modificadores;
 }
 
+// Item 7 — gatilhos reativos (ON_HIT/ON_KILL por enquanto, ver
+// REACTIVE_EFFECT_KEYS_IMPLEMENTADAS abaixo). Diferente de PASSIVE
+// (resolverModificadoresDoPersonagem acima), aqui NUNCA agrega de
+// antemão: cada linha carrega seu próprio chance_ppm e só é decidida no
+// INSTANTE do evento (um golpe pode acertar e não procar; o próximo
+// pode procar), então o resultado é uma lista crua por trigger — quem
+// quiser o Map final chama processarGatilho(linhas) no momento certo
+// (ver duelEngine.aplicarAcao), rolando o dado ali, nunca aqui.
+const TRIGGERS_REATIVOS_SUPORTADOS = ["ON_HIT", "ON_KILL"];
+
+// Único subconjunto de EFFECT_KEYS com significado definido como "proc
+// instantâneo" hoje — reaproveita REGEN_HP_FLAT/PERCENT e
+// REGEN_MANA_FLAT/PERCENT (mesmos effect_keys do regen passivo por
+// turno) como "cura/restaura instantânea ao acertar/matar", chance_ppm
+// decidindo se procou. Qualquer outro effect_key configurado num
+// trigger reativo é ignorado aqui (documentado, nunca silenciosamente
+// tratado como passivo) — mesmo critério de EFFECT_KEYS_IMPLEMENTADAS
+// em classEvolutionEffectService.js: escopo fechado, expande quando
+// alguém definir o que ON_CRIT/dano-bônus/debuff-no-alvo significam de
+// verdade.
+const REACTIVE_EFFECT_KEYS_IMPLEMENTADAS = [
+  "REGEN_HP_FLAT",
+  "REGEN_HP_PERCENT",
+  "REGEN_MANA_FLAT",
+  "REGEN_MANA_PERCENT",
+];
+
+// Mesmo formato de retorno de resolverModificadoresDoPersonagem (Map),
+// mas chaveado por trigger -> array de linhas CRUAS (nunca agregadas,
+// nunca com o dado rolado) pra quem chama resolver UMA vez por turno
+// (mesmo princípio de "nunca uma query por golpe") e processar o proc
+// de fato a cada evento real (ver processarGatilho).
+async function resolverGatilhosDoPersonagem(personagem, contexto, { transaction } = {}) {
+  const porTrigger = new Map(TRIGGERS_REATIVOS_SUPORTADOS.map((t) => [t, []]));
+  if (!contextoValido(contexto)) {
+    throw erro(`Contexto de combate desconhecido: "${contexto}". Válidos: ${CONTEXTOS_DE_COMBATE.join(", ")}.`);
+  }
+  if (!personagem?.id) return porTrigger;
+
+  const aprendidas = await CharacterAbilities.findAll({
+    where: { id_personagem: personagem.id },
+    include: [
+      {
+        model: Power,
+        required: true,
+        include: [
+          {
+            model: PowerCombatEffect,
+            as: "efeitosDeCombate",
+            required: false,
+            where: { trigger: TRIGGERS_REATIVOS_SUPORTADOS, ativo: true },
+          },
+        ],
+      },
+    ],
+    transaction,
+  });
+
+  for (const aprendida of aprendidas) {
+    const power = aprendida.Power;
+    if (!power) continue;
+    const contaComoAtiva = power.tipo_poder === "Passivo" || aprendida.is_active;
+    if (!contaComoAtiva) continue;
+
+    for (const efeito of power.efeitosDeCombate ?? []) {
+      if (!efeitoPermitidoNoContexto(efeito, contexto)) continue;
+      if (!REACTIVE_EFFECT_KEYS_IMPLEMENTADAS.includes(efeito.effect_key)) continue;
+      const linhas = porTrigger.get(efeito.trigger);
+      if (!linhas) continue;
+      linhas.push({
+        effect_key: efeito.effect_key,
+        magnitude: magnitudeEfetiva(efeito, personagem, aprendida.nivel_habilidade),
+        stack_group: efeito.stack_group,
+        reapply_policy: efeito.reapply_policy,
+        max_stacks: efeito.max_stacks,
+        chance_ppm: efeito.chance_ppm,
+      });
+    }
+  }
+
+  return porTrigger;
+}
+
+// Rola o chance_ppm de CADA linha (independente, no instante do evento
+// — nunca o mesmo dado pré-computado por turno) e agrega só as que
+// procaram, reaproveitando resolverModificadores (mesma política de
+// stack_group/reapply_policy que o passivo já usa).
+function processarGatilho(linhas = []) {
+  const procadas = linhas.filter((linha) => Math.random() * 1_000_000 < (linha.chance_ppm ?? 1_000_000));
+  return resolverModificadores(procadas);
+}
+
+// Cura/restauração instantânea de um proc ON_HIT/ON_KILL — mesma
+// fórmula de regenVidaDoTurno/regenManaDoTurno (abaixo), só que chamada
+// uma vez no instante do evento, nunca por turno.
+function regenInstantanea(mapaModificadoresDoProc, vidaMaxima, manaMaxima) {
+  return {
+    vida: regenVidaDoTurno(mapaModificadoresDoProc, vidaMaxima),
+    mana: regenManaDoTurno(mapaModificadoresDoProc, manaMaxima),
+  };
+}
+
 function valorDoModificador(mapaModificadores, effectKey) {
   if (!effectKeyValida(effectKey)) {
     throw erro(`effect_key desconhecido: "${effectKey}".`);
@@ -326,6 +428,11 @@ function dispararGatilho(triggerKey) {
 
 module.exports = {
   resolverModificadoresDoPersonagem,
+  resolverGatilhosDoPersonagem,
+  processarGatilho,
+  regenInstantanea,
+  TRIGGERS_REATIVOS_SUPORTADOS,
+  REACTIVE_EFFECT_KEYS_IMPLEMENTADAS,
   resolverModificadores,
   magnitudeEfetiva,
   efeitoPermitidoNoContexto,

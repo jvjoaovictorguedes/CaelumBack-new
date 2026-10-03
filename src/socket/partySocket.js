@@ -737,6 +737,8 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
     atacante.estado,
     "PARTY",
   );
+  // Item 7 — gatilhos reativos ON_HIT/ON_KILL do aliado, mesmo princípio.
+  const gatilhosAtacante = await combatModifierService.resolverGatilhosDoPersonagem(atacante.estado, "PARTY");
 
   // Motor de Status (Evolução do Motor de Status) — mesma engrenagem do
   // Duelo ao vivo/PvE solo: ticks de DoT no FIM do turno de quem agiu
@@ -772,6 +774,7 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
     nomeAtacante: atacante.nome,
     nomeDefensor: batalha.inimigo.nome,
     modificadoresAtacante,
+    gatilhosAtacante,
   });
   atacante.status = statusAtacante;
   batalha.inimigo.status = statusDefensor;

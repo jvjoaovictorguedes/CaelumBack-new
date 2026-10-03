@@ -97,6 +97,12 @@ function aplicarAcao({
   // resolveu modificadores (pvpController async legado, testes antigos).
   modificadoresAtacante = new Map(),
   modificadoresDefensor = new Map(),
+  // Habilidades V2.0 §14/§26 (item 7) — gatilhos reativos ON_HIT/ON_KILL
+  // do ATACANTE, resolvidos UMA vez por turno por quem chama (mesmo
+  // princípio de modificadoresAtacante — nunca uma query por golpe).
+  // Map vazio default = nenhum proc, comportamento idêntico a antes pra
+  // quem ainda não resolveu gatilhos.
+  gatilhosAtacante = new Map(),
 }) {
   let dano = 0;
   let cura = 0;
@@ -257,6 +263,30 @@ function aplicarAcao({
       const tetoLifesteal = vidaMaxAtacante ?? atacante.vida_atual + curaPorRoubo;
       atacante.vida_atual = Math.min(tetoLifesteal, atacante.vida_atual + curaPorRoubo);
     }
+
+    // Habilidades V2.0 (item 7) — gatilhos reativos do ATACANTE: ON_HIT
+    // em todo golpe que reduziu Vida de verdade, ON_KILL só quando esse
+    // MESMO golpe derrubou a Vida do defensor a 0 (nunca um "kill" sobre
+    // um alvo que já estava morto antes deste golpe).
+    const procOnHit = combatModifierService.processarGatilho(gatilhosAtacante.get("ON_HIT") ?? []);
+    const regenOnHit = combatModifierService.regenInstantanea(procOnHit, vidaMaxAtacante ?? atacante.vida_atual, manaMaxAtacante ?? atacante.mana_atual);
+    if (regenOnHit.vida > 0) {
+      atacante.vida_atual = Math.min(vidaMaxAtacante ?? atacante.vida_atual + regenOnHit.vida, atacante.vida_atual + regenOnHit.vida);
+    }
+    if (regenOnHit.mana > 0) {
+      atacante.mana_atual = Math.min(manaMaxAtacante ?? atacante.mana_atual + regenOnHit.mana, atacante.mana_atual + regenOnHit.mana);
+    }
+
+    if (defensor.vida_atual <= 0 && vidaDefensorAntes > 0) {
+      const procOnKill = combatModifierService.processarGatilho(gatilhosAtacante.get("ON_KILL") ?? []);
+      const regenOnKill = combatModifierService.regenInstantanea(procOnKill, vidaMaxAtacante ?? atacante.vida_atual, manaMaxAtacante ?? atacante.mana_atual);
+      if (regenOnKill.vida > 0) {
+        atacante.vida_atual = Math.min(vidaMaxAtacante ?? atacante.vida_atual + regenOnKill.vida, atacante.vida_atual + regenOnKill.vida);
+      }
+      if (regenOnKill.mana > 0) {
+        atacante.mana_atual = Math.min(manaMaxAtacante ?? atacante.mana_atual + regenOnKill.mana, atacante.mana_atual + regenOnKill.mana);
+      }
+    }
   }
 
   // Mesmo critério do PvE (combatController.js): um poder com dano E
@@ -348,6 +378,10 @@ async function resolverTurnoComStatus({
   // comportamento sem resolver e passar os modificadores de verdade.
   modificadoresAtacante = new Map(),
   modificadoresDefensor = new Map(),
+  // Item 7 — mesma convenção de modificadoresAtacante: Map (por trigger)
+  // resolvido uma vez por turno por quem chama
+  // (combatModifierService.resolverGatilhosDoPersonagem).
+  gatilhosAtacante = new Map(),
 }) {
   const log = [];
   let listaAtacante = statusAtacante;
@@ -438,6 +472,7 @@ async function resolverTurnoComStatus({
     escudoDefensor,
     modificadoresAtacante,
     modificadoresDefensor,
+    gatilhosAtacante,
   });
   let listaBuffsAtacante = resultado.novosBuffsAtacante ?? buffsAtacante;
   let escudoAtacanteAtual = resultado.novoEscudoAtacante ?? escudoAtacante;

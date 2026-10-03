@@ -425,6 +425,8 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
       atacanteEstado,
       "WORLD_BOSS",
     );
+    // Item 7 — gatilhos reativos ON_HIT/ON_KILL do jogador.
+    const gatilhosJogador = await combatModifierService.resolverGatilhosDoPersonagem(atacanteEstado, "WORLD_BOSS");
 
     const blindDoJogador = listaJogador.find((s) => s.key === "BLIND");
     const resultado = aplicarAcao({
@@ -438,6 +440,7 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
         statusEffectService.multiplicadorDeDanoDeSaida(listaJogador) *
         combatModifierService.multiplicadorDanoSaida(modificadoresJogador),
       modificadoresAtacante: modificadoresJogador,
+      gatilhosAtacante: gatilhosJogador,
     });
 
     const hpDepois = Math.max(0, Math.round(bossDefensor.vida_atual));
