@@ -52,6 +52,22 @@ exports.atualizarAtivoDoRecurso = async (req, res) => {
   }
 };
 
+exports.criarRecurso = async (req, res) => {
+  try {
+    const resultado = await adminExpeditionResourceService.criarRecurso(
+      {
+        profissao: req.body?.profissao,
+        nome: req.body?.nome,
+        itensPorQualidade: req.body?.itens_por_qualidade,
+      },
+      { idAdmin: req.user.id, req },
+    );
+    res.status(201).json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao criar o recurso.");
+  }
+};
+
 exports.atualizarPesoNaRegiao = async (req, res) => {
   try {
     const resultado = await adminExpeditionResourceService.atualizarPesoNaRegiao(
