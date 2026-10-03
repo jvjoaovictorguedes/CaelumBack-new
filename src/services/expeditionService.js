@@ -258,7 +258,6 @@ async function coletar(id_personagem, id_regiao) {
             dano_min: monstroDeEmboscada.dano_min,
             dano_max: monstroDeEmboscada.dano_max,
             defesa: monstroDeEmboscada.defesa ?? 0,
-            sprite_key: monstroDeEmboscada.sprite_key ?? null,
             imagem_url: monstroDeEmboscada.imagem_url ?? null,
           }
         : gerarInimigo(jogadorEfetivo, undefined, { nivelForcado });

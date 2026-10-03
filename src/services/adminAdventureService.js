@@ -159,7 +159,6 @@ const CAMPOS_MONSTRO = [
   "nome",
   "descricao",
   "imagem_url",
-  "sprite_key",
   "nivel",
   "vida_maxima",
   "dano_min",

@@ -19,19 +19,18 @@ const { sequelize } = require("../config/database");
 // derivados de personagem de referência. Nullable só até o Backfill
 // (migration seguinte) preencher todo o catálogo existente.
 //
-// sprite_key: a coluna já existia no banco desde as migrations
-// 20261026430000/20261026450000/20261026470000/20261026780000 —
-// combatController/bestiaryService/partySocket já liam
-// `monstro.sprite_key`, mas como o model nunca declarava o atributo, o
-// Sequelize nunca populava esse valor (bug real, corrigido aqui).
 const AdventureMonster = sequelize.define(
   "AdventureMonster",
   {
     id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
     nome: { type: DataTypes.STRING(100), allowNull: false, unique: true },
     descricao: { type: DataTypes.TEXT, allowNull: true },
+    // sprite_key (sprite animado fixo embutido no front) foi removido —
+    // os 9 monstros legados que ainda dependiam dele (migration
+    // 20261026450000) passam a usar imagem_url, igual aos outros 31 e
+    // igual a Guild Boss/World Boss (nenhum dos dois nunca teve sprite
+    // fixo). Ver migration 20270203010000-remove-sprite-key-monstro.js.
     imagem_url: { type: DataTypes.STRING(255), allowNull: true },
-    sprite_key: { type: DataTypes.STRING(100), allowNull: true },
     multiplicador_vida: { type: DataTypes.FLOAT, allowNull: false, defaultValue: 1 },
     multiplicador_dano: { type: DataTypes.FLOAT, allowNull: false, defaultValue: 1 },
     multiplicador_agilidade: { type: DataTypes.FLOAT, allowNull: false, defaultValue: 1 },
