@@ -45,6 +45,7 @@ const { CONDITIONS, CONFIG_ESPERADA, conditionKeyValida, configBateComContrato }
 const { CONTEXTOS_DE_COMBATE, ROTULO_DO_CONTEXTO } = require("../config/combatContextConfig");
 const { NIVEL_MAXIMO_HABILIDADE, multiplicadorEfeito, multiplicadorCustoMana, marcoDoNivel, custoParaEvoluir } = require("../services/abilityLevelService");
 const { potenciaEsperada } = require("../services/combatEffectResolver");
+const { magnitudeEfetiva } = require("../services/combatModifierService");
 const { registrarAcao } = require("./adminAuditService");
 
 function erro(mensagem, statusCode = 400) {
@@ -525,6 +526,67 @@ async function previewPowerStatus(idPower, valorAtributoExemplo) {
   return { power_id: power.id, nome: power.nome, dano_base: power.dano_base, valor_atributo_exemplo: valorAtributoExemplo, efeitos };
 }
 
+// Habilidades V2.0 (item 9) — combina os 3 previews que hoje vivem
+// separados (evolução 1-10, status/DoT, modificadores passivos de
+// PowerCombatEffect) numa única resposta por nível 1-10, pro Admin ver
+// de uma vez o poder total da Power em cada nível — sem reimplementar
+// nenhuma fórmula: reaproveita abilityLevelService.multiplicadorEfeito
+// pro dano/cura (igual previewPowerEvolution), combatEffectResolver.
+// potenciaEsperada pro status/DoT (igual previewPowerStatus — não
+// escala por nível hoje, é mostrado constante de propósito, nunca
+// inventado), e combatModifierService.magnitudeEfetiva pros
+// PowerCombatEffect passivos marcados scale_with_ability_level.
+async function previewCombinadoPorNivel(idPower, valorAtributoExemplo = 100) {
+  const power = await Power.findByPk(idPower, {
+    include: [
+      { model: PowerStatusEffect, as: "efeitosDeStatus" },
+      { model: PowerCombatEffect, as: "efeitosDeCombate" },
+    ],
+  });
+  if (!power) throw erro("Habilidade não encontrada.", 404);
+
+  const personagemFicticio = {
+    forca: valorAtributoExemplo,
+    vitalidade: valorAtributoExemplo,
+    agilidade: valorAtributoExemplo,
+    inteligencia: valorAtributoExemplo,
+    velocidade: valorAtributoExemplo,
+  };
+
+  const efeitosDeStatusAtivos = (power.efeitosDeStatus ?? []).filter((e) => e.ativo);
+  const efeitosDeCombateAtivos = (power.efeitosDeCombate ?? []).filter((e) => e.ativo);
+
+  const niveis = [];
+  for (let nivel = 1; nivel <= NIVEL_MAXIMO_HABILIDADE; nivel++) {
+    const mult = multiplicadorEfeito(nivel);
+    niveis.push({
+      nivel,
+      marco: marcoDoNivel(nivel),
+      dano: power.dano_base ? Math.round(power.dano_base * mult) : null,
+      cura: power.cura_base ? Math.round(power.cura_base * mult) : null,
+      custo_mana: Math.round(power.custo_mana * multiplicadorCustoMana(nivel)),
+      status: efeitosDeStatusAtivos.map((e) => ({
+        status_key: e.status_key,
+        nome_ui: STATUS[e.status_key]?.nomeUi ?? e.status_key,
+        chance_percentual: e.chance_ppm / 10000,
+        duration_turns: e.duration_turns,
+        // Potência de status/DoT não escala por nível de habilidade hoje
+        // (mesmo valor em todo nível) — mostrado assim de propósito,
+        // nunca inventando uma escala que o motor de combate não aplica.
+        potencia_estimada: Math.round(potenciaEsperada(e, personagemFicticio) * 100) / 100,
+      })),
+      modificadores_passivos: efeitosDeCombateAtivos
+        .filter((e) => e.trigger === "PASSIVE")
+        .map((e) => ({
+          effect_key: e.effect_key,
+          magnitude_no_nivel: Math.round(magnitudeEfetiva(e, personagemFicticio, nivel) * 100) / 100,
+        })),
+    });
+  }
+
+  return { power_id: power.id, nome: power.nome, valor_atributo_exemplo: valorAtributoExemplo, niveis };
+}
+
 // ------------------------------------------- POWER BOOK (Livro de Habilidade)
 // Habilidades V2.0 §13 — uma linha por Item tipo_item="LivroHabilidade",
 // vinculando ao Power concedido + requisitos opcionais (nivel_minimo/
@@ -615,6 +677,7 @@ module.exports = {
   statusCatalog,
   previewPowerEvolution,
   previewPowerStatus,
+  previewCombinadoPorNivel,
   getAdminPowerBook,
   upsertAdminPowerBook,
   removeAdminPowerBook,
