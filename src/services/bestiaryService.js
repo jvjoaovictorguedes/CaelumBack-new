@@ -5,6 +5,7 @@
 const AdventureZone = require("../models/AdventureZone");
 const AdventureZoneMonster = require("../models/AdventureZoneMonster");
 const AdventureMonster = require("../models/AdventureMonster");
+const { Op } = require("sequelize");
 const AdventureMonsterLoot = require("../models/AdventureMonsterLoot");
 const Item = require("../models/Item");
 const CharacterMonsterKill = require("../models/CharacterMonsterKill");
@@ -96,7 +97,12 @@ async function obterRegiao(idPersonagem, idZona) {
   const loots = idsMonstros.length
     ? await AdventureMonsterLoot.findAll({
         where: { id_monstro: idsMonstros, ativo: true },
-        include: [{ model: Item, as: "item" }],
+        // Receita (item físico de Fórmula/Receita, aprendido ao usar —
+        // ver alchemyLearnService.js/forgeRecipeService.js) não entra na
+        // lista de drops do Bestiário: reportado que receitas apareciam
+        // ali, mas a ficha do monstro é só pra loot de equipamento/
+        // material/consumível, nunca pra spoilar a receita em si.
+        include: [{ model: Item, as: "item", where: { tipo_item: { [Op.ne]: "Receita" } } }],
         order: [["chance_ppm", "DESC"]],
       })
     : [];
