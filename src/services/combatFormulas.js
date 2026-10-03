@@ -6,6 +6,16 @@ const {
   multiplicadorEfeito: multiplicadorEfeitoPorNivelHabilidade,
   multiplicadorCustoMana: multiplicadorCustoManaPorNivelHabilidade,
 } = require("./abilityLevelService");
+// Habilidades V2.0 (item 8) — CRIT_CHANCE_PCT/CRIT_DAMAGE_PCT/
+// DODGE_CHANCE_PCT/HIT_CHANCE_PCT já existiam como getters em
+// combatModifierService desde a Fase 4, mas nenhuma fórmula de combate
+// de verdade os lia — PowerCombatEffect/ClassEvolutionEffect desses 4
+// effect_keys não tinham efeito nenhum (achado nesta revisão: getter
+// morto, nunca chamado). Corrigido aqui: toda função abaixo aceita um
+// `modificadores`/par de Maps OPCIONAL (default new Map() = nenhum
+// bônus, comportamento idêntico a antes pra quem ainda não passa nada,
+// mesmo padrão aditivo do resto da Fase 5/item 8).
+const combatModifierService = require("./combatModifierService");
 
 const ATRIBUTO_PARA_CAMPO = {
   Forca: "forca",
@@ -71,13 +81,16 @@ function precisaoDe(atacante) {
 // probabilidadeDeEsquiva existir separada de chanceDeEsquiva: o Editor
 // de Balanceamento (Admin Aventura/Boss) precisa mostrar "chance de
 // crítico estimada" sem depender de RNG.
-function probabilidadeDeCritico(atacante) {
-  const chance = CHANCE_CRITICO_BASE + (atacante.velocidade || 0) * FATOR_CHANCE_CRITICO_POR_VELOCIDADE;
-  return Math.min(chance, CHANCE_CRITICO_MAXIMA);
+function probabilidadeDeCritico(atacante, modificadoresAtacante = new Map()) {
+  const chance =
+    CHANCE_CRITICO_BASE +
+    (atacante.velocidade || 0) * FATOR_CHANCE_CRITICO_POR_VELOCIDADE +
+    combatModifierService.bonusChanceCriticoPct(modificadoresAtacante) / 100;
+  return Math.min(Math.max(chance, 0), CHANCE_CRITICO_MAXIMA);
 }
 
-function rolarCritico(atacante) {
-  return Math.random() < probabilidadeDeCritico(atacante);
+function rolarCritico(atacante, modificadoresAtacante = new Map()) {
+  return Math.random() < probabilidadeDeCritico(atacante, modificadoresAtacante);
 }
 
 // Dano esperado (sem aleatoriedade) — usado só pra calibrar a vida/dano
@@ -113,7 +126,7 @@ function danoBasicoEsperado(atacante) {
 // (a maioria dos callers — ex.: danoBasicoEsperado, calibração de
 // inimigo) o retorno continua sendo só o número, comportamento idêntico
 // a antes.
-function calcularDanoBasico(atacante, contexto) {
+function calcularDanoBasico(atacante, contexto, modificadoresAtacante = new Map()) {
   // Com arma equipada, o dano_min/dano_max dela é o que manda — a força
   // só soma em cima, nunca deixa o resultado cair abaixo do dano_min da
   // arma (antes o ataque básico ignorava esses campos e só olhava a
@@ -125,9 +138,11 @@ function calcularDanoBasico(atacante, contexto) {
   // Crítico (Velocidade, ver comentário acima de precisaoDe) — mais uma
   // rolagem de variação por cima das outras, exatamente como a
   // variação de arma/base já é.
-  const critico = rolarCritico(atacante);
+  const critico = rolarCritico(atacante, modificadoresAtacante);
   if (contexto) contexto.critico = critico;
-  const multiplicadorCritico = critico ? MULTIPLICADOR_DANO_CRITICO : 1;
+  const multiplicadorCritico = critico
+    ? MULTIPLICADOR_DANO_CRITICO + combatModifierService.bonusDanoCriticoPct(modificadoresAtacante) / 100
+    : 1;
 
   if (atacante.arma_equipada) {
     const { dano_min, dano_max } = atacante.arma_equipada;
@@ -171,7 +186,7 @@ function multiplicadorDeClassePorTipoDano(power, personagem) {
 // cima de tudo (atributo, bônus de nível de personagem, classe).
 // `contexto` — mesmo efeito colateral opcional de calcularDanoBasico
 // (ver comentário lá): se passado, recebe `contexto.critico`.
-function calcularEfeitoPoder(power, personagem, nivelHabilidade = 1, contexto) {
+function calcularEfeitoPoder(power, personagem, nivelHabilidade = 1, contexto, modificadoresAtacante = new Map()) {
   const campoAtributo = ATRIBUTO_PARA_CAMPO[power.escala_atributo] || "forca";
   const valorAtributo = personagem[campoAtributo] || 0;
   const variacao = 0.9 + Math.random() * 0.2;
@@ -182,9 +197,11 @@ function calcularEfeitoPoder(power, personagem, nivelHabilidade = 1, contexto) {
   // cura crítico dependeria de sorte pra curar mais, e isso não é a
   // intenção do pedido ("crítico nos ataques/habilidades" é sobre
   // dano, não sobre amplificar cura por acaso).
-  const critico = Boolean(power.dano_base) && rolarCritico(personagem);
+  const critico = Boolean(power.dano_base) && rolarCritico(personagem, modificadoresAtacante);
   if (contexto) contexto.critico = critico;
-  const multiplicadorCritico = critico ? MULTIPLICADOR_DANO_CRITICO : 1;
+  const multiplicadorCritico = critico
+    ? MULTIPLICADOR_DANO_CRITICO + combatModifierService.bonusDanoCriticoPct(modificadoresAtacante) / 100
+    : 1;
 
   const dano = power.dano_base
     ? Math.round(
@@ -274,15 +291,19 @@ function aplicarMitigacaoDeDefesa(dano, defensor) {
 // poder mostrar "esquiva estimada contra perfil X" sem depender de RNG.
 // Mesma fórmula, mesmo piso/teto reais (5%/35%) — nunca duplicar isso
 // em outro lugar (frontend inclusive).
-function probabilidadeDeEsquiva(defensor, atacante) {
+function probabilidadeDeEsquiva(defensor, atacante, modificadoresDefensor = new Map(), modificadoresAtacante = new Map()) {
   const diferenca = (defensor.agilidade || 0) - (atacante.agilidade || 0) - precisaoDe(atacante);
   const chanceBase = 0.05;
-  const chance = chanceBase + Math.max(0, diferenca) * 0.01;
-  return Math.min(chance, 0.35);
+  const chance =
+    chanceBase +
+    Math.max(0, diferenca) * 0.01 +
+    combatModifierService.bonusChanceEsquivaPct(modificadoresDefensor) / 100 -
+    combatModifierService.bonusChanceAcertoPct(modificadoresAtacante) / 100;
+  return Math.min(Math.max(chance, 0), 0.35);
 }
 
-function chanceDeEsquiva(defensor, atacante) {
-  return Math.random() < probabilidadeDeEsquiva(defensor, atacante);
+function chanceDeEsquiva(defensor, atacante, modificadoresDefensor = new Map(), modificadoresAtacante = new Map()) {
+  return Math.random() < probabilidadeDeEsquiva(defensor, atacante, modificadoresDefensor, modificadoresAtacante);
 }
 
 // Unifica Cegueira (BLIND) e esquiva num único resultado de acerto
@@ -293,12 +314,18 @@ function chanceDeEsquiva(defensor, atacante) {
 // daqui pra dentro, pra não criar dependência circular com
 // statusEffectService. Não muda Agilidade permanentemente; é só um
 // resultado de acerto por golpe.
-function resolverResultadoDeAcerto({ atacante, defensor, blindPotency = 0 }) {
+function resolverResultadoDeAcerto({
+  atacante,
+  defensor,
+  blindPotency = 0,
+  modificadoresAtacante = new Map(),
+  modificadoresDefensor = new Map(),
+}) {
   const chanceCegueira = Math.min(100, Math.max(0, blindPotency || 0)) / 100;
   if (chanceCegueira > 0 && Math.random() < chanceCegueira) {
     return { hit: false, reason: "BLIND_MISS" };
   }
-  if (chanceDeEsquiva(defensor, atacante)) {
+  if (chanceDeEsquiva(defensor, atacante, modificadoresDefensor, modificadoresAtacante)) {
     return { hit: false, reason: "DODGE" };
   }
   return { hit: true, reason: "HIT" };

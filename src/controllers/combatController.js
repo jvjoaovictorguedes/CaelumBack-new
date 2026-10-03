@@ -935,6 +935,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           personagemAtual,
           nivelHabilidadeUsada,
           contextoCriticoPoder,
+          modificadoresJogador,
         );
       // Enfraquecimento (§45) reduz o dano de SAÍDA de quem está com o
       // status, antes de qualquer mitigação do alvo. PVE_DAMAGE_PCT da
@@ -985,6 +986,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           atacante: personagemAtual,
           defensor: inimigoAtual,
           blindPotency: blindDoAtacante?.potency ?? 0,
+          modificadoresAtacante: modificadoresJogador,
         });
         if (!resultadoAcerto.hit) {
           curaBloqueadaPorEsquiva = true;
@@ -1005,6 +1007,18 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
             0,
             inimigoAtual.vida_atual - absorcaoEscudoInimigo1.danoResidual
           );
+          // LIFESTEAL_PCT (Habilidades V2.0 item 8) — mesma regra do
+          // ataque básico: usa a redução REAL de Vida (pós-escudo).
+          const curaPorRouboPoder = combatModifierService.curaPorLifesteal(
+            modificadoresJogador,
+            absorcaoEscudoInimigo1.danoResidual,
+          );
+          if (curaPorRouboPoder > 0) {
+            personagemAtual.vida_atual = Math.min(
+              vidaMaximaEfetiva,
+              personagemAtual.vida_atual + curaPorRouboPoder,
+            );
+          }
 
           log.push(
             contextoCriticoPoder.critico
@@ -1135,6 +1149,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         atacante: personagemAtual,
         defensor: inimigoAtual,
         blindPotency: blindDoAtacante?.potency ?? 0,
+        modificadoresAtacante: modificadoresJogador,
       });
 
       if (!resultadoAcerto.hit) {
@@ -1146,7 +1161,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       } else {
         const contextoCriticoAtaque = {};
         const danoBasicoEnfraquecido = Math.round(
-          calcularDanoBasico(personagemAtual, contextoCriticoAtaque) *
+          calcularDanoBasico(personagemAtual, contextoCriticoAtaque, modificadoresJogador) *
             statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.player) *
             combatBuffService.modificadorDeDanoSaida(combatBuffs.player) *
             combatModifierService.multiplicadorDanoSaida(modificadoresJogador) *
@@ -1167,6 +1182,18 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           0,
           inimigoAtual.vida_atual - absorcaoEscudoInimigo2.danoResidual
         );
+        // LIFESTEAL_PCT (Habilidades V2.0 item 8) — usa a redução REAL
+        // de Vida do inimigo (pós-escudo), nunca o dano bruto.
+        const curaPorRouboAtaque = combatModifierService.curaPorLifesteal(
+          modificadoresJogador,
+          absorcaoEscudoInimigo2.danoResidual,
+        );
+        if (curaPorRouboAtaque > 0) {
+          personagemAtual.vida_atual = Math.min(
+            vidaMaximaEfetiva,
+            personagemAtual.vida_atual + curaPorRouboAtaque,
+          );
+        }
 
         log.push(
           contextoCriticoAtaque.critico
@@ -1644,6 +1671,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         atacante: inimigoAtual,
         defensor: personagemAtual,
         blindPotency: blindDoInimigo?.potency ?? 0,
+        modificadoresDefensor: modificadoresJogador,
       });
 
       if (!resultadoAcerto.hit) {

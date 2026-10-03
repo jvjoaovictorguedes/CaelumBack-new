@@ -125,7 +125,7 @@ function aplicarAcao({
     nomeAcao = acao.power.nome;
     atacante.mana_atual -= custoManaEfetivo(acao.power, nivelHabilidade);
     const contextoCritico = {};
-    const efeito = calcularEfeitoPoder(acao.power, atacante, nivelHabilidade, contextoCritico);
+    const efeito = calcularEfeitoPoder(acao.power, atacante, nivelHabilidade, contextoCritico, modificadoresAtacante);
     dano = Math.round(efeito.dano * multiplicadorDano);
     // HEALING_DONE_PCT passivo (Habilidades V2.0 §8/§15) — mesmo ponto
     // de combatController.js (PvE): só a cura de Power, nunca a de item
@@ -195,12 +195,25 @@ function aplicarAcao({
     }
   }
 
+  // LIFESTEAL_PCT (Habilidades V2.0 §9/§15, item 7/8) — mede a redução
+  // REAL de Vida do defensor (depois de Defesa e escudo, nunca o dano
+  // bruto/absorvido — ver combatModifierService.curaPorLifesteal), por
+  // isso compara a Vida antes/depois do bloco inteiro em vez de tentar
+  // capturar `danoResidual` de dentro de cada branch.
+  const vidaDefensorAntes = defensor.vida_atual;
+
   if (dano > 0 || acao.tipo === "attack") {
     // Cegueira (§17) unifica com a esquiva num único resultado de
     // acerto — precisa rolar mesmo em ataque básico sem dano "pré-
     // calculado" (dano vira 0 aqui e o cálculo de verdade só acontece
     // se acertar, no branch `acao.tipo === "attack"` abaixo).
-    const resultadoAcerto = resolverResultadoDeAcerto({ atacante, defensor, blindPotency });
+    const resultadoAcerto = resolverResultadoDeAcerto({
+      atacante,
+      defensor,
+      blindPotency,
+      modificadoresAtacante,
+      modificadoresDefensor,
+    });
     if (!resultadoAcerto.hit) {
       esquivou = true;
       motivoEsquiva = resultadoAcerto.reason;
@@ -219,7 +232,9 @@ function aplicarAcao({
       // dano (branch abaixo), já que o jogo só tem um stat de defesa
       // (sem resistência mágica separada).
       const contextoCritico = {};
-      const danoBase = Math.round(calcularDanoBasico(atacante, contextoCritico) * multiplicadorDano);
+      const danoBase = Math.round(
+        calcularDanoBasico(atacante, contextoCritico, modificadoresAtacante) * multiplicadorDano,
+      );
       critico = Boolean(contextoCritico.critico);
       dano = aplicarMitigacaoDeDefesa(danoBase, defensorComBuffs);
       dano = Math.max(1, Math.round(dano * multiplicadorDanoRecebido));
@@ -232,6 +247,15 @@ function aplicarAcao({
       const absorcao2 = combatBuffService.absorverDano(novoEscudoDefensor, dano);
       novoEscudoDefensor = absorcao2.escudo;
       defensor.vida_atual = Math.max(0, defensor.vida_atual - absorcao2.danoResidual);
+    }
+  }
+
+  const danoEfetivoNaVida = Math.max(0, vidaDefensorAntes - defensor.vida_atual);
+  if (danoEfetivoNaVida > 0) {
+    const curaPorRoubo = combatModifierService.curaPorLifesteal(modificadoresAtacante, danoEfetivoNaVida);
+    if (curaPorRoubo > 0) {
+      const tetoLifesteal = vidaMaxAtacante ?? atacante.vida_atual + curaPorRoubo;
+      atacante.vida_atual = Math.min(tetoLifesteal, atacante.vida_atual + curaPorRoubo);
     }
   }
 

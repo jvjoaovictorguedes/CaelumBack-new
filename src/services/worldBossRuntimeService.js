@@ -120,7 +120,15 @@ function aplicarStatusNoBoss(lista, instancia, statusResistances) {
 // comportar exatamente como antes pra quem não resolveu modificadores;
 // `alvoDefesa` já vem com DEFENSE_FLAT somado por quem chama (mesmo
 // padrão de bonusDefesaDefensor em duelEngine.js).
-function resolverDanoBasico({ snapshot, fase, furiaPct, alvoBase, alvoDefesa, multiplicadorDanoRecebido = 1 }) {
+function resolverDanoBasico({
+  snapshot,
+  fase,
+  furiaPct,
+  alvoBase,
+  alvoDefesa,
+  multiplicadorDanoRecebido = 1,
+  modificadoresAlvo = new Map(),
+}) {
   const atacante = {
     forca: snapshot.forca,
     agilidade: snapshot.agilidade,
@@ -134,7 +142,9 @@ function resolverDanoBasico({ snapshot, fase, furiaPct, alvoBase, alvoDefesa, mu
   };
   const defensor = { agilidade: alvoBase.agilidade || 0 };
 
-  const resultadoAcerto = resolverResultadoDeAcerto({ atacante, defensor });
+  // DODGE_CHANCE_PCT (Habilidades V2.0 item 8) do jogador-alvo — Boss
+  // nunca tem CharacterAbilities, então só o lado defensor importa aqui.
+  const resultadoAcerto = resolverResultadoDeAcerto({ atacante, defensor, modificadoresDefensor: modificadoresAlvo });
   if (!resultadoAcerto.hit) return { dano: 0, esquivou: true, critico: false };
 
   const contextoCritico = {};
@@ -278,7 +288,16 @@ async function selecionarAlvos(tipoAlvo, quantidadeAlvos, eventId, transaction) 
 // (resolverDanoBasico): o Boss fica mais forte na fase seguinte
 // independente do tipo de ataque. escala_com_furia decide só o dano —
 // cura/buff do Boss nunca escala com Fúria (§5.5).
-function resolverEfeitoDeHabilidade({ snapshot, fase, furiaPct, ability, alvoBase, alvoDefesa, multiplicadorDanoRecebido = 1 }) {
+function resolverEfeitoDeHabilidade({
+  snapshot,
+  fase,
+  furiaPct,
+  ability,
+  alvoBase,
+  alvoDefesa,
+  multiplicadorDanoRecebido = 1,
+  modificadoresAlvo = new Map(),
+}) {
   const atacante = {
     forca: snapshot.forca,
     agilidade: snapshot.agilidade,
@@ -289,7 +308,7 @@ function resolverEfeitoDeHabilidade({ snapshot, fase, furiaPct, ability, alvoBas
   };
   const defensor = { agilidade: alvoBase?.agilidade || 0 };
 
-  const resultadoAcerto = resolverResultadoDeAcerto({ atacante, defensor });
+  const resultadoAcerto = resolverResultadoDeAcerto({ atacante, defensor, modificadoresDefensor: modificadoresAlvo });
   if (!resultadoAcerto.hit) return { dano: 0, cura: 0, esquivou: true, critico: false };
 
   const contextoCritico = {};
@@ -376,6 +395,7 @@ async function aplicarEfeitoDeHabilidadeEmAlvos({ characterIds, snapshot, fase, 
       alvoBase: base,
       alvoDefesa: (base.defesa || 0) + combatModifierService.bonusDefesa(modificadoresAlvo),
       multiplicadorDanoRecebido: combatModifierService.multiplicadorDanoRecebido(modificadoresAlvo),
+      modificadoresAlvo,
     });
     let derrotado = false;
 
@@ -697,6 +717,7 @@ async function processarProximaAcao() {
             alvoBase: base,
             alvoDefesa: (base.defesa || 0) + combatModifierService.bonusDefesa(modificadoresAlvo),
             multiplicadorDanoRecebido: combatModifierService.multiplicadorDanoRecebido(modificadoresAlvo),
+            modificadoresAlvo,
           });
           let alvoDerrotado = false;
 
