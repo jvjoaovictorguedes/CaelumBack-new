@@ -251,6 +251,18 @@ exports.previewStatus = async (req, res) => {
   }
 };
 
+// Habilidades V2.0 (item 9) — dano+cura+status/DoT+modificadores
+// passivos combinados por nível 1-10 numa só resposta.
+exports.previewCombinado = async (req, res) => {
+  try {
+    const valor = Number(req.query.atributo ?? req.body?.atributo ?? 100);
+    const preview = await adminPowerService.previewCombinadoPorNivel(req.params.id, valor);
+    res.status(200).json({ status: "success", data: preview });
+  } catch (error) {
+    tratarErro(res, error, "Erro interno do servidor ao simular preview combinado.");
+  }
+};
+
 // PowerBook / Livro de Habilidade (montado sob /admin/items/:idItem/power-book
 // — Habilidades V2.0 §13).
 exports.obterPowerBook = async (req, res) => {

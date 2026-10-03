@@ -590,9 +590,12 @@ async function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
   // DoT (duelEngine.resolverTurnoComStatus). `duelo.ranked`/torneio
   // ainda não distinguem contexto aqui — ver mesmo comentário em
   // duelEngine.js.
-  const [modificadoresAtacante, modificadoresDefensor] = await Promise.all([
+  const [modificadoresAtacante, modificadoresDefensor, gatilhosAtacante] = await Promise.all([
     combatModifierService.resolverModificadoresDoPersonagem(atacanteInfo.estado, "PVP_CASUAL"),
     combatModifierService.resolverModificadoresDoPersonagem(defensorInfo.estado, "PVP_CASUAL"),
+    // Item 7 — gatilhos reativos ON_HIT/ON_KILL do atacante, mesmo
+    // princípio de resolução por turno dos modificadores acima.
+    combatModifierService.resolverGatilhosDoPersonagem(atacanteInfo.estado, "PVP_CASUAL"),
   ]);
 
   // Motor de Status (Evolução do Motor de Status) — mesma engrenagem do
@@ -637,6 +640,7 @@ async function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
     nomeDefensor: defensorInfo.nome,
     modificadoresAtacante,
     modificadoresDefensor,
+    gatilhosAtacante,
   });
   duelo.statusEffects[chave] = statusAtacante;
   duelo.statusEffects[outraChave] = statusDefensor;

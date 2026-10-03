@@ -16,6 +16,7 @@ powersRouter.get("/:id/affected-players", adminPowerController.jogadoresAfetados
 powersRouter.post("/:id/duplicate", adminPowerController.duplicar);
 powersRouter.get("/:id/preview-evolution", adminPowerController.previewEvolucao);
 powersRouter.get("/:id/preview-status", adminPowerController.previewStatus);
+powersRouter.get("/:id/preview-combinado", adminPowerController.previewCombinado);
 
 powersRouter.get("/:id/links", adminPowerController.listarVinculos);
 powersRouter.put("/:id/links/class", adminPowerController.vincularClasse);

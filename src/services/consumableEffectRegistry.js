@@ -41,12 +41,20 @@ function cleanseCategory({ statusEffects, config }) {
 // ATRIBUTOS_BUFAVEIS; `magnitude` é o valor do buff; `duration_turns`
 // vem direto da coluna ConsumableEffect.duration_turns (não de
 // `config`), igual todo outro efeito com duração.
+// Item 3 (Habilidades V2.0) — stack_group/reapply_policy/max_stacks são
+// OPCIONAIS dentro do mesmo `config` JSONB (nenhuma migration nova):
+// ausentes, aplicarBuff cai no comportamento original (uma instância
+// por atributo, a mais forte vence); presentes, generaliza pro mesmo
+// catálogo de políticas de combatModifierConfig.
 function applyCombatBuff({ combatBuffs, config, magnitude, duration_turns, sourceItemId }) {
   const novaLista = combatBuffService.aplicarBuff(combatBuffs, {
     atributo: config?.atributo,
     valor: magnitude,
     remainingTurns: duration_turns,
     sourceItemId: sourceItemId ?? null,
+    stack_group: config?.stack_group ?? null,
+    reapply_policy: config?.reapply_policy ?? null,
+    max_stacks: config?.max_stacks ?? null,
   });
   return { combatBuffs: novaLista, aplicado: true };
 }

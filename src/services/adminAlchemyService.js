@@ -20,6 +20,7 @@ const {
   regenDeManaDoTurno,
 } = require("./combatBuffService");
 const { CHAVES_VALIDAS } = require("../config/statusEffectConfig");
+const { REAPPLY_POLICIES_VALIDAS, reapplyPolicyValida } = require("../config/combatModifierConfig");
 
 function erro(mensagem, statusCode = 400) {
   const e = new Error(mensagem);
@@ -290,6 +291,10 @@ function listEffectTypes() {
     exige_duracao: EFFECT_KEYS_COM_DURACAO.includes(effectKey),
     exige_atributo_buff: effectKey === "APPLY_COMBAT_BUFF",
     atributos_buff: effectKey === "APPLY_COMBAT_BUFF" ? ATRIBUTOS_BUFAVEIS : undefined,
+    // Item 3 — stacking OPCIONAL só faz sentido pra APPLY_COMBAT_BUFF
+    // (os outros effect_keys de consumível são instantâneos/sem duração).
+    aceita_stack_group: effectKey === "APPLY_COMBAT_BUFF",
+    reapply_policies: effectKey === "APPLY_COMBAT_BUFF" ? REAPPLY_POLICIES_VALIDAS : undefined,
     exige_status_key: effectKey === "CLEANSE_STATUS",
     status_keys: effectKey === "CLEANSE_STATUS" ? CHAVES_VALIDAS : undefined,
     exige_category: effectKey === "CLEANSE_CATEGORY",
@@ -314,6 +319,20 @@ function validarConfigDoEfeito(effectKey, config, duration_turns, magnitude) {
   if (effectKey === "APPLY_COMBAT_BUFF") {
     if (!config?.atributo || !ATRIBUTOS_BUFAVEIS.includes(config.atributo)) {
       throw erro(`APPLY_COMBAT_BUFF precisa de config.atributo em: ${ATRIBUTOS_BUFAVEIS.join(", ")}.`);
+    }
+    // Item 3 (Habilidades V2.0) — stack_group é OPCIONAL (ausente =
+    // comportamento original de sempre, uma instância por atributo); se
+    // presente, reapply_policy é obrigatória e precisa ser uma das do
+    // catálogo compartilhado com PowerCombatEffect.
+    if (config?.stack_group) {
+      if (!reapplyPolicyValida(config.reapply_policy)) {
+        throw erro(
+          `APPLY_COMBAT_BUFF com config.stack_group precisa de config.reapply_policy em: ${REAPPLY_POLICIES_VALIDAS.join(", ")}.`,
+        );
+      }
+      if (config.reapply_policy === "STACK" && config.max_stacks != null && !(Number(config.max_stacks) > 0)) {
+        throw erro("APPLY_COMBAT_BUFF com reapply_policy STACK precisa de config.max_stacks > 0 (ou omitido).");
+      }
     }
   }
   if (effectKey === "CLEANSE_STATUS") {

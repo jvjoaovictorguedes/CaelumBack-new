@@ -419,6 +419,8 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
       atacante.estado,
       "GUILD_BOSS",
     );
+    // Item 7 — gatilhos reativos ON_HIT/ON_KILL do aliado.
+    const gatilhosAtacante = await combatModifierService.resolverGatilhosDoPersonagem(atacante.estado, "GUILD_BOSS");
     const { nomeAcao, dano, cura, manaCurada, esquivou, critico } = aplicarAcao({
       atacante: atacante.estado,
       defensor: chefeEstado,
@@ -427,6 +429,7 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
       manaMaxAtacante: atacante.manaMax,
       multiplicadorDano: combatModifierService.multiplicadorDanoSaida(modificadoresAtacante),
       modificadoresAtacante,
+      gatilhosAtacante,
     });
 
     // Fim do "turno" deste ator (§ mesma semântica do Boss Mundial):
