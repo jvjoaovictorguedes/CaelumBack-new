@@ -665,12 +665,6 @@ async function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
     logStatus,
     statusA: duelo.statusEffects.A.map((s) => ({ key: s.key, remainingTurns: s.remainingTurns, stacks: s.stacks })),
     statusB: duelo.statusEffects.B.map((s) => ({ key: s.key, remainingTurns: s.remainingTurns, stacks: s.stacks })),
-    // Habilidades V2.0 (item 10) — combatBuffs já era rastreado em
-    // duelo.combatBuffs (ver resolverTurnoComStatus acima), mas nunca
-    // chegava no payload do socket, então o frontend nunca tinha como
-    // mostrar os ícones de buff/debuff do duelo ao vivo.
-    combatBuffsA: (duelo.combatBuffs?.A ?? []).map((b) => ({ atributo: b.atributo, valor: b.valor, remainingTurns: b.remainingTurns })),
-    combatBuffsB: (duelo.combatBuffs?.B ?? []).map((b) => ({ atributo: b.atributo, valor: b.valor, remainingTurns: b.remainingTurns })),
     vidaA: duelo.a.estado.vida_atual,
     vidaB: duelo.b.estado.vida_atual,
     manaA: duelo.a.estado.mana_atual,
