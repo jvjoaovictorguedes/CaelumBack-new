@@ -344,65 +344,115 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
         });
       }
 
-      // §1/§17/§29/§31 da spec do Modo Aventura: combate PvE não pode
-      // mais começar fora de uma Área de Caça — validado aqui no
-      // servidor (dentro da MESMA transação que trava o Character),
-      // nunca só no frontend. Sem sessão ativa, nem chega a sortear
-      // monstro nenhum.
-      const sessaoAtiva = await obterSessaoAtiva(character.id, { transaction });
-      if (!sessaoAtiva) {
-        return res.status(409).json({
-          message: "Entre em uma Área de Caça antes de procurar uma criatura.",
-        });
-      }
+      // Performance sob carga real (gerarInimigoParaPersonagem é a função
+      // mais cara da Aventura — chamada toda vez que alguém busca um
+      // inimigo novo, segurando o LOCK.UPDATE do Character o tempo todo):
+      // esta função fazia 8 consultas em SÉRIE, uma depois da outra,
+      // quando metade delas não depende da outra metade. Dois ramos
+      // completamente independentes até aqui — zona/sessão/monstro
+      // sorteado (só precisa de character.id/nivel) e jogador/equipamento
+      // (só precisa de character.id/id_classe) — agora rodam em paralelo
+      // via Promise.all. Validado com teste de carga (20 jogadores
+      // concorrentes, personagem equipado de verdade): a versão em série
+      // esgotava o pool de conexão sob carga real (SequelizeConnection-
+      // AcquireTimeoutError); paralelizar reduz o tempo total (e o tempo
+      // que o lock fica seguro) por chamada.
+      const [ramoZona, ramoJogador] = await Promise.all([
+        (async () => {
+          // §1/§17/§29/§31 da spec do Modo Aventura: combate PvE não pode
+          // mais começar fora de uma Área de Caça — validado aqui no
+          // servidor (dentro da MESMA transação que trava o Character),
+          // nunca só no frontend. Sem sessão ativa, nem chega a sortear
+          // monstro nenhum.
+          const sessaoAtiva = await obterSessaoAtiva(character.id, { transaction });
+          if (!sessaoAtiva) {
+            return { erro: { status: 409, message: "Entre em uma Área de Caça antes de procurar uma criatura." } };
+          }
 
-      const zona = sessaoAtiva.area;
-      const todosVinculosDaZona = await AdventureZoneMonster.findAll({
-        where: { id_area: zona.id, ativo: true },
-        // ativo:true no vínculo não basta — o admin também pode
-        // desativar o MONSTRO em si (MonstersTab "Desativar"), pra
-        // tirá-lo de circulação em toda zona de uma vez sem precisar
-        // desvincular linha por linha. Sem esse `where` aqui, um
-        // monstro desativado continuava sendo sorteado normalmente
-        // (bug reportado: "desativar" não tirava o monstro do jogo).
-        include: [{ model: AdventureMonster, as: "monstro", where: { ativo: true }, required: true }],
-        transaction,
-      });
-      if (todosVinculosDaZona.length === 0) {
-        return res.status(500).json({
-          message: "Área de Caça sem monstros configurados.",
-        });
-      }
-      // Reformulação V2 dos Monstros (§4.3) — nivel_jogador_minimo só
-      // decide ELEGIBILIDADE de aparição (jogador abaixo disso nem entra
-      // no pool ponderado); nunca altera o nível/stats do monstro
-      // sorteado, que continuam sempre os mesmos de AdventureMonster.
-      const monstrosDaZona = todosVinculosDaZona.filter((zm) => character.nivel >= (zm.nivel_jogador_minimo ?? 1));
-      if (monstrosDaZona.length === 0) {
-        return res.status(500).json({
-          message: "Nenhuma criatura dessa Área de Caça está disponível pro seu nível ainda.",
-        });
-      }
-
-      const classe = await Class.findByPk(character.id_classe, { transaction });
-      const bonusEquipamento = await buscarBonusDeAtributos(character.id, transaction);
-      const jogadorEfetivo = comMultiplicadoresDeClasse(
-        personagemComBonus(character.toJSON(), bonusEquipamento),
-        classe,
-      );
-
-      // Evolução do Motor de Status §32 (Performance) — captura os
-      // efeitos de status da arma equipada UMA vez, no início do
-      // encontro (mesmo princípio já usado pra dano_min/dano_max da
-      // arma logo abaixo), pra executarTurno nunca consultar o banco a
-      // cada hit. Arma sem nenhuma linha configurada = arma normal
-      // (opt-in, §12.1).
-      const efeitosDaArmaEquipada = jogadorEfetivo.arma_equipada?.id_item
-        ? await WeaponStatusEffect.findAll({
-            where: { id_item: jogadorEfetivo.arma_equipada.id_item, ativo: true },
+          const zona = sessaoAtiva.area;
+          const todosVinculosDaZona = await AdventureZoneMonster.findAll({
+            where: { id_area: zona.id, ativo: true },
+            // ativo:true no vínculo não basta — o admin também pode
+            // desativar o MONSTRO em si (MonstersTab "Desativar"), pra
+            // tirá-lo de circulação em toda zona de uma vez sem precisar
+            // desvincular linha por linha. Sem esse `where` aqui, um
+            // monstro desativado continuava sendo sorteado normalmente
+            // (bug reportado: "desativar" não tirava o monstro do jogo).
+            include: [{ model: AdventureMonster, as: "monstro", where: { ativo: true }, required: true }],
             transaction,
-          })
-        : [];
+          });
+          if (todosVinculosDaZona.length === 0) {
+            return { erro: { status: 500, message: "Área de Caça sem monstros configurados." } };
+          }
+          // Reformulação V2 dos Monstros (§4.3) — nivel_jogador_minimo só
+          // decide ELEGIBILIDADE de aparição (jogador abaixo disso nem
+          // entra no pool ponderado); nunca altera o nível/stats do
+          // monstro sorteado, que continuam sempre os mesmos de
+          // AdventureMonster.
+          const monstrosDaZona = todosVinculosDaZona.filter((zm) => character.nivel >= (zm.nivel_jogador_minimo ?? 1));
+          if (monstrosDaZona.length === 0) {
+            return {
+              erro: { status: 500, message: "Nenhuma criatura dessa Área de Caça está disponível pro seu nível ainda." },
+            };
+          }
+
+          // Escolha de alvo removida (pedido do jogador) — sempre sorteio
+          // ponderado normal da zona (§6/§7), nunca mais "caçar" um
+          // monstro específico.
+          const escolhido = sortearMonstroDaZona(monstrosDaZona);
+
+          // Os três abaixo só dependem do monstro já sorteado — nenhuma
+          // ordem entre eles importa, então também rodam em paralelo
+          // (mesmo princípio do Promise.all de fora). Efeitos de status e
+          // habilidades são pré-carregados UMA vez aqui, no início do
+          // encontro, pra executarTurno nunca consultar o banco a cada
+          // hit (monstro sem nenhuma linha configurada = monstro normal).
+          const [efeitosDeStatusDoMonstro, habilidadesDoMonstro, modificadorCacada] = await Promise.all([
+            MonsterStatusEffect.findAll({ where: { id_monstro: escolhido.id_monstro, ativo: true }, transaction }),
+            monsterCombatAdapter.construirHabilidadesParaEncontro(escolhido.id_monstro, { transaction }),
+            // Caçadas §6 — compõe um SEGUNDO multiplicador por cima do
+            // perfil normal, só no snapshot deste encontro e só se o alvo
+            // sorteado bater com o alvo da Caçada Ativa do personagem.
+            // Nunca faz UPDATE no AdventureMonster nem afeta outro
+            // jogador.
+            resolverModificadorParaEncontro(character.id, escolhido.id_monstro, transaction),
+          ]);
+
+          return { zona, escolhido, efeitosDeStatusDoMonstro, habilidadesDoMonstro, modificadorCacada };
+        })(),
+        (async () => {
+          const [classe, bonusEquipamento] = await Promise.all([
+            Class.findByPk(character.id_classe, { transaction }),
+            buscarBonusDeAtributos(character.id, transaction),
+          ]);
+          const jogadorEfetivo = comMultiplicadoresDeClasse(
+            personagemComBonus(character.toJSON(), bonusEquipamento),
+            classe,
+          );
+
+          // Evolução do Motor de Status §32 (Performance) — captura os
+          // efeitos de status da arma equipada UMA vez, no início do
+          // encontro (mesmo princípio já usado pra dano_min/dano_max da
+          // arma logo abaixo), pra executarTurno nunca consultar o banco a
+          // cada hit. Arma sem nenhuma linha configurada = arma normal
+          // (opt-in, §12.1).
+          const efeitosDaArmaEquipada = jogadorEfetivo.arma_equipada?.id_item
+            ? await WeaponStatusEffect.findAll({
+                where: { id_item: jogadorEfetivo.arma_equipada.id_item, ativo: true },
+                transaction,
+              })
+            : [];
+
+          return { jogadorEfetivo, efeitosDaArmaEquipada };
+        })(),
+      ]);
+
+      if (ramoZona.erro) {
+        return res.status(ramoZona.erro.status).json({ message: ramoZona.erro.message });
+      }
+
+      const { zona, escolhido, efeitosDeStatusDoMonstro, habilidadesDoMonstro, modificadorCacada } = ramoZona;
+      const { jogadorEfetivo, efeitosDaArmaEquipada } = ramoJogador;
 
       // Aplica a regeneração passiva acumulada antes de calibrar/entrar
       // em combate — sem isso, um jogador que ficou horas offline entrava
@@ -411,11 +461,6 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       // com encontro_pve no save abaixo, que já é obrigatório de
       // qualquer jeito.
       sincronizarRegeneracaoDeVidaEMana(character, jogadorEfetivo);
-
-      // Escolha de alvo removida (pedido do jogador) — sempre sorteio
-      // ponderado normal da zona (§6/§7), nunca mais "caçar" um monstro
-      // específico.
-      const escolhido = sortearMonstroDaZona(monstrosDaZona);
 
       // Reformulação V2 dos Monstros (§3/§4.2/§5.1/§5.2) — o snapshot
       // vem DIRETO do catálogo, sem sortear nível nem aplicar variação
@@ -460,15 +505,10 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       // direto quando é um encontro NOVO.
       inimigo.imagem_url = monstro?.imagem_url ?? null;
 
-      // Ideia #3 da fila de melhorias — captura os efeitos de status do
-      // monstro UMA vez, no início do encontro (mesmo princípio já usado
-      // pra armaEquipadaEfeitos do jogador), pra executarTurno nunca
-      // consultar o banco a cada hit. Monstro sem nenhuma linha
-      // configurada = monstro normal (opt-in).
-      const efeitosDeStatusDoMonstro = await MonsterStatusEffect.findAll({
-        where: { id_monstro: escolhido.id_monstro, ativo: true },
-        transaction,
-      });
+      // efeitosDeStatusDoMonstro/habilidadesDoMonstro/modificadorCacada já
+      // vieram resolvidos (em paralelo) do ramoZona acima — ver comentário
+      // no Promise.all de cima pro motivo de não refazer essas 3 consultas
+      // aqui.
       inimigo.efeitosDeStatus = efeitosDeStatusDoMonstro.map((e) => ({
         status_key: e.status_key,
         chance_ppm: e.chance_ppm,
@@ -478,21 +518,9 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
         ativo: e.ativo,
       }));
 
-      // IA de Combate PvE & Habilidades de Monstros V1 (§8.1) — mesmo
-      // princípio de efeitosDeStatus acima: pré-carrega MonsterAbility
-      // UMA vez, no início do encontro. Monstro sem nenhuma ability ativa
-      // = array vazio = combatAiService.chooseAction sempre devolve
-      // "attack" (comportamento 100% legado, ver §12.1).
-      inimigo.habilidades = await monsterCombatAdapter.construirHabilidadesParaEncontro(escolhido.id_monstro, {
-        transaction,
-      });
+      inimigo.habilidades = habilidadesDoMonstro;
       inimigo.ai_profile = monstro.ai_profile ?? "BASIC";
 
-      // Caçadas §6 — compõe um SEGUNDO multiplicador por cima do perfil
-      // normal, só no snapshot deste encontro e só se o alvo sorteado
-      // bater com o alvo da Caçada Ativa do personagem. Nunca faz UPDATE
-      // no AdventureMonster nem afeta outro jogador.
-      const modificadorCacada = await resolverModificadorParaEncontro(character.id, escolhido.id_monstro, transaction);
       if (modificadorCacada) {
         // §6.1 — a Caçada aplica sobre vida_maxima/dano_min/dano_max do
         // SNAPSHOT deste encontro; nunca persiste de volta no
