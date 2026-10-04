@@ -8,7 +8,6 @@ const { bancoDisponivel, sufixo, sequelize } = require("./helpers/db");
 const Power = require("../src/models/Power");
 const AdventureMonster = require("../src/models/AdventureMonster");
 const MonsterAbility = require("../src/models/MonsterAbility");
-const MonsterAbilityCondition = require("../src/models/MonsterAbilityCondition");
 require("../src/models/associations");
 const { listarAbilitiesDoMonstro, sincronizarAbilitiesMonstro } = require("../src/services/monsterAbilityService");
 
@@ -143,7 +142,10 @@ testeComBanco("sincronizarAbilitiesMonstro substitui condições inteiras a cada
   lista = await listarAbilitiesDoMonstro(monstro.id);
   assert.equal(lista[0].condicoes.length, 0);
 
-  await MonsterAbilityCondition.destroy({ where: {} });
+  // Não precisa apagar MonsterAbilityCondition manualmente: a FK pra
+  // monster_abilities tem ON DELETE CASCADE. Um destroy({ where: {} })
+  // aqui apagaria a tabela inteira (dado compartilhado entre arquivos de
+  // teste rodando em paralelo contra o mesmo banco), então nunca usar isso.
   await MonsterAbility.destroy({ where: { id_monstro: monstro.id } });
   await power.destroy();
   await monstro.destroy();
