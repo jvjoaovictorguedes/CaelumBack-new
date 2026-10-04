@@ -97,10 +97,9 @@ async function checkForgeAchievements(characterId, transaction) {
 // chamada a partir de um incremento de vitória ranqueada/casual quando
 // esse hook for adicionado (ver relatório final: pendência registrada).
 async function checkPvpAchievements(characterId, transaction) {
-  const [casual, temporadas] = await Promise.all([
-    PvpStatus.findOne({ where: { id_personagem: characterId }, transaction }),
-    CharacterPvpSeason.findAll({ where: { character_id: characterId }, transaction }),
-  ]);
+  // Sequencial, não Promise.all: compartilham a mesma transaction.
+  const casual = await PvpStatus.findOne({ where: { id_personagem: characterId }, transaction });
+  const temporadas = await CharacterPvpSeason.findAll({ where: { character_id: characterId }, transaction });
   const vitoriasRankeadas = temporadas.reduce((soma, t) => soma + (t.vitorias ?? 0), 0);
   const totalVitorias = (casual?.vitorias ?? 0) + vitoriasRankeadas;
   if (totalVitorias >= REQUISITO_VETERANO_DA_ARENA) {

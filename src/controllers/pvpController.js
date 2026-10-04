@@ -325,10 +325,11 @@ async function aplicarResultadoDuelo({ vencedor, perdedor, rodadas }) {
     await registrarProgressoContrato(vencedorTravado, "VencerDuelos", 1, {}, transaction);
     await registrarProgressoMissaoGuilda(vencedorTravado, "VencerDuelos", 1, transaction);
 
-    const [statusVencedor, statusPerdedor] = await Promise.all([
-      garantirStatus(vencedor.id, transaction),
-      garantirStatus(perdedor.id, transaction),
-    ]);
+    // Sequencial, não Promise.all: as duas chamadas compartilham a
+    // mesma transaction (presa a uma única conexão) — mesmo motivo já
+    // corrigido em equipmentBonusService.js/combatConsumablesService.js.
+    const statusVencedor = await garantirStatus(vencedor.id, transaction);
+    const statusPerdedor = await garantirStatus(perdedor.id, transaction);
 
     const novaSequenciaVencedor = statusVencedor.sequencia_vitorias + 1;
     await statusVencedor.update(

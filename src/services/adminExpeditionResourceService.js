@@ -121,10 +121,9 @@ async function atualizarPesoNaRegiao(idRegiao, idRecurso, peso, { idAdmin, req }
   if (!Number.isInteger(peso) || peso < 0) throw erro("peso precisa ser um inteiro >= 0.");
 
   return sequelize.transaction(async (transaction) => {
-    const [regiao, recurso] = await Promise.all([
-      ExpeditionRegion.findByPk(idRegiao, { transaction }),
-      ExpeditionResource.findByPk(idRecurso, { transaction }),
-    ]);
+    // Sequencial, não Promise.all: compartilham a mesma transaction.
+    const regiao = await ExpeditionRegion.findByPk(idRegiao, { transaction });
+    const recurso = await ExpeditionResource.findByPk(idRecurso, { transaction });
     if (!regiao) throw erro("Região de expedição não encontrada.", 404);
     if (!recurso) throw erro("Recurso de expedição não encontrado.", 404);
     if (regiao.profissao !== recurso.profissao) {

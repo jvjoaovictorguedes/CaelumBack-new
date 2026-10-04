@@ -11,10 +11,9 @@ const { HUNT_DIFFICULTIES } = require("../config/huntConfig");
 async function obterMonstrosEZonas(hunts, transaction) {
   const idsMonstro = [...new Set(hunts.map((h) => h?.id_monstro).filter(Boolean))];
   const idsZona = [...new Set(hunts.map((h) => h?.id_zona_referencia).filter(Boolean))];
-  const [monstros, zonas] = await Promise.all([
-    idsMonstro.length ? AdventureMonster.findAll({ where: { id: idsMonstro }, transaction }) : [],
-    idsZona.length ? AdventureZone.findAll({ where: { id: idsZona }, transaction }) : [],
-  ]);
+  // Sequencial, não Promise.all: compartilham a mesma transaction.
+  const monstros = idsMonstro.length ? await AdventureMonster.findAll({ where: { id: idsMonstro }, transaction }) : [];
+  const zonas = idsZona.length ? await AdventureZone.findAll({ where: { id: idsZona }, transaction }) : [];
   return {
     monstroPorId: new Map(monstros.map((m) => [m.id, m])),
     zonaPorId: new Map(zonas.map((z) => [z.id, z])),
