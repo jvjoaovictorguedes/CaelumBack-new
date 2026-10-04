@@ -11,9 +11,31 @@ const MarketTransaction = require("../models/MarketTransaction");
 const CharacterForgeProgress = require("../models/CharacterForgeProgress");
 const CharacterAlchemyProgress = require("../models/CharacterAlchemyProgress");
 const Item = require("../models/Item");
+const WeaponProperties = require("../models/WeaponProperties");
+const ArmorProperties = require("../models/ArmorProperties");
+const ConsumableProperties = require("../models/ConsumableProperties");
+const FishingRodProperties = require("../models/FishingRodProperties");
 const PlayerShopDemand = require("../models/PlayerShopDemand");
 const PlayerShopCommission = require("../models/PlayerShopCommission");
 const alchemyProgressionService = require("./alchemyProgressionService");
+
+// Mesmo bug já documentado em marketController.js (INCLUDE_ITEM_COM_
+// PROPRIEDADES): sem isso, obterPerfilPublico devolvia o item só com
+// nome/descrição — a tela da Loja do Aventureiro não tinha NENHUM dado
+// de atributo pra mostrar no hover do produto (bug relatado: "ao
+// passar o mouse não se pode ver o status do item"), já que os
+// produtos daqui são MarketListing de verdade (mesmo service do
+// Mercado Negro, só filtrado por vendedor).
+const INCLUDE_ITEM_COM_PROPRIEDADES = {
+  model: Item,
+  as: "item",
+  include: [
+    { model: WeaponProperties, as: "weaponProperties" },
+    { model: ArmorProperties, as: "armorProperties" },
+    { model: ConsumableProperties, as: "consumableProperties" },
+    { model: FishingRodProperties, as: "fishingRodProperties" },
+  ],
+};
 
 const NOME_MIN = 3;
 const NOME_MAX = 100;
@@ -73,7 +95,7 @@ async function obterPerfilPublico(characterId) {
     await Promise.all([
       MarketListing.findAll({
         where: { id_personagem_vendedor: characterId, status: "Ativo" },
-        include: [{ model: Item, as: "item" }],
+        include: [INCLUDE_ITEM_COM_PROPRIEDADES],
         order: [["createdAt", "DESC"]],
         limit: 100,
       }),
