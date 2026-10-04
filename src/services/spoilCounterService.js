@@ -122,30 +122,42 @@ async function venderEspolios(idPersonagem, linhasPedido, idempotencyKey, transa
 
   // Fase 1 — valida tudo primeiro (lock nas linhas de inventário
   // envolvidas evita duas vendas concorrentes do mesmo stack, §4.5).
+  // Item/inventário/preferência de TODAS as linhas do pedido em lote
+  // (3 queries no total, nunca 3 por linha — §14 Performance): vender
+  // uma pilha de 15-20 espólios diferentes, comum depois de uma sessão
+  // de caça, antes disparava 45-60 queries sequenciais aqui.
+  const idsItens = linhasPedido.map((l) => l.itemId);
+  const itens = await Item.findAll({ where: { id: idsItens }, transaction });
+  const entradasInventario = await CharacterInventory.findAll({
+    where: { id_personagem: idPersonagem, id_item: idsItens },
+    transaction,
+    lock: transaction.LOCK.UPDATE,
+  });
+  const preferencias = await CharacterSpoilPreference.findAll({
+    where: { id_personagem: idPersonagem, id_item: idsItens },
+    transaction,
+  });
+  const itemPorId = new Map(itens.map((i) => [i.id, i]));
+  const inventarioPorId = new Map(entradasInventario.map((e) => [e.id_item, e]));
+  const preferenciaPorId = new Map(preferencias.map((p) => [p.id_item, p]));
+
   const linhasValidadas = [];
   for (const { itemId, quantidade } of linhasPedido) {
     if (!(quantidade > 0)) {
       throw erroBalcao(400, "Quantidade deve ser maior que zero.");
     }
 
-    const item = await Item.findByPk(itemId, { transaction });
+    const item = itemPorId.get(itemId);
     if (!item || item.tipo_item !== "Espolio" || !(item.valor_venda > 0)) {
       throw erroBalcao(400, `Item ${itemId} não é vendável no Balcão.`);
     }
 
-    const entradaInventario = await CharacterInventory.findOne({
-      where: { id_personagem: idPersonagem, id_item: itemId },
-      transaction,
-      lock: transaction.LOCK.UPDATE,
-    });
+    const entradaInventario = inventarioPorId.get(itemId);
     if (!entradaInventario) {
       throw erroBalcao(400, `Você não possui ${item.nome}.`);
     }
 
-    const preferencia = await CharacterSpoilPreference.findOne({
-      where: { id_personagem: idPersonagem, id_item: itemId },
-      transaction,
-    });
+    const preferencia = preferenciaPorId.get(itemId);
     if (preferencia?.protegido_venda) {
       throw erroBalcao(400, `${item.nome} está protegido contra venda.`);
     }
