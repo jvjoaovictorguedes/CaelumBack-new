@@ -66,6 +66,14 @@ const ATRIBUTOS_VALIDOS = ["Forca", "Vitalidade", "Agilidade", "Inteligencia", "
 const NATUREZAS_MAGICAS_VALIDAS = ["Fogo", "Agua", "Terra", "Ar", "Luz", "Escuridao", "Raio", "Yin&Yang"];
 const TARGETS_VALIDOS = ["Self", "Enemy"];
 const TRIGGERS_SUPORTADOS = ["BASIC_ATTACK_HIT"]; // único suportado pelo motor hoje (§15)
+// IA de Combate PvE & Habilidades de Monstros V1 (§4.1) — até aqui
+// usage_scope só existia no schema (migration 20270119010000), sem
+// nenhum jeito do Admin editar: toda Power nascia e ficava CHARACTER
+// pra sempre, então MonsterAbility nunca tinha uma Power MONSTER/BOTH
+// de verdade pra vincular. Pedido real do admin ("não da pra colocar as
+// habilidades dos monstros") — liberado aqui, mesmo padrão de
+// escala_atributo (campo editável comum, validado contra whitelist).
+const USAGE_SCOPES_VALIDOS = ["CHARACTER", "MONSTER", "BOTH"];
 
 function validarStatusKey(chave) {
   if (!CHAVES_VALIDAS.includes(chave)) {
@@ -74,13 +82,14 @@ function validarStatusKey(chave) {
 }
 
 // ------------------------------------------------------------- CATÁLOGO
-const CAMPOS_POWER = ["nome", "descricao", "tipo_poder", "custo_mana", "dano_base", "cura_base", "cooldown", "escala_atributo", "valor_escala", "imagem_url"];
+const CAMPOS_POWER = ["nome", "descricao", "tipo_poder", "custo_mana", "dano_base", "cura_base", "cooldown", "escala_atributo", "valor_escala", "imagem_url", "usage_scope"];
 
-async function listAdminPowers({ nome, tipo_poder, escala_atributo } = {}) {
+async function listAdminPowers({ nome, tipo_poder, escala_atributo, usage_scope } = {}) {
   const where = {};
   if (nome) where.nome = { [Op.iLike]: `%${nome}%` };
   if (tipo_poder) where.tipo_poder = tipo_poder;
   if (escala_atributo) where.escala_atributo = escala_atributo;
+  if (usage_scope) where.usage_scope = usage_scope;
 
   return Power.findAll({
     where,
@@ -97,6 +106,9 @@ async function createAdminPower(payload, { idAdmin, req }) {
     throw erro(`escala_atributo precisa ser um de: ${ATRIBUTOS_VALIDOS.join(", ")}.`);
   }
   if (!dados.descricao) throw erro("descricao é obrigatória.");
+  if (dados.usage_scope && !USAGE_SCOPES_VALIDOS.includes(dados.usage_scope)) {
+    throw erro(`usage_scope precisa ser um de: ${USAGE_SCOPES_VALIDOS.join(", ")}.`);
+  }
 
   return sequelize.transaction(async (transaction) => {
     const power = await Power.create(dados, { transaction });
@@ -109,6 +121,9 @@ async function updateAdminPower(id, payload, { idAdmin, req }) {
   const dados = somenteCampos(payload, CAMPOS_POWER);
   if (dados.escala_atributo && !ATRIBUTOS_VALIDOS.includes(dados.escala_atributo)) {
     throw erro(`escala_atributo precisa ser um de: ${ATRIBUTOS_VALIDOS.join(", ")}.`);
+  }
+  if (dados.usage_scope && !USAGE_SCOPES_VALIDOS.includes(dados.usage_scope)) {
+    throw erro(`usage_scope precisa ser um de: ${USAGE_SCOPES_VALIDOS.join(", ")}.`);
   }
 
   return sequelize.transaction(async (transaction) => {
