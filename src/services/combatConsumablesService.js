@@ -24,23 +24,33 @@ async function listarConsumiveisDeCombate(characterId, transaction) {
   const idsUnicos = Array.from(new Set(slots.filter((id) => typeof id === "number")));
   if (idsUnicos.length === 0) return [];
 
-  const [inventario, itens, efeitosModernos] = await Promise.all([
-    CharacterInventory.findAll({
-      where: { id_personagem: characterId, id_item: idsUnicos },
-      transaction,
-    }),
-    Item.findAll({
-      where: { id: idsUnicos },
-      include: [{ model: ConsumableProperties, as: "consumableProperties" }],
-      transaction,
-    }),
-    // ConsumableEffect (spec Caldeirão §6.5) — pré-carregado em lote
-    // igual o resto desta função, pra partySocket.js/pvpLiveSocket.js
-    // montarem `acao.efeitosConsumiveisModernos` sem N+1 nenhuma. Um
-    // item com HEAL_HP_*/RESTORE_MANA_* aqui faz duelEngine.js ignorar o
-    // efeito_vida/efeito_mana legado dele (nunca os dois juntos).
-    ConsumableEffect.findAll({ where: { id_item: idsUnicos, ativo: true }, transaction }),
-  ]);
+  // Sequencial, não Promise.all: uma transação do Sequelize fica presa a
+  // UMA conexão só, e essa conexão só processa uma query por vez — rodar
+  // as três "em paralelo" aqui não paraleliza nada de verdade, só
+  // enfileira client.query() na mesma conexão (gera o aviso de
+  // depreciação do pg "client already executing a query", que some em
+  // pg@9). Sem transaction (chamada fora de uma transação em andamento,
+  // caso de pvpLiveSocket.js) elas ainda podem rodar em paralelo — mas
+  // como aqui é só pré-carregar o loadout de consumíveis (poucos itens),
+  // o custo de ir sequencial é desprezível.
+  const inventario = await CharacterInventory.findAll({
+    where: { id_personagem: characterId, id_item: idsUnicos },
+    transaction,
+  });
+  const itens = await Item.findAll({
+    where: { id: idsUnicos },
+    include: [{ model: ConsumableProperties, as: "consumableProperties" }],
+    transaction,
+  });
+  // ConsumableEffect (spec Caldeirão §6.5) — pré-carregado em lote igual
+  // o resto desta função, pra partySocket.js/pvpLiveSocket.js montarem
+  // `acao.efeitosConsumiveisModernos` sem N+1 nenhuma. Um item com
+  // HEAL_HP_*/RESTORE_MANA_* aqui faz duelEngine.js ignorar o
+  // efeito_vida/efeito_mana legado dele (nunca os dois juntos).
+  const efeitosModernos = await ConsumableEffect.findAll({
+    where: { id_item: idsUnicos, ativo: true },
+    transaction,
+  });
 
   const quantidadePorItem = new Map(inventario.map((entrada) => [entrada.id_item, entrada.quantidade]));
   const itemPorId = new Map(itens.map((item) => [item.id, item]));
