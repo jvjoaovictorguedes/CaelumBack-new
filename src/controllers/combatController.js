@@ -318,230 +318,274 @@ exports.statsFinaisDoMonstroPorNivel = statsFinaisDoMonstroPorNivel;
 // já faz nesse mesmo contorno.
 exports.gerarInimigoParaPersonagem = async (req, res) => {
   try {
+    // Lido SEM lock — monta o encontro inteiro (zona, classe, bônus de
+    // equipamento, monstro sorteado, efeitos, habilidades, modificador de
+    // caçada) fora de qualquer transação, pra não segurar o LOCK.UPDATE
+    // do personagem por ~10 queries. O personagem só é travado de novo
+    // mais abaixo, por tempo bem menor (1 leitura + 1 write), exatamente
+    // no instante do check-and-write que precisa ser atômico — o resto
+    // daqui é só leitura, não precisa de exclusão mútua nenhuma (ver
+    // reconfirmação logo antes do save, que cobre a corrida de verdade).
+    const characterSemLock = await Character.findByPk(req.personagemAtual.id);
+    if (!characterSemLock) {
+      return res.status(404).json({
+        message: "Personagem não encontrado.",
+      });
+    }
+
+    // Se já existe um encontro em andamento (não expirado), devolve ELE
+    // — nunca sorteia um novo. Sem essa checagem, chamar GET
+    // /combat/enemy de novo no meio de uma luta ruim descartava o
+    // inimigo atual (com o dano já sofrido) e sorteava outro do zero,
+    // com vida cheia — um reroll de graça pra fugir de um inimigo difícil.
+    const encontroEmAndamentoSemLock = encontroValido(characterSemLock);
+    if (encontroEmAndamentoSemLock) {
+      const { criadoEm, statsPersonagem, ...inimigoAtual } = encontroEmAndamentoSemLock;
+      return res.status(200).json({
+        status: "success",
+        data: { enemy: inimigoAtual },
+      });
+    }
+
+    // §1/§17/§29/§31 da spec do Modo Aventura: combate PvE não pode mais
+    // começar fora de uma Área de Caça — validado aqui no servidor,
+    // nunca só no frontend. Sem sessão ativa, nem chega a sortear
+    // monstro nenhum. Leitura sem transação (não muda com frequência
+    // suficiente pra precisar de consistência forte aqui; revalidada de
+    // qualquer jeito dentro do lock, logo abaixo, antes do write).
+    const sessaoAtivaSemLock = await obterSessaoAtiva(characterSemLock.id);
+    if (!sessaoAtivaSemLock) {
+      return res.status(409).json({
+        message: "Entre em uma Área de Caça antes de procurar uma criatura.",
+      });
+    }
+
+    const zona = sessaoAtivaSemLock.area;
+    const todosVinculosDaZona = await AdventureZoneMonster.findAll({
+      where: { id_area: zona.id, ativo: true },
+      // ativo:true no vínculo não basta — o admin também pode
+      // desativar o MONSTRO em si (MonstersTab "Desativar"), pra
+      // tirá-lo de circulação em toda zona de uma vez sem precisar
+      // desvincular linha por linha. Sem esse `where` aqui, um
+      // monstro desativado continuava sendo sorteado normalmente
+      // (bug reportado: "desativar" não tirava o monstro do jogo).
+      include: [{ model: AdventureMonster, as: "monstro", where: { ativo: true }, required: true }],
+    });
+    if (todosVinculosDaZona.length === 0) {
+      return res.status(500).json({
+        message: "Área de Caça sem monstros configurados.",
+      });
+    }
+    // Reformulação V2 dos Monstros (§4.3) — nivel_jogador_minimo só
+    // decide ELEGIBILIDADE de aparição (jogador abaixo disso nem entra
+    // no pool ponderado); nunca altera o nível/stats do monstro
+    // sorteado, que continuam sempre os mesmos de AdventureMonster.
+    const monstrosDaZona = todosVinculosDaZona.filter((zm) => characterSemLock.nivel >= (zm.nivel_jogador_minimo ?? 1));
+    if (monstrosDaZona.length === 0) {
+      return res.status(500).json({
+        message: "Nenhuma criatura dessa Área de Caça está disponível pro seu nível ainda.",
+      });
+    }
+
+    // Sem `transaction` aqui: buscarBonusDeAtributos roda as 5 queries
+    // internas de verdade em paralelo (conexões separadas do pool), em
+    // vez de enfileiradas numa única conexão travada — só é obrigatório
+    // passar `transaction` quando o chamador precisa ler uma mudança
+    // ainda não commitada na MESMA transação (não é o caso aqui, é
+    // leitura pura antes de qualquer write).
+    const [classe, bonusEquipamento] = await Promise.all([
+      Class.findByPk(characterSemLock.id_classe),
+      buscarBonusDeAtributos(characterSemLock.id),
+    ]);
+    const jogadorEfetivo = comMultiplicadoresDeClasse(
+      personagemComBonus(characterSemLock.toJSON(), bonusEquipamento),
+      classe,
+    );
+
+    // Evolução do Motor de Status §32 (Performance) — captura os
+    // efeitos de status da arma equipada UMA vez, no início do
+    // encontro (mesmo princípio já usado pra dano_min/dano_max da
+    // arma logo abaixo), pra executarTurno nunca consultar o banco a
+    // cada hit. Arma sem nenhuma linha configurada = arma normal
+    // (opt-in, §12.1).
+    const efeitosDaArmaEquipada = jogadorEfetivo.arma_equipada?.id_item
+      ? await WeaponStatusEffect.findAll({
+          where: { id_item: jogadorEfetivo.arma_equipada.id_item, ativo: true },
+        })
+      : [];
+
+    // Escolha de alvo removida (pedido do jogador) — sempre sorteio
+    // ponderado normal da zona (§6/§7), nunca mais "caçar" um monstro
+    // específico.
+    const escolhido = sortearMonstroDaZona(monstrosDaZona);
+
+    // Reformulação V2 dos Monstros (§3/§4.2/§5.1/§5.2) — o snapshot
+    // vem DIRETO do catálogo, sem sortear nível nem aplicar variação
+    // de ±10%: se o Admin salvou vida_maxima=55, o monstro nasce com
+    // exatamente 55. O mesmo id_monstro tem sempre o MESMO nível/
+    // stats em qualquer zona, Party, Caçada ou Bestiário —
+    // sortearNivelMonstro/gerarInimigo (baseados em personagem de
+    // referência) não são mais usados aqui; esses helpers continuam
+    // existindo só pelo Editor de Balanceamento/Simulador legado até
+    // o Contract.
+    const monstro = escolhido.monstro;
+    const inimigo = {
+      nome: monstro.nome,
+      nivel: monstro.nivel,
+      // forca/vitalidade sintéticos (§5.4) — só pra manter o formato
+      // de resposta que a API sempre devolveu; ninguém recalcula o
+      // monstro a partir deles.
+      forca: Math.max(1, Math.round((monstro.dano_min + monstro.dano_max) / 2)),
+      vitalidade: Math.max(1, Math.round(monstro.vida_maxima / 5)),
+      agilidade: monstro.agilidade,
+      velocidade: monstro.velocidade,
+      vida_maxima: monstro.vida_maxima,
+      vida_atual: monstro.vida_maxima,
+      dano_min: monstro.dano_min,
+      dano_max: monstro.dano_max,
+      // Especificação "Admin de Aventura + Defesa/Poder de Monstros"
+      // v3 (§5.3) — mesma regra de mitigação do motor de combate
+      // (aplicarMitigacaoDeDefesa, chamado logo abaixo neste mesmo
+      // arquivo pro dano recebido pelo monstro); `?? 0` cobre monstros
+      // cadastrados antes desta coluna existir sem exigir backfill.
+      defesa: monstro.defesa ?? 0,
+      // §7 — recompensa base é propriedade do monstro, fixa no
+      // cadastro; nunca mais calculada por fórmula de nível na hora
+      // da vitória (ver adventureRewardService.concederRecompensaDeZona).
+      xp_recompensa: monstro.xp_recompensa,
+      ouro_recompensa: monstro.ouro_recompensa,
+    };
+    // imagem_url é a foto estática entregue pro monstro (Bestiário/
+    // Mapa) — também serve de sprite de combate (sprite_key fixo foi
+    // removido, ver AdventureMonster.js). Setado aqui (não só embaixo,
+    // em encontro_pve) porque a resposta deste endpoint usa `inimigo`
+    // direto quando é um encontro NOVO.
+    inimigo.imagem_url = monstro?.imagem_url ?? null;
+
+    // Ideia #3 da fila de melhorias — captura os efeitos de status do
+    // monstro UMA vez, no início do encontro (mesmo princípio já usado
+    // pra armaEquipadaEfeitos do jogador), pra executarTurno nunca
+    // consultar o banco a cada hit. Monstro sem nenhuma linha
+    // configurada = monstro normal (opt-in).
+    const [efeitosDeStatusDoMonstro, habilidadesDoMonstro, modificadorCacada] = await Promise.all([
+      MonsterStatusEffect.findAll({ where: { id_monstro: escolhido.id_monstro, ativo: true } }),
+      // IA de Combate PvE & Habilidades de Monstros V1 (§8.1) — mesmo
+      // princípio de efeitosDeStatus acima: pré-carrega MonsterAbility
+      // UMA vez, no início do encontro. Monstro sem nenhuma ability ativa
+      // = array vazio = combatAiService.chooseAction sempre devolve
+      // "attack" (comportamento 100% legado, ver §12.1).
+      monsterCombatAdapter.construirHabilidadesParaEncontro(escolhido.id_monstro),
+      // Caçadas §6 — compõe um SEGUNDO multiplicador por cima do perfil
+      // normal, só no snapshot deste encontro e só se o alvo sorteado
+      // bater com o alvo da Caçada Ativa do personagem. Nunca faz UPDATE
+      // no AdventureMonster nem afeta outro jogador.
+      resolverModificadorParaEncontro(characterSemLock.id, escolhido.id_monstro),
+    ]);
+    inimigo.efeitosDeStatus = efeitosDeStatusDoMonstro.map((e) => ({
+      status_key: e.status_key,
+      chance_ppm: e.chance_ppm,
+      duration_turns: e.duration_turns,
+      potency_base: e.potency_base,
+      percentual_vida_maxima: e.percentual_vida_maxima,
+      ativo: e.ativo,
+    }));
+    inimigo.habilidades = habilidadesDoMonstro;
+    inimigo.ai_profile = monstro.ai_profile ?? "BASIC";
+
+    if (modificadorCacada) {
+      // §6.1 — a Caçada aplica sobre vida_maxima/dano_min/dano_max do
+      // SNAPSHOT deste encontro; nunca persiste de volta no
+      // AdventureMonster (identidade do monstro continua intacta).
+      inimigo.vida_maxima = Math.round(inimigo.vida_maxima * (1 + modificadorCacada.hpMultiplier));
+      inimigo.vida_atual = inimigo.vida_maxima;
+      inimigo.dano_min = Math.round(inimigo.dano_min * (1 + modificadorCacada.damageMultiplier));
+      inimigo.dano_max = Math.round(inimigo.dano_max * (1 + modificadorCacada.damageMultiplier));
+      inimigo.huntTarget = true;
+      inimigo.huntId = modificadorCacada.huntId;
+      inimigo.huntDifficulty = modificadorCacada.difficulty;
+      inimigo.huntDifficultyLabel = modificadorCacada.difficultyLabel;
+    }
+
+    // Snapshot dos atributos ESTRUTURAIS do personagem no exato momento
+    // em que o encontro começa (força/vitalidade/etc já com bônus de
+    // equipamento, arma equipada, defesa, multiplicadores de classe) —
+    // sem isso, /combat/action recalculava esses valores A CADA TURNO a
+    // partir do equipamento ATUAL, e o inimigo continuava calibrado pro
+    // equipamento de quando foi gerado: trocar pra um equipamento mais
+    // fraco só pra gerar um inimigo fácil e depois voltar ao
+    // equipamento forte pra lutar (ou o inverso) virava trivial. Só HP/
+    // mana atuais continuam vivos/atualizáveis turno a turno — o resto
+    // fica congelado até o encontro terminar (vitória ou derrota).
+    const statsPersonagem = {
+      nivel: characterSemLock.nivel,
+      forca: jogadorEfetivo.forca,
+      vitalidade: jogadorEfetivo.vitalidade,
+      agilidade: jogadorEfetivo.agilidade,
+      inteligencia: jogadorEfetivo.inteligencia,
+      velocidade: jogadorEfetivo.velocidade,
+      defesa: jogadorEfetivo.defesa,
+      arma_equipada: jogadorEfetivo.arma_equipada,
+      armaEquipadaEfeitos: efeitosDaArmaEquipada.map((e) => ({
+        status_key: e.status_key,
+        chance_ppm: e.chance_ppm,
+        duration_turns: e.duration_turns,
+        potency_base: e.potency_base,
+        potency_scale_attribute: e.potency_scale_attribute,
+        potency_scale_value: e.potency_scale_value,
+        percentual_vida_maxima: e.percentual_vida_maxima,
+        trigger: e.trigger,
+        ativo: e.ativo,
+      })),
+      multiplicador_vida_por_nivel: jogadorEfetivo.multiplicador_vida_por_nivel,
+      multiplicador_mana_por_nivel: jogadorEfetivo.multiplicador_mana_por_nivel,
+      multiplicador_dano_fisico: jogadorEfetivo.multiplicador_dano_fisico,
+      multiplicador_dano_magico: jogadorEfetivo.multiplicador_dano_magico,
+    };
+
+    // A partir daqui é que precisa de exclusão mútua de verdade: travar
+    // o personagem (LOCK.UPDATE), reconfirmar que ninguém mais gerou um
+    // encontro NEM mudou de Área de Caça enquanto a leitura acima
+    // (zona/classe/equipamento/monstro/caçada) rodava sem lock, e só
+    // então gravar — mesma garantia de antes, só que o lock agora dura
+    // 1 leitura + 1 write em vez de ~10 queries.
     return await sequelize.transaction(async (transaction) => {
       const character = await Character.findByPk(req.personagemAtual.id, {
         transaction,
         lock: { level: transaction.LOCK.UPDATE, of: Character },
       });
-
       if (!character) {
         return res.status(404).json({
           message: "Personagem não encontrado.",
         });
       }
 
-      // Se já existe um encontro em andamento (não expirado), devolve ELE
-      // — nunca sorteia um novo. Sem essa checagem, chamar GET
-      // /combat/enemy de novo no meio de uma luta ruim descartava o
-      // inimigo atual (com o dano já sofrido) e sorteava outro do zero,
-      // com vida cheia — um reroll de graça pra fugir de um inimigo difícil.
+      // Alguém pode ter gerado (ou terminado) um encontro enquanto a
+      // leitura sem lock acima rodava — devolve ESSE em vez de
+      // sobrescrever (mesma regra de "nunca sorteia um novo" de cima).
       const encontroEmAndamento = encontroValido(character);
       if (encontroEmAndamento) {
-        const { criadoEm, statsPersonagem, ...inimigoAtual } = encontroEmAndamento;
+        const { criadoEm, statsPersonagem: _ignorado, ...inimigoAtual } = encontroEmAndamento;
         return res.status(200).json({
           status: "success",
           data: { enemy: inimigoAtual },
         });
       }
 
-      // §1/§17/§29/§31 da spec do Modo Aventura: combate PvE não pode
-      // mais começar fora de uma Área de Caça — validado aqui no
-      // servidor (dentro da MESMA transação que trava o Character),
-      // nunca só no frontend. Sem sessão ativa, nem chega a sortear
-      // monstro nenhum.
+      // A Área de Caça também pode ter mudado (jogador saiu/entrou em
+      // outra zona) nesse meio-tempo — revalida contra a sessão ATUAL
+      // em vez de confiar na lida sem lock lá em cima.
       const sessaoAtiva = await obterSessaoAtiva(character.id, { transaction });
-      if (!sessaoAtiva) {
+      if (!sessaoAtiva || sessaoAtiva.area.id !== zona.id) {
         return res.status(409).json({
           message: "Entre em uma Área de Caça antes de procurar uma criatura.",
         });
       }
 
-      const zona = sessaoAtiva.area;
-      const todosVinculosDaZona = await AdventureZoneMonster.findAll({
-        where: { id_area: zona.id, ativo: true },
-        // ativo:true no vínculo não basta — o admin também pode
-        // desativar o MONSTRO em si (MonstersTab "Desativar"), pra
-        // tirá-lo de circulação em toda zona de uma vez sem precisar
-        // desvincular linha por linha. Sem esse `where` aqui, um
-        // monstro desativado continuava sendo sorteado normalmente
-        // (bug reportado: "desativar" não tirava o monstro do jogo).
-        include: [{ model: AdventureMonster, as: "monstro", where: { ativo: true }, required: true }],
-        transaction,
-      });
-      if (todosVinculosDaZona.length === 0) {
-        return res.status(500).json({
-          message: "Área de Caça sem monstros configurados.",
-        });
-      }
-      // Reformulação V2 dos Monstros (§4.3) — nivel_jogador_minimo só
-      // decide ELEGIBILIDADE de aparição (jogador abaixo disso nem entra
-      // no pool ponderado); nunca altera o nível/stats do monstro
-      // sorteado, que continuam sempre os mesmos de AdventureMonster.
-      const monstrosDaZona = todosVinculosDaZona.filter((zm) => character.nivel >= (zm.nivel_jogador_minimo ?? 1));
-      if (monstrosDaZona.length === 0) {
-        return res.status(500).json({
-          message: "Nenhuma criatura dessa Área de Caça está disponível pro seu nível ainda.",
-        });
-      }
-
-      const classe = await Class.findByPk(character.id_classe, { transaction });
-      const bonusEquipamento = await buscarBonusDeAtributos(character.id, transaction);
-      const jogadorEfetivo = comMultiplicadoresDeClasse(
-        personagemComBonus(character.toJSON(), bonusEquipamento),
-        classe,
-      );
-
-      // Evolução do Motor de Status §32 (Performance) — captura os
-      // efeitos de status da arma equipada UMA vez, no início do
-      // encontro (mesmo princípio já usado pra dano_min/dano_max da
-      // arma logo abaixo), pra executarTurno nunca consultar o banco a
-      // cada hit. Arma sem nenhuma linha configurada = arma normal
-      // (opt-in, §12.1).
-      const efeitosDaArmaEquipada = jogadorEfetivo.arma_equipada?.id_item
-        ? await WeaponStatusEffect.findAll({
-            where: { id_item: jogadorEfetivo.arma_equipada.id_item, ativo: true },
-            transaction,
-          })
-        : [];
-
       // Aplica a regeneração passiva acumulada antes de calibrar/entrar
       // em combate — sem isso, um jogador que ficou horas offline entrava
       // na luta com a vida/mana velha (baixa), mesmo já tendo regenerado.
-      // Muta `character`/`jogadorEfetivo` em memória; persistido junto
-      // com encontro_pve no save abaixo, que já é obrigatório de
-      // qualquer jeito.
+      // Muta `character` (o mesmo que será salvo abaixo) em memória.
       sincronizarRegeneracaoDeVidaEMana(character, jogadorEfetivo);
-
-      // Escolha de alvo removida (pedido do jogador) — sempre sorteio
-      // ponderado normal da zona (§6/§7), nunca mais "caçar" um monstro
-      // específico.
-      const escolhido = sortearMonstroDaZona(monstrosDaZona);
-
-      // Reformulação V2 dos Monstros (§3/§4.2/§5.1/§5.2) — o snapshot
-      // vem DIRETO do catálogo, sem sortear nível nem aplicar variação
-      // de ±10%: se o Admin salvou vida_maxima=55, o monstro nasce com
-      // exatamente 55. O mesmo id_monstro tem sempre o MESMO nível/
-      // stats em qualquer zona, Party, Caçada ou Bestiário —
-      // sortearNivelMonstro/gerarInimigo (baseados em personagem de
-      // referência) não são mais usados aqui; esses helpers continuam
-      // existindo só pelo Editor de Balanceamento/Simulador legado até
-      // o Contract.
-      const monstro = escolhido.monstro;
-      const inimigo = {
-        nome: monstro.nome,
-        nivel: monstro.nivel,
-        // forca/vitalidade sintéticos (§5.4) — só pra manter o formato
-        // de resposta que a API sempre devolveu; ninguém recalcula o
-        // monstro a partir deles.
-        forca: Math.max(1, Math.round((monstro.dano_min + monstro.dano_max) / 2)),
-        vitalidade: Math.max(1, Math.round(monstro.vida_maxima / 5)),
-        agilidade: monstro.agilidade,
-        velocidade: monstro.velocidade,
-        vida_maxima: monstro.vida_maxima,
-        vida_atual: monstro.vida_maxima,
-        dano_min: monstro.dano_min,
-        dano_max: monstro.dano_max,
-        // Especificação "Admin de Aventura + Defesa/Poder de Monstros"
-        // v3 (§5.3) — mesma regra de mitigação do motor de combate
-        // (aplicarMitigacaoDeDefesa, chamado logo abaixo neste mesmo
-        // arquivo pro dano recebido pelo monstro); `?? 0` cobre monstros
-        // cadastrados antes desta coluna existir sem exigir backfill.
-        defesa: monstro.defesa ?? 0,
-        // §7 — recompensa base é propriedade do monstro, fixa no
-        // cadastro; nunca mais calculada por fórmula de nível na hora
-        // da vitória (ver adventureRewardService.concederRecompensaDeZona).
-        xp_recompensa: monstro.xp_recompensa,
-        ouro_recompensa: monstro.ouro_recompensa,
-      };
-      // imagem_url é a foto estática entregue pro monstro (Bestiário/
-      // Mapa) — também serve de sprite de combate (sprite_key fixo foi
-      // removido, ver AdventureMonster.js). Setado aqui (não só embaixo,
-      // em encontro_pve) porque a resposta deste endpoint usa `inimigo`
-      // direto quando é um encontro NOVO.
-      inimigo.imagem_url = monstro?.imagem_url ?? null;
-
-      // Ideia #3 da fila de melhorias — captura os efeitos de status do
-      // monstro UMA vez, no início do encontro (mesmo princípio já usado
-      // pra armaEquipadaEfeitos do jogador), pra executarTurno nunca
-      // consultar o banco a cada hit. Monstro sem nenhuma linha
-      // configurada = monstro normal (opt-in).
-      const efeitosDeStatusDoMonstro = await MonsterStatusEffect.findAll({
-        where: { id_monstro: escolhido.id_monstro, ativo: true },
-        transaction,
-      });
-      inimigo.efeitosDeStatus = efeitosDeStatusDoMonstro.map((e) => ({
-        status_key: e.status_key,
-        chance_ppm: e.chance_ppm,
-        duration_turns: e.duration_turns,
-        potency_base: e.potency_base,
-        percentual_vida_maxima: e.percentual_vida_maxima,
-        ativo: e.ativo,
-      }));
-
-      // IA de Combate PvE & Habilidades de Monstros V1 (§8.1) — mesmo
-      // princípio de efeitosDeStatus acima: pré-carrega MonsterAbility
-      // UMA vez, no início do encontro. Monstro sem nenhuma ability ativa
-      // = array vazio = combatAiService.chooseAction sempre devolve
-      // "attack" (comportamento 100% legado, ver §12.1).
-      inimigo.habilidades = await monsterCombatAdapter.construirHabilidadesParaEncontro(escolhido.id_monstro, {
-        transaction,
-      });
-      inimigo.ai_profile = monstro.ai_profile ?? "BASIC";
-
-      // Caçadas §6 — compõe um SEGUNDO multiplicador por cima do perfil
-      // normal, só no snapshot deste encontro e só se o alvo sorteado
-      // bater com o alvo da Caçada Ativa do personagem. Nunca faz UPDATE
-      // no AdventureMonster nem afeta outro jogador.
-      const modificadorCacada = await resolverModificadorParaEncontro(character.id, escolhido.id_monstro, transaction);
-      if (modificadorCacada) {
-        // §6.1 — a Caçada aplica sobre vida_maxima/dano_min/dano_max do
-        // SNAPSHOT deste encontro; nunca persiste de volta no
-        // AdventureMonster (identidade do monstro continua intacta).
-        inimigo.vida_maxima = Math.round(inimigo.vida_maxima * (1 + modificadorCacada.hpMultiplier));
-        inimigo.vida_atual = inimigo.vida_maxima;
-        inimigo.dano_min = Math.round(inimigo.dano_min * (1 + modificadorCacada.damageMultiplier));
-        inimigo.dano_max = Math.round(inimigo.dano_max * (1 + modificadorCacada.damageMultiplier));
-        inimigo.huntTarget = true;
-        inimigo.huntId = modificadorCacada.huntId;
-        inimigo.huntDifficulty = modificadorCacada.difficulty;
-        inimigo.huntDifficultyLabel = modificadorCacada.difficultyLabel;
-      }
-
-      // Snapshot dos atributos ESTRUTURAIS do personagem no exato momento
-      // em que o encontro começa (força/vitalidade/etc já com bônus de
-      // equipamento, arma equipada, defesa, multiplicadores de classe) —
-      // sem isso, /combat/action recalculava esses valores A CADA TURNO a
-      // partir do equipamento ATUAL, e o inimigo continuava calibrado pro
-      // equipamento de quando foi gerado: trocar pra um equipamento mais
-      // fraco só pra gerar um inimigo fácil e depois voltar ao
-      // equipamento forte pra lutar (ou o inverso) virava trivial. Só HP/
-      // mana atuais continuam vivos/atualizáveis turno a turno — o resto
-      // fica congelado até o encontro terminar (vitória ou derrota).
-      const statsPersonagem = {
-        nivel: character.nivel,
-        forca: jogadorEfetivo.forca,
-        vitalidade: jogadorEfetivo.vitalidade,
-        agilidade: jogadorEfetivo.agilidade,
-        inteligencia: jogadorEfetivo.inteligencia,
-        velocidade: jogadorEfetivo.velocidade,
-        defesa: jogadorEfetivo.defesa,
-        arma_equipada: jogadorEfetivo.arma_equipada,
-        armaEquipadaEfeitos: efeitosDaArmaEquipada.map((e) => ({
-          status_key: e.status_key,
-          chance_ppm: e.chance_ppm,
-          duration_turns: e.duration_turns,
-          potency_base: e.potency_base,
-          potency_scale_attribute: e.potency_scale_attribute,
-          potency_scale_value: e.potency_scale_value,
-          percentual_vida_maxima: e.percentual_vida_maxima,
-          trigger: e.trigger,
-          ativo: e.ativo,
-        })),
-        multiplicador_vida_por_nivel: jogadorEfetivo.multiplicador_vida_por_nivel,
-        multiplicador_mana_por_nivel: jogadorEfetivo.multiplicador_mana_por_nivel,
-        multiplicador_dano_fisico: jogadorEfetivo.multiplicador_dano_fisico,
-        multiplicador_dano_magico: jogadorEfetivo.multiplicador_dano_magico,
-      };
 
       // Metadados da zona/monstro ficam junto no mesmo JSONB (§28-§30) —
       // é o que executarTurno usa depois pra decidir recompensa/espólio
