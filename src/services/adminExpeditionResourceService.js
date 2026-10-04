@@ -9,9 +9,12 @@ const { sequelize } = require("../config/database");
 const ExpeditionResource = require("../models/ExpeditionResource");
 const ExpeditionRegion = require("../models/ExpeditionRegion");
 const ExpeditionRegionResource = require("../models/ExpeditionRegionResource");
+const ExpeditionResourceItem = require("../models/ExpeditionResourceItem");
+const Item = require("../models/Item");
 const { registrarAcao } = require("./adminAuditService");
 
 const PROFISSOES_VALIDAS = ["Mineracao", "Silvicultura", "Exploracao"];
+const QUALIDADES_VALIDAS = ["Comum", "Incomum", "Raro", "Epico", "Lendario", "Mitico"];
 
 function erro(mensagem, statusCode = 400) {
   const e = new Error(mensagem);
@@ -157,9 +160,63 @@ async function atualizarPesoNaRegiao(idRegiao, idRecurso, peso, { idAdmin, req }
   });
 }
 
+// Pedido do jogador: "colocar mais itens se eu quiser" — cria um
+// ExpeditionResource NOVO (ex.: "Minério de Titânio") já vinculado a um
+// Item real por qualidade (ExpeditionResourceItem), pra virar
+// imediatamente elegível a ser adicionado a regiões via
+// atualizarPesoNaRegiao (que já cria o vínculo sozinho). `itensPorQualidade`
+// é um objeto parcial { Comum: idItem, Raro: idItem, ... } — qualidade
+// omitida simplesmente não ganha vínculo ainda (o admin pode voltar aqui
+// e chamar de novo, ou ajustar depois; nunca obrigatório preencher as 6).
+async function criarRecurso({ profissao, nome, itensPorQualidade }, { idAdmin, req } = {}) {
+  validarProfissao(profissao);
+  if (!nome || !nome.trim()) throw erro("Nome do recurso é obrigatório.");
+
+  const entradas = Object.entries(itensPorQualidade ?? {}).filter(([, idItem]) => idItem != null && idItem !== "");
+  for (const [qualidade] of entradas) {
+    if (!QUALIDADES_VALIDAS.includes(qualidade)) {
+      throw erro(`Qualidade inválida: "${qualidade}". Use uma de: ${QUALIDADES_VALIDAS.join(", ")}.`);
+    }
+  }
+
+  return sequelize.transaction(async (transaction) => {
+    if (entradas.length > 0) {
+      const idsItem = entradas.map(([, idItem]) => Number(idItem));
+      const itensEncontrados = await Item.findAll({ where: { id: idsItem }, transaction });
+      if (itensEncontrados.length !== new Set(idsItem).size) {
+        throw erro("Um ou mais itens selecionados não existem.");
+      }
+    }
+
+    const recurso = await ExpeditionResource.create({ nome: nome.trim(), profissao, ativo: true }, { transaction });
+
+    for (const [qualidade, idItem] of entradas) {
+      await ExpeditionResourceItem.create(
+        { id_recurso: recurso.id, qualidade, id_item: Number(idItem) },
+        { transaction },
+      );
+    }
+
+    await registrarAcao({
+      idAdmin,
+      acao: "criar",
+      entidade: "ExpeditionResource",
+      idEntidade: recurso.id,
+      dadosAntes: null,
+      dadosDepois: { ...recurso.toJSON(), itens_por_qualidade: Object.fromEntries(entradas) },
+      req,
+      transaction,
+    });
+
+    return { id: recurso.id, nome: recurso.nome, profissao: recurso.profissao, ativo: recurso.ativo };
+  });
+}
+
 module.exports = {
   PROFISSOES_VALIDAS,
+  QUALIDADES_VALIDAS,
   listarPorProfissao,
   atualizarAtivoDoRecurso,
   atualizarPesoNaRegiao,
+  criarRecurso,
 };

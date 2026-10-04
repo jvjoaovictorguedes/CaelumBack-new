@@ -797,6 +797,8 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
     rodada: batalha.rodada,
     statusInimigo: snapshotStatus(batalha.inimigo.status),
     statusAliados: snapshotStatusAliados(batalha),
+    combatBuffsInimigo: snapshotCombatBuffs(batalha.inimigo.combatBuffs),
+    combatBuffsAliados: snapshotCombatBuffsAliados(batalha),
   });
 
   if (batalha.inimigo.vida_atual <= 0) {
@@ -921,6 +923,23 @@ function snapshotStatusAliados(batalha) {
   for (const id of batalha.ordem) {
     const membro = batalha.membros.get(id);
     if (membro) mapa[id] = snapshotStatus(membro.status);
+  }
+  return mapa;
+}
+
+// Habilidades V2.0 (item 10) — mesmo princípio de snapshotStatus/
+// snapshotStatusAliados, só que pros buffs/debuffs TEMPORÁRIOS
+// (ConsumableEffect APPLY_COMBAT_BUFF): nunca manda sourceItemId (detalhe
+// de servidor, igual status nunca manda sourceActorId/appliedAtTurn).
+function snapshotCombatBuffs(lista) {
+  return (lista ?? []).map((b) => ({ atributo: b.atributo, valor: b.valor, remainingTurns: b.remainingTurns }));
+}
+
+function snapshotCombatBuffsAliados(batalha) {
+  const mapa = {};
+  for (const id of batalha.ordem) {
+    const membro = batalha.membros.get(id);
+    if (membro) mapa[id] = snapshotCombatBuffs(membro.combatBuffs);
   }
   return mapa;
 }
@@ -1114,6 +1133,8 @@ async function executarTurnoMonstro(io, battleId) {
     rodada: batalha.rodada,
     statusInimigo: snapshotStatus(batalha.inimigo.status),
     statusAliados: snapshotStatusAliados(batalha),
+    combatBuffsInimigo: snapshotCombatBuffs(batalha.inimigo.combatBuffs),
+    combatBuffsAliados: snapshotCombatBuffsAliados(batalha),
   });
 
   const alguemVivo = batalha.ordem.some((id) => batalha.membros.get(id)?.estado.vida_atual > 0);

@@ -21,6 +21,7 @@ router.put("/balance/:group", podeBalancear, adminExpeditionController.atualizar
 // pras 3 profissões — pedido do jogador: "poder escolher que tipos de
 // drops caem na exploração" (vale igual pra Mineração/Silvicultura).
 router.get("/resources", podeBalancear, adminExpeditionController.listarRecursos);
+router.post("/resources", podeBalancear, adminExpeditionController.criarRecurso);
 router.patch("/resources/:idRecurso/active", podeBalancear, adminExpeditionController.atualizarAtivoDoRecurso);
 router.patch(
   "/resources/region/:idRegiao/:idRecurso/weight",
