@@ -74,6 +74,7 @@ async function iniciarJogoDaSerie(io, serieId) {
   const duelo = {
     id: duelId,
     sala,
+    arena: NOME_ARENA_TORNEIO,
     a: lutadorA,
     b: lutadorB,
     turnoDe: primeiro,
@@ -88,7 +89,11 @@ async function iniciarJogoDaSerie(io, serieId) {
     // de desafio).
     combatBuffs: { A: [], B: [] },
     timer: null,
-    torneio: true,
+    // Objeto (nunca só `true`) — além de continuar valendo nos checks de
+    // truthiness existentes (ex.: a varredura de séries travadas abaixo),
+    // é o que monta o campo "torneio" do payload (ver montarPayloadDuelo
+    // em pvpLiveSocket.js), inclusive no resync após F5.
+    torneio: { serieId, round: serie.round, formato: serie.format },
     serieId,
     participantAId: a.id,
     participantBId: b.id,
@@ -104,28 +109,7 @@ async function iniciarJogoDaSerie(io, serieId) {
   socketA?.join(sala);
   socketB?.join(sala);
 
-  io.to(sala).emit("pvp:duelo-iniciado", {
-    duelId,
-    arena: NOME_ARENA_TORNEIO,
-    torneio: { serieId, round: serie.round, formato: serie.format },
-    a: { id: lutadorA.id, nome: lutadorA.nome, genero: lutadorA.genero, classe: lutadorA.classe, chave: "A" },
-    b: { id: lutadorB.id, nome: lutadorB.nome, genero: lutadorB.genero, classe: lutadorB.classe, chave: "B" },
-    vidaMaxA: lutadorA.vidaMax,
-    vidaMaxB: lutadorB.vidaMax,
-    manaMaxA: lutadorA.manaMax,
-    manaMaxB: lutadorB.manaMax,
-    vidaA: lutadorA.estado.vida_atual,
-    vidaB: lutadorB.estado.vida_atual,
-    manaA: lutadorA.estado.mana_atual,
-    manaB: lutadorB.estado.mana_atual,
-    poderesA: pvpLiveSocket.poderesPublicos(lutadorA.poderes),
-    poderesB: pvpLiveSocket.poderesPublicos(lutadorB.poderes),
-    // Consumíveis liberados — mesma regra do casual (§16).
-    consumiveisA: lutadorA.consumiveis,
-    consumiveisB: lutadorB.consumiveis,
-    turnoDe: primeiro,
-    prazoSegundos: pvpLiveSocket.PRAZO_TURNO_MS / 1000,
-  });
+  io.to(sala).emit("pvp:duelo-iniciado", pvpLiveSocket.montarPayloadDuelo(duelo));
 
   pvpLiveSocket.iniciarTimerDeTurno(io, duelId);
   log("jogo:iniciado", { serie: serieId, duelId, a: a.character_id, b: b.character_id });

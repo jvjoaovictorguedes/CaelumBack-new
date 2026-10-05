@@ -178,6 +178,75 @@ function poderesPublicos(poderes) {
   }));
 }
 
+// Criação do duelo E resync (F5/reconexão) usam o MESMO formato de
+// payload, sempre os valores ATUAIS de `duelo` (vida/mana/turno no
+// momento, nunca os iniciais) — nunca duas formas diferentes de
+// descrever o mesmo duelo. Cobre casual e torneio (ambos vivem nos
+// mesmos mapas `duelos`/`duelPorPersonagem`); Ranked tem seu próprio
+// montarPayloadInicio em rankedLiveSocket.js (payload bem diferente:
+// rating/tier/IA) e nunca passa por aqui.
+function montarPayloadDuelo(duelo) {
+  return {
+    duelId: duelo.id,
+    arena: duelo.arena,
+    torneio: duelo.torneio,
+    a: { id: duelo.a.id, nome: duelo.a.nome, genero: duelo.a.genero, classe: duelo.a.classe, chave: "A" },
+    b: { id: duelo.b.id, nome: duelo.b.nome, genero: duelo.b.genero, classe: duelo.b.classe, chave: "B" },
+    vidaMaxA: duelo.a.vidaMax,
+    vidaMaxB: duelo.b.vidaMax,
+    manaMaxA: duelo.a.manaMax,
+    manaMaxB: duelo.b.manaMax,
+    vidaA: duelo.a.estado.vida_atual,
+    vidaB: duelo.b.estado.vida_atual,
+    manaA: duelo.a.estado.mana_atual,
+    manaB: duelo.b.estado.mana_atual,
+    poderesA: poderesPublicos(duelo.a.poderes),
+    poderesB: poderesPublicos(duelo.b.poderes),
+    consumiveisA: duelo.a.consumiveis,
+    consumiveisB: duelo.b.consumiveis,
+    turnoDe: duelo.turnoDe,
+    prazoSegundos: PRAZO_TURNO_MS / 1000,
+  };
+}
+
+// Janela de reconexão genérica pra duelo casual/torneio — MESMO modelo
+// da Arena Ranqueada (JANELA_RECONEXAO_SEGUNDOS em rankedConfig.js),
+// só que local (pvpLiveSocket.js não depende de config de Ranked):
+// desconectar não é mais desistência IMEDIATA, dá tempo de reconectar
+// (F5, queda de rede) antes de declarar desistência de verdade. Ranked
+// continua com seu próprio aoDesconectar/aoReconectar (mensagens e
+// efeitos específicos de rating/IA) — isto aqui é só o default pros
+// outros dois modos, que nunca setam esses hooks.
+const JANELA_RECONEXAO_CASUAL_SEGUNDOS = 30;
+
+function aoDesconectarPadrao(io, duelId, characterId) {
+  const duelo = duelos.get(duelId);
+  if (!duelo) return;
+  const chave = duelo.a.id === Number(characterId) ? "A" : "B";
+
+  duelo.desconexoes = duelo.desconexoes || {};
+  if (duelo.desconexoes[chave]) return; // já tem uma janela rodando pra este lado
+
+  duelo.desconexoes[chave] = setTimeout(() => {
+    finalizarDueloPorDesistencia(io, duelId, characterId);
+  }, JANELA_RECONEXAO_CASUAL_SEGUNDOS * 1000);
+}
+
+function aoReconectarPadrao(io, socket, duelId) {
+  const duelo = duelos.get(duelId);
+  if (!duelo) return;
+
+  const characterId = socket.characterId;
+  const chave = duelo.a.id === Number(characterId) ? "A" : "B";
+  if (duelo.desconexoes?.[chave]) {
+    clearTimeout(duelo.desconexoes[chave]);
+    delete duelo.desconexoes[chave];
+  }
+
+  socket.join(duelo.sala);
+  socket.emit("pvp:duelo-iniciado", montarPayloadDuelo(duelo));
+}
+
 module.exports = function registerPvpLiveHandlers(io) {
   io.on("connection", (socket) => {
     socket.on("identificar", async ({ ticket } = {}, callback) => {
@@ -206,16 +275,24 @@ module.exports = function registerPvpLiveHandlers(io) {
       online.set(chave, socket.id);
       socket.broadcast.emit("pvp:ficou-online", { characterId: chave });
 
-      // Arena Ranqueada (§9 — reconexão): se esse personagem estava numa
-      // partida ranqueada em andamento com uma janela de reconexão aberta
-      // (aoReconectar setado pelo rankedLiveSocket.js na criação do
-      // duelo), avisa o hook pra cancelar o timer de abandono e
-      // ressincronizar o estado com este socket novo. Duelos casuais nunca
-      // setam `aoReconectar`, então isso é um no-op pra eles.
+      // Reconexão (§9 Ranked / bug reportado pra casual e torneio): se
+      // este personagem já está num duelo em andamento, ressincroniza
+      // com o socket novo. Ranqueado tem uma janela de reconexão própria
+      // (aoReconectar setado pelo rankedLiveSocket.js — cancela o timer
+      // de abandono e manda seu próprio payload); casual e torneio (que
+      // nunca setam `aoReconectar`, mas vivem nos MESMOS mapas
+      // `duelos`/`duelPorPersonagem`) caem no else e reaproveitam o
+      // MESMO evento "pvp:duelo-iniciado" que o frontend já escuta — sem
+      // isso, um F5 no meio de um duelo ao vivo deixava a tela em
+      // branco pra sempre (o processo continuava rodando o duelo, só
+      // nada reenviava o estado pro socket novo).
       const duelIdAtivo = duelPorPersonagem.get(chave);
       if (duelIdAtivo) {
         const duelo = duelos.get(duelIdAtivo);
-        duelo?.aoReconectar?.(io, socket, duelIdAtivo);
+        if (duelo) {
+          const aoReconectar = duelo.aoReconectar ?? aoReconectarPadrao;
+          aoReconectar(io, socket, duelIdAtivo);
+        }
       }
 
       // Outros módulos (ex.: partySocket.js — convite de party pendente)
@@ -353,6 +430,7 @@ module.exports = function registerPvpLiveHandlers(io) {
         const duelo = {
           id: duelId,
           sala,
+          arena: NOME_ARENA,
           a: lutadorA,
           b: lutadorB,
           turnoDe: primeiro,
@@ -375,26 +453,7 @@ module.exports = function registerPvpLiveHandlers(io) {
         socketA?.join(sala);
         socketB?.join(sala);
 
-        io.to(sala).emit("pvp:duelo-iniciado", {
-          duelId,
-          arena: NOME_ARENA,
-          a: { id: lutadorA.id, nome: lutadorA.nome, genero: lutadorA.genero, classe: lutadorA.classe, chave: "A" },
-          b: { id: lutadorB.id, nome: lutadorB.nome, genero: lutadorB.genero, classe: lutadorB.classe, chave: "B" },
-          vidaMaxA: lutadorA.vidaMax,
-          vidaMaxB: lutadorB.vidaMax,
-          manaMaxA: lutadorA.manaMax,
-          manaMaxB: lutadorB.manaMax,
-          vidaA: lutadorA.estado.vida_atual,
-          vidaB: lutadorB.estado.vida_atual,
-          manaA: lutadorA.estado.mana_atual,
-          manaB: lutadorB.estado.mana_atual,
-          poderesA: poderesPublicos(lutadorA.poderes),
-          poderesB: poderesPublicos(lutadorB.poderes),
-          consumiveisA: lutadorA.consumiveis,
-          consumiveisB: lutadorB.consumiveis,
-          turnoDe: primeiro,
-          prazoSegundos: PRAZO_TURNO_MS / 1000,
-        });
+        io.to(sala).emit("pvp:duelo-iniciado", montarPayloadDuelo(duelo));
 
         iniciarTimerDeTurno(io, duelId);
       } catch (error) {
@@ -556,15 +615,19 @@ module.exports = function registerPvpLiveHandlers(io) {
 
       const duelId = duelPorPersonagem.get(characterId);
       if (duelId) {
-        // Arena Ranqueada tem janela de reconexão própria (§9) — quando o
-        // duelo é ranked (aoDesconectar setado pelo rankedLiveSocket.js),
-        // a desistência imediata do duelo casual não se aplica.
+        // Bug reportado: duelo casual/torneio desistia IMEDIATAMENTE no
+        // disconnect, sem nenhuma janela — um F5 (que dispara disconnect
+        // antes do navegador recarregar e reconectar) já dava a vitória
+        // pro oponente por desistência antes do jogador conseguir voltar;
+        // o resync em "identificar" (abaixo) nunca chegava a executar
+        // porque o duelo já tinha sido apagado. Arena Ranqueada sempre
+        // teve sua própria janela de reconexão (§9, aoDesconectar
+        // setado pelo rankedLiveSocket.js); agora casual e torneio
+        // (que nunca setam isso) caem no mesmo padrão genérico
+        // (aoDesconectarPadrao), copiando o mesmo modelo.
         const duelo = duelos.get(duelId);
-        if (duelo?.aoDesconectar) {
-          duelo.aoDesconectar(io, duelId, characterId);
-        } else {
-          finalizarDueloPorDesistencia(io, duelId, characterId);
-        }
+        const aoDesconectar = duelo?.aoDesconectar ?? aoDesconectarPadrao;
+        aoDesconectar(io, duelId, characterId);
       }
     });
   });
@@ -838,4 +901,5 @@ module.exports.executarTurno = executarTurno;
 module.exports.finalizarDuelo = finalizarDuelo;
 module.exports.finalizarDueloPorDesistencia = finalizarDueloPorDesistencia;
 module.exports.PRAZO_TURNO_MS = PRAZO_TURNO_MS;
+module.exports.montarPayloadDuelo = montarPayloadDuelo;
 module.exports.MAX_ACOES = MAX_ACOES;
