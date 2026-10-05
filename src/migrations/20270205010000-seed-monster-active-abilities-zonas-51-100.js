@@ -537,9 +537,17 @@ module.exports = {
       for (const monstro of MONSTROS) {
         const linhaMonstro = await encontrarIdMonstro(queryInterface, monstro.nome, transaction);
         if (!linhaMonstro) {
-          throw new Error(
-            `Monstro "${monstro.nome}" não encontrado em AdventureMonsters -- confira o cadastro no Admin (Zonas 51-100) antes de rodar esta migration (nenhum ID foi hardcoded, a resolução é só por nome).`,
+          // Pula só este monstro (não aborta a migration inteira) --
+          // ambientes sem o cadastro completo de Admin (ex.: dev, que
+          // não espelha 1:1 os monstros criados em produção) não devem
+          // travar o boot do servidor por faltar conteúdo que nem é
+          // obrigatório pra app rodar. Em produção, onde os 40 monstros
+          // já existem, isto nunca é atingido -- comportamento idêntico
+          // a antes.
+          console.warn(
+            `[seed-monster-active-abilities-zonas-51-100] Monstro "${monstro.nome}" não encontrado em AdventureMonsters -- pulando (cadastre no Admin pra este ambiente ganhar as habilidades dele).`,
           );
+          continue;
         }
 
         for (const habilidade of monstro.habilidades) {
