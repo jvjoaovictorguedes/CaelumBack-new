@@ -254,7 +254,7 @@ const MONSTROS = [
       { nome: "Punho Rúnico", dano: 63, cooldown: 1, prioridade_base: 8, peso_uso: 3 },
       { nome: "Onda de Pedra", dano: 54, cooldown: 2, prioridade_base: 10, peso_uso: 2, status: { key: "STUN", chance_ppm: 200000, duration_turns: 1, potency_base: 0, percentual_vida_maxima: null } },
       { nome: "Ruptura Rúnica", dano: 77, cooldown: 3, prioridade_base: 14, peso_uso: 2 },
-      { nome: "Colapso Telúrico", dano: 88, cooldown: 4, prioridade_base: 20, peso_uso: 2, condition: { key: "TURN_AT_LEAST", config: {"turn":3}, score_bonus: 15 } },
+      { nome: "Colapso Telúrico do Golem", dano: 88, cooldown: 4, prioridade_base: 20, peso_uso: 2, condition: { key: "TURN_AT_LEAST", config: {"turn":3}, score_bonus: 15 } },
     ],
   },
   {
