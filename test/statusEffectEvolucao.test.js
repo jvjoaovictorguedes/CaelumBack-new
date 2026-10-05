@@ -86,7 +86,7 @@ test("Silence bloqueia só POWER; ataque básico e item continuam liberados", ()
   assert.deepEqual([...bloqueadas], [ACTION_TYPE.POWER]);
 });
 
-test("Freeze/Stun bloqueiam as 3 ações do turno (hard control)", () => {
+test("Freeze/Stun bloqueiam ataque básico e poder, mas liberam ITEM e PASS (hard control nunca deixa o ator sem nenhuma ação)", () => {
   for (const chave of ["FREEZE", "STUN"]) {
     const { bloqueadas, motivoBloqueioTotal } = statusEffectService.resolverAcoesBloqueadasDoTurno(
       [instancia({ key: chave })],
@@ -94,7 +94,8 @@ test("Freeze/Stun bloqueiam as 3 ações do turno (hard control)", () => {
     );
     assert.equal(bloqueadas.has(ACTION_TYPE.BASIC_ATTACK), true, chave);
     assert.equal(bloqueadas.has(ACTION_TYPE.POWER), true, chave);
-    assert.equal(bloqueadas.has(ACTION_TYPE.ITEM), true, chave);
+    assert.equal(bloqueadas.has(ACTION_TYPE.ITEM), false, chave);
+    assert.equal(bloqueadas.has(ACTION_TYPE.PASS), false, chave);
     assert.equal(motivoBloqueioTotal, chave);
   }
 });
