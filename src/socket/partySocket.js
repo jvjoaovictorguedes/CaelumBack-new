@@ -604,38 +604,7 @@ module.exports = function registerPartyHandlers(io) {
         // finalizarBatalha) quando a batalha termina.
         grupo.emBatalha = true;
 
-        io.to(sala).emit("party:batalha-iniciada", {
-          battleId,
-          zona: batalha.zona,
-          inimigo: {
-            nome: inimigo.nome,
-            nivel: inimigo.nivel,
-            vida_atual: inimigo.vida_atual,
-            vida_maxima: inimigo.vida_maxima,
-            imagem_url: inimigo.imagem_url,
-          },
-          membros: membros.map((m) => ({
-            id: m.id,
-            nome: m.nome,
-            genero: m.genero,
-            classe: m.classe,
-            vidaMax: m.vidaMax,
-            manaMax: m.manaMax,
-            vida: m.estado.vida_atual,
-            mana: m.estado.mana_atual,
-            poderes: poderesPublicos(m.poderes),
-            consumiveis: m.consumiveis,
-          })),
-          ordem: batalha.ordem,
-          turnoDe: batalha.ordem[0],
-          prazoSegundos: partyBattleConfig.PRAZO_TURNO_MS / 1000,
-          // Transparência: se a recompensa vai sair reduzida pela
-          // diferença de nível dentro do grupo, o grupo sabe disso ANTES
-          // de lutar, não só ao ver o número final menor em party:batalha-fim.
-          penalidadeDiferencaNivel: penalidadeDiferencaNivel.aplicada
-            ? { multiplicador: penalidadeDiferencaNivel.multiplicador, diferencaNivel: penalidadeDiferencaNivel.diferenca }
-            : null,
-        });
+        io.to(sala).emit("party:batalha-iniciada", montarPayloadBatalha(batalha));
 
         iniciarTimerDeTurnoGrupo(io, battleId);
       } catch (error) {
@@ -693,6 +662,23 @@ module.exports = function registerPartyHandlers(io) {
       }
 
       await executarTurnoAliado(io, battleId, characterId, acao);
+    });
+
+    // Resync após F5/reconexão (bug reportado: luta em grupo continuava
+    // rodando no servidor, mas a tela nunca repovoava sozinha — só
+    // existia o evento de INÍCIO da luta, que dispara uma única vez).
+    // Mesmo princípio de guildboss:entrar (guildBossSocket.js): se este
+    // personagem já está numa batalha de grupo em andamento, reentra na
+    // sala e manda o estado ATUAL (não o inicial) pro socket novo.
+    socket.on("party:entrar-batalha", () => {
+      const characterId = socket.characterId;
+      if (!characterId) return;
+      const battleId = batalhaPorPersonagem.get(characterId);
+      if (!battleId) return;
+      const batalha = batalhas.get(battleId);
+      if (!batalha) return;
+      socket.join(batalha.sala);
+      socket.emit("party:batalha-estado", montarPayloadBatalha(batalha));
     });
 
     socket.on("disconnect", () => {
@@ -874,6 +860,54 @@ function sairDaBatalhaPorDesconexao(io, characterId) {
   if (batalha.fase === "aliados" && batalha.ordem[batalha.turnoIndex] === characterId) {
     avancarTurnoAliado(io, battleId);
   }
+}
+
+// Resync (F5/reconexão) e criação da luta usam o MESMO formato de
+// payload — nunca duas formas diferentes de descrever a mesma luta
+// (mesmo princípio de montarEstadoBatalha em guildBossSocket.js). Usa
+// sempre os valores ATUAIS de `batalha` (vida/mana/turno/rodada no
+// momento), nunca os iniciais.
+function montarPayloadBatalha(batalha) {
+  return {
+    battleId: batalha.id,
+    zona: batalha.zona,
+    inimigo: {
+      nome: batalha.inimigo.nome,
+      nivel: batalha.inimigo.nivel,
+      vida_atual: batalha.inimigo.vida_atual,
+      vida_maxima: batalha.inimigo.vida_maxima,
+      imagem_url: batalha.inimigo.imagem_url,
+    },
+    membros: batalha.ordem.map((id) => {
+      const m = batalha.membros.get(id);
+      return {
+        id: m.id,
+        nome: m.nome,
+        genero: m.genero,
+        classe: m.classe,
+        vidaMax: m.vidaMax,
+        manaMax: m.manaMax,
+        vida: m.estado.vida_atual,
+        mana: m.estado.mana_atual,
+        poderes: poderesPublicos(m.poderes),
+        consumiveis: m.consumiveis,
+      };
+    }),
+    ordem: batalha.ordem,
+    turnoDe: batalha.ordem[batalha.turnoIndex],
+    rodada: batalha.rodada,
+    prazoSegundos: partyBattleConfig.PRAZO_TURNO_MS / 1000,
+    // Transparência: se a recompensa vai sair reduzida pela diferença de
+    // nível dentro do grupo, o grupo sabe disso ANTES de lutar (e
+    // continua sabendo depois de um F5), não só ao ver o número final
+    // menor em party:batalha-fim.
+    penalidadeDiferencaNivel: batalha.penalidadeDiferencaNivel?.aplicada
+      ? {
+          multiplicador: batalha.penalidadeDiferencaNivel.multiplicador,
+          diferencaNivel: batalha.penalidadeDiferencaNivel.diferenca,
+        }
+      : null,
+  };
 }
 
 // Motor de Status — formato mínimo que o frontend precisa pra desenhar

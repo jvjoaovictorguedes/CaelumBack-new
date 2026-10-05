@@ -9,8 +9,8 @@ function tratarErro(res, error, mensagemPadrao) {
 
 exports.listar = async (req, res) => {
   try {
-    const { nome, tipo_poder, escala_atributo } = req.query;
-    const powers = await adminPowerService.listAdminPowers({ nome, tipo_poder, escala_atributo });
+    const { nome, tipo_poder, escala_atributo, usage_scope } = req.query;
+    const powers = await adminPowerService.listAdminPowers({ nome, tipo_poder, escala_atributo, usage_scope });
     res.status(200).json({ status: "success", data: { powers } });
   } catch (error) {
     tratarErro(res, error, "Erro interno do servidor ao listar habilidades.");
