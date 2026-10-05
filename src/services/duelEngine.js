@@ -138,6 +138,14 @@ function aplicarAcao({
     // (resolvida fora daqui, no registry).
     cura = Math.round(efeito.cura * combatModifierService.multiplicadorCuraFeita(modificadoresAtacante));
     critico = Boolean(contextoCritico.critico);
+  } else if (acao.tipo === "pass") {
+    // "Passar o turno" — ação explícita e NUNCA bloqueada por nenhum
+    // status (ACTION_TYPE.PASS não entra em nenhum bloqueiaAcoes do
+    // catálogo), pro atacante sempre ter uma ação disponível mesmo sob
+    // hard control (bug relatado: travava o turno infinitamente quando
+    // Stun/Freeze/Paralyze bloqueava ataque/poder E item). dano/cura
+    // continuam 0 — nenhum efeito além de consumir o turno.
+    nomeAcao = "Passar o turno";
   } else if (acao.tipo === "item" && acao.efeito) {
     // Consumível como ação de duelo — consome o turno igual um ataque ou
     // poder (o oponente ainda age depois) e usa a MESMA fórmula percentual
@@ -391,7 +399,13 @@ async function resolverTurnoComStatus({
   // (inclusive a única rolagem de Paralyze do turno) se o atacante
   // consegue executar o tipo de ação pedido.
   const tipoAcao =
-    acao.tipo === "power" ? ACTION_TYPE.POWER : acao.tipo === "item" ? ACTION_TYPE.ITEM : ACTION_TYPE.BASIC_ATTACK;
+    acao.tipo === "power"
+      ? ACTION_TYPE.POWER
+      : acao.tipo === "item"
+        ? ACTION_TYPE.ITEM
+        : acao.tipo === "pass"
+          ? ACTION_TYPE.PASS
+          : ACTION_TYPE.BASIC_ATTACK;
   const controle = statusEffectService.resolverAcoesBloqueadasDoTurno(listaAtacante, turno);
   listaAtacante = controle.lista;
   if (controle.bloqueadas.has(tipoAcao)) {
@@ -427,6 +441,15 @@ async function resolverTurnoComStatus({
   // Silêncio bloqueia só Power especificamente (ataque básico e item
   // continuam liberados) — já coberto por `controle.bloqueadas` acima,
   // então nenhum check adicional é necessário aqui.
+
+  // "Passar o turno" — ação voluntária, nunca bloqueada (PASS não entra
+  // em nenhum bloqueiaAcoes do catálogo, então nunca cai no bloco
+  // acima). Log explícito aqui porque, diferente de um ataque/poder
+  // normal, não há nenhum dano/cura pro chamador inferir uma frase da
+  // ação a partir de nomeAcao/dano.
+  if (tipoAcao === ACTION_TYPE.PASS) {
+    log.push(`${nomeAtacante} optou por passar o turno.`);
+  }
 
   // 2) Efeitos "Self" configurados no poder usado — aplicam sempre que
   // a Power é de fato usada, dano ou não (não existe "esquivar do

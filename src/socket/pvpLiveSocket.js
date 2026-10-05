@@ -578,6 +578,12 @@ module.exports = function registerPvpLiveHandlers(io) {
         } finally {
           duelo.processandoAcao = false;
         }
+      } else if (tipo === "pass") {
+        // Bug relatado: atordoado/congelado, o jogador não tinha ação
+        // nenhuma disponível e ficava travado no turno infinitamente —
+        // "pass" é sempre liberado (statusEffectConfig.js/duelEngine.js),
+        // pro jogador decidir não usar item nenhum e só passar o turno.
+        acao = { tipo: "pass" };
       }
 
       executarTurno(io, duelId, chave, acao);

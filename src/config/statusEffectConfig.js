@@ -142,16 +142,22 @@ const STATUS = {
     unidadeAlvoV2: UNIDADE.PERCENTUAL_DANO_CAUSADO,
     labelAdminMagnitude: "Redução do dano causado (%)",
   },
-  // Hard control (§4/§5.1) — o ator não executa nenhuma ação; é
-  // removido imediatamente ao receber DANO DIRETO (não DoT, e não pelo
-  // próprio golpe que o aplicou — ver
-  // statusEffectService.removerFreezeAoReceberDanoDireto).
+  // Hard control (§4/§5.1) — o ator não executa nenhuma ação de
+  // combate (ataque/poder); é removido imediatamente ao receber DANO
+  // DIRETO (não DoT, e não pelo próprio golpe que o aplicou — ver
+  // statusEffectService.removerFreezeAoReceberDanoDireto). ITEM fica de
+  // fora do bloqueio de propósito (bug relatado: jogador atordoado/
+  // congelado ficava sem NENHUMA ação disponível, travado no turno
+  // infinitamente — a decisão de usar ou não um consumível pra tentar
+  // sair do status precisa continuar sendo do jogador; ver também
+  // ACTION_TYPE.PASS, sempre liberado, pra quando ele decidir não usar
+  // nada).
   FREEZE: {
     nomeUi: "Congelamento",
     ehDot: false,
     stack: REGRA_STACK.RENEW_MAX_DURATION,
     mitigacao: MITIGACAO.NONE,
-    bloqueiaAcoes: [ACTION_TYPE.BASIC_ATTACK, ACTION_TYPE.POWER, ACTION_TYPE.ITEM],
+    bloqueiaAcoes: [ACTION_TYPE.BASIC_ATTACK, ACTION_TYPE.POWER],
     quebraPorDanoDireto: true,
     unidadeHoje: UNIDADE.SEM_MAGNITUDE,
     unidadeAlvoV2: UNIDADE.SEM_MAGNITUDE,
@@ -164,7 +170,7 @@ const STATUS = {
     ehDot: false,
     stack: REGRA_STACK.RENEW_MAX_DURATION,
     mitigacao: MITIGACAO.NONE,
-    bloqueiaAcoes: [ACTION_TYPE.BASIC_ATTACK, ACTION_TYPE.POWER, ACTION_TYPE.ITEM],
+    bloqueiaAcoes: [ACTION_TYPE.BASIC_ATTACK, ACTION_TYPE.POWER],
     unidadeHoje: UNIDADE.SEM_MAGNITUDE,
     unidadeAlvoV2: UNIDADE.SEM_MAGNITUDE,
     labelAdminMagnitude: null,
@@ -179,7 +185,7 @@ const STATUS = {
     stack: REGRA_STACK.MAX_INTENSITY,
     mitigacao: MITIGACAO.NONE,
     controleProbabilistico: true,
-    bloqueiaAcoes: [ACTION_TYPE.BASIC_ATTACK, ACTION_TYPE.POWER, ACTION_TYPE.ITEM],
+    bloqueiaAcoes: [ACTION_TYPE.BASIC_ATTACK, ACTION_TYPE.POWER],
     unidadeHoje: UNIDADE.PERCENTUAL_CHANCE,
     unidadeAlvoV2: UNIDADE.PERCENTUAL_CHANCE,
     labelAdminMagnitude: "Chance de perder a ação (%)",

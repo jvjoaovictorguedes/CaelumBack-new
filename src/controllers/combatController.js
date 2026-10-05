@@ -777,11 +777,41 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       combatTurn,
     );
     statusEffects.player = controleDoTurnoJogador.lista;
-    const jogadorBloqueadoNesteTurno = controleDoTurnoJogador.bloqueadas.has(ACTION_TYPE.BASIC_ATTACK);
+
+    // Bug relatado: atordoado/congelado, o jogador não tinha NENHUMA
+    // ação disponível (ITEM também bloqueado) e ficava travado no turno
+    // infinitamente — a tela nunca tinha nada clicável pra mandar o
+    // request que já resolveria o turno sem deadlock. ACTION_TYPE.ITEM
+    // não é mais bloqueado por hard control (statusEffectConfig.js) e
+    // "pass" é uma ação explícita, sempre liberada, pro jogador decidir
+    // não gastar um consumível e simplesmente passar o turno. O check
+    // de bloqueio agora é POR TIPO de ação pedida (igual duelEngine já
+    // fazia), não mais fixo em BASIC_ATTACK — assim um pedido de ITEM
+    // nunca é descartado só porque o ataque básico está bloqueado.
+    const tipoAcaoSolicitadaJogador =
+      action.type === "power"
+        ? ACTION_TYPE.POWER
+        : action.type === "item"
+          ? ACTION_TYPE.ITEM
+          : action.type === "pass"
+            ? ACTION_TYPE.PASS
+            : ACTION_TYPE.BASIC_ATTACK;
+    const jogadorPassouTurno = tipoAcaoSolicitadaJogador === ACTION_TYPE.PASS;
+    // Só o hard control (motivoBloqueioTotal setado) consome o turno
+    // sozinho aqui — Silence bloqueando Power sem hard control junto
+    // continua caindo no check explícito de bloqueiaHabilidadesAtivas
+    // mais abaixo (que devolve um 403 com mensagem própria), nunca
+    // passa por aqui (motivoBloqueioTotal é null nesse caso).
+    const jogadorBloqueadoNesteTurno =
+      !jogadorPassouTurno &&
+      Boolean(controleDoTurnoJogador.motivoBloqueioTotal) &&
+      controleDoTurnoJogador.bloqueadas.has(tipoAcaoSolicitadaJogador);
     if (jogadorBloqueadoNesteTurno) {
       log.push(
         `Você está ${definicaoDoStatus(controleDoTurnoJogador.motivoBloqueioTotal).nomeUi} e não conseguiu agir neste turno!`,
       );
+    } else if (jogadorPassouTurno) {
+      log.push("Você optou por passar o turno.");
     }
 
     let poderUsado = null;
@@ -819,7 +849,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     const statusTickEventsJogador = [];
     const statusTickEventsInimigo = [];
 
-    if (!jogadorBloqueadoNesteTurno) {
+    if (!jogadorBloqueadoNesteTurno && !jogadorPassouTurno) {
 
     if (action.type === "power") {
       // Silêncio bloqueia habilidades ativas, não o ataque básico nem
@@ -1261,7 +1291,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         }
       }
     }
-    } // fecha `if (!jogadorBloqueadoNesteTurno)`
+    } // fecha `if (!jogadorBloqueadoNesteTurno && !jogadorPassouTurno)`
 
     // Fim do turno do JOGADOR (§23 passos 8/9, parte cooldown) — só o
     // cooldown decrementa aqui; a duração de status do jogador decrementa
