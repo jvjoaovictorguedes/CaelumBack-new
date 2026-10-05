@@ -325,7 +325,7 @@ const MONSTROS = [
     habilidades: [
       { nome: "Projétil Arcano", dano: 245, cooldown: 1, prioridade_base: 8, peso_uso: 3 },
       { nome: "Selo Sem-Rosto", dano: 215, cooldown: 2, prioridade_base: 10, peso_uso: 2, status: { key: "SILENCE", chance_ppm: 400000, duration_turns: 1, potency_base: 0, percentual_vida_maxima: null } },
-      { nome: "Colapso Astral", dano: 300, cooldown: 3, prioridade_base: 14, peso_uso: 2 },
+      { nome: "Colapso Astral do Arquimago", dano: 300, cooldown: 3, prioridade_base: 14, peso_uso: 2 },
       { nome: "Horizonte Proibido", dano: 355, cooldown: 4, prioridade_base: 20, peso_uso: 2, status: { key: "BLIND", chance_ppm: 400000, duration_turns: 2, potency_base: 12, percentual_vida_maxima: null }, condition: { key: "TARGET_HP_BELOW_PCT", config: { thresholdPct: 40 }, score_bonus: 15 } },
     ],
   },
