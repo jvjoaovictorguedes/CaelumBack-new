@@ -180,7 +180,7 @@ function poderesPublicos(poderes) {
 
 module.exports = function registerPvpLiveHandlers(io) {
   io.on("connection", (socket) => {
-    socket.on("identificar", async ({ ticket } = {}) => {
+    socket.on("identificar", async ({ ticket } = {}, callback) => {
       // O characterId nunca vem do cliente — só do ticket de curta
       // duração emitido via GET /api/users/socket-ticket (autenticado
       // por JWT), senão qualquer socket conectado conseguia agir como
@@ -224,9 +224,17 @@ module.exports = function registerPvpLiveHandlers(io) {
       // (diferente do aoReconectar acima), porque não há "um objeto"
       // pra pendurar a função — é um evento genérico de "esta conexão é
       // este personagem agora".
-      for (const callback of aoIdentificarCallbacks) {
-        callback(io, socket, chave);
+      for (const cb of aoIdentificarCallbacks) {
+        cb(io, socket, chave);
       }
+
+      // Ack opcional (bug reportado: resync de Party/Duelo após F5 corria
+      // numa race com este handler sendo async — `socket.characterId`
+      // podia ainda não estar setado quando o cliente emitia o evento de
+      // resync em seguida). Quem precisa de ordem garantida espera este
+      // callback antes de emitir o próximo evento; `identificar` continua
+      // funcionando sem passar nenhum (cliente antigo, ou nenhum callback).
+      if (typeof callback === "function") callback();
     });
 
     socket.on("pvp:listar-online", (_payload, callback) => {
