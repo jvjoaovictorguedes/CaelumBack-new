@@ -36,49 +36,54 @@ function bonusZerado() {
 // rodaria numa conexão separada e não enxergaria a alteração ainda não
 // commitada).
 async function buscarBonusDeAtributos(idPersonagem, transaction) {
-  const [equipamentos, passivasAtivas, setState, bonusEvolucaoClasse, bonusEfeitosEvolucao] = await Promise.all([
-    CharacterEquipment.findAll({
-      where: { id_personagem: idPersonagem },
-      include: [
-        {
-          model: Item,
-          as: "item",
-          include: [
-            { model: WeaponProperties, as: "weaponProperties" },
-            { model: ArmorProperties, as: "armorProperties" },
-            { model: ItemRarityAttributeOverride, as: "raridadeOverrides" },
-          ],
-        },
-        // Inventário v2 (§6/§7) — id_instancia é null pra equipamento
-        // legado (refinamento 0 durante a migração, comportamento
-        // idêntico a antes); quando setado, é dali que vem o
-        // refinamento de verdade que escala as propriedades abaixo.
-        { model: CharacterEquipmentInstance, as: "instancia" },
-      ],
-      transaction,
-    }),
-    // Sem include (evita depender da associação CharacterAbilities<->Power
-    // já ter sido registrada por outro require) — busca as habilidades
-    // ativas e resolve o Power de cada uma à parte.
-    CharacterAbilities.findAll({
-      where: { id_personagem: idPersonagem, is_active: true },
-      transaction,
-    }),
-    // Sistema de Conjuntos de Equipamentos — contagem/thresholds/soma de
-    // stats já resolvidos por equipmentSetService (fonte única, nunca
-    // recalculado aqui); roda em paralelo por fazer sua própria query
-    // independente de CharacterEquipment.
-    resolverConjuntosEquipados(idPersonagem, transaction),
-    // Classes V2 §7 — bônus de evolução de classe, resolvido sob demanda
-    // igual equipamento/passivas/sets (ver classEvolutionBonusService.js
-    // pro motivo de nunca materializar isso em Character).
-    resolverBonusDeEvolucaoDeClasse(idPersonagem, transaction),
-    // Classes V2 §10 — efeitos mecânicos de evolução (hoje só
-    // DAMAGE_REDUCTION, ver classEvolutionEffectService.js pro motivo
-    // do catálogo fechado). Mesma filosofia de sob-demanda, mesma
-    // exclusão de backfill legado.
-    resolverBonusDeEfeitosDeEvolucao(idPersonagem, transaction),
-  ]);
+  // Sequencial, não Promise.all: com `transaction` setado, essas cinco
+  // chamadas disputariam a MESMA conexão presa à transação (uma conexão
+  // só processa uma query por vez) — "paralelizar" aqui só enfileirava
+  // client.query() na mesma conexão (aviso de depreciação do pg "client
+  // already executing a query", removido em pg@9) sem ganhar velocidade
+  // nenhuma de verdade. Essa função roda em TODO ataque/uso de poder do
+  // combate PvE (combatController.js chama com `transaction`), então o
+  // enfileiramento inválido acontecia a cada ação de combate do jogo.
+  const equipamentos = await CharacterEquipment.findAll({
+    where: { id_personagem: idPersonagem },
+    include: [
+      {
+        model: Item,
+        as: "item",
+        include: [
+          { model: WeaponProperties, as: "weaponProperties" },
+          { model: ArmorProperties, as: "armorProperties" },
+          { model: ItemRarityAttributeOverride, as: "raridadeOverrides" },
+        ],
+      },
+      // Inventário v2 (§6/§7) — id_instancia é null pra equipamento
+      // legado (refinamento 0 durante a migração, comportamento
+      // idêntico a antes); quando setado, é dali que vem o
+      // refinamento de verdade que escala as propriedades abaixo.
+      { model: CharacterEquipmentInstance, as: "instancia" },
+    ],
+    transaction,
+  });
+  // Sem include (evita depender da associação CharacterAbilities<->Power
+  // já ter sido registrada por outro require) — busca as habilidades
+  // ativas e resolve o Power de cada uma à parte.
+  const passivasAtivas = await CharacterAbilities.findAll({
+    where: { id_personagem: idPersonagem, is_active: true },
+    transaction,
+  });
+  // Sistema de Conjuntos de Equipamentos — contagem/thresholds/soma de
+  // stats já resolvidos por equipmentSetService (fonte única, nunca
+  // recalculado aqui).
+  const setState = await resolverConjuntosEquipados(idPersonagem, transaction);
+  // Classes V2 §7 — bônus de evolução de classe, resolvido sob demanda
+  // igual equipamento/passivas/sets (ver classEvolutionBonusService.js
+  // pro motivo de nunca materializar isso em Character).
+  const bonusEvolucaoClasse = await resolverBonusDeEvolucaoDeClasse(idPersonagem, transaction);
+  // Classes V2 §10 — efeitos mecânicos de evolução (hoje só
+  // DAMAGE_REDUCTION, ver classEvolutionEffectService.js pro motivo do
+  // catálogo fechado). Mesma filosofia de sob-demanda, mesma exclusão de
+  // backfill legado.
+  const bonusEfeitosEvolucao = await resolverBonusDeEfeitosDeEvolucao(idPersonagem, transaction);
 
   const bonus = bonusZerado();
   let arma = null;

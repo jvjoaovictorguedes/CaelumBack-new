@@ -18,10 +18,12 @@ async function obterCacadaAtiva(idPersonagem, transaction) {
 // GET /hunt — garante a oferta da janela atual (gera se preciso) e
 // devolve junto a Caçada Ativa, se existir.
 async function obterEstado(idPersonagem, transaction) {
-  const [oferta, ativa] = await Promise.all([
-    garantirOfertaAtual(idPersonagem, transaction),
-    obterCacadaAtiva(idPersonagem, transaction),
-  ]);
+  // Sequencial, não Promise.all: com `transaction` setada, as duas
+  // compartilhariam a mesma conexão (mesmo motivo já corrigido em
+  // equipmentBonusService.js). Sem transaction (chamada solta de fora
+  // de uma transação em andamento), ainda funcionam normalmente.
+  const oferta = await garantirOfertaAtual(idPersonagem, transaction);
+  const ativa = await obterCacadaAtiva(idPersonagem, transaction);
   return { oferta, ativa };
 }
 
