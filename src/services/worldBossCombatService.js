@@ -108,13 +108,18 @@ function montarResultadoSemAcao({
   manaMax,
   bloqueado = false,
   motivoBloqueio,
+  // "Passar o turno" (bug relatado: hard control sem nenhuma ação
+  // disponível travava o jogador infinitamente) — voluntário, nunca
+  // junto com bloqueado=true (são caminhos mutuamente exclusivos de
+  // quem chama).
+  passou = false,
   actionSeq,
   cooldowns = {},
   proximaAcaoJogadorEmMs = 0,
 }) {
   const hpAtual = Math.max(0, Number(evento.hp_current));
   return {
-    nomeAcao: null,
+    nomeAcao: passou ? "Passar o turno" : null,
     dano: 0,
     esquivou: false,
     cura: 0,
@@ -122,6 +127,7 @@ function montarResultadoSemAcao({
     golpeFinal: false,
     proezasConquistadas: [],
     bloqueado,
+    passou,
     motivoBloqueio: bloqueado ? motivoBloqueio : undefined,
     action_seq: actionSeq,
     cooldowns,
@@ -351,9 +357,40 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
     const controleJogador = statusEffectService.resolverAcoesBloqueadasDoTurno(listaJogador, turnoJogador);
     listaJogador = controleJogador.lista;
 
-    if (tipo !== "attack" && tipo !== "power") {
-      throw erro("Ação inválida — só ataque básico ou poder valem contra a Ameaça Mundial.");
+    if (tipo !== "attack" && tipo !== "power" && tipo !== "pass") {
+      throw erro("Ação inválida — só ataque básico, poder ou passar o turno valem contra a Ameaça Mundial.");
     }
+
+    // "Passar o turno" — ação voluntária, sempre liberada (nunca entra
+    // em `bloqueadas`, ver statusEffectConfig.js), pro jogador sempre
+    // ter uma ação disponível pra consumir o turno mesmo sob hard
+    // control (bug relatado: travava o turno infinitamente quando
+    // Stun/Freeze/Paralyze bloqueava ataque e poder, os únicos dois
+    // tipos de ação que existem contra a Ameaça Mundial — não há item
+    // aqui, então "pass" é a única alternativa quando o jogador não
+    // quer/não pode agir).
+    if (tipo === "pass") {
+      await personagem.save({ transaction });
+      cooldownsJogador = cooldownService.decrementarCooldowns(cooldownsJogador);
+      sessao.state = {
+        ...(sessao.state ?? {}),
+        status: statusEffectService.decrementarDuracoes(listaJogador),
+        cooldowns: cooldownsJogador,
+        ultima_acao_jogador_em: Date.now(),
+      };
+      await sessao.save({ transaction });
+      return montarResultadoSemAcao({
+        evento,
+        personagem,
+        vidaMax,
+        manaMax,
+        passou: true,
+        actionSeq: sessao.action_seq,
+        cooldowns: cooldownsJogador,
+        proximaAcaoJogadorEmMs: cooldownAcaoMs,
+      });
+    }
+
     const tipoAcaoStatus = tipo === "power" ? ACTION_TYPE.POWER : ACTION_TYPE.BASIC_ATTACK;
 
     if (controleJogador.bloqueadas.has(tipoAcaoStatus)) {
