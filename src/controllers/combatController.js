@@ -1,3 +1,4 @@
+const { calcularDanoBasico, calcularEfeitoPoder } = require("../services/combatActionEngine");
 // src/controllers/combatController.js
 //
 // Motor de combate por turnos (PvE).
@@ -19,9 +20,7 @@ const ConsumableProperties = require("../models/ConsumableProperties");
 const consumableEffectService = require("../services/consumableEffectService");
 const { adicionarExperiencia } = require("../services/experienceService");
 const {
-  calcularDanoBasico,
   aplicarMitigacaoDeDefesa,
-  calcularEfeitoPoder,
   custoManaEfetivo,
   chanceDeEsquiva,
   resolverResultadoDeAcerto,
