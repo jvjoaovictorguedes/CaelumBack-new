@@ -12,7 +12,7 @@ const { aplicarAcao } = require("../src/services/duelEngine");
 
 test("resolverGatilhosDoPersonagem: personagem sem id devolve Map vazio por trigger (nunca quebra)", async () => {
   const resultado = await combatModifierService.resolverGatilhosDoPersonagem(null, "PVP_CASUAL");
-  assert.deepEqual([...resultado.keys()].sort(), ["ON_HIT", "ON_KILL"]);
+  assert.deepEqual([...resultado.keys()].sort(), require("../src/services/combatModifierService").TRIGGERS_REATIVOS_SUPORTADOS.toSorted());
   assert.equal(resultado.get("ON_HIT").length, 0);
   assert.equal(resultado.get("ON_KILL").length, 0);
 });

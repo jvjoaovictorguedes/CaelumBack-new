@@ -26,6 +26,7 @@ const {
 } = require("./consumableEffectRegistry");
 const combatBuffService = require("./combatBuffService");
 const combatModifierService = require("./combatModifierService");
+const powerRuntime = require("./powerCombatRuntime");
 
 // Habilidades V2.0 §7/§9/§26 (Fase 5) — combina a resistência a status
 // do buff temporário (Caldeirão §13) com STATUS_RESISTANCE_PCT passivo
@@ -103,7 +104,38 @@ function aplicarAcao({
   // Map vazio default = nenhum proc, comportamento idêntico a antes pra
   // quem ainda não resolveu gatilhos.
   gatilhosAtacante = new Map(),
+  gatilhosDefensor = new Map(),
+  vidaMaxDefensor,
+  manaMaxDefensor,
+  runtime = null,
+  contexto = "PVP_CASUAL",
 }) {
+  const ownsRuntime = !runtime;
+  runtime ??= [
+    powerRuntime.participant(atacante, { key: atacante.id ?? "A", team: atacante.id ?? "A", triggers: gatilhosAtacante,
+      modifiers: modificadoresAtacante, hpMax: vidaMaxAtacante ?? atacante.vida_atual,
+      mpMax: manaMaxAtacante ?? atacante.mana_atual, shield: escudoAtacante }),
+    powerRuntime.participant(defensor, { key: defensor.id ?? "B", team: defensor.id ?? "B", triggers: gatilhosDefensor,
+      modifiers: modificadoresDefensor, hpMax: vidaMaxDefensor ?? defensor.vida_atual,
+      mpMax: manaMaxDefensor ?? defensor.mana_atual, shield: escudoDefensor }),
+  ];
+  const [source, target] = runtime;
+  if (ownsRuntime) powerRuntime.begin(source, target, runtime);
+  if (acao.tipo === "power" && acao.power) {
+    const custo = Math.round(custoManaEfetivo(acao.power, acao.power.nivel_habilidade ?? 1) *
+      combatModifierService.multiplicadorCustoMana(powerRuntime.effective(source)));
+    atacante.mana_atual = Math.max(0, atacante.mana_atual - custo);
+    powerRuntime.emit("ON_CAST", source, target, runtime);
+  }
+  const beforeModifiers = combatModifierService.multiplicadorDanoSaida(modificadoresAtacante);
+  modificadoresAtacante = powerRuntime.effective(source);
+  modificadoresDefensor = powerRuntime.effective(target);
+  // Caller already includes passive damage. Only apply the reactive delta here.
+  multiplicadorDano *= beforeModifiers === 0 ? 1 :
+    combatModifierService.multiplicadorDanoSaida(modificadoresAtacante) / beforeModifiers;
+  escudoAtacante = source.shield;
+  escudoDefensor = target.shield;
+  const vidaAtacanteAntes = atacante.vida_atual;
   let dano = 0;
   let cura = 0;
   let manaCurada = 0;
@@ -129,14 +161,13 @@ function aplicarAcao({
   if (acao.tipo === "power" && acao.power) {
     const nivelHabilidade = acao.power.nivel_habilidade ?? 1;
     nomeAcao = acao.power.nome;
-    atacante.mana_atual -= custoManaEfetivo(acao.power, nivelHabilidade);
     const contextoCritico = {};
     const efeito = calcularEfeitoPoder(acao.power, atacante, nivelHabilidade, contextoCritico, modificadoresAtacante);
     dano = Math.round(efeito.dano * multiplicadorDano);
     // HEALING_DONE_PCT passivo (Habilidades V2.0 §8/§15) — mesmo ponto
     // de combatController.js (PvE): só a cura de Power, nunca a de item
     // (resolvida fora daqui, no registry).
-    cura = Math.round(efeito.cura * combatModifierService.multiplicadorCuraFeita(modificadoresAtacante));
+    cura = Math.round(efeito.cura * combatModifierService.multiplicadorCuraFeita(modificadoresAtacante) * combatModifierService.multiplicadorCuraRecebida(modificadoresAtacante));
     critico = Boolean(contextoCritico.critico);
   } else if (acao.tipo === "pass") {
     // "Passar o turno" — ação explícita e NUNCA bloqueada por nenhum
@@ -272,29 +303,6 @@ function aplicarAcao({
       atacante.vida_atual = Math.min(tetoLifesteal, atacante.vida_atual + curaPorRoubo);
     }
 
-    // Habilidades V2.0 (item 7) — gatilhos reativos do ATACANTE: ON_HIT
-    // em todo golpe que reduziu Vida de verdade, ON_KILL só quando esse
-    // MESMO golpe derrubou a Vida do defensor a 0 (nunca um "kill" sobre
-    // um alvo que já estava morto antes deste golpe).
-    const procOnHit = combatModifierService.processarGatilho(gatilhosAtacante.get("ON_HIT") ?? []);
-    const regenOnHit = combatModifierService.regenInstantanea(procOnHit, vidaMaxAtacante ?? atacante.vida_atual, manaMaxAtacante ?? atacante.mana_atual);
-    if (regenOnHit.vida > 0) {
-      atacante.vida_atual = Math.min(vidaMaxAtacante ?? atacante.vida_atual + regenOnHit.vida, atacante.vida_atual + regenOnHit.vida);
-    }
-    if (regenOnHit.mana > 0) {
-      atacante.mana_atual = Math.min(manaMaxAtacante ?? atacante.mana_atual + regenOnHit.mana, atacante.mana_atual + regenOnHit.mana);
-    }
-
-    if (defensor.vida_atual <= 0 && vidaDefensorAntes > 0) {
-      const procOnKill = combatModifierService.processarGatilho(gatilhosAtacante.get("ON_KILL") ?? []);
-      const regenOnKill = combatModifierService.regenInstantanea(procOnKill, vidaMaxAtacante ?? atacante.vida_atual, manaMaxAtacante ?? atacante.mana_atual);
-      if (regenOnKill.vida > 0) {
-        atacante.vida_atual = Math.min(vidaMaxAtacante ?? atacante.vida_atual + regenOnKill.vida, atacante.vida_atual + regenOnKill.vida);
-      }
-      if (regenOnKill.mana > 0) {
-        atacante.mana_atual = Math.min(manaMaxAtacante ?? atacante.mana_atual + regenOnKill.mana, atacante.mana_atual + regenOnKill.mana);
-      }
-    }
   }
 
   // Mesmo critério do PvE (combatController.js): um poder com dano E
@@ -312,6 +320,18 @@ function aplicarAcao({
     atacante.mana_atual = Math.min(tetoMana, atacante.mana_atual + manaCurada);
   }
 
+  const curouNaAcao = atacante.vida_atual > vidaAtacanteAntes;
+  source.shield = novoEscudoAtacante;
+  target.shield = novoEscudoDefensor;
+  if (!esquivou && (dano > 0 || acao.tipo === "attack")) {
+    powerRuntime.emit("ON_HIT", source, target, runtime);
+    if (critico) powerRuntime.emit("ON_CRIT", source, target, runtime);
+  }
+  if (danoEfetivoNaVida > 0) powerRuntime.emit("ON_DAMAGE_TAKEN", target, source, runtime);
+  if (motivoEsquiva === "DODGE") powerRuntime.emit("ON_DODGE", target, source, runtime);
+  if (vidaDefensorAntes > 0 && defensor.vida_atual <= 0) powerRuntime.emit("ON_KILL", source, target, runtime);
+  if (curouNaAcao) powerRuntime.emit("ON_HEAL", source, target, runtime);
+  if (ownsRuntime) powerRuntime.end(source, target, runtime);
   return {
     nomeAcao,
     dano,
@@ -321,8 +341,8 @@ function aplicarAcao({
     motivoEsquiva,
     critico,
     novosBuffsAtacante,
-    novoEscudoAtacante,
-    novoEscudoDefensor,
+    novoEscudoAtacante: source.shield,
+    novoEscudoDefensor: target.shield,
   };
 }
 
@@ -390,10 +410,27 @@ async function resolverTurnoComStatus({
   // resolvido uma vez por turno por quem chama
   // (combatModifierService.resolverGatilhosDoPersonagem).
   gatilhosAtacante = new Map(),
+  gatilhosDefensor = new Map(),
+  vidaMaxDefensor,
+  manaMaxDefensor,
+  runtime = null,
+  contexto = "PVP_CASUAL",
 }) {
   const log = [];
   let listaAtacante = statusAtacante;
   let listaDefensor = statusDefensor;
+  runtime ??= [
+    powerRuntime.participant(atacante, { key: atacante.id ?? casterActorId, team: atacante.id ?? casterActorId, triggers: gatilhosAtacante,
+      modifiers: modificadoresAtacante, hpMax: vidaMaxAtacante ?? atacante.vida_atual,
+      mpMax: manaMaxAtacante ?? atacante.mana_atual, status: listaAtacante ?? [], shield: escudoAtacante }),
+    powerRuntime.participant(defensor, { key: defensor.id ?? "defender", team: defensor.id ?? "defender", triggers: gatilhosDefensor,
+      modifiers: modificadoresDefensor, hpMax: vidaMaxDefensor ?? defensor.vida_atual,
+      mpMax: manaMaxDefensor ?? defensor.mana_atual, status: listaDefensor ?? [], shield: escudoDefensor }),
+  ];
+  const [source, target] = runtime;
+  powerRuntime.begin(source, target, runtime);
+  listaAtacante = source.status;
+  listaDefensor = target.status;
 
   // 1) Política central de bloqueio de ação — resolve de uma vez
   // (inclusive a única rolagem de Paralyze do turno) se o atacante
@@ -424,7 +461,9 @@ async function resolverTurnoComStatus({
     // Power), então o fallback é seguro.
     const motivoBloqueio = controle.motivoBloqueioTotal ?? "SILENCE";
     log.push(`${nomeAtacante} está ${definicaoDoStatus(motivoBloqueio).nomeUi} e não conseguiu agir!`);
-    listaAtacante = statusEffectService.decrementarDuracoes(listaAtacante);
+    source.status = listaAtacante;
+    powerRuntime.end(source, target, runtime);
+    listaAtacante = statusEffectService.decrementarDuracoes(source.status);
     return {
       nomeAcao: "Ação bloqueada",
       dano: 0,
@@ -433,7 +472,9 @@ async function resolverTurnoComStatus({
       esquivou: false,
       bloqueado: true,
       statusAtacante: listaAtacante,
-      statusDefensor: listaDefensor,
+      statusDefensor: target.status,
+      escudoAtacante: source.shield,
+      escudoDefensor: target.shield,
       buffsAtacante: combatBuffService.decrementarDuracoes(buffsAtacante),
       log,
     };
@@ -473,6 +514,8 @@ async function resolverTurnoComStatus({
 
   // 3) Resolve a ação em si — Cegueira do atacante afeta o acerto,
   // Enfraquecimento do atacante reduz o dano de saída.
+  source.status = listaAtacante;
+  target.status = listaDefensor;
   const blindDoAtacante = listaAtacante.find((s) => s.key === "BLIND");
   const resultado = aplicarAcao({
     atacante,
@@ -496,10 +539,15 @@ async function resolverTurnoComStatus({
     modificadoresAtacante,
     modificadoresDefensor,
     gatilhosAtacante,
+    gatilhosDefensor,
+    runtime,
   });
+  listaAtacante = source.status;
+  listaDefensor = target.status;
+  modificadoresAtacante = powerRuntime.effective(source);
+  modificadoresDefensor = powerRuntime.effective(target);
   let listaBuffsAtacante = resultado.novosBuffsAtacante ?? buffsAtacante;
-  let escudoAtacanteAtual = resultado.novoEscudoAtacante ?? escudoAtacante;
-  const escudoDefensorAtual = resultado.novoEscudoDefensor ?? escudoDefensor;
+  let escudoAtacanteAtual = resultado.novoEscudoAtacante;
 
   if (resultado.esquivou && resultado.motivoEsquiva === "BLIND_MISS") {
     log.push(`Cego, ${nomeAtacante} errou o golpe contra ${nomeDefensor}!`);
@@ -583,13 +631,14 @@ async function resolverTurnoComStatus({
     lista: listaAtacante,
     log,
     nomeAlvo: nomeAtacante,
-    // Habilidades V2.0 §11/§17 — duelEngine atende tanto o PvP
-    // assíncrono quanto o ao vivo; nenhum dos dois distingue modalidade
-    // Ranqueada/Torneio hoje, então PVP_CASUAL é o teto mais
-    // conservador disponível até essa distinção existir.
-    contexto: "PVP_CASUAL",
+    // Modalidade informada pelo chamador (PvP casual, ranqueado, torneio ou grupo).
+    contexto,
   });
   const morteAoFimDoTurno = vidaAntesDoTick > 0 && atacante.vida_atual <= 0;
+  source.status = listaAtacante;
+  target.status = listaDefensor;
+  if (vidaAntesDoTick > atacante.vida_atual) powerRuntime.emit("ON_DAMAGE_TAKEN", source, target, runtime);
+  if (morteAoFimDoTurno) powerRuntime.emit("ON_KILL", target, source, runtime);
 
   // REGEN_HP/REGEN_MANA (ConsumableEffect APPLY_COMBAT_BUFF — spec
   // Caldeirão §13) — mesmo ponto do tick de DoT acima (fim do PRÓPRIO
@@ -607,7 +656,10 @@ async function resolverTurnoComStatus({
       const curouDeFato = atacante.vida_atual - vidaAntesDoRegen;
       // Só loga o que realmente curou — já no teto, um log de "regenerou
       // 10" seria enganoso (mesmo critério de HEAL_HP_FLAT/PERCENT).
-      if (curouDeFato > 0) log.push(`${nomeAtacante} regenerou ${curouDeFato} de vida.`);
+      if (curouDeFato > 0) {
+        log.push(`${nomeAtacante} regenerou ${curouDeFato} de vida.`);
+        powerRuntime.emit("ON_HEAL", source, target, runtime);
+      }
     }
     const manaMaximaParaRegen = manaMaxAtacante ?? atacante.mana_atual;
     const regenMana =
@@ -622,9 +674,15 @@ async function resolverTurnoComStatus({
     }
   }
 
-  listaAtacante = statusEffectService.decrementarDuracoes(listaAtacante);
+  powerRuntime.end(source, target, runtime);
+  listaAtacante = statusEffectService.decrementarDuracoes(source.status);
+  listaDefensor = target.status;
+  escudoAtacanteAtual = source.shield;
   listaBuffsAtacante = combatBuffService.decrementarDuracoes(listaBuffsAtacante);
-  escudoAtacanteAtual = combatBuffService.decrementarDuracaoDoEscudo(escudoAtacanteAtual);
+  if (atacante.powerCombatState.shieldExpiresAfterTurn == null) {
+    escudoAtacanteAtual = combatBuffService.decrementarDuracaoDoEscudo(escudoAtacanteAtual);
+  }
+  atacante.powerCombatState.shield = escudoAtacanteAtual;
 
   return {
     ...resultado,
@@ -633,7 +691,7 @@ async function resolverTurnoComStatus({
     statusDefensor: listaDefensor,
     buffsAtacante: listaBuffsAtacante,
     escudoAtacante: escudoAtacanteAtual,
-    escudoDefensor: escudoDefensorAtual,
+    escudoDefensor: target.shield,
     log,
   };
 }

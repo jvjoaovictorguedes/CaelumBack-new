@@ -2085,7 +2085,7 @@ testeComBanco("combate: veneno no próprio jogador mata DEPOIS de agir — ataqu
   sessao.state = { status: [{ key: "POISON", sourceActorId: "BOSS", sourcePowerId: null, sourceItemId: null, remainingTurns: 2, stacks: 3, potency: 999, appliedAtTurn: 0 }] };
   await sessao.save();
 
-  const resultado = await worldBossCombatService.executarAcao(personagem.id, { tipo: "attack" });
+  const resultado = await comMathRandomFixo(0.99, () => worldBossCombatService.executarAcao(personagem.id, { tipo: "attack" }));
   assert.equal(resultado.morreuAoFimDoTurno, true);
   assert.ok(resultado.dano > 0, "ataque foi resolvido ANTES do tick do próprio veneno — precisa ter causado dano de verdade no Boss");
 
@@ -2967,4 +2967,39 @@ testeComBanco("admin métricas: evento DEFEATED expõe métricas pós-evento —
   assert.equal(linha.metricas.tempo_por_fase[0].ordem, 1);
   assert.ok(Number.isInteger(linha.metricas.duracao_segundos) && linha.metricas.duracao_segundos > 0);
   assert.ok(linha.metricas.dps_agregado_jogadores === null || linha.metricas.dps_agregado_jogadores >= 0);
+});
+
+
+testeComBanco("reativos: Boss Mundial persiste COMBAT_START, passe e ON_DAMAGE_TAKEN na sessão", async () => {
+  const CharacterAbilities = require("../src/models/CharacterAbilities");
+  const PowerCombatEffect = require("../src/models/PowerCombatEffect");
+  const { personagem } = await criarPersonagem({ nivel: 30 });
+  personagem.mana_atual = 10;
+  personagem.ultima_atualizacao_mana = new Date();
+  await personagem.save();
+  const power = await Power.create({ nome: `WorldReactive_${sufixo()}`, descricao: "Teste dos eventos reais",
+    tipo_poder: "Passivo", custo_mana: 0, escala_atributo: "Forca", valor_escala: 0 });
+  try {
+    await CharacterAbilities.create({ id_personagem: personagem.id, id_power: power.id });
+    for (const [trigger, magnitude_base] of [["COMBAT_START", 3], ["TURN_START", 2], ["TURN_END", 4], ["ON_DAMAGE_TAKEN", 5]]) {
+      await PowerCombatEffect.create({ id_power: power.id, trigger, effect_key: "REGEN_MANA_FLAT", magnitude_base });
+    }
+    const evento = await criarEventoAtivoV2();
+    await worldBossCombatService.entrar(personagem.id);
+    await comMathRandomFixo(0.99, () => worldBossRuntimeService.processarProximaAcao());
+    await personagem.reload();
+    assert.equal(personagem.mana_atual, 18, "início no primeiro ataque recebido + reação ao dano");
+    const session = await WorldBossCombatSession.findOne({ where: { event_id: evento.id, character_id: personagem.id } });
+    assert.equal(session.state.powerCombatState.started, true);
+    await worldBossCombatService.executarAcao(personagem.id, { tipo: "pass" });
+    await personagem.reload();
+    assert.equal(personagem.mana_atual, 24, "passe executa início/fim, sem repetir COMBAT_START");
+    await worldBossCombatService.executarAcao(personagem.id, { tipo: "pass" });
+    await personagem.reload();
+    assert.equal(personagem.mana_atual, 30);
+  } finally {
+    await PowerCombatEffect.destroy({ where: { id_power: power.id } });
+    await CharacterAbilities.destroy({ where: { id_power: power.id } });
+    await power.destroy();
+  }
 });

@@ -33,6 +33,8 @@ const { persistirEstadoFinalDoMembro, calcularPenalidadeDiferencaNivel } = requi
 const { registrarProgressoContrato } = require("../services/adventureGuildObjectiveService");
 const { custoManaEfetivo, resolverResultadoDeAcerto } = require("../services/combatFormulas");
 const combatModifierService = require("../services/combatModifierService");
+const powerRuntime = require("../services/powerCombatRuntime");
+const combatBuffService = require("../services/combatBuffService");
 const statusEffectService = require("../services/statusEffectService");
 const { definicaoDoStatus, ACTION_TYPE } = require("../config/statusEffectConfig");
 const {
@@ -745,6 +747,16 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
   // Item 7 — gatilhos reativos ON_HIT/ON_KILL do aliado, mesmo princípio.
   const gatilhosAtacante = await combatModifierService.resolverGatilhosDoPersonagem(atacante.estado, "PARTY");
 
+  const source = powerRuntime.participant(atacante.estado, {
+    key: characterId, team: "allies", triggers: gatilhosAtacante, modifiers: modificadoresAtacante,
+    hpMax: atacante.vidaMax, mpMax: atacante.manaMax, status: atacante.status, cooldowns: atacante.cooldowns,
+  });
+  const enemy = powerRuntime.participant(batalha.inimigo, { key: "enemy", team: "enemies",
+    status: batalha.inimigo.status, hpMax: batalha.inimigo.vida_maxima, cooldowns: batalha.inimigo.cooldowns });
+  const otherAllies = [...batalha.membros.values()].filter((m) => m !== atacante).map((m) =>
+    powerRuntime.participant(m.estado, { key: m.id, team: "allies", status: m.status,
+      hpMax: m.vidaMax, mpMax: m.manaMax, cooldowns: m.cooldowns }));
+  const runtime = [source, enemy, ...otherAllies];
   // Motor de Status (Evolução do Motor de Status) — mesma engrenagem do
   // Duelo ao vivo/PvE solo: ticks de DoT no FIM do turno de quem agiu
   // (nunca na hora do golpe que aplicou o status), bloqueio de ação por
@@ -780,7 +792,13 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
     nomeDefensor: batalha.inimigo.nome,
     modificadoresAtacante,
     gatilhosAtacante,
+    runtime,
+    contexto: "PARTY",
   });
+  for (const m of batalha.membros.values()) {
+    const p = runtime.find((p) => p.actor === m.estado);
+    if (p && m !== atacante) m.status = p.status;
+  }
   atacante.status = statusAtacante;
   batalha.inimigo.status = statusDefensor;
   atacante.combatBuffs = buffsAtacante ?? atacante.combatBuffs;
@@ -1024,7 +1042,20 @@ async function executarTurnoMonstro(io, battleId) {
   // membro que está sendo atacado (defensor aqui), mesmo critério de
   // executarTurnoAliado acima: só resolvido pro lado que é um Character
   // de verdade.
-  const modificadoresDefensor = await combatModifierService.resolverModificadoresDoPersonagem(alvo.estado, "PARTY");
+  let modificadoresDefensor = await combatModifierService.resolverModificadoresDoPersonagem(alvo.estado, "PARTY");
+  const gatilhosDefensor = await combatModifierService.resolverGatilhosDoPersonagem(alvo.estado, "PARTY");
+  const target = powerRuntime.participant(alvo.estado, { key: alvo.id, team: "allies",
+    modifiers: modificadoresDefensor, triggers: gatilhosDefensor, status: alvo.status,
+    hpMax: alvo.vidaMax, mpMax: alvo.manaMax, cooldowns: alvo.cooldowns });
+  const source = powerRuntime.participant(batalha.inimigo, { key: "enemy", team: "enemies",
+    hpMax: batalha.inimigo.vida_maxima, status: batalha.inimigo.status });
+  const runtime = [source, target, ...[...batalha.membros.values()].filter((m) => m !== alvo).map((m) =>
+    powerRuntime.participant(m.estado, { key: m.id, team: "allies", hpMax: m.vidaMax,
+      mpMax: m.manaMax, status: m.status, cooldowns: m.cooldowns }))];
+  powerRuntime.start(target, source, runtime);
+  alvo.status = target.status;
+  modificadoresDefensor = powerRuntime.effective(target);
+  const vidaAntesDaPower = alvo.estado.vida_atual;
 
   let nomeAcao;
   let dano;
@@ -1062,6 +1093,7 @@ async function executarTurnoMonstro(io, battleId) {
             ? `${batalha.inimigo.nome}, cego, errou o ataque!`
             : `${alvo.nome} esquivou do ataque de ${batalha.inimigo.nome}!`,
         ];
+        if (resultadoAcerto.reason === "DODGE") powerRuntime.emit("ON_DODGE", target, source, runtime);
       } else {
         const log = [];
         const resultadoPower = monsterCombatAdapter.executarPoderEmGrupo({
@@ -1080,6 +1112,14 @@ async function executarTurnoMonstro(io, battleId) {
         batalha.inimigo.status = resultadoPower.statusAtacante;
         alvo.status = resultadoPower.statusDefensor;
         alvo.combatBuffs = resultadoPower.buffsDefensor ?? alvo.combatBuffs;
+        const absorbed = combatBuffService.absorverDano(target.shield,
+          Math.max(0, vidaAntesDaPower - alvo.estado.vida_atual));
+        target.shield = absorbed.escudo;
+        alvo.estado.vida_atual = Math.max(0, vidaAntesDaPower - absorbed.danoResidual);
+        target.status = alvo.status;
+        if (alvo.estado.vida_atual < vidaAntesDaPower) powerRuntime.emit("ON_DAMAGE_TAKEN", target, source, runtime);
+        alvo.status = target.status;
+        powerRuntime.end(source, target, runtime);
         logStatus = log;
       }
     }
@@ -1105,6 +1145,11 @@ async function executarTurnoMonstro(io, battleId) {
       nomeAtacante: batalha.inimigo.nome,
       nomeDefensor: alvo.nome,
       modificadoresDefensor,
+      gatilhosDefensor,
+      runtime,
+      contexto: "PARTY",
+      vidaMaxDefensor: alvo.vidaMax,
+      manaMaxDefensor: alvo.manaMax,
     });
     nomeAcao = resultado.nomeAcao;
     dano = resultado.dano;
@@ -1115,6 +1160,12 @@ async function executarTurnoMonstro(io, battleId) {
     batalha.inimigo.status = resultado.statusAtacante;
     alvo.status = resultado.statusDefensor;
     batalha.inimigo.combatBuffs = resultado.buffsAtacante ?? batalha.inimigo.combatBuffs;
+  }
+
+  for (const member of batalha.membros.values()) {
+    if (member === alvo) continue;
+    const participant = runtime.find((p) => p.actor === member.estado);
+    if (participant) member.status = participant.status;
   }
 
   // Fim do turno do monstro (§8.1 equivalente de Party) — cooldown recém

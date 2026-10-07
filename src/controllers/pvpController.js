@@ -188,6 +188,9 @@ async function simularDuelo({ desafiante, desafiado, poderesDesafiante, poderesD
       modificadoresAtacante,
       modificadoresDefensor,
       gatilhosAtacante,
+      gatilhosDefensor: chave === "A" ? gatilhosB : gatilhosA,
+      vidaMaxDefensor: chave === "A" ? vidaMaxB : vidaMaxA,
+      manaMaxDefensor: chave === "A" ? manaMaxB : manaMaxA,
     });
     if (chave === "A") {
       statusA = statusAtacante;

@@ -17,6 +17,8 @@ const ConsumableProperties = require("../src/models/ConsumableProperties");
 const ConsumableEffect = require("../src/models/ConsumableEffect");
 const CharacterInventory = require("../src/models/CharacterInventory");
 const Power = require("../src/models/Power");
+const PowerCombatEffect = require("../src/models/PowerCombatEffect");
+const CharacterAbilities = require("../src/models/CharacterAbilities");
 const PowerStatusEffect = require("../src/models/PowerStatusEffect");
 const combatController = require("../src/controllers/combatController");
 
@@ -42,6 +44,8 @@ test.after(async () => {
     await Item.destroy({ where: { id: itensCriados } });
   }
   if (powersCriados.length > 0) {
+    await PowerCombatEffect.destroy({ where: { id_power: powersCriados } });
+    await CharacterAbilities.destroy({ where: { id_power: powersCriados } });
     await PowerStatusEffect.destroy({ where: { id_power: powersCriados } });
     await Power.destroy({ where: { id: powersCriados } });
   }
@@ -500,4 +504,55 @@ testeComBanco("combate PvE: item com STATUS_RESISTANCE_PCT nega o efeito de stat
   } finally {
     Math.random = original;
   }
+});
+
+
+testeComBanco("PvE: COMBAT_START uma vez, TURN_START/TURN_END no passe e ON_DAMAGE_TAKEN no contra-ataque", async () => {
+  const { personagem } = await criarPersonagem({ nivel: 5 });
+  const power = await Power.create({ nome: `Eventos_${sufixo()}`, descricao: "Teste de eventos", tipo_poder: "Passivo", custo_mana: 0,
+    escala_atributo: "Forca", valor_escala: 0 });
+  powersCriados.push(power.id);
+  await CharacterAbilities.create({ id_personagem: personagem.id, id_power: power.id });
+  for (const [trigger, magnitude_base] of [["COMBAT_START", 10], ["TURN_START", 2], ["TURN_END", 3], ["ON_DAMAGE_TAKEN", 4]]) {
+    await PowerCombatEffect.create({ id_power: power.id, trigger, effect_key: "REGEN_MANA_FLAT", magnitude_base });
+  }
+  await encontroDeTreino(personagem);
+  personagem.mana_atual = 10;
+  personagem.ultima_atualizacao_mana = new Date();
+  await personagem.save();
+  await comMathRandomFixo(0.99, async () => {
+    const first = await chamarExecutarTurno(personagem.id, { type: "pass" });
+    assert.equal(first.statusCode, 200);
+    assert.equal(first.corpo.data.character.mana_atual, 29);
+    await personagem.reload();
+    assert.equal(personagem.encontro_pve.playerPowerCombatState.started, true);
+    const second = await chamarExecutarTurno(personagem.id, { type: "pass" });
+    assert.equal(second.statusCode, 200);
+    assert.equal(second.corpo.data.character.mana_atual, 38);
+  });
+});
+
+testeComBanco("PvE: ON_CAST temporário expira e ação rejeitada não consome evento", async () => {
+  const { personagem } = await criarPersonagem({ nivel: 5 });
+  const power = await Power.create({ nome: `Cast_${sufixo()}`, descricao: "Teste de cast", tipo_poder: "Ativo", custo_mana: 0,
+    dano_base: 10, escala_atributo: "Forca", valor_escala: 0 });
+  powersCriados.push(power.id);
+  await CharacterAbilities.create({ id_personagem: personagem.id, id_power: power.id, is_active: true });
+  await PowerCombatEffect.create({ id_power: power.id, trigger: "ON_CAST", effect_key: "DEFENSE_FLAT",
+    magnitude_base: 12, duration_turns: 1 });
+  await encontroDeTreino(personagem);
+  await comMathRandomFixo(0.99, async () => {
+    const rejected = await chamarExecutarTurno(personagem.id, { type: "power", powerId: 999999999 });
+    assert.equal(rejected.statusCode, 404);
+    await personagem.reload();
+    assert.equal(personagem.encontro_pve.playerPowerCombatState, undefined);
+    const first = await chamarExecutarTurno(personagem.id, { type: "power", powerId: power.id });
+    assert.equal(first.statusCode, 200);
+    await personagem.reload();
+    assert.equal(personagem.encontro_pve.playerPowerCombatState.effects.length, 1);
+    const second = await chamarExecutarTurno(personagem.id, { type: "attack" });
+    assert.equal(second.statusCode, 200);
+    await personagem.reload();
+    assert.equal(personagem.encontro_pve.playerPowerCombatState.effects.length, 0);
+  });
 });
