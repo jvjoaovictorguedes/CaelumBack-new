@@ -292,6 +292,8 @@ async function coletar(id_personagem, id_regiao) {
       // verdade) não deveria conseguir dropar equipamento nenhum, só
       // XP/ouro genéricos, igual o resto do sistema de Expedição (que
       // só entrega Material via coletar()).
+      inimigo.encounterId = require("node:crypto").randomUUID();
+      inimigo.combatTurn = 0;
       character.encontro_pve = {
         ...inimigo,
         criadoEm: Date.now(),

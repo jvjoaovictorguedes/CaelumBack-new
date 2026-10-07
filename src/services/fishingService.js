@@ -372,9 +372,17 @@ async function finalizarCaptura(characterId, session, transaction) {
 }
 
 // POST /api/fishing/sessions/:id/reel — body: { active: boolean }
-async function recolher(characterId, sessionId, active) {
+async function recolher(characterId, sessionId, active, guard) {
   const estado = await sequelize.transaction(async (transaction) => {
     const session = await carregarSessaoAtivaTravada(characterId, sessionId, transaction);
+    const Receipt = require("../models/AutomationActionReceipt");
+    if (guard) {
+      const { failure } = require("../antiAutomation/antiAutomationErrors");
+      if (typeof guard.actionId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(guard.actionId)) throw failure("INVALID_ACTION_STATE",409);
+      const receipt=await Receipt.findOne({where:{id_personagem:characterId,action_id:guard.actionId},transaction});
+      if(receipt){if(receipt.session_id!==sessionId||receipt.state_version!==guard.stateVersion||receipt.result.active!==Boolean(active))throw failure("ACTION_REPLAYED",409);return receipt.result.state;}
+      require("../antiAutomation/actionGuardService").assertVersion(guard.stateVersion,session.sequence);
+    }
     const agora = new Date();
     if (ehTerminal(session.fase)) return estadoPublico(session); // idempotente — nunca reprocessa
     if (checarExpiracao(session, agora)) {
@@ -425,7 +433,9 @@ async function recolher(characterId, sessionId, active) {
     }
 
     await session.save({ transaction });
-    return estadoPublico(session);
+    const result=estadoPublico(session);
+    if(guard)await Receipt.create({id_personagem:characterId,action_id:guard.actionId,session_id:sessionId,state_version:guard.stateVersion,result:{active:Boolean(active),state:result}},{transaction});
+    return result;
   });
 
   // Sistema de Proezas Únicas §12.1 — SÓ depois do commit acima.
@@ -472,3 +482,5 @@ module.exports = {
   obterSessaoAtiva,
   estadoPublico,
 };
+
+module.exports.FASES_TERMINAIS = FASES_TERMINAIS;

@@ -624,7 +624,7 @@ module.exports = function registerPartyHandlers(io) {
       if (!battleId) return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Você não está em nenhuma batalha." });
       const batalha = batalhas.get(battleId);
       if (!batalha) return;
-      if (batalha.processandoAcao) {
+      if (batalha.processandoAcao || batalha.resolvendoTurno) {
         return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Aguarde, a última ação ainda está sendo processada." });
       }
       if (batalha.fase !== "aliados" || batalha.ordem[batalha.turnoIndex] !== characterId) {
@@ -730,6 +730,15 @@ function iniciarTimerDeTurnoGrupo(io, battleId) {
 }
 
 async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatico = false) {
+  const current = batalhas.get(battleId);
+  if (!current) return;
+  if (current.resolvendoTurno || current.fase !== "aliados" || current.ordem[current.turnoIndex] !== characterId) return;
+  current.resolvendoTurno = true;
+  try { return await executarTurnoAliadoSemGuard(io, battleId, characterId, acao, foiAutomatico); }
+  finally { current.resolvendoTurno = false; }
+}
+
+async function executarTurnoAliadoSemGuard(io, battleId, characterId, acao, foiAutomatico = false) {
   const batalha = batalhas.get(battleId);
   if (!batalha) return;
   clearTimeout(batalha.timer);
@@ -1293,3 +1302,5 @@ async function finalizarBatalha(io, battleId, vitoria, motivo = vitoria ? "comba
     emitirGrupoAtualizado(io, grupo);
   }
 }
+
+module.exports.estaEmBatalha = id => batalhaPorPersonagem.has(String(id));

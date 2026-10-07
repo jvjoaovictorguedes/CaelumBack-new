@@ -779,3 +779,5 @@ function finalizarBatalha(io, battleId, vitoria, recompensas, motivo = vitoria ?
 // — nunca chamadas de fora deste arquivo em produção.
 module.exports.podeUsarPoderNaBatalha = podeUsarPoderNaBatalha;
 module.exports.registrarUsoDePoder = registrarUsoDePoder;
+
+module.exports.estaEmBatalha = id => batalhaPorPersonagem.has(String(id));

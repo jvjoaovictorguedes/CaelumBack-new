@@ -25,8 +25,8 @@ test("BASELINE rate limiter: default compartilha bucket entre contas no mesmo IP
   const bloqueado = chamar(limitador, { ip: "NAT", user: { id: 2 } });
   assert.equal(bloqueado.status, 429);
   assert.match(bloqueado.corpo.message, /Muitas tentativas/);
-  assert.equal(bloqueado.corpo.code, undefined);
-  assert.equal(bloqueado.corpo.retryAfterMs, undefined);
+  assert.equal(bloqueado.corpo.code, "ACTION_RATE_LIMITED");
+  assert.ok(bloqueado.corpo.retryAfterMs >= 0);
 });
 
 test("BASELINE rate limiter: janela atual só reinicia depois de resetAt", (t) => {

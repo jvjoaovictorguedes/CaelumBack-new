@@ -5,12 +5,14 @@ const tournamentRoutes = require("./tournamentRoutes");
 const authMiddleware = require("../middlewares/authMiddleware");
 const { carregarPersonagemAtual } = require("../middlewares/currentCharacterMiddleware");
 
+const automation = require("../antiAutomation/httpMiddleware").protect("pvp");
+
 const router = express.Router();
 
 router.get("/opponents/:characterId", pvpController.getOpponents);
 router.get("/status/:characterId", pvpController.getStatus);
 router.get("/ranking", pvpController.getRanking);
-router.post("/challenge", authMiddleware, carregarPersonagemAtual, pvpController.challenge);
+router.post("/challenge", authMiddleware, carregarPersonagemAtual, automation, pvpController.challenge);
 
 // Arena Ranqueada (PvP v2) — separada do Duelo casual acima, nunca
 // reaproveita PvpStatus/PvpMatches (ver rankedController.js).
@@ -26,10 +28,10 @@ router.post("/ranked/queue/leave", authMiddleware, rankedController.filaRemovida
 router.post(
   "/ranked/match/start",
   authMiddleware,
-  carregarPersonagemAtual,
+  carregarPersonagemAtual, automation,
   rankedController.iniciarPartida,
 );
-router.get("/ranked/status", authMiddleware, carregarPersonagemAtual, rankedController.status);
+router.get("/ranked/status", authMiddleware, carregarPersonagemAtual, automation, rankedController.status);
 router.get("/ranked/season", authMiddleware, rankedController.season);
 router.get("/ranked/leaderboard", authMiddleware, rankedController.leaderboard);
 

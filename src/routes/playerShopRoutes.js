@@ -4,6 +4,8 @@ const playerShopController = require("../controllers/playerShopController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const { carregarPersonagemAtual } = require("../middlewares/currentCharacterMiddleware");
 
+const automation = require("../antiAutomation/httpMiddleware").protect("playerShop");
+
 const router = express.Router();
 
 router.get("/", authMiddleware, playerShopController.listarLojas);
@@ -12,15 +14,15 @@ router.get("/", authMiddleware, playerShopController.listarLojas);
 // lido como um characterId.
 router
   .route("/mine")
-  .get(authMiddleware, carregarPersonagemAtual, playerShopController.obterMinhaLoja)
-  .put(authMiddleware, carregarPersonagemAtual, playerShopController.atualizarMinhaLoja);
+  .get(authMiddleware, carregarPersonagemAtual, automation, playerShopController.obterMinhaLoja)
+  .put(authMiddleware, carregarPersonagemAtual, automation, playerShopController.atualizarMinhaLoja);
 
-router.post("/mine/listings", authMiddleware, carregarPersonagemAtual, playerShopController.criarProdutoDaLoja);
+router.post("/mine/listings", authMiddleware, carregarPersonagemAtual, automation, playerShopController.criarProdutoDaLoja);
 
 router
   .route("/mine/demands")
-  .post(authMiddleware, carregarPersonagemAtual, playerShopController.criarDemanda)
-  .get(authMiddleware, carregarPersonagemAtual, playerShopController.listarMinhasDemandas);
+  .post(authMiddleware, carregarPersonagemAtual, automation, playerShopController.criarDemanda)
+  .get(authMiddleware, carregarPersonagemAtual, automation, playerShopController.listarMinhasDemandas);
 
 // Demandas são globais (qualquer personagem pode ver/entregar), por isso
 // vivem fora de "/mine" — mas ainda precisam vir antes de "/:characterId".
@@ -28,50 +30,50 @@ router.get("/demands", authMiddleware, playerShopController.listarDemandasAberta
 router.post(
   "/demands/:idDemanda/cancel",
   authMiddleware,
-  carregarPersonagemAtual,
+  carregarPersonagemAtual, automation,
   playerShopController.cancelarDemanda,
 );
 router.post(
   "/demands/:idDemanda/deliver",
   authMiddleware,
-  carregarPersonagemAtual,
+  carregarPersonagemAtual, automation,
   playerShopController.entregarNaDemanda,
 );
 
-router.get("/mine/commissions", authMiddleware, carregarPersonagemAtual, playerShopController.listarMinhasEncomendas);
+router.get("/mine/commissions", authMiddleware, carregarPersonagemAtual, automation, playerShopController.listarMinhasEncomendas);
 
 // Encomendas também vivem fora de "/mine" (precisam vir antes de
 // "/:characterId") — cada uma pertence a um cliente+lojista específicos,
 // validado dentro do service (playerShopCommissionService).
-router.get("/commissions/:idEncomenda", authMiddleware, carregarPersonagemAtual, playerShopController.obterEncomenda);
+router.get("/commissions/:idEncomenda", authMiddleware, carregarPersonagemAtual, automation, playerShopController.obterEncomenda);
 router.post(
   "/commissions/:idEncomenda/counter-offer",
   authMiddleware,
-  carregarPersonagemAtual,
+  carregarPersonagemAtual, automation,
   playerShopController.contraProporEncomenda,
 );
 router.post(
   "/commissions/:idEncomenda/accept",
   authMiddleware,
-  carregarPersonagemAtual,
+  carregarPersonagemAtual, automation,
   playerShopController.aceitarEncomenda,
 );
 router.post(
   "/commissions/:idEncomenda/decline",
   authMiddleware,
-  carregarPersonagemAtual,
+  carregarPersonagemAtual, automation,
   playerShopController.recusarEncomenda,
 );
 router.post(
   "/commissions/:idEncomenda/deliver",
   authMiddleware,
-  carregarPersonagemAtual,
+  carregarPersonagemAtual, automation,
   playerShopController.entregarEncomenda,
 );
 router.post(
   "/commissions/:idEncomenda/cancel",
   authMiddleware,
-  carregarPersonagemAtual,
+  carregarPersonagemAtual, automation,
   playerShopController.cancelarEncomenda,
 );
 
@@ -83,7 +85,7 @@ router.get("/:characterId", authMiddleware, playerShopController.obterLoja);
 router.post(
   "/:characterId/commissions",
   authMiddleware,
-  carregarPersonagemAtual,
+  carregarPersonagemAtual, automation,
   playerShopController.criarEncomenda,
 );
 

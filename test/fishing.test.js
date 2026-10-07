@@ -547,5 +547,30 @@ testeComBanco("BASELINE anti-automação: 10 reels concorrentes ainda consomem 1
   const persistida = await FishingSession.findByPk(sessao.id);
   assert.equal(persistida.sequence, 10);
   assert.equal(persistida.fase, "FIGHTING");
+  const actionIds=Array.from({length:10},()=>require("node:crypto").randomUUID());
+  const guarded=await Promise.allSettled(Array.from({length:10},(_,i)=>fishingService.recolher(personagem.id,sessao.id,false,{actionId:actionIds[i],stateVersion:10})));
+  assert.equal(guarded.filter(r=>r.status==="fulfilled").length,1);
+  assert.ok(guarded.filter(r=>r.status==="rejected").every(r=>r.reason.code==="INVALID_ACTION_STATE"));
+  assert.equal((await FishingSession.findByPk(sessao.id)).sequence,11);
+  const winner=guarded.findIndex(r=>r.status==="fulfilled");
+  const actionId=actionIds[winner];
+  const replay=await fishingService.recolher(personagem.id,sessao.id,false,{actionId,stateVersion:10});
+  assert.deepEqual(replay,JSON.parse(JSON.stringify(guarded[winner].value)));
+  assert.equal((await FishingSession.findByPk(sessao.id)).sequence,11);
+  await assert.rejects(()=>fishingService.recolher(personagem.id,sessao.id,true,{actionId,stateVersion:10}),e=>e.code==="ACTION_REPLAYED");
+  const app=require("express")();app.use(require("express").json());app.use("/api/fishing",require("../src/routes/fishingRoutes"));
+  const server=require("node:http").createServer(app);await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
+  const token=require("jsonwebtoken").sign({id:personagem.id_usuario,proposito:"session"},require("../src/config/jwt").JWT_SECRET,{expiresIn:"1m"});
+  const url=`http://127.0.0.1:${server.address().port}/api/fishing/sessions/${sessao.id}/reel`;
+  const request=body=>fetch(url,{method:"POST",headers:{authorization:`Bearer ${token}`,"content-type":"application/json"},body:JSON.stringify(body)});
+  try {
+    assert.equal((await request({active:false})).status,409);
+    const retry=await request({active:false,stateVersion:10,actionId});assert.equal(retry.status,200);
+    const data=await retry.json();assert.equal(data.data.sessao.sequence,11);assert.equal(data.riskScore,undefined);
+    assert.equal((await request({active:false,stateVersion:10,actionId:require("node:crypto").randomUUID()})).status,409);
+    assert.equal((await FishingSession.findByPk(sessao.id)).sequence,11);
+  }finally{await new Promise(resolve=>server.close(resolve));}
+
+
   assert.equal(await FishingCatchRecord.count({ where: { id_personagem: personagem.id } }), 0);
 });

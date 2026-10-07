@@ -341,6 +341,7 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
     const encontroEmAndamentoSemLock = encontroValido(characterSemLock);
     if (encontroEmAndamentoSemLock) {
       const { criadoEm, statsPersonagem, ...inimigoAtual } = encontroEmAndamentoSemLock;
+      inimigoAtual.encounterId ??= String(criadoEm);
       return res.status(200).json({
         status: "success",
         data: { enemy: inimigoAtual },
@@ -565,6 +566,7 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       const encontroEmAndamento = encontroValido(character);
       if (encontroEmAndamento) {
         const { criadoEm, statsPersonagem: _ignorado, ...inimigoAtual } = encontroEmAndamento;
+        inimigoAtual.encounterId ??= String(criadoEm);
         return res.status(200).json({
           status: "success",
           data: { enemy: inimigoAtual },
@@ -591,6 +593,8 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       // é o que executarTurno usa depois pra decidir recompensa/espólio
       // de zona e atualizar os contadores da sessão (ver
       // adventureRewardService.js).
+      inimigo.encounterId = require("node:crypto").randomUUID();
+      inimigo.combatTurn = 0;
       character.encontro_pve = {
         ...inimigo,
         criadoEm: Date.now(),
@@ -681,6 +685,11 @@ exports.executarTurno = async (req, res) => {
         });
       }
 
+      inimigoAtual.encounterId ??= String(inimigoAtual.criadoEm);
+      if(req.body.stateVersion !== undefined) {
+        require("../antiAutomation/actionGuardService").assertVersion(req.body.stateVersion,inimigoAtual.combatTurn || 0);
+        if(req.body.encounterId !== (inimigoAtual.encounterId || String(inimigoAtual.criadoEm))) throw require("../antiAutomation/antiAutomationErrors").failure("INVALID_ACTION_STATE",409);
+      }
       return await processarTurno({ req, res, character, inimigoAtual, transaction, proezasParaAnunciar });
     });
 
@@ -691,6 +700,7 @@ exports.executarTurno = async (req, res) => {
     await uniqueFeatPublicService.anunciarConquistas(proezasParaAnunciar);
     return resposta;
   } catch (error) {
+    if(error.code && error.statusCode)return res.status(error.statusCode).json(require("../antiAutomation/antiAutomationErrors").payload(error));
     console.error(
       "Erro ao processar turno de combate:",
       error
@@ -2101,6 +2111,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     // Persiste o estado atualizado do inimigo (vida restante) E o
     // estado de status/cooldown/turno pro próximo turno (§37 —
     // extensão do JSONB já existente).
+    inimigoAtual.combatTurn = combatTurn;
     character.encontro_pve = { ...inimigoAtual, statusEffects, combatBuffs, escudo, cooldowns, combatTurn };
     await character.save({ transaction });
 

@@ -444,7 +444,7 @@ module.exports = function registerPvpLiveHandlers(io) {
       // Ainda assim, essa trava cobre os três tipos: evita que um duplo
       // clique durante o await do item dispare uma segunda ação (de
       // qualquer tipo) antes da primeira terminar de processar.
-      if (duelo.processandoAcao) {
+      if (duelo.processandoAcao || duelo.resolvendoTurno) {
         return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Aguarde, sua última ação ainda está sendo processada." });
       }
 
@@ -522,12 +522,14 @@ module.exports = function registerPvpLiveHandlers(io) {
             return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Esse turno não é mais válido." });
           }
 
-          inventoryEntry.quantidade -= 1;
-          if (inventoryEntry.quantidade <= 0) {
-            await inventoryEntry.destroy();
-          } else {
-            await inventoryEntry.save();
-          }
+          await require("../config/database").sequelize.transaction(async transaction => {
+            await Character.findByPk(characterId,{transaction,lock:transaction.LOCK.UPDATE});
+            const entry=await CharacterInventory.findOne({where:{id_personagem:characterId,id_item:idItem},transaction,lock:transaction.LOCK.UPDATE});
+            if(!entry || entry.quantidade<1 || !duelos.has(duelId) || duelo.turnoDe!==chave) throw require("../antiAutomation/antiAutomationErrors").failure("INVALID_ACTION_STATE",409);
+            entry.quantidade-=1;
+            if(entry.quantidade<=0)await entry.destroy({transaction});
+            else await entry.save({transaction});
+          });
 
           acao = {
             tipo: "item",
@@ -554,7 +556,7 @@ module.exports = function registerPvpLiveHandlers(io) {
         acao = { tipo: "pass" };
       }
 
-      executarTurno(io, duelId, chave, acao);
+      await executarTurno(io, duelId, chave, acao);
     });
 
     socket.on("disconnect", () => {
@@ -612,11 +614,25 @@ function iniciarTimerDeTurno(io, duelId) {
   if (!duelo) return;
   clearTimeout(duelo.timer);
   duelo.timer = setTimeout(() => {
-    executarTurno(io, duelId, duelo.turnoDe, { tipo: "attack" }, true);
+    const run = () => {
+      if (!duelos.has(duelId)) return;
+      if (duelo.processandoAcao) { duelo.timer = setTimeout(run,50); return; }
+      void executarTurno(io, duelId, duelo.turnoDe, { tipo: "attack" }, true).catch(() => console.warn("[pvp] turn failed"));
+    };
+    run();
   }, PRAZO_TURNO_MS);
 }
 
 async function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
+  const current = duelos.get(duelId);
+  if (!current) return;
+  if (current.resolvendoTurno || current.turnoDe !== chave) return;
+  current.resolvendoTurno = true;
+  try { return await executarTurnoSemGuard(io, duelId, chave, acao, foiAutomatico); }
+  finally { current.resolvendoTurno = false; }
+}
+
+async function executarTurnoSemGuard(io, duelId, chave, acao, foiAutomatico = false) {
   const duelo = duelos.get(duelId);
   if (!duelo) return;
   clearTimeout(duelo.timer);

@@ -76,6 +76,7 @@ async function prepararLote(characterId, recipeId, { quantity, idempotencyKey } 
         transaction,
       });
       if (existente) {
+        if(Number(existente.id_recipe)!==Number(recipeId)||existente.resultado.quantidade_lotes!==quantidade)throw require("../antiAutomation/antiAutomationErrors").failure("ACTION_REPLAYED",409);
         return { ...existente.resultado, idempotent_replay: true };
       }
     }
@@ -88,6 +89,14 @@ async function prepararLote(characterId, recipeId, { quantity, idempotencyKey } 
       throw Object.assign(new Error("Personagem não encontrado."), { statusCode: 404 });
     }
 
+    // A concurrent retry may have committed while this request waited for Character.
+    if(idempotencyKey){
+      const existente=await AlchemyBrewIdempotency.findOne({where:{id_personagem:characterId,idempotency_key:idempotencyKey},transaction});
+      if(existente){
+        if(Number(existente.id_recipe)!==Number(recipeId)||existente.resultado.quantidade_lotes!==quantidade)throw require("../antiAutomation/antiAutomationErrors").failure("ACTION_REPLAYED",409);
+        return {...existente.resultado,idempotent_replay:true};
+      }
+    }
     const progresso = await CharacterAlchemyProgress.findOne({
       where: { id_personagem: characterId },
       transaction,

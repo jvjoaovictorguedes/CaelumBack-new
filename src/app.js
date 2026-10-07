@@ -244,6 +244,9 @@ app.get("/", (req, res) => {
 app.use(maintenanceMiddleware);
 app.use("/api/maintenance", maintenanceRoutes);
 
+require("./antiAutomation/retentionService").start();
+app.use("/api/anti-automation", require("./routes/antiAutomationRoutes"));
+app.use("/api/admin/anti-automation", require("./routes/adminAntiAutomationRoutes"));
 app.use("/api/shop", shopRoutes);
 app.use("/api/crafting", craftingRoutes);
 app.use("/api/alchemy", alchemyRoutes);
@@ -371,6 +374,7 @@ const io = new SocketIOServer(server, {
       ? { origin: origensPermitidas, credentials: true }
       : { origin: "*" },
 });
+io.on("connection", socket => require("./antiAutomation/socketProtection").install(socket));
 registerPvpLiveHandlers(io);
 registerRankedLiveHandlers(io);
 // PvP v2 §11/§12 — partidas ranqueadas assíncronas vivem em memória:

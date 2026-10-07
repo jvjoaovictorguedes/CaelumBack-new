@@ -17,29 +17,16 @@
 // CONTA em vez de por IP (evita que trocar de rede/proxy resete o
 // contador, e evita que várias contas atrás do mesmo IP/NAT dividam o
 // mesmo limite de propósito).
-function criarLimitador({ janelaMs, maxTentativas, obterChave = (req) => req.ip }) {
-  const tentativasPorChave = new Map();
-
+const { MemoryRateLimitStore } = require("../antiAutomation/rateLimitStore/memoryRateLimitStore");
+function criarLimitador({ janelaMs, maxTentativas, obterChave = (req) => req.ip, store = new MemoryRateLimitStore() }) {
   return (req, res, next) => {
-    const chave = obterChave(req);
-    const agora = Date.now();
-    const registro = tentativasPorChave.get(chave);
-
-    if (!registro || agora > registro.resetAt) {
-      tentativasPorChave.set(chave, { contagem: 1, resetAt: agora + janelaMs });
-      return next();
-    }
-
-    if (registro.contagem >= maxTentativas) {
-      const segundosRestantes = Math.ceil((registro.resetAt - agora) / 1000);
-      return res.status(429).json({
-        message: `Muitas tentativas. Tente novamente em ${segundosRestantes} segundos.`,
-      });
-    }
-
-    registro.contagem += 1;
-    next();
+    const result = store.consume(obterChave(req), { now: Date.now(), windowMs: janelaMs, limit: maxTentativas });
+    const respond = result => {
+    if (result.allowed) return next();
+    res.set?.("Retry-After", String(Math.ceil(result.retryAfterMs / 1000)));
+    return res.status(429).json({ message: `Muitas tentativas. Tente novamente em ${Math.ceil(result.retryAfterMs / 1000)} segundos.`, code: "ACTION_RATE_LIMITED", retryAfterMs: result.retryAfterMs });
+    };
+    return result && typeof result.then === "function" ? result.then(respond).catch(next) : respond(result);
   };
 }
-
 module.exports = { criarLimitador };

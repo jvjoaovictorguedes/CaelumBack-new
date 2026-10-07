@@ -338,6 +338,10 @@ class RankedMatchError extends Error {
 // Ordem importa (§6/§11): seleciona o oponente ANTES de consumir a
 // tentativa diária — sem candidato elegível, nada é gasto.
 async function iniciarPartidaAssincrona(io, { idDesafiante }) {
+  try { return await require("../antiAutomation/actionGuardService").exclusive(`ranked:start:${idDesafiante}`,()=>iniciarPartidaSemGuard(io,{idDesafiante})); }
+  catch(error){if(error.code==="INVALID_ACTION_STATE")throw new RankedMatchError(error.code,error.message,409);throw error;}
+}
+async function iniciarPartidaSemGuard(io, { idDesafiante }) {
   const chaveDesafiante = pvpLiveSocket.chaveOnline(idDesafiante);
 
   if (!pvpLiveSocket.online.has(chaveDesafiante)) {
