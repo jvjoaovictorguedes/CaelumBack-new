@@ -5,6 +5,7 @@
 const rankingService = require("../services/rankingService");
 const Character = require("../models/Character");
 const GuildMember = require("../models/GuildMember");
+const { online } = require("../socket/pvpLiveSocket");
 
 // PvP v2 §3 — "pvp_ranked" é a Arena RANQUEADA (nome alinhado com o
 // frontend, que usa esse valor na aba "PvP Ranqueado" desde a separação
@@ -93,6 +94,7 @@ exports.obterRanking = async (req, res) => {
         break;
     }
 
+    dados.totalOnline = online.size;
     res.status(200).json({ status: "success", data: dados });
   } catch (error) {
     console.error("Erro ao obter ranking:", error);
