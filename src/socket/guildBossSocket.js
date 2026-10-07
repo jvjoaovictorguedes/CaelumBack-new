@@ -1,3 +1,4 @@
+const SOCKET_EVENTS = require("../contracts/socketEvents");
 // src/socket/guildBossSocket.js
 //
 // Boss da Guilda V2.0 — batalha em tempo real (spec do jogador: "igual
@@ -12,13 +13,13 @@
 //   - Sem convite: qualquer membro da guilda pode entrar numa sala
 //     aberta (a própria filiação à guilda já é o "convite").
 //   - Sem sala de espera/lobby — pedido do jogador ("entrar tipo
-//     aventura"): "guildboss:entrar" já entrega o personagem DENTRO da
+//     aventura"): SOCKET_EVENTS.GUILDBOSS.ENTRAR já entrega o personagem DENTRO da
 //     luta, nunca numa tela de espera por outros membros. Se já existe
 //     uma luta em andamento contra a tentativa ativa da guilda, entra
 //     nela (adicionado ao fim da fila de turnos); senão, abre uma luta
 //     nova com só esse personagem — mais gente pode entrar a qualquer
 //     momento depois, inclusive no meio de uma rodada.
-//   - Sem consumíveis: "guildboss:acao" só aceita "attack"/"power",
+//   - Sem consumíveis: SOCKET_EVENTS.GUILDBOSS.ACAO só aceita "attack"/"power",
 //     nunca "item" (pedido explícito do jogador).
 //   - Boss revida com dano crescente por rodada (dano_base_ataque na
 //     rodada 1, escalando por BOSS_AO_VIVO_FATOR_ESCALADA_DANO) — o
@@ -38,8 +39,8 @@
 //     andamento os turnos seguem livres, só entrar numa luta NOVA (a
 //     tentativa semanal trocou) é que espera o cooldown de novo.
 //
-// De propósito SEM "identificar" próprio: reaproveita socket.characterId
-// já setado pelo "identificar" do pvpLiveSocket, mesmo raciocínio já
+// De propósito SEM SOCKET_EVENTS.TRANSPORT.IDENTIFY próprio: reaproveita socket.characterId
+// já setado pelo SOCKET_EVENTS.TRANSPORT.IDENTIFY do pvpLiveSocket, mesmo raciocínio já
 // documentado em partySocket.js (é a MESMA conexão, o PvpSocketProvider
 // do frontend é global).
 
@@ -84,7 +85,7 @@ const batalhas = new Map();
 // characterId (string) -> battleId
 const batalhaPorPersonagem = new Map();
 // idGuild -> battleId — a luta "corrente" da guilda, se houver. Sem
-// sala de espera, "guildboss:entrar" usa isto pra decidir se entra numa
+// sala de espera, SOCKET_EVENTS.GUILDBOSS.ENTRAR usa isto pra decidir se entra numa
 // luta já em andamento ou abre uma nova (ver comentário no topo do
 // arquivo).
 const batalhaPorGuild = new Map();
@@ -148,7 +149,7 @@ function membroPublico(m) {
 
 // Estado completo de uma luta em andamento — usado tanto pra quem
 // acabou de abrir/entrar numa luta (resposta direta de
-// "guildboss:entrar") quanto, futuramente, por qualquer resync. `turnoDe`
+// SOCKET_EVENTS.GUILDBOSS.ENTRAR) quanto, futuramente, por qualquer resync. `turnoDe`
 // só faz sentido durante a fase "aliados" (fase "chefe" = telegraph ou
 // resolução do contra-ataque em andamento, ninguém pode agir).
 function montarEstadoBatalha(batalha) {
@@ -173,12 +174,12 @@ function montarEstadoBatalha(batalha) {
 // `characterIdInicial` dentro — nunca espera mais ninguém (ver
 // comentário no topo do arquivo: "entrar tipo aventura"). Mais membros
 // entram depois via o branch de "luta em andamento" de
-// "guildboss:entrar", a qualquer momento, inclusive no meio de uma
+// SOCKET_EVENTS.GUILDBOSS.ENTRAR, a qualquer momento, inclusive no meio de uma
 // rodada.
 async function criarBatalha(io, idGuild, tentativa, characterIdInicial, socketIniciador) {
   const chefe = await GuildBossConfig.findByPk(tentativa.id_guild_boss_config);
   if (!chefe) {
-    socketIniciador?.emit("guildboss:erro", { mensagem: "Configuração do Boss não encontrada." });
+    socketIniciador?.emit(SOCKET_EVENTS.GUILDBOSS.ERRO, { mensagem: "Configuração do Boss não encontrada." });
     return;
   }
 
@@ -188,7 +189,7 @@ async function criarBatalha(io, idGuild, tentativa, characterIdInicial, socketIn
   // cair no default de duelo casual.
   const lutador = await carregarLutador(characterIdInicial, { contexto: "GUILD_BOSS" });
   if (!lutador) {
-    socketIniciador?.emit("guildboss:erro", { mensagem: "Não foi possível carregar seu personagem." });
+    socketIniciador?.emit(SOCKET_EVENTS.GUILDBOSS.ERRO, { mensagem: "Não foi possível carregar seu personagem." });
     return;
   }
   // Cooldown de Powers por ATOR (não por batalha) — cada membro entra
@@ -234,7 +235,7 @@ async function criarBatalha(io, idGuild, tentativa, characterIdInicial, socketIn
 
   socketIniciador?.join(sala);
 
-  io.to(sala).emit("guildboss:batalha-iniciada", montarEstadoBatalha(batalha));
+  io.to(sala).emit(SOCKET_EVENTS.GUILDBOSS.BATALHA_INICIADA, montarEstadoBatalha(batalha));
 
   iniciarTimerDeTurno(io, battleId);
 }
@@ -246,10 +247,10 @@ module.exports = function registerGuildBossHandlers(io) {
     // tem uma luta rolando contra a tentativa ativa, entra nela (fim da
     // fila de turnos); senão, abre uma luta nova já com este personagem
     // dentro, sem esperar mais ninguém (ver criarBatalha).
-    socket.on("guildboss:entrar", async () => {
+    socket.on(SOCKET_EVENTS.GUILDBOSS.ENTRAR, async () => {
       const characterId = socket.characterId;
       if (!characterId) {
-        return socket.emit("guildboss:erro", { mensagem: "Identifique seu personagem antes de entrar." });
+        return socket.emit(SOCKET_EVENTS.GUILDBOSS.ERRO, { mensagem: "Identifique seu personagem antes de entrar." });
       }
 
       // Reconexão/F5/segunda aba — já está numa luta, só rejunta a sala
@@ -259,7 +260,7 @@ module.exports = function registerGuildBossHandlers(io) {
         const batalhaAtual = batalhas.get(battleIdAtual);
         if (batalhaAtual) {
           socket.join(batalhaAtual.sala);
-          return socket.emit("guildboss:estado", montarEstadoBatalha(batalhaAtual));
+          return socket.emit(SOCKET_EVENTS.GUILDBOSS.ESTADO, montarEstadoBatalha(batalhaAtual));
         }
         batalhaPorPersonagem.delete(characterId);
       }
@@ -267,17 +268,17 @@ module.exports = function registerGuildBossHandlers(io) {
       try {
         const membro = await GuildMember.findOne({ where: { id_personagem: characterId } });
         if (!membro) {
-          return socket.emit("guildboss:erro", { mensagem: "Você não pertence a nenhuma guilda." });
+          return socket.emit(SOCKET_EVENTS.GUILDBOSS.ERRO, { mensagem: "Você não pertence a nenhuma guilda." });
         }
 
         const tentativa = await tentativaAtivaDaGuild(membro.id_guild);
         if (!tentativa) {
-          return socket.emit("guildboss:erro", { mensagem: "Não há Boss liberado (ou o tempo dele já esgotou)." });
+          return socket.emit(SOCKET_EVENTS.GUILDBOSS.ERRO, { mensagem: "Não há Boss liberado (ou o tempo dele já esgotou)." });
         }
 
         const restanteMs = await tempoRestanteCooldown(membro.id_guild, characterId);
         if (restanteMs > 0) {
-          return socket.emit("guildboss:erro", {
+          return socket.emit(SOCKET_EVENTS.GUILDBOSS.ERRO, {
             mensagem: `Aguarde ${Math.ceil(restanteMs / 60000)}min antes de atacar o Boss de novo.`,
           });
         }
@@ -290,7 +291,7 @@ module.exports = function registerGuildBossHandlers(io) {
         // segunda luta concorrente pra mesma tentativa).
         if (batalhaEmAndamento && batalhaEmAndamento.idBossAttempt === tentativa.id) {
           if (batalhaEmAndamento.membros.size >= guildConfig.BOSS_AO_VIVO_TAMANHO_MAXIMO) {
-            return socket.emit("guildboss:erro", {
+            return socket.emit(SOCKET_EVENTS.GUILDBOSS.ERRO, {
               mensagem: `A luta já está cheia (máximo ${guildConfig.BOSS_AO_VIVO_TAMANHO_MAXIMO}).`,
             });
           }
@@ -298,7 +299,7 @@ module.exports = function registerGuildBossHandlers(io) {
           // Proezas Únicas §11 — mesmo contexto de criarBatalha abaixo.
           const lutador = await carregarLutador(characterId, { contexto: "GUILD_BOSS" });
           if (!lutador) {
-            return socket.emit("guildboss:erro", { mensagem: "Não foi possível carregar seu personagem." });
+            return socket.emit(SOCKET_EVENTS.GUILDBOSS.ERRO, { mensagem: "Não foi possível carregar seu personagem." });
           }
           lutador.cooldowns = {};
           batalhaEmAndamento.membros.set(chaveOnline(lutador.id), lutador);
@@ -306,12 +307,12 @@ module.exports = function registerGuildBossHandlers(io) {
           batalhaPorPersonagem.set(characterId, batalhaEmAndamento.id);
           socket.join(batalhaEmAndamento.sala);
 
-          io.to(batalhaEmAndamento.sala).emit("guildboss:membro-entrou", {
+          io.to(batalhaEmAndamento.sala).emit(SOCKET_EVENTS.GUILDBOSS.MEMBRO_ENTROU, {
             battleId: batalhaEmAndamento.id,
             membro: membroPublico(lutador),
             ordem: batalhaEmAndamento.ordem,
           });
-          return socket.emit("guildboss:estado", montarEstadoBatalha(batalhaEmAndamento));
+          return socket.emit(SOCKET_EVENTS.GUILDBOSS.ESTADO, montarEstadoBatalha(batalhaEmAndamento));
         }
 
         // Ninguém da guilda lutando agora contra esta tentativa — abre
@@ -319,7 +320,7 @@ module.exports = function registerGuildBossHandlers(io) {
         await criarBatalha(io, membro.id_guild, tentativa, characterId, socket);
       } catch (error) {
         console.error("Erro ao entrar no Boss da Guilda:", error);
-        socket.emit("guildboss:erro", { mensagem: "Não foi possível entrar na luta do Boss." });
+        socket.emit(SOCKET_EVENTS.GUILDBOSS.ERRO, { mensagem: "Não foi possível entrar na luta do Boss." });
       }
     });
 
@@ -328,7 +329,7 @@ module.exports = function registerGuildBossHandlers(io) {
     // sozinho pelo timer, igual qualquer ausência). "entrar" de novo
     // rejunta a MESMA luta (ver branch de reconexão acima), nunca cria
     // outra.
-    socket.on("guildboss:sair", () => {
+    socket.on(SOCKET_EVENTS.GUILDBOSS.SAIR, () => {
       const characterId = socket.characterId;
       if (!characterId) return;
       const battleId = batalhaPorPersonagem.get(characterId);
@@ -339,42 +340,42 @@ module.exports = function registerGuildBossHandlers(io) {
 
     // Sem "tipo: item" de propósito — consumíveis não podem ser usados
     // no Boss da Guilda ao vivo (pedido explícito do jogador).
-    socket.on("guildboss:acao", async ({ tipo, idPoder } = {}) => {
+    socket.on(SOCKET_EVENTS.GUILDBOSS.ACAO, async ({ tipo, idPoder } = {}) => {
       const characterId = socket.characterId;
       if (!characterId) return;
       const battleId = batalhaPorPersonagem.get(characterId);
-      if (!battleId) return socket.emit("guildboss:erro", { mensagem: "Você não está em nenhuma batalha." });
+      if (!battleId) return socket.emit(SOCKET_EVENTS.GUILDBOSS.ERRO, { mensagem: "Você não está em nenhuma batalha." });
       const batalha = batalhas.get(battleId);
       if (!batalha) return;
       if (batalha.processandoAcao) {
-        return socket.emit("guildboss:erro", { mensagem: "Aguarde, a última ação ainda está sendo processada." });
+        return socket.emit(SOCKET_EVENTS.GUILDBOSS.ERRO, { mensagem: "Aguarde, a última ação ainda está sendo processada." });
       }
       if (batalha.fase !== "aliados" || batalha.ordem[batalha.turnoIndex] !== characterId) {
-        return socket.emit("guildboss:erro", { mensagem: "Ainda não é o seu turno." });
+        return socket.emit(SOCKET_EVENTS.GUILDBOSS.ERRO, { mensagem: "Ainda não é o seu turno." });
       }
 
       const atacante = batalha.membros.get(characterId);
       if (!atacante || atacante.estado.vida_atual <= 0) {
-        return socket.emit("guildboss:erro", { mensagem: "Você não pode agir derrotado." });
+        return socket.emit(SOCKET_EVENTS.GUILDBOSS.ERRO, { mensagem: "Você não pode agir derrotado." });
       }
 
       let acao = { tipo: "attack" };
       if (tipo === "power") {
         const power = atacante.poderes.find((p) => p.id === Number(idPoder));
-        if (!power) return socket.emit("guildboss:erro", { mensagem: "Poder inválido." });
+        if (!power) return socket.emit(SOCKET_EVENTS.GUILDBOSS.ERRO, { mensagem: "Poder inválido." });
         if (power.tipo_poder !== "Ativo") {
-          return socket.emit("guildboss:erro", { mensagem: "Este poder não pode ser usado manualmente em combate." });
+          return socket.emit(SOCKET_EVENTS.GUILDBOSS.ERRO, { mensagem: "Este poder não pode ser usado manualmente em combate." });
         }
         if (custoManaEfetivo(power, power.nivel_habilidade ?? 1) > atacante.estado.mana_atual) {
-          return socket.emit("guildboss:erro", { mensagem: "Mana insuficiente para esse poder." });
+          return socket.emit(SOCKET_EVENTS.GUILDBOSS.ERRO, { mensagem: "Mana insuficiente para esse poder." });
         }
         if (!podeUsarPoderNaBatalha(atacante, power)) {
           const restante = cooldownService.turnosRestantes(atacante.cooldowns ?? {}, power.id);
-          return socket.emit("guildboss:erro", { mensagem: `Essa habilidade ainda está em cooldown (${restante} turno(s)).` });
+          return socket.emit(SOCKET_EVENTS.GUILDBOSS.ERRO, { mensagem: `Essa habilidade ainda está em cooldown (${restante} turno(s)).` });
         }
         acao = { tipo: "power", power };
       } else if (tipo !== "attack") {
-        return socket.emit("guildboss:erro", { mensagem: "Ação inválida — consumíveis não podem ser usados contra o Boss da Guilda." });
+        return socket.emit(SOCKET_EVENTS.GUILDBOSS.ERRO, { mensagem: "Ação inválida — consumíveis não podem ser usados contra o Boss da Guilda." });
       }
 
       await executarTurnoAliado(io, battleId, characterId, acao);
@@ -386,7 +387,7 @@ module.exports = function registerGuildBossHandlers(io) {
       // Mesma cautela do partySocket.js: só trata como saída real se
       // este ainda é o socket "dono" do personagem — um socket novo pro
       // mesmo characterId já assumiu `online` antes desse handler
-      // rodar (de forma síncrona, em "identificar"), então comparar
+      // rodar (de forma síncrona, em SOCKET_EVENTS.TRANSPORT.IDENTIFY), então comparar
       // igual (não diferente) trataria toda reconexão como abandono.
       const eraSocketAtivo = online.get(characterId) === socket.id;
       if (!eraSocketAtivo) return;
@@ -478,7 +479,7 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
     }
     batalha.vidaRestante = vidaRestanteAtual;
 
-    io.to(batalha.sala).emit("guildboss:turno-resultado", {
+    io.to(batalha.sala).emit(SOCKET_EVENTS.GUILDBOSS.TURNO_RESULTADO, {
       battleId,
       origem: "aliado",
       idAtor: characterId,
@@ -508,7 +509,7 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
   } catch (error) {
     console.error("Erro ao processar turno do Boss da Guilda ao vivo:", error);
     batalha.processandoAcao = false;
-    io.to(batalha.sala).emit("guildboss:erro", { mensagem: "Erro ao processar a ação — tente de novo." });
+    io.to(batalha.sala).emit(SOCKET_EVENTS.GUILDBOSS.ERRO, { mensagem: "Erro ao processar a ação — tente de novo." });
   }
 }
 
@@ -533,7 +534,7 @@ function sairDaBatalhaPorDesconexao(io, characterId) {
     return;
   }
 
-  io.to(batalha.sala).emit("guildboss:turno-resultado", {
+  io.to(batalha.sala).emit(SOCKET_EVENTS.GUILDBOSS.TURNO_RESULTADO, {
     battleId,
     origem: "aliado",
     idAtor: characterId,
@@ -565,7 +566,7 @@ function avancarTurnoAliado(io, battleId) {
   const proximoIndex = proximoAliadoVivoIndex(batalha, batalha.turnoIndex + 1);
   if (proximoIndex !== -1) {
     batalha.turnoIndex = proximoIndex;
-    io.to(batalha.sala).emit("guildboss:proximo-turno", {
+    io.to(batalha.sala).emit(SOCKET_EVENTS.GUILDBOSS.PROXIMO_TURNO, {
       battleId,
       turnoDe: batalha.ordem[proximoIndex],
       prazoSegundos: guildConfig.BOSS_AO_VIVO_PRAZO_TURNO_MS / 1000,
@@ -622,7 +623,7 @@ function executarTurnoChefe(io, battleId) {
     return finalizarBatalha(io, battleId, false, null, "grupo_derrotado");
   }
 
-  io.to(batalha.sala).emit("guildboss:cast-start", {
+  io.to(batalha.sala).emit(SOCKET_EVENTS.GUILDBOSS.CAST_START, {
     battleId,
     nomePoder: null,
     imagemUrl: null,
@@ -709,7 +710,7 @@ async function resolverAcaoDoChefe(io, battleId) {
     habilidadeEscolhida ? new Set([cooldownService.chaveDoPoder(habilidadeEscolhida.powerId)]) : undefined,
   );
 
-  io.to(batalha.sala).emit("guildboss:turno-resultado", {
+  io.to(batalha.sala).emit(SOCKET_EVENTS.GUILDBOSS.TURNO_RESULTADO, {
     battleId,
     origem: "chefe",
     idAlvo: alvo.id,
@@ -736,7 +737,7 @@ async function resolverAcaoDoChefe(io, battleId) {
   batalha.turnoIndex = primeiroVivoIndex;
   batalha.fase = "aliados";
 
-  io.to(batalha.sala).emit("guildboss:proximo-turno", {
+  io.to(batalha.sala).emit(SOCKET_EVENTS.GUILDBOSS.PROXIMO_TURNO, {
     battleId,
     turnoDe: batalha.ordem[primeiroVivoIndex],
     prazoSegundos: guildConfig.BOSS_AO_VIVO_PRAZO_TURNO_MS / 1000,
@@ -761,7 +762,7 @@ function finalizarBatalha(io, battleId, vitoria, recompensas, motivo = vitoria ?
     batalhaPorGuild.delete(batalha.idGuild);
   }
 
-  io.to(batalha.sala).emit("guildboss:batalha-fim", {
+  io.to(batalha.sala).emit(SOCKET_EVENTS.GUILDBOSS.BATALHA_FIM, {
     battleId,
     vitoria,
     motivo,

@@ -1,3 +1,4 @@
+const SOCKET_EVENTS = require("../contracts/socketEvents");
 // src/socket/globalChatSocket.js
 //
 // Chat global — uma sala só, pro servidor inteiro, pra jogadores se
@@ -44,9 +45,9 @@ function excedeuRateLimit(characterId) {
 
 module.exports = function registerGlobalChatHandlers(io) {
   io.on("connection", (socket) => {
-    // Nome de evento PRÓPRIO (não "identificar" genérico) — mesmo motivo
+    // Nome de evento PRÓPRIO (não SOCKET_EVENTS.TRANSPORT.IDENTIFY genérico) — mesmo motivo
     // documentado em guildSocket.js: vários sockets "de feature"
-    // compartilham o mesmo `io`, e um "identificar" genérico atropela os
+    // compartilham o mesmo `io`, e um SOCKET_EVENTS.TRANSPORT.IDENTIFY genérico atropela os
     // outros listeners que escutam esse nome.
     socket.on("globalchat:identificar", async ({ ticket } = {}, callback) => {
       const characterId = await personagemViaTicket(ticket);
