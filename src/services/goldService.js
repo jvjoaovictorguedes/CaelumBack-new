@@ -10,4 +10,10 @@ function concederOuro(character, valor) {
   character.dinheiro_total_ganho += valor;
 }
 
-module.exports = { concederOuro };
+// Spending does not change lifetime earnings. Persistence and transaction
+// ownership remain with the caller, as with reward creation above.
+function debitarOuro(character, valor) {
+  character.dinheiro -= valor;
+}
+
+module.exports = { concederOuro, debitarOuro };

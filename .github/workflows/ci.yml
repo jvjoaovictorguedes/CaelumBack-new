@@ -47,5 +47,8 @@ jobs:
       - name: Rodar migrations
         run: npm run migrate
 
+      - name: Revisar novas escritas econômicas
+        run: npm run audit:economy
+
       - name: Rodar testes
         run: npm test
