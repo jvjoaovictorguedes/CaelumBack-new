@@ -193,6 +193,7 @@ async function resolverTurnoComStatus({
   target.status = listaDefensor;
   const blindDoAtacante = listaAtacante.find((s) => s.key === "BLIND");
   const resultado = aplicarAcao({
+    contexto,
     atacante,
     defensor,
     acao,
@@ -232,6 +233,7 @@ async function resolverTurnoComStatus({
   // qualquer efeito novo deste mesmo golpe) e libera os efeitos de
   // status configurados (poder alvo Enemy + proc de arma em ataque
   // básico), só quando o golpe de fato acerta e causa dano.
+  if (resultado.damageResolution && require("./combatTypingService").enabled(contexto) && !/PVP|RANKED|TOURNAMENT/i.test(contexto)) log.push(require("./combatTypingService").describe(resultado.damageResolution));
   if (resultado.dano > 0) {
     const quebraFreeze = statusEffectService.removerFreezeAoReceberDanoDireto(listaDefensor, resultado.dano);
     listaDefensor = quebraFreeze.lista;

@@ -58,6 +58,8 @@ async function montarSnapshotHabilidades(idConfig, transaction) {
     power_snapshot: hab.Power
       ? {
           id: hab.Power.id,
+          tipo_dano:hab.Power.tipo_dano,
+          ...Object.fromEntries(Object.keys(require("../models/combatTypingModels").fields.power).map(k=>[k,hab.Power[k]])),
           nome: hab.Power.nome,
           imagem_url: hab.Power.imagem_url,
           dano_base: hab.Power.dano_base,
@@ -99,9 +101,11 @@ async function montarSnapshot(config, transaction) {
     transaction,
   });
   const habilidades = await montarSnapshotHabilidades(config.id, transaction);
+  await require("./combatTypingService").catalog();
 
   return {
     schema_version: SNAPSHOT_SCHEMA_VERSION,
+    combatTyping:require("./combatTypingService").monsterProfile(config),
     nome: config.nome,
     descricao: config.descricao,
     lore: config.lore,
@@ -109,6 +113,7 @@ async function montarSnapshot(config, transaction) {
     fundo_url: config.fundo_url,
     vida_base: Number(config.vida_base),
     defesa: config.defesa,
+    ...Object.fromEntries(Object.keys(require("../models/combatTypingModels").fields.monster).map(k=>[k,config[k]])),
     // §4.1 — atributos de combate/raid do Boss.
     nivel: config.nivel,
     forca: config.forca,

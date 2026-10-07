@@ -48,7 +48,7 @@ const CAMPOS_ITEM = [
   "negociavel_mercado",
   "tier_equipamento",
 ];
-const CAMPOS_WEAPON = ["dano_min", "dano_max", "tipo_dano", "tipo_arma", "bonus_atributo", "valor_bonus_atributo"];
+const CAMPOS_WEAPON = ["weapon_type_id","damage_nature_override","dano_min", "dano_max", "tipo_dano", "tipo_arma", "bonus_atributo", "valor_bonus_atributo"];
 const CAMPOS_ARMOR = [
   "slot_equipamento",
   "defesa",
@@ -465,6 +465,10 @@ async function duplicateAdminItem(idItem, { idAdmin, req } = {}) {
         : undefined,
     };
     await criarPropriedadesDoTipo(copia, payload, transaction);
+    const typingModels=require("../models/combatTypingModels");
+    if(original.weaponProperties){const typedFields=Object.fromEntries(Object.keys(typingModels.fields.weapon).map(k=>[k,original.weaponProperties[k]]));await WeaponProperties.update(typedFields,{where:{id_item:copia.id},transaction});}
+    for(const [model,owner] of [[typingModels.EquipmentAffinityModifier,"id_item"],[typingModels.WeaponFamilyBonus,"item_id"]]){const rows=await model.findAll({where:{[owner]:original.id},raw:true,transaction});if(rows.length)await model.bulkCreate(rows.map(({id,createdAt,updatedAt,...row})=>({...row,[owner]:copia.id})),{transaction});}
+
 
     await registrarAcao({
       idAdmin,

@@ -462,6 +462,7 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
     // em encontro_pve) porque a resposta deste endpoint usa `inimigo`
     // direto quando é um encontro NOVO.
     inimigo.imagem_url = monstro?.imagem_url ?? null;
+    await require("../services/combatTypingService").attachMonster(inimigo,monstro);
 
     // Ideia #3 da fila de melhorias — captura os efeitos de status do
     // monstro UMA vez, no início do encontro (mesmo princípio já usado
@@ -526,6 +527,7 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       velocidade: jogadorEfetivo.velocidade,
       defesa: jogadorEfetivo.defesa,
       arma_equipada: jogadorEfetivo.arma_equipada,
+      combatTyping: jogadorEfetivo.combatTyping,
       armaEquipadaEfeitos: efeitosDaArmaEquipada.map((e) => ({
         status_key: e.status_key,
         chance_ppm: e.chance_ppm,
@@ -729,6 +731,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     // salvo) caem no fallback de character.toJSON() puro — janela
     // curta e não reexplorável (só afeta uma luta já em andamento no
     // exato momento do deploy).
+    await require("../services/combatTypingService").catalog();
     const personagemAtual = {
       ...character.toJSON(),
       ...inimigoAtual.statsPersonagem,
@@ -1043,6 +1046,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
 
     syncRuntime();
     powerRuntime.begin(runtimePlayer, runtimeEnemy, runtime);
+    inimigoAtual.lastDamageResolution=null;
     saveRuntime();
     const vidaAntesDaAcao = personagemAtual.vida_atual;
     if (poderUsado) {
@@ -1128,9 +1132,10 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           );
         } else {
           if (contextoCriticoPoder.critico) criticoJogador = true;
-          const danoMitigado = Math.max(1, Math.round(aplicarMitigacaoDeDefesa(dano, {
-            ...inimigoAtual, defesa: (inimigoAtual.defesa ?? 0) + combatModifierService.bonusDefesa(powerRuntime.effective(runtimeEnemy)),
-          }) * combatModifierService.multiplicadorDanoRecebido(powerRuntime.effective(runtimeEnemy))));
+          const damageResolution=require("../services/combatTypingService").resolveDamage({amount:dano,actor:personagemAtual,target:{...inimigoAtual,defesa:(inimigoAtual.defesa??0)+combatModifierService.bonusDefesa(powerRuntime.effective(runtimeEnemy))},power:poderUsado,context:"PVE",finalMultiplier:combatModifierService.multiplicadorDanoRecebido(powerRuntime.effective(runtimeEnemy)),buffs:combatBuffs.player,defenderBuffs:combatBuffs.enemy});
+          const danoMitigado=damageResolution.totalDamage;
+          inimigoAtual.lastDamageResolution=damageResolution;
+          log.push(require("../services/combatTypingService").describe(damageResolution));
           danoCausadoNoInimigo = danoMitigado;
           // GRANT_SHIELD do inimigo (spec Caldeirão §13) — absorve
           // antes da Vida dele.
@@ -1298,17 +1303,17 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       } else {
         const contextoCriticoAtaque = {};
         const danoBasicoEnfraquecido = Math.round(
-          calcularDanoBasico(personagemAtual, contextoCriticoAtaque, modificadoresJogador) *
+          require("../services/combatTypingService").basicDamage(personagemAtual, contextoCriticoAtaque, modificadoresJogador, "PVE") *
             statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.player) *
             combatBuffService.modificadorDeDanoSaida(combatBuffs.player) *
             combatModifierService.multiplicadorDanoSaida(modificadoresJogador) *
             multiplicadorDanoTaverna,
         );
         if (contextoCriticoAtaque.critico) criticoJogador = true;
-        const dano = Math.max(1, Math.round(aplicarMitigacaoDeDefesa(
-          danoBasicoEnfraquecido,
-          { ...inimigoAtual, defesa: (inimigoAtual.defesa ?? 0) + combatModifierService.bonusDefesa(powerRuntime.effective(runtimeEnemy)) },
-        ) * combatModifierService.multiplicadorDanoRecebido(powerRuntime.effective(runtimeEnemy))));
+        const damageResolution=require("../services/combatTypingService").resolveDamage({amount:danoBasicoEnfraquecido,actor:personagemAtual,target:{...inimigoAtual,defesa:(inimigoAtual.defesa??0)+combatModifierService.bonusDefesa(powerRuntime.effective(runtimeEnemy))},context:"PVE",finalMultiplier:combatModifierService.multiplicadorDanoRecebido(powerRuntime.effective(runtimeEnemy)),buffs:combatBuffs.player,defenderBuffs:combatBuffs.enemy});
+        const dano=damageResolution.totalDamage;
+        inimigoAtual.lastDamageResolution=damageResolution;
+        log.push(require("../services/combatTypingService").describe(damageResolution));
         danoCausadoNoInimigo = dano;
 
         // GRANT_SHIELD do inimigo (spec Caldeirão §13) — absorve antes
@@ -1377,6 +1382,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     if (jogadorBloqueadoNesteTurno || jogadorPassouTurno) {
       syncRuntime();
       powerRuntime.begin(runtimePlayer, runtimeEnemy, runtime);
+    inimigoAtual.lastDamageResolution=null;
       saveRuntime();
     }
 
@@ -1683,6 +1689,8 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       });
     }
 
+    if(require("../services/combatTypingService").enabled("PVE")) combatBuffs.player=require("../services/combatTypingService").applyPowerBuffs(combatBuffs.player,poderUsado);
+
     if (inimigoAtual.vida_atual <= 0) {
       syncRuntime();
       powerRuntime.end(runtimePlayer, runtimeEnemy, runtime);
@@ -1931,14 +1939,9 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         const defensorComBuffs = bonusDefesaTotal
           ? { ...personagemAtual, defesa: (personagemAtual.defesa || 0) + bonusDefesaTotal }
           : personagemAtual;
-        const danoRecebido = Math.max(
-          1,
-          Math.round(
-            aplicarMitigacaoDeDefesa(danoComCriticoInimigo, defensorComBuffs) *
-              multiplicadorDefesaTaverna *
-              combatModifierService.multiplicadorDanoRecebido(modificadoresJogador),
-          ),
-        );
+        const incoming=require("../services/combatTypingService").resolveDamage({amount:danoComCriticoInimigo,actor:inimigoAtual,target:defensorComBuffs,context:"PVE",finalMultiplier:multiplicadorDefesaTaverna*combatModifierService.multiplicadorDanoRecebido(modificadoresJogador),buffs:combatBuffs.enemy,defenderBuffs:combatBuffs.player});
+        const danoRecebido=incoming.totalDamage;
+        log.push(require("../services/combatTypingService").describe(incoming));
         danoRecebidoContraAtaque = danoRecebido;
 
         // GRANT_SHIELD (spec Caldeirão §13) — absorve ANTES da Vida,

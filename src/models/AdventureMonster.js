@@ -22,6 +22,7 @@ const { sequelize } = require("../config/database");
 const AdventureMonster = sequelize.define(
   "AdventureMonster",
   {
+    ...require("./combatTypingModels").fields.monster,
     id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
     nome: { type: DataTypes.STRING(100), allowNull: false, unique: true },
     descricao: { type: DataTypes.TEXT, allowNull: true },

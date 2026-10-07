@@ -1,3 +1,4 @@
+const typing=require("./combatTypingService");
 // Ameaça Mundial V2 — Etapa 3: relógio global do Boss (§3.2/§9). O Boss
 // age no seu próprio ritmo (next_action_at), independente de quantos
 // jogadores estão atacando — nunca um contra-ataque "por hit recebido"
@@ -134,7 +135,9 @@ function resolverDanoBasico({
   modificadoresBoss = new Map(),
 }) {
   const atacante = {
+    combatTyping:snapshot.combatTyping??typing.monsterProfile(snapshot),
     forca: snapshot.forca,
+    inteligencia:snapshot.inteligencia,
     agilidade: snapshot.agilidade,
     // Velocidade (Precisão/Crítico) — faltava aqui (só o ataque de
     // HABILIDADE, resolverEfeitoDeHabilidade abaixo, já levava isso em
@@ -152,13 +155,13 @@ function resolverDanoBasico({
   if (!resultadoAcerto.hit) return { dano: 0, esquivou: true, critico: false };
 
   const contextoCritico = {};
-  const danoBase = calcularDanoBasico(atacante, contextoCritico, modificadoresBoss);
+  const danoBase = typing.basicDamage(atacante, contextoCritico, modificadoresBoss,"WORLD_BOSS");
   const danoFase = danoBase * (1 + Number(fase.modificador_dano_percentual || 0) / 100);
   const danoComFuria = danoFase * (1 + furiaPct / 100) * combatModifierService.multiplicadorDanoSaida(modificadoresBoss);
-  const danoMitigado = aplicarMitigacaoDeDefesa(Math.round(danoComFuria), { defesa: alvoDefesa });
-  const danoFinal = Math.max(1, Math.round(danoMitigado * multiplicadorDanoRecebido));
+  const damageResolution=typing.resolveDamage({amount:Math.round(danoComFuria),actor:atacante,target:{...alvoBase,defesa:alvoDefesa},context:"WORLD_BOSS",finalMultiplier:multiplicadorDanoRecebido});
+  const danoFinal=damageResolution.totalDamage;
 
-  return { dano: danoFinal, esquivou: false, critico: Boolean(contextoCritico.critico) };
+  return { dano: danoFinal, damageResolution, esquivou: false, critico: Boolean(contextoCritico.critico) };
 }
 
 // --- Ameaça Mundial V2 — Etapa 5: Habilidades do Boss + IA (§6) ---
@@ -304,6 +307,7 @@ function resolverEfeitoDeHabilidade({
   modificadoresBoss = new Map(),
 }) {
   const atacante = {
+    combatTyping:snapshot.combatTyping??typing.monsterProfile(snapshot),
     forca: snapshot.forca,
     agilidade: snapshot.agilidade,
     inteligencia: snapshot.inteligencia,
@@ -321,18 +325,10 @@ function resolverEfeitoDeHabilidade({
   const modificadorFase = 1 + Number(fase.modificador_dano_percentual || 0) / 100;
   const escalaFuria = ability.escala_com_furia ? 1 + furiaPct / 100 : 1;
 
-  const danoFinal =
-    efeito.dano > 0
-      ? Math.max(
-          1,
-          Math.round(
-            aplicarMitigacaoDeDefesa(Math.round(efeito.dano * modificadorFase * escalaFuria * combatModifierService.multiplicadorDanoSaida(modificadoresBoss)), { defesa: alvoDefesa }) *
-              multiplicadorDanoRecebido,
-          ),
-        )
-      : 0;
+  const damageResolution=typing.resolveDamage({amount:Math.round(efeito.dano * modificadorFase * escalaFuria * combatModifierService.multiplicadorDanoSaida(modificadoresBoss)),actor:atacante,target:{...alvoBase,defesa:alvoDefesa},power:ability.power_snapshot,context:"WORLD_BOSS",finalMultiplier:multiplicadorDanoRecebido});
+  const danoFinal=damageResolution.totalDamage;
 
-  return { dano: danoFinal, cura: efeito.cura, esquivou: false, critico: Boolean(contextoCritico.critico) };
+  return { dano: danoFinal, damageResolution, cura: efeito.cura, esquivou: false, critico: Boolean(contextoCritico.critico) };
 }
 
 // Cura/buff SELF (§6.4) — o Boss nunca esquiva de si mesmo, e cura
@@ -340,6 +336,7 @@ function resolverEfeitoDeHabilidade({
 // (esse modificador é só pra dano ofensivo).
 function resolverEfeitoSelf({ snapshot, ability }) {
   const atacante = {
+    combatTyping:snapshot.combatTyping??typing.monsterProfile(snapshot),
     forca: snapshot.forca,
     agilidade: snapshot.agilidade,
     inteligencia: snapshot.inteligencia,
@@ -366,6 +363,7 @@ async function reactiveTarget(evento, efetivo, transaction) {
   base.vida_atual = personagem.vida_atual;
   base.mana_atual = personagem.mana_atual;
   base.powerCombatState = session?.state?.powerCombatState;
+  base.combatAffinityBuffs=session?.state?.combatAffinityBuffs??[];
   const target = powerRuntime.participant(base, { key: personagem.id, team: "players", hpMax: vidaMax,
     mpMax: manaMaximaDe(base),
     status: session?.state?.status ?? [], cooldowns: session?.state?.cooldowns ?? {},
@@ -413,6 +411,7 @@ async function aplicarEfeitoDeHabilidadeEmAlvos({ characterIds, snapshot, fase, 
   // paralelo. `target: "Enemy"` é quem importa aqui — "Self" é tratado
   // fora, por quem chama (a cura/buff SELF do próprio Boss).
   const bossComoAtacante = {
+    combatTyping:snapshot.combatTyping??typing.monsterProfile(snapshot),
     forca: snapshot.forca,
     agilidade: snapshot.agilidade,
     inteligencia: snapshot.inteligencia,
@@ -773,6 +772,7 @@ async function processarProximaAcao() {
               character_id: alvoBasico.character_id,
               nome: personagem.nome,
               dano: danoInfo.dano,
+              damageResolution:danoInfo.damageResolution,
               esquivou: danoInfo.esquivou,
               critico: Boolean(danoInfo.critico),
               vida_atual: personagem.vida_atual,

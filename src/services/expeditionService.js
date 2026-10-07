@@ -258,6 +258,7 @@ async function coletar(id_personagem, id_regiao) {
             dano_min: monstroDeEmboscada.dano_min,
             dano_max: monstroDeEmboscada.dano_max,
             defesa: monstroDeEmboscada.defesa ?? 0,
+            combatTyping: (await require("./combatTypingService").catalog(),require("./combatTypingService").monsterProfile(monstroDeEmboscada)),
             imagem_url: monstroDeEmboscada.imagem_url ?? null,
           }
         : gerarInimigo(jogadorEfetivo, undefined, { nivelForcado });
@@ -271,6 +272,7 @@ async function coletar(id_personagem, id_regiao) {
         velocidade: jogadorEfetivo.velocidade,
         defesa: jogadorEfetivo.defesa,
         arma_equipada: jogadorEfetivo.arma_equipada,
+        combatTyping: jogadorEfetivo.combatTyping,
         multiplicador_vida_por_nivel: jogadorEfetivo.multiplicador_vida_por_nivel,
         multiplicador_mana_por_nivel: jogadorEfetivo.multiplicador_mana_por_nivel,
         multiplicador_dano_fisico: jogadorEfetivo.multiplicador_dano_fisico,

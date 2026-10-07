@@ -396,7 +396,8 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
         ...(sessao.state ?? {}),
         status: statusEffectService.decrementarDuracoes(listaJogador),
         cooldowns: cooldownsJogador,
-        ultima_acao_jogador_em: Date.now(),
+        combatAffinityBuffs:require("./combatBuffService").decrementarDuracoes(resultado.novosBuffsAtacante),
+      ultima_acao_jogador_em: Date.now(),
       };
       await sessao.save({ transaction });
       return montarResultadoSemAcao({
@@ -421,7 +422,8 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
         ...(sessao.state ?? {}),
         status: statusEffectService.decrementarDuracoes(listaJogador),
         cooldowns: cooldownsJogador,
-        ultima_acao_jogador_em: Date.now(),
+        combatAffinityBuffs:require("./combatBuffService").decrementarDuracoes(resultado.novosBuffsAtacante),
+      ultima_acao_jogador_em: Date.now(),
       };
       await sessao.save({ transaction });
       return montarResultadoSemAcao({
@@ -456,7 +458,8 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
 
     const snapshot = evento.config_snapshot ?? {};
     const hpAntes = Math.max(0, Number(evento.hp_current));
-    const bossDefensor = { defesa: snapshot.defesa ?? 0, agilidade: 0, vida_atual: hpAntes,
+    await require("./combatTypingService").catalog();
+    const bossDefensor = { combatTyping: snapshot.combatTyping??require("./combatTypingService").monsterProfile(snapshot), defesa: snapshot.defesa ?? 0, agilidade: 0, vida_atual: hpAntes,
       powerCombatState: evento.runtime_state?.powerCombatState };
 
     // 3) Efeitos "Self" do poder usado aplicam sempre, dano ou não — os
@@ -497,6 +500,8 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
     listaJogador = source.status;
     const blindDoJogador = listaJogador.find((s) => s.key === "BLIND");
     const resultado = aplicarAcao({
+      contexto:"WORLD_BOSS",
+      buffsAtacante:sessao.state?.combatAffinityBuffs??[],
       atacante: atacanteEstado,
       defensor: bossDefensor,
       acao,
@@ -587,6 +592,7 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
       status: statusEffectService.decrementarDuracoes(listaJogador),
       powerCombatState: atacanteEstado.powerCombatState,
       cooldowns: cooldownsJogador,
+      combatAffinityBuffs:require("./combatBuffService").decrementarDuracoes(resultado.novosBuffsAtacante),
       ultima_acao_jogador_em: Date.now(),
     };
     await sessao.save({ transaction });
@@ -672,6 +678,7 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
 
     return {
       nomeAcao: resultado.nomeAcao,
+      damageResolution:resultado.damageResolution,
       dano: danoEfetivo,
       esquivou: resultado.esquivou,
       // Precisão/Crítico (Velocidade) — vem pronto de aplicarAcao

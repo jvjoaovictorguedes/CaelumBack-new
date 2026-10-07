@@ -1,3 +1,4 @@
+const typing = require("./combatTypingService");
 // Shared action resolution. Inputs are loaded by mode adapters; no transport,
 // match persistence, timers, matchmaking or reward payout belongs here.
 const {
@@ -131,6 +132,7 @@ function aplicarAcao({
   escudoDefensor = target.shield;
   const vidaAtacanteAntes = atacante.vida_atual;
   let dano = 0;
+  let damageResolution = null;
   let cura = 0;
   let manaCurada = 0;
   let esquivou = false;
@@ -272,17 +274,17 @@ function aplicarAcao({
       // (sem resistência mágica separada).
       const contextoCritico = {};
       const danoBase = Math.round(
-        calcularDanoBasico(atacante, contextoCritico, modificadoresAtacante) * multiplicadorDano,
+        typing.basicDamage(atacante, contextoCritico, modificadoresAtacante, contexto) * multiplicadorDano,
       );
       critico = Boolean(contextoCritico.critico);
-      dano = aplicarMitigacaoDeDefesa(danoBase, defensorComBuffs);
-      dano = Math.max(1, Math.round(dano * multiplicadorDanoRecebido));
+      damageResolution = typing.resolveDamage({amount:danoBase,actor:atacante,target:defensorComBuffs,context:contexto,finalMultiplier:multiplicadorDanoRecebido,buffs:buffsAtacante,defenderBuffs:buffsDefensor});
+      dano=damageResolution.totalDamage;
       const absorcao1 = combatBuffService.absorverDano(novoEscudoDefensor, dano);
       novoEscudoDefensor = absorcao1.escudo;
       defensor.vida_atual = Math.max(0, defensor.vida_atual - absorcao1.danoResidual);
     } else {
-      dano = aplicarMitigacaoDeDefesa(dano, defensorComBuffs);
-      dano = Math.max(1, Math.round(dano * multiplicadorDanoRecebido));
+      damageResolution = typing.resolveDamage({amount:dano,actor:atacante,target:defensorComBuffs,power:acao.power,context:contexto,finalMultiplier:multiplicadorDanoRecebido,buffs:buffsAtacante,defenderBuffs:buffsDefensor});
+      dano=damageResolution.totalDamage;
       const absorcao2 = combatBuffService.absorverDano(novoEscudoDefensor, dano);
       novoEscudoDefensor = absorcao2.escudo;
       defensor.vida_atual = Math.max(0, defensor.vida_atual - absorcao2.danoResidual);
@@ -314,6 +316,7 @@ function aplicarAcao({
     atacante.mana_atual = Math.min(tetoMana, atacante.mana_atual + manaCurada);
   }
 
+  if(typing.enabled(contexto))novosBuffsAtacante=typing.applyPowerBuffs(novosBuffsAtacante,acao.power);
   const curouNaAcao = atacante.vida_atual > vidaAtacanteAntes;
   source.shield = novoEscudoAtacante;
   target.shield = novoEscudoDefensor;
@@ -328,6 +331,7 @@ function aplicarAcao({
   if (ownsRuntime) powerRuntime.end(source, target, runtime);
   return {
     nomeAcao,
+    damageResolution,
     dano,
     cura,
     manaCurada,

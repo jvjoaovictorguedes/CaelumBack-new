@@ -7,6 +7,7 @@ const { sequelize } = require("../config/database");
 const WorldBossConfig = sequelize.define(
   "WorldBossConfig",
   {
+    ...require("./combatTypingModels").fields.monster,
     id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
     nome: { type: DataTypes.STRING(150), allowNull: false },
     descricao: { type: DataTypes.TEXT, allowNull: false },

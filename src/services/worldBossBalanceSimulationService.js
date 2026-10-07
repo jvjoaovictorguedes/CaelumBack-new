@@ -78,6 +78,7 @@ async function montarSnapshotParaSimulacao(idConfig) {
     velocidade: config.velocidade,
     nivel: config.nivel,
     defesa: config.defesa,
+    ...Object.fromEntries(Object.keys(require("../models/combatTypingModels").fields.monster).map(k=>[k,config[k]])),
     mana_maxima: config.mana_maxima,
     regeneracao_mana_por_acao: config.regeneracao_mana_por_acao,
     intervalo_acao_ms: config.intervalo_acao_ms,
@@ -88,6 +89,8 @@ async function montarSnapshotParaSimulacao(idConfig) {
         id_ability: hab.id,
         power_snapshot: {
           id: hab.Power.id,
+          tipo_dano:hab.Power.tipo_dano,
+          ...Object.fromEntries(Object.keys(require("../models/combatTypingModels").fields.power).map(k=>[k,hab.Power[k]])),
           nome: hab.Power.nome,
           dano_base: hab.Power.dano_base,
           cura_base: hab.Power.cura_base,

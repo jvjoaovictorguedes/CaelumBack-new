@@ -437,6 +437,7 @@ async function carregarRespostaDoPersonagem(character) {
     vida_atual: personagemEfetivo.vida_atual,
     mana_atual: personagemEfetivo.mana_atual,
     bonus_atributos,
+    effective_affinities: require("../services/combatTypingService").publicDefense(personagemEfetivo),
     vida_maxima: vidaMaximaComBuff,
     mana_maxima: manaMaximaComBuff,
     regen_vida_restante_ms: msAteVidaRegenCompleta(personagemEfetivo),

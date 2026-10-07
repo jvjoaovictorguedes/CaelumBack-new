@@ -528,6 +528,7 @@ module.exports = function registerPartyHandlers(io) {
           // (só vida/dano escalam por tamanho de grupo); preservada tal
           // qual configurada no catálogo.
           defesa: monstro.defesa ?? 0,
+          combatTyping: (await require("../services/combatTypingService").catalog(),require("../services/combatTypingService").monsterProfile(monstro)),
           xp_recompensa: monstro.xp_recompensa,
           ouro_recompensa: monstro.ouro_recompensa,
         };
@@ -775,6 +776,7 @@ async function executarTurnoAliadoSemGuard(io, battleId, characterId, acao, foiA
   // aliado no monstro quando o ataque básico acerta.
   const {
     nomeAcao,
+    damageResolution,
     dano,
     cura,
     manaCurada,
@@ -819,6 +821,7 @@ async function executarTurnoAliadoSemGuard(io, battleId, characterId, acao, foiA
     origem: "aliado",
     idAtor: characterId,
     nomeAcao: bloqueado ? nomeAcao : foiAutomatico ? `${nomeAcao} (tempo esgotado)` : nomeAcao,
+    damageResolution,
     dano,
     cura,
     manaCurada,

@@ -246,6 +246,8 @@ app.use("/api/maintenance", maintenanceRoutes);
 
 require("./antiAutomation/retentionService").start();
 app.use("/api/anti-automation", require("./routes/antiAutomationRoutes"));
+app.use("/api/combat-typing", require("./routes/combatTypingRoutes"));
+app.use("/api/admin/combat-typing", require("./routes/adminCombatTypingRoutes"));
 app.use("/api/admin/anti-automation", require("./routes/adminAntiAutomationRoutes"));
 app.use("/api/shop", shopRoutes);
 app.use("/api/crafting", craftingRoutes);

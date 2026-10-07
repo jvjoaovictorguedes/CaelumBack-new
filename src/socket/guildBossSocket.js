@@ -212,6 +212,7 @@ async function criarBatalha(io, idGuild, tentativa, characterIdInicial, socketIn
     sala,
     nomeChefe: chefe.nome_chefe,
     defesaChefe: chefe.defesa,
+    combatTyping: (await require("../services/combatTypingService").catalog(),require("../services/combatTypingService").monsterProfile(chefe)),
     danoBaseChefe: chefe.dano_base_ataque,
     vidaTotal: Number(tentativa.vida_total),
     vidaRestante: Number(tentativa.vida_restante),
@@ -420,7 +421,7 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
 
   try {
     const atacante = batalha.membros.get(characterId);
-    const chefeEstado = { defesa: batalha.defesaChefe, agilidade: 0, vida_atual: batalha.vidaRestante,
+    const chefeEstado = { combatTyping:batalha.combatTyping, defesa: batalha.defesaChefe, agilidade: 0, vida_atual: batalha.vidaRestante,
       powerCombatState: batalha.powerCombatState };
     // Habilidades V2.0 §7/§9/§11/§26 (Fase 5) — modificadores PASSIVOS
     // do aliado (chefe nunca tem CharacterAbilities, então o lado dele
@@ -442,10 +443,12 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
       powerRuntime.participant(m.estado, { key: m.id, team: "allies", hpMax: m.vidaMax,
         mpMax: m.manaMax, cooldowns: m.cooldowns }))];
     powerRuntime.begin(source, enemy, runtime);
-    const { nomeAcao, dano, cura, manaCurada, esquivou, critico } = aplicarAcao({
+    const { nomeAcao, novosBuffsAtacante, damageResolution, dano, cura, manaCurada, esquivou, critico } = aplicarAcao({
+      contexto:"GUILD_BOSS",
       atacante: atacante.estado,
       defensor: chefeEstado,
       acao,
+      buffsAtacante:atacante.combatBuffs??[],
       vidaMaxAtacante: atacante.vidaMax,
       manaMaxAtacante: atacante.manaMax,
       multiplicadorDano: combatModifierService.multiplicadorDanoSaida(modificadoresAtacante),
@@ -455,6 +458,8 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
     });
     powerRuntime.end(source, enemy, runtime);
     batalha.powerCombatState = chefeEstado.powerCombatState;
+    atacante.combatBuffs=require("../services/combatBuffService").decrementarDuracoes(novosBuffsAtacante);
+    atacante.estado.combatAffinityBuffs=atacante.combatBuffs;
 
     // Fim do "turno" deste ator (§ mesma semântica do Boss Mundial):
     // ação já validada/consumida acima (Mana/turno/cooldown checados
@@ -484,6 +489,7 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
       origem: "aliado",
       idAtor: characterId,
       nomeAcao: foiAutomatico ? `${nomeAcao} (tempo esgotado)` : nomeAcao,
+      damageResolution,
       dano,
       cura,
       manaCurada,
@@ -671,6 +677,7 @@ async function resolverAcaoDoChefe(io, battleId) {
   }
 
   const chefeAtacante = {
+    combatTyping: habilidadeEscolhida?.powerTyping ? {...batalha.combatTyping,attackPower:habilidadeEscolhida.powerTyping,basicNature:habilidadeEscolhida.powerTyping.tipo_dano,basicAffinityId:habilidadeEscolhida.powerTyping.affinity_mode==="INHERIT_WEAPON"?batalha.combatTyping.basicAffinityId:habilidadeEscolhida.powerTyping.affinity_id} : batalha.combatTyping,
     forca: habilidadeEscolhida ? forcaParaDanoAlvo(habilidadeEscolhida.danoBase, batalha.rodada) : forcaChefeParaRodada(batalha),
     nivel: 1,
     agilidade: 0,
@@ -685,8 +692,10 @@ async function resolverAcaoDoChefe(io, battleId) {
     "GUILD_BOSS",
   );
   const resultadoAcao = aplicarAcao({
+    contexto:"GUILD_BOSS",
     atacante: chefeAtacante,
     defensor: alvo.estado,
+    buffsDefensor:alvo.combatBuffs??[],
     acao: { tipo: "attack" },
     vidaMaxAtacante: undefined,
     modificadoresDefensor,
@@ -713,6 +722,7 @@ async function resolverAcaoDoChefe(io, battleId) {
   io.to(batalha.sala).emit(SOCKET_EVENTS.GUILDBOSS.TURNO_RESULTADO, {
     battleId,
     origem: "chefe",
+    damageResolution:resultadoAcao.damageResolution,
     idAlvo: alvo.id,
     nomeAcao,
     dano,
