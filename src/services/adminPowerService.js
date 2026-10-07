@@ -33,20 +33,20 @@ RaceAbilities.belongsTo(Race, { foreignKey: "id_raca" });
 const { CHAVES_VALIDAS, STATUS, STACKS_MAXIMOS } = require("../config/statusEffectConfig");
 const {
   EFFECT_KEYS,
-  METADADOS_DO_EFEITO,
   TARGETS,
   REAPPLY_POLICIES_VALIDAS,
   effectKeyValida,
   targetValido,
   reapplyPolicyValida,
 } = require("../config/combatModifierConfig");
-const { TRIGGERS, DESCRICAO_DO_TRIGGER, triggerValido } = require("../config/combatTriggerConfig");
-const { CONDITIONS, CONFIG_ESPERADA, conditionKeyValida, configBateComContrato } = require("../config/combatConditionConfig");
-const { CONTEXTOS_DE_COMBATE, ROTULO_DO_CONTEXTO } = require("../config/combatContextConfig");
+const { TRIGGERS, triggerValido } = require("../config/combatTriggerConfig");
+const { CONFIG_ESPERADA, conditionKeyValida, configBateComContrato } = require("../config/combatConditionConfig");
+const { CONTEXTOS_DE_COMBATE } = require("../config/combatContextConfig");
 const { NIVEL_MAXIMO_HABILIDADE, multiplicadorEfeito, multiplicadorCustoMana, marcoDoNivel, custoParaEvoluir } = require("../services/abilityLevelService");
 const { potenciaEsperada } = require("../services/combatEffectResolver");
 const { magnitudeEfetiva } = require("../services/combatModifierService");
 const { registrarAcao } = require("./adminAuditService");
+const { catalogoAdminCombatEffects } = require("./adminCombatEffectMetadata");
 
 function erro(mensagem, statusCode = 400) {
   const e = new Error(mensagem);
@@ -361,14 +361,52 @@ function validarCombatEffectPayload(dados) {
   if (dados.max_stacks != null && (!Number.isInteger(dados.max_stacks) || dados.max_stacks < 1)) {
     throw erro("max_stacks precisa ser um inteiro >= 1 (ou null).");
   }
-  if (dados.condition_key != null) {
-    if (!conditionKeyValida(dados.condition_key)) {
-      throw erro(`condition_key "${dados.condition_key}" não existe no catálogo canônico. Válidos: ${CONDITIONS.join(", ")}.`);
+  for (const campo of ["magnitude_base", "scale_value"]) {
+    if (dados[campo] !== undefined && (typeof dados[campo] !== "number" || !Number.isFinite(dados[campo]))) {
+      throw erro(`${campo} precisa ser um número finito.`);
     }
+  }
+  for (const campo of ["scale_with_ability_level", "dispellable", "ativo", ...CONTEXTOS_DE_COMBATE.map(c => `allow_${c.toLowerCase()}`)]) {
+    if (dados[campo] !== undefined && typeof dados[campo] !== "boolean") throw erro(`${campo} precisa ser booleano.`);
+  }
+  if (dados.stack_group != null && (typeof dados.stack_group !== "string" || dados.stack_group.length > 60)) {
+    throw erro("stack_group precisa ser texto de até 60 caracteres (ou null).");
+  }
+  for (const campo of ["condition_config", "config"]) {
+    if (dados[campo] !== undefined && (!dados[campo] || typeof dados[campo] !== "object" || Array.isArray(dados[campo]))) {
+      throw erro(`${campo} precisa ser um objeto.`);
+    }
+  }
+}
+
+// Valida dependências no estado FINAL de um PATCH. Linhas antigas sem
+// campos hoje exigidos continuam podendo ser ativadas/editadas em outros
+// campos; não reescrevemos nem descartamos configs legadas silenciosamente.
+function validarContratoCombatEffect(dados, alterados = null) {
+  const mudou = (...campos) => !alterados || campos.some(campo => Object.hasOwn(alterados, campo));
+  if (mudou("reapply_policy", "max_stacks") && dados.reapply_policy === "STACK" && dados.max_stacks == null) {
+    throw erro("STACK exige max_stacks (inteiro >= 1).");
+  }
+  if (mudou("condition_key", "condition_config") && dados.condition_key != null) {
+    if (!conditionKeyValida(dados.condition_key)) throw erro(`condition_key "${dados.condition_key}" não existe no catálogo canônico.`);
+    const contrato = CONFIG_ESPERADA[dados.condition_key];
     if (!configBateComContrato(dados.condition_key, dados.condition_config ?? {})) {
-      const contrato = CONFIG_ESPERADA[dados.condition_key];
       throw erro(`condition_config precisa ter os campos: ${contrato.campos.join(", ")}.`);
     }
+    for (const campo of contrato.fields) {
+      const valor = dados.condition_config[campo.key];
+      if (campo.type === "number" && (typeof valor !== "number" || !Number.isFinite(valor) || valor < campo.min || valor > campo.max)) {
+        throw erro(`condition_config.${campo.key} precisa ser um número entre ${campo.min} e ${campo.max}.`);
+      }
+      if (campo.optionsSource === "statusKeys" && !CHAVES_VALIDAS.includes(valor)) throw erro(`condition_config.${campo.key} precisa ser um Status válido.`);
+      if (campo.type === "text" && (typeof valor !== "string" || !valor.trim() || valor.length > campo.maxLength)) throw erro(`condition_config.${campo.key} precisa ser texto não vazio de até ${campo.maxLength} caracteres.`);
+    }
+  }
+  if (mudou("effect_key", "config") && dados.effect_key === "CLEANSE_STATUS" && !CHAVES_VALIDAS.includes(dados.config?.status_key)) {
+    throw erro("config.status_key precisa ser um Status válido para CLEANSE_STATUS.");
+  }
+  if (mudou("effect_key", "config") && dados.effect_key === "CLEANSE_CATEGORY" && !["DOT", "CONTROLE"].includes(dados.config?.category)) {
+    throw erro("config.category precisa ser DOT ou CONTROLE para CLEANSE_CATEGORY.");
   }
 }
 
@@ -380,6 +418,7 @@ async function addAdminPowerCombatEffect(idPower, payload, { idAdmin, req }) {
   const dados = somenteCampos(payload, CAMPOS_COMBAT_EFFECT);
   if (!dados.effect_key) throw erro("effect_key é obrigatório.");
   validarCombatEffectPayload(dados);
+  validarContratoCombatEffect(dados);
 
   return sequelize.transaction(async (transaction) => {
     const power = await Power.findByPk(idPower, { transaction });
@@ -398,6 +437,7 @@ async function updateAdminPowerCombatEffect(idEfeito, payload, { idAdmin, req })
     const efeito = await PowerCombatEffect.findByPk(idEfeito, { transaction, lock: transaction.LOCK.UPDATE });
     if (!efeito) throw erro("Efeito não encontrado.", 404);
     const antes = efeito.toJSON();
+    validarContratoCombatEffect({ ...antes, ...dados }, dados);
     await efeito.update(dados, { transaction });
     await registrarAcao({ idAdmin, acao: "editar", entidade: "PowerCombatEffect", idEntidade: efeito.id, dadosAntes: antes, dadosDepois: efeito.toJSON(), req, transaction });
     return efeito;
@@ -419,14 +459,17 @@ async function removeAdminPowerCombatEffect(idEfeito, { idAdmin, req }) {
 // contextual (nunca hardcoded lá); "Potência base" nunca aparece
 // genérico — cada effect_key já vem com label/unidade reais.
 function combatEffectCatalog() {
-  return {
-    effectKeys: EFFECT_KEYS.map((chave) => ({ key: chave, ...METADADOS_DO_EFEITO[chave] })),
-    targets: TARGETS,
-    triggers: TRIGGERS.map((chave) => ({ key: chave, descricao: DESCRICAO_DO_TRIGGER[chave] })),
-    reapplyPolicies: REAPPLY_POLICIES_VALIDAS,
-    conditions: CONDITIONS.map((chave) => ({ key: chave, ...CONFIG_ESPERADA[chave] })),
-    contexts: CONTEXTOS_DE_COMBATE.map((chave) => ({ key: chave, rotulo: ROTULO_DO_CONTEXTO[chave] })),
-  };
+  return catalogoAdminCombatEffects(ATRIBUTOS_VALIDOS);
+}
+
+async function listCombatEffectStackGroups() {
+  const linhas = await PowerCombatEffect.findAll({
+    attributes: [[sequelize.fn("DISTINCT", sequelize.col("stack_group")), "stack_group"]],
+    where: { stack_group: { [Op.ne]: null } },
+    order: [["stack_group", "ASC"]],
+    raw: true,
+  });
+  return linhas.map(linha => linha.stack_group).filter(Boolean);
 }
 
 // ----------------------------------------------------- WEAPON STATUS EFFECT
@@ -685,6 +728,7 @@ module.exports = {
   updateAdminPowerCombatEffect,
   removeAdminPowerCombatEffect,
   combatEffectCatalog,
+  listCombatEffectStackGroups,
   listAdminWeaponStatusEffects,
   addAdminWeaponStatusEffect,
   updateAdminWeaponStatusEffect,
