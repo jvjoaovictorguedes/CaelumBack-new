@@ -1,3 +1,4 @@
+const { habilidadesComSlots } = require("../services/combatLoadoutService");
 // src/controllers/characterController.js
 const { Op } = require("sequelize");
 const { sequelize } = require("../config/database");
@@ -844,6 +845,7 @@ exports.getPoderesDisponiveis = async (req, res) => {
       }),
       CharacterAbilities.findAll({
         where: { id_personagem: character.id },
+        include: [{ model: Power }],
       }),
       Item.findOne({ where: { nome: NOME_ITEM_FRAGMENTO } }),
       // Bug reportado: um poder vinculado via NatureAbilities (admin
@@ -879,6 +881,7 @@ exports.getPoderesDisponiveis = async (req, res) => {
         )?.quantidade ?? 0
       : 0;
 
+    const slotPorPoder = new Map(habilidadesComSlots(aprendidos).map((row) => [row.id_power, row.combat_slot]));
     const aprendidoPorPoder = new Map(
       aprendidos.map((linha) => [linha.id_power, linha]),
     );
@@ -914,6 +917,7 @@ exports.getPoderesDisponiveis = async (req, res) => {
         nivel_necessario: nivelNecessario,
         aprendido: Boolean(linhaAprendida),
         ativo: linhaAprendida?.is_active ?? false,
+        combat_slot: slotPorPoder.get(poder.id) ?? null,
         id_character_ability: linhaAprendida?.id ?? null,
         // custo_ouro = precisa comprar (não libera de graça por nível) —
         // pode_comprar só fica true quando falta comprar, o nível já foi
