@@ -193,3 +193,26 @@ testeComBanco(
     );
   },
 );
+
+testeComBanco("BASELINE anti-automação: 10 coletas concorrentes produzem uma única coleta útil", async (t) => {
+  const { usuario, personagem } = await criarPersonagem({ nivel: 5 });
+  usuariosCriados.push(usuario.id);
+  personagensCriados.push(personagem.id);
+  const admin = await criarUsuarioAdmin();
+  await expeditionSettingsService.updateBalanceamento("expedition.cooldown", { TEMPO_COLETA_MS: 60000 }, { idAdmin: admin.id });
+  const regiao = await criarRegiaoComRecurso("Mineracao");
+  await expeditionService.listarProfissoes(personagem.id);
+  // Evita emboscada e mantém qualidade na faixa suportada pela fixture.
+  t.mock.method(require("node:crypto"), "randomInt", (min, max) => min + Math.floor((max - min) * 0.2));
+  const respostas = await Promise.allSettled(Array.from({ length: 10 }, () => expeditionService.coletar(personagem.id, regiao.id)));
+  assert.equal(respostas.filter((r) => r.status === "fulfilled").length, 1);
+  const rejeitadas = respostas.filter((r) => r.status === "rejected");
+  assert.equal(rejeitadas.length, 9);
+  assert.ok(rejeitadas.every((r) => r.reason.statusCode === 429));
+  const resultado = respostas.find((r) => r.status === "fulfilled").value;
+  assert.ok(resultado.item_ganho, "a coleta única deve conceder um recurso");
+  const estoque = await require("../src/models/CharacterInventory").findOne({ where: { id_personagem: personagem.id, id_item: resultado.item_ganho.id } });
+  assert.equal(estoque.quantidade, resultado.quantidade);
+  const linhas = await CharacterProfession.findAll({ where: { id_personagem: personagem.id } });
+  assert.equal(linhas.find((p) => p.tipo === "Mineracao").experiencia, respostas.find((r) => r.status === "fulfilled").value.experiencia);
+});
