@@ -189,3 +189,80 @@ test("combatEffectCatalog: publica os 4 catálogos completos, cada effect_key co
   assert.ok(catalogo.conditions.some((c) => c.key === "SELF_HP_BELOW_PCT"));
   assert.ok(catalogo.contexts.some((c) => c.key === "PVE"));
 });
+
+test("combatEffectCatalog: metadados canônicos, schemas e suporte por combinação", () => {
+  const { EFFECT_KEYS, METADADOS_DO_EFEITO } = require("../src/config/combatModifierConfig");
+  const { CONFIG_ESPERADA } = require("../src/config/combatConditionConfig");
+  const { TRIGGERS_REATIVOS_SUPORTADOS, REACTIVE_EFFECT_KEYS_IMPLEMENTADAS } = require("../src/services/combatModifierService");
+  const catalog = adminPowerService.combatEffectCatalog();
+  assert.deepEqual(catalog.effectKeys.map(effect => effect.key), EFFECT_KEYS);
+  for (const effect of catalog.effectKeys) {
+    assert.equal(effect.unidade, METADADOS_DO_EFEITO[effect.key].unidade);
+    assert.ok(effect.previewTemplate.includes("{subject}"));
+    for (const trigger of catalog.triggers) assert.ok(effect.supportByTrigger[trigger.key]);
+  }
+  const effect = key => catalog.effectKeys.find(effect => effect.key === key);
+  assert.equal(effect("CLEANSE_STATUS").unidade, "SEM_MAGNITUDE");
+  assert.equal(effect("CLEANSE_STATUS").configFields[0].key, "status_key");
+  assert.equal(effect("CLEANSE_CATEGORY").configFields[0].key, "category");
+  assert.equal(effect("DAMAGE_DEALT_PCT").supportByTrigger.PASSIVE.status, "FUNCTIONAL");
+  assert.equal(effect("DAMAGE_DEALT_PCT").supportByTrigger.ON_HIT.status, "UNSUPPORTED");
+  assert.equal(effect("DAMAGE_DEALT_PCT").supportByTrigger.ON_CAST.status, "UNSUPPORTED");
+  assert.equal(effect("COOLDOWN_REDUCTION_TURNS").supportByTrigger.PASSIVE.status, "UNSUPPORTED", "getter sem wiring não pode aparecer como funcional");
+  for (const trigger of TRIGGERS_REATIVOS_SUPORTADOS) for (const key of REACTIVE_EFFECT_KEYS_IMPLEMENTADAS) assert.equal(effect(key).supportByTrigger[trigger].status, "PARTIAL");
+  for (const condition of catalog.conditions) {
+    assert.deepEqual(condition.fields.map(field => field.key), CONFIG_ESPERADA[condition.key].campos);
+  }
+  assert.ok(catalog.contexts.every(context => PowerCombatEffect.rawAttributes[context.field]));
+});
+
+testeComBanco("combat effects: duração, chance e STACK são validados sem executar novos gatilhos", async () => {
+  const admin = await criarAdmin(); const power = await criarPower(); const context = { idAdmin: admin.id };
+  for (const duration of [0, -1, 1.5]) await assert.rejects(() => adminPowerService.addAdminPowerCombatEffect(power.id, { effect_key: "DAMAGE_DEALT_PCT", duration_turns: duration }, context), /duration_turns/);
+  for (const chance of [0, 1_000_001, 0.5]) await assert.rejects(() => adminPowerService.addAdminPowerCombatEffect(power.id, { effect_key: "DAMAGE_DEALT_PCT", chance_ppm: chance }, context), /chance_ppm/);
+  await assert.rejects(() => adminPowerService.addAdminPowerCombatEffect(power.id, { effect_key: "DAMAGE_DEALT_PCT", reapply_policy: "STACK" }, context), /STACK exige/);
+  const effect = await adminPowerService.addAdminPowerCombatEffect(power.id, { effect_key: "DAMAGE_DEALT_PCT", trigger: "ON_CAST", duration_turns: 2, chance_ppm: 200_000, reapply_policy: "STACK", max_stacks: 3 }, context);
+  assert.equal(effect.duration_turns, 2); assert.equal(effect.chance_ppm, 200_000);
+  await assert.rejects(() => adminPowerService.updateAdminPowerCombatEffect(effect.id, { max_stacks: null }, context), /STACK exige/);
+  const updated = await adminPowerService.updateAdminPowerCombatEffect(effect.id, { duration_turns: null }, context);
+  assert.equal(updated.duration_turns, null); assert.equal(updated.max_stacks, 3);
+});
+
+testeComBanco("combat effects: PATCH valida condição mesclada e preserva os outros campos", async () => {
+  const admin = await criarAdmin(); const power = await criarPower(); const context = { idAdmin: admin.id };
+  const original = await adminPowerService.addAdminPowerCombatEffect(power.id, {
+    effect_key: "DEFENSE_FLAT", magnitude_base: -12, chance_ppm: 500_000, duration_turns: 3,
+    scale_attribute: "Forca", scale_value: 0.5, scale_with_ability_level: true,
+    condition_key: "TARGET_HP_BELOW_PCT", condition_config: { limite_pct: 40, legacy: "preservar" },
+    config: { extension: "preservar" }, dispellable: false, allow_ranked: false, allow_world_boss: false,
+  }, context);
+  const updated = await adminPowerService.updateAdminPowerCombatEffect(original.id, { condition_config: { limite_pct: 25, legacy: "preservar" } }, context);
+  assert.equal(updated.condition_config.limite_pct, 25);
+  for (const key of ["magnitude_base", "chance_ppm", "duration_turns", "scale_attribute", "scale_value", "scale_with_ability_level", "config", "dispellable", "allow_ranked", "allow_world_boss"]) assert.deepEqual(updated[key], original[key], key);
+  await assert.rejects(() => adminPowerService.updateAdminPowerCombatEffect(original.id, { condition_config: { limite_pct: 101 } }, context), /condition_config.limite_pct/);
+  await assert.rejects(() => adminPowerService.updateAdminPowerCombatEffect(original.id, { condition_config: { thresholdPct: 40 } }, context), /limite_pct/);
+});
+
+testeComBanco("combat effects: CLEANSE tipado, contextos e autocomplete do banco", async () => {
+  const admin = await criarAdmin(); const power = await criarPower(); const context = { idAdmin: admin.id };
+  await assert.rejects(() => adminPowerService.addAdminPowerCombatEffect(power.id, { effect_key: "CLEANSE_STATUS", config: { status_key: "INVENTADO" } }, context), /config.status_key/);
+  await assert.rejects(() => adminPowerService.addAdminPowerCombatEffect(power.id, { effect_key: "CLEANSE_CATEGORY", config: { category: "INVENTADA" } }, context), /config.category/);
+  const group = `CUSTOM_${sufixo()}`;
+  const catalog = adminPowerService.combatEffectCatalog();
+  const flags = Object.fromEntries(catalog.contexts.map(context => [context.field, false]));
+  const effect = await adminPowerService.addAdminPowerCombatEffect(power.id, { effect_key: "CLEANSE_STATUS", config: { status_key: "BURN", extension: true }, stack_group: group, ...flags }, context);
+  for (const field of Object.keys(flags)) assert.equal(effect[field], false);
+  assert.ok((await adminPowerService.listCombatEffectStackGroups()).includes(group));
+  await assert.rejects(() => adminPowerService.updateAdminPowerCombatEffect(effect.id, { config: { status_key: "INVALIDO" } }, context), /config.status_key/);
+  const updated = await adminPowerService.updateAdminPowerCombatEffect(effect.id, { ativo: false }, context);
+  assert.deepEqual(updated.config, { status_key: "BURN", extension: true });
+  const category = await adminPowerService.addAdminPowerCombatEffect(power.id, { effect_key: "CLEANSE_CATEGORY", config: { category: "DOT" } }, context);
+  assert.equal(category.magnitude_base, 0);
+});
+
+testeComBanco("combat effects: edição compatível com STACK e configs legadas", async () => {
+  const admin = await criarAdmin(); const power = await criarPower(); const context = { idAdmin: admin.id };
+  const legacy = await PowerCombatEffect.create({ id_power: power.id, effect_key: "CLEANSE_STATUS", reapply_policy: "STACK", max_stacks: null, config: { legacy: 42 } });
+  const updated = await adminPowerService.updateAdminPowerCombatEffect(legacy.id, { ativo: false, magnitude_base: 9 }, context);
+  assert.equal(updated.ativo, false); assert.equal(updated.max_stacks, null); assert.deepEqual(updated.config, { legacy: 42 });
+});

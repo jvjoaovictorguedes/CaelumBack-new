@@ -187,7 +187,13 @@ exports.removerCombatEffect = async (req, res) => {
 };
 
 exports.catalogoDeCombatEffects = async (req, res) => {
-  res.status(200).json({ status: "success", data: { catalogo: adminPowerService.combatEffectCatalog() } });
+  try {
+    const catalogo = adminPowerService.combatEffectCatalog();
+    catalogo.stackGroups = await adminPowerService.listCombatEffectStackGroups();
+    res.status(200).json({ status: "success", data: { catalogo } });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao carregar metadados dos efeitos de combate.");
+  }
 };
 
 // Weapon status effects (montado sob /admin/items/:idItem/weapon-status-effects)
