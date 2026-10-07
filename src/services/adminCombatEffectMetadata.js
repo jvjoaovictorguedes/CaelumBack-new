@@ -41,8 +41,8 @@ const PREFIXOS = {
 };
 
 // Somente os modificadores de Power cujos valores são consumidos nas
-// fórmulas/ações do personagem. Ter um getter não prova que está ligado:
-// HEALING_RECEIVED_PCT e COOLDOWN_REDUCTION_TURNS ainda não são consumidos.
+// fórmulas/ações do personagem. Cura recebida e cooldown têm consumidores
+// específicos e permanecem parciais para não prometer todas as fontes/modos.
 const PASSIVOS_EXECUTADOS = new Set([
   "DAMAGE_DEALT_PCT",
   "DAMAGE_TAKEN_PCT",
@@ -127,6 +127,14 @@ function suporteDaCombinacao(effectKey, trigger) {
         "Modificador passivo consumido pelo motor do personagem, com alvo SELF e chance de 100%.",
     };
   }
+  if (trigger === "PASSIVE" && ["HEALING_RECEIVED_PCT", "COOLDOWN_REDUCTION_TURNS"].includes(effectKey)) {
+    return {
+      status: "PARTIAL", label: "Suporte parcial",
+      description: effectKey === "HEALING_RECEIVED_PCT"
+        ? "Consumido nas curas de Power; outras fontes mantêm o comportamento anterior."
+        : "Reduz o cooldown inicial no PvE; os outros modos mantêm o ciclo anterior.",
+    };
+  }
   if (
     TRIGGERS_REATIVOS_SUPORTADOS.includes(trigger) &&
     REACTIVE_EFFECT_KEYS_IMPLEMENTADAS.includes(effectKey)
@@ -135,7 +143,7 @@ function suporteDaCombinacao(effectKey, trigger) {
       status: "PARTIAL",
       label: "Suporte parcial",
       description:
-        "Proc instantâneo de Vida/Mana ao acertar ou matar. Não há aplicação temporária geral, nem resolução de condições ou de outros alvos.",
+        "Evento executado com chance e condições. Modificadores numéricos usam duração e reaplicação; Vida/Mana são instantâneas. Há limitações de alvos de grupo em Boss Mundial, de cooldown fora do PvE e de políticas de escudo/dissipação.",
     };
   }
   return {
@@ -180,7 +188,7 @@ function catalogoAdminCombatEffects(attributes) {
           key === "PASSIVE"
             ? "Funcional"
             : TRIGGERS_REATIVOS_SUPORTADOS.includes(key)
-              ? "Suporte parcial"
+              ? "Executado — suporte parcial"
               : "Ainda não executado pelo motor",
       },
     })),
@@ -201,17 +209,17 @@ function catalogoAdminCombatEffects(attributes) {
       scope:
         "Suporte de Powers aprendidas pelo personagem. Habilidades de monstros usam um adaptador específico; o catálogo não garante execução em todos os motores.",
       target:
-        "O motor do personagem agrega o efeito no portador e ainda não resolve ENEMY, ALL_ALLIES ou ALL_ENEMIES. O alvo selecionado pode não ser respeitado.",
+        "Reativos resolvem SELF/ENEMY; ALL_ALLIES inclui os membros no combate de Grupo/Guild Boss. No Boss Mundial, grupos ficam limitados à sessão atual. PASSIVE continua agregado no portador.",
       condition:
-        "A condição é salva, mas ainda não é avaliada pelo motor do personagem: o efeito pode ser aplicado mesmo quando ela não for atendida.",
+        "Condições reativas são avaliadas por alvo no instante do evento. Condições em PASSIVE ainda não são avaliadas.",
       passiveChance:
         "PASSIVE com chance abaixo de 100% é ignorado pelo motor; não é sorteado como um efeito reativo.",
       duration:
-        "Duração e dissipação são configuráveis, mas ainda não há ciclo geral de expiração/dissipação para estes modificadores de Power.",
+        "Modificadores numéricos reativos expiram nos turnos do destinatário; sem duração, valem até o fim do combate. Vida/Mana e limpeza são instantâneas, independentemente da duração. Escudos usam a política de maior valor do motor existente.",
       passivePolicy:
         "Em passivas agrupadas, as políticas diferentes de STACK convergem hoje para a maior magnitude; não há renovação ou substituição temporal geral.",
       noGroup:
-        "Sem grupo, as linhas somam livremente; a política de reaplicação não é usada para agrupá-las.",
+        "Passivas sem grupo somam livremente. Reativos sem grupo reaplicam por origem/linha; um grupo explícito compartilha a política entre origens.",
     },
   };
 }

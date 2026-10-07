@@ -231,3 +231,31 @@ test("resolverModificadoresDoPersonagem: lança erro claro pra contexto desconhe
     /Contexto de combate desconhecido/,
   );
 });
+
+
+testeComBanco("catálogo reativo carrega todos os eventos, condições e alvos; respeita loadout/contexto/ativo", async () => {
+  const personagem = await novoPersonagem();
+  const power = await criarPower({ tipo_poder: "Ativo" });
+  await CharacterAbilities.create({ id_personagem: personagem.id, id_power: power.id, is_active: true });
+  for (const trigger of combatModifierService.TRIGGERS_REATIVOS_SUPORTADOS) {
+    await PowerCombatEffect.create({ id_power: power.id, trigger, effect_key: "DEFENSE_FLAT", magnitude_base: 7,
+      target: "ENEMY", duration_turns: 2, condition_key: "TARGET_HP_BELOW_PCT", condition_config: { limite_pct: 50 },
+      config: { extension: true }, allow_ranked: false });
+  }
+  await PowerCombatEffect.create({ id_power: power.id, trigger: "ON_CAST", effect_key: "REGEN_HP_FLAT", ativo: false });
+  const map = await combatModifierService.resolverGatilhosDoPersonagem(personagem, "PVE");
+  assert.equal(map.size, 10);
+  for (const rows of map.values()) {
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].target, "ENEMY");
+    assert.equal(rows[0].sourcePowerId, power.id);
+    assert.equal(rows[0].duration_turns, 2);
+    assert.deepEqual(rows[0].condition_config, { limite_pct: 50 });
+    assert.deepEqual(rows[0].config, { extension: true });
+  }
+  const ranked = await combatModifierService.resolverGatilhosDoPersonagem(personagem, "RANKED");
+  assert.ok([...ranked.values()].every((rows) => rows.length === 0));
+  await CharacterAbilities.update({ is_active: false }, { where: { id_personagem: personagem.id, id_power: power.id } });
+  const inactive = await combatModifierService.resolverGatilhosDoPersonagem(personagem, "PVE");
+  assert.ok([...inactive.values()].every((rows) => rows.length === 0));
+});

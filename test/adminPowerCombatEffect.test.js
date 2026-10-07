@@ -206,9 +206,9 @@ test("combatEffectCatalog: metadados canônicos, schemas e suporte por combinaç
   assert.equal(effect("CLEANSE_STATUS").configFields[0].key, "status_key");
   assert.equal(effect("CLEANSE_CATEGORY").configFields[0].key, "category");
   assert.equal(effect("DAMAGE_DEALT_PCT").supportByTrigger.PASSIVE.status, "FUNCTIONAL");
-  assert.equal(effect("DAMAGE_DEALT_PCT").supportByTrigger.ON_HIT.status, "UNSUPPORTED");
-  assert.equal(effect("DAMAGE_DEALT_PCT").supportByTrigger.ON_CAST.status, "UNSUPPORTED");
-  assert.equal(effect("COOLDOWN_REDUCTION_TURNS").supportByTrigger.PASSIVE.status, "UNSUPPORTED", "getter sem wiring não pode aparecer como funcional");
+  assert.equal(effect("DAMAGE_DEALT_PCT").supportByTrigger.ON_HIT.status, "PARTIAL");
+  assert.equal(effect("DAMAGE_DEALT_PCT").supportByTrigger.ON_CAST.status, "PARTIAL");
+  assert.equal(effect("COOLDOWN_REDUCTION_TURNS").supportByTrigger.PASSIVE.status, "PARTIAL", "cooldown fora do PvE não pode aparecer como funcional");
   for (const trigger of TRIGGERS_REATIVOS_SUPORTADOS) for (const key of REACTIVE_EFFECT_KEYS_IMPLEMENTADAS) assert.equal(effect(key).supportByTrigger[trigger].status, "PARTIAL");
   for (const condition of catalog.conditions) {
     assert.deepEqual(condition.fields.map(field => field.key), CONFIG_ESPERADA[condition.key].campos);

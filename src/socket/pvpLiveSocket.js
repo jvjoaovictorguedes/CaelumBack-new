@@ -661,20 +661,14 @@ async function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
 
   duelo.acoes += 1;
 
-  // Habilidades V2.0 §7/§9/§11/§26 (Fase 5) — modificadores PASSIVOS de
-  // Powers aprendidas (PowerCombatEffect), resolvidos uma vez por turno
-  // pros dois lados, mesmo contexto PVP_CASUAL que já vale pro teto de
-  // DoT (duelEngine.resolverTurnoComStatus). `duelo.ranked`/torneio
-  // ainda não distinguem contexto aqui — ver mesmo comentário em
-  // duelEngine.js.
-  const [modificadoresAtacante, modificadoresDefensor, gatilhosAtacante] = await Promise.all([
-    combatModifierService.resolverModificadoresDoPersonagem(atacanteInfo.estado, "PVP_CASUAL"),
-    combatModifierService.resolverModificadoresDoPersonagem(defensorInfo.estado, "PVP_CASUAL"),
-    // Item 7 — gatilhos reativos ON_HIT/ON_KILL do atacante, mesmo
-    // princípio de resolução por turno dos modificadores acima.
-    combatModifierService.resolverGatilhosDoPersonagem(atacanteInfo.estado, "PVP_CASUAL"),
+  // Catálogo e regras de contexto para os dois lados, sem query por golpe.
+  const contexto = duelo.ranked ? "RANKED" : duelo.torneio ? "TOURNAMENT" : "PVP_CASUAL";
+  const [modificadoresAtacante, modificadoresDefensor, gatilhosAtacante, gatilhosDefensor] = await Promise.all([
+    combatModifierService.resolverModificadoresDoPersonagem(atacanteInfo.estado, contexto),
+    combatModifierService.resolverModificadoresDoPersonagem(defensorInfo.estado, contexto),
+    combatModifierService.resolverGatilhosDoPersonagem(atacanteInfo.estado, contexto),
+    combatModifierService.resolverGatilhosDoPersonagem(defensorInfo.estado, contexto),
   ]);
-
   // Motor de Status (Evolução do Motor de Status) — mesma engrenagem do
   // PvE (combatController.js), agora também no duelo ao vivo (casual,
   // ranqueado e torneio, que reaproveitam esta mesma função): ticks de
@@ -718,6 +712,10 @@ async function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
     modificadoresAtacante,
     modificadoresDefensor,
     gatilhosAtacante,
+    gatilhosDefensor,
+    vidaMaxDefensor: defensorInfo.vidaMax,
+    manaMaxDefensor: defensorInfo.manaMax,
+    contexto,
   });
   duelo.statusEffects[chave] = statusAtacante;
   duelo.statusEffects[outraChave] = statusDefensor;

@@ -53,6 +53,7 @@ const GuildLog = require("../models/GuildLog");
 const { aplicarAcao } = require("../services/duelEngine");
 const { custoManaEfetivo } = require("../services/combatFormulas");
 const combatModifierService = require("../services/combatModifierService");
+const powerRuntime = require("../services/powerCombatRuntime");
 // Cooldown real de Powers dentro da luta ao vivo — MESMO motor que o
 // Boss Mundial usa (worldBossCombatService.js) e o combate solo da
 // Aventura (combatController.js), nunca um paralelo: "cooldown 3"
@@ -418,7 +419,8 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
 
   try {
     const atacante = batalha.membros.get(characterId);
-    const chefeEstado = { defesa: batalha.defesaChefe, agilidade: 0, vida_atual: batalha.vidaRestante };
+    const chefeEstado = { defesa: batalha.defesaChefe, agilidade: 0, vida_atual: batalha.vidaRestante,
+      powerCombatState: batalha.powerCombatState };
     // Habilidades V2.0 §7/§9/§11/§26 (Fase 5) — modificadores PASSIVOS
     // do aliado (chefe nunca tem CharacterAbilities, então o lado dele
     // fica com o Map vazio default de aplicarAcao). DAMAGE_DEALT_PCT
@@ -431,6 +433,14 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
     );
     // Item 7 — gatilhos reativos ON_HIT/ON_KILL do aliado.
     const gatilhosAtacante = await combatModifierService.resolverGatilhosDoPersonagem(atacante.estado, "GUILD_BOSS");
+    const source = powerRuntime.participant(atacante.estado, { key: characterId, team: "allies",
+      triggers: gatilhosAtacante, modifiers: modificadoresAtacante, hpMax: atacante.vidaMax,
+      mpMax: atacante.manaMax, cooldowns: atacante.cooldowns });
+    const enemy = powerRuntime.participant(chefeEstado, { key: "boss", team: "boss" });
+    const runtime = [source, enemy, ...[...batalha.membros.values()].filter((m) => m !== atacante).map((m) =>
+      powerRuntime.participant(m.estado, { key: m.id, team: "allies", hpMax: m.vidaMax,
+        mpMax: m.manaMax, cooldowns: m.cooldowns }))];
+    powerRuntime.begin(source, enemy, runtime);
     const { nomeAcao, dano, cura, manaCurada, esquivou, critico } = aplicarAcao({
       atacante: atacante.estado,
       defensor: chefeEstado,
@@ -440,7 +450,10 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
       multiplicadorDano: combatModifierService.multiplicadorDanoSaida(modificadoresAtacante),
       modificadoresAtacante,
       gatilhosAtacante,
+      runtime,
     });
+    powerRuntime.end(source, enemy, runtime);
+    batalha.powerCombatState = chefeEstado.powerCombatState;
 
     // Fim do "turno" deste ator (§ mesma semântica do Boss Mundial):
     // ação já validada/consumida acima (Mana/turno/cooldown checados
@@ -454,9 +467,10 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
     let derrotado = false;
     let recompensas = null;
 
-    if (dano > 0) {
+    const danoEfetivo = Math.max(0, batalha.vidaRestante - chefeEstado.vida_atual);
+    if (danoEfetivo > 0) {
       const resultado = await sequelize.transaction((transaction) =>
-        atacarBossAoVivo(batalha.idGuild, characterId, dano, transaction, { registrarLog, emitirEvento: emitParaGuild }),
+        atacarBossAoVivo(batalha.idGuild, characterId, danoEfetivo, transaction, { registrarLog, emitirEvento: emitParaGuild }),
       );
       vidaRestanteAtual = Number(resultado.tentativa.vida_restante);
       derrotado = resultado.derrotado;
@@ -659,6 +673,8 @@ async function resolverAcaoDoChefe(io, battleId) {
     forca: habilidadeEscolhida ? forcaParaDanoAlvo(habilidadeEscolhida.danoBase, batalha.rodada) : forcaChefeParaRodada(batalha),
     nivel: 1,
     agilidade: 0,
+    vida_atual: batalha.vidaRestante,
+    powerCombatState: batalha.powerCombatState,
   };
   // Habilidades V2.0 §7/§9/§11/§26 (Fase 5) — modificadores PASSIVOS do
   // membro atacado (DEFENSE_FLAT/DAMAGE_TAKEN_PCT), resolvidos aqui
@@ -673,7 +689,11 @@ async function resolverAcaoDoChefe(io, battleId) {
     acao: { tipo: "attack" },
     vidaMaxAtacante: undefined,
     modificadoresDefensor,
+    gatilhosDefensor: await combatModifierService.resolverGatilhosDoPersonagem(alvo.estado, "GUILD_BOSS"),
+    vidaMaxDefensor: alvo.vidaMax,
+    manaMaxDefensor: alvo.manaMax,
   });
+  batalha.powerCombatState = chefeAtacante.powerCombatState;
   const { dano, esquivou, critico } = resultadoAcao;
   // Nome da ação: a própria Power quando a IA escolheu uma
   // GuildBossAbility, senão o nome que aplicarAcao já dá pro ataque
