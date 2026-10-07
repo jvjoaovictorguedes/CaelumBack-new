@@ -1,3 +1,4 @@
+const { habilidadesComSlots } = require("../services/combatLoadoutService");
 // src/controllers/pvpController.js
 //
 // PVP assíncrono: o duelo inteiro é resolvido de uma vez no servidor
@@ -73,9 +74,8 @@ async function buscarPoderesDoPersonagem(idPersonagem) {
   // Sequelize) — é o único jeito de carregar o nível investido até
   // duelEngine.aplicarAcao sem esse precisar saber nada de
   // CharacterAbilities.
-  return habilidades
-    .filter((h) => h.Power && h.Power.tipo_poder === "Ativo")
-    .map((h) => ({ ...h.Power.get({ plain: true }), nivel_habilidade: h.nivel_habilidade }));
+  return habilidadesComSlots(habilidades)
+    .map((h) => ({ ...h.Power, nivel_habilidade: h.nivel_habilidade, combat_slot: h.combat_slot }));
 }
 
 // Escolhe a ação de cada turno: usa o poder ofensivo mais forte que

@@ -226,6 +226,7 @@ async function entrar(characterId) {
       lutador: estadoLutador(personagem, base, vidaMax, manaMax),
       poderes: poderes.map((p) => ({
         id: p.id,
+    combat_slot: p.combat_slot,
         nome: p.nome,
         imagem_url: p.imagem_url ?? null,
         custo_mana: custoManaEfetivo(p, p.nivel_habilidade ?? 1),

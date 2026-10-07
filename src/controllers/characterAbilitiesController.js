@@ -1,4 +1,5 @@
 // src/controllers/characterAbilitiesController.js
+const { habilidadesComSlots, definirSlot } = require("../services/combatLoadoutService");
 const { sequelize } = require("../config/database");
 const CharacterAbilities = require("../models/CharacterAbilities");
 const Character = require("../models/Character"); // Importa Character para inclusão
@@ -95,12 +96,14 @@ exports.getAllCharacterAbilities = async (req, res) => {
     // poder, então sem isso o número mostrado ali nunca batia com o que
     // combatController.js de fato aplicava (que já usa
     // custoManaEfetivo/calcularEfeitoPoder com o nível certo).
+    const slotPorId = new Map(habilidadesComSlots(characterAbilities).map((row) => [row.id, row.combat_slot]));
     const comEfeitoAjustado = characterAbilities.map((linha) => {
       const plano = linha.get({ plain: true });
       if (!plano.Power) return plano;
       const multiplicador = multiplicadorEfeito(plano.nivel_habilidade);
       return {
         ...plano,
+        combat_slot: slotPorId.get(plano.id) ?? null,
         Power: {
           ...plano.Power,
           custo_mana: Math.round(plano.Power.custo_mana * multiplicadorCustoMana(plano.nivel_habilidade)),
@@ -237,30 +240,17 @@ exports.toggleCharacterAbility = async (req, res) => {
       });
     }
 
-    if (is_active && !characterAbility.is_active) {
-      const jaAtivas = await CharacterAbilities.count({
-        where: { id_personagem: characterAbility.id_personagem, is_active: true },
-        include: [{ model: Power, attributes: [], where: { tipo_poder: "Ativo" } }],
-      });
-      if (jaAtivas >= MAX_HABILIDADES_ATIVAS_COMBATE) {
-        return res.status(400).json({
-          message: `Você já tem ${MAX_HABILIDADES_ATIVAS_COMBATE} habilidades marcadas pro combate. Desmarque uma antes de marcar essa.`,
-        });
-      }
-    }
-
-    characterAbility.is_active = is_active;
-    await characterAbility.save();
+    const updated = await definirSlot(characterAbility.id, characterAbility.id_personagem, is_active, req.body.combat_slot);
 
     res.status(200).json({
       status: "success",
-      data: { characterAbility },
+      data: { characterAbility: updated },
     });
   } catch (error) {
     console.error("Erro ao alternar habilidade de personagem:", error);
     res
-      .status(500)
-      .json({ message: "Erro interno do servidor ao alternar habilidade." });
+      .status(error.statusCode ?? 500)
+      .json({ message: error.statusCode ? error.message : "Erro interno do servidor ao alternar habilidade." });
   }
 };
 
