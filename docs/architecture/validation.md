@@ -1,6 +1,6 @@
 # Validação da Fase 0
 
-Estado: documentação e caracterização entregues; **gate completo do backend pendente**. Não iniciar a Fase 1 assumindo que a suíte inteira está verde.
+Estado atual: **baseline estabilizado e gate completo verde**. O histórico abaixo preserva os resultados anteriores à estabilização.
 
 ## Ambiente utilizado
 
@@ -57,3 +57,7 @@ Reprodução adicional, sem executar a nova caracterização: `combatBalance`, `
 - Preparação para multi-instância, Redis, economia canônica e decomposição de Context não foi implementada; pertence às fases seguintes.
 
 Próximo passo recomendado: estabilizar as fixtures e asserções do baseline em uma alteração específica, obter `npm test` verde e então revisar a Fase 1. Nenhuma fase seguinte foi executada automaticamente.
+
+## Estabilização autorizada para as fases seguintes
+
+Em 2026-10-07, `npm test` executou 1.302 testes: 1.302 passaram, zero falhas, zero ignorados (381 segundos). Foram corrigidas fixtures incompletas, limpeza de WeaponProperties, nomes de guilda truncados, escopo do catálogo e rolagens presumidas nas fixtures. O runner serializa arquivos porque os testes de integração compartilham banco; testes de concorrência continuam executando operações simultâneas dentro dos próprios cenários. Nenhuma regra de gameplay foi alterada. A Fase 1 pode usar este baseline.

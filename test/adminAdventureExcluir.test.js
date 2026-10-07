@@ -7,7 +7,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { bancoDisponivel, sufixo } = require("./helpers/db");
+const { bancoDisponivel, criarPersonagem, sufixo } = require("./helpers/db");
 require("../src/models/associations");
 
 const AdventureMonster = require("../src/models/AdventureMonster");
@@ -83,8 +83,9 @@ testeComBanco("deleteAdminMonster: exclui de verdade um monstro sem histórico, 
 testeComBanco("deleteAdminMonster: recusa excluir monstro com histórico real (Caçada), pede pra desativar em vez disso", async () => {
   const monstro = await criarMonstro();
   const agora = new Date();
+  const { personagem } = await criarPersonagem();
   await CharacterAdventureHunt.create({
-    id_personagem: 1,
+    id_personagem: personagem.id,
     id_monstro: monstro.id,
     rotation_start: agora,
     rotation_end: agora,

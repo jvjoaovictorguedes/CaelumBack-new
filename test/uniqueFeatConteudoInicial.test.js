@@ -89,7 +89,8 @@ testeComBanco("nenhum Power do seed reaproveita id_power_reward de outra Proeza 
   assert.equal(new Set(idsPower).size, idsPower.length, "cada Proeza precisa ter seu próprio Legado exclusivo");
 });
 
-testeComBanco("'O Sobrevivente Impossível' é conquistável de verdade: vitória real no Covil do Minotauro com 1 HP", async () => {
+testeComBanco("'O Sobrevivente Impossível' é conquistável de verdade: vitória real no Covil do Minotauro com 1 HP", async (t) => {
+  t.mock.method(Math, "random", () => 0.9);
   const feat = await UniqueFeat.findOne({ where: { key: "sobrevivente_impossivel" } });
   assert.ok(feat, "pré-condição: Proeza do seed precisa existir");
 

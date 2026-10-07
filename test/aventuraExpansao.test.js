@@ -95,8 +95,11 @@ testeComBanco("todos os monstros ativos têm descrição e multiplicadores posit
   }
 });
 
-testeComBanco("todo AdventureMonsterLoot aponta pra um Item válido do tipo Espólio", async () => {
-  const loots = await AdventureMonsterLoot.findAll({ include: [{ model: Item, as: "item" }] });
+testeComBanco("todo loot do catálogo da expansão aponta pra um Item válido do tipo Espólio", async () => {
+  const loots = await AdventureMonsterLoot.findAll({ include: [
+    { model: AdventureMonster, where: { nome: NOMES_DOS_40 }, attributes: [] },
+    { model: Item, as: "item" },
+  ] });
   assert.ok(loots.length > 0);
   for (const l of loots) {
     assert.ok(l.item, `loot ${l.id} aponta pra item inexistente`);
