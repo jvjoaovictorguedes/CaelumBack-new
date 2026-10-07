@@ -1,0 +1,374 @@
+{
+  "events": {
+    "GUILDBOSS": {
+      "ACAO": "guildboss:acao",
+      "BATALHA_FIM": "guildboss:batalha-fim",
+      "BATALHA_INICIADA": "guildboss:batalha-iniciada",
+      "CAST_START": "guildboss:cast-start",
+      "ENTRAR": "guildboss:entrar",
+      "ERRO": "guildboss:erro",
+      "ESTADO": "guildboss:estado",
+      "MEMBRO_ENTROU": "guildboss:membro-entrou",
+      "PROXIMO_TURNO": "guildboss:proximo-turno",
+      "SAIR": "guildboss:sair",
+      "TURNO_RESULTADO": "guildboss:turno-resultado"
+    },
+    "TRANSPORT": {
+      "IDENTIFY": "identificar"
+    },
+    "PARTY": {
+      "ACAO": "party:acao",
+      "BATALHA_ESTADO": "party:batalha-estado",
+      "BATALHA_FIM": "party:batalha-fim",
+      "BATALHA_INICIADA": "party:batalha-iniciada",
+      "CONVIDAR": "party:convidar",
+      "CONVITE_CANCELADO": "party:convite-cancelado",
+      "CONVITE_ENVIADO": "party:convite-enviado",
+      "CONVITE_EXPIRADO": "party:convite-expirado",
+      "CONVITE_RECEBIDO": "party:convite-recebido",
+      "CONVITE_RECUSADO": "party:convite-recusado",
+      "CRIAR": "party:criar",
+      "ENTRAR_BATALHA": "party:entrar-batalha",
+      "ERRO": "party:erro",
+      "EXPULSAR": "party:expulsar",
+      "EXPULSO": "party:expulso",
+      "GRUPO_ATUALIZADO": "party:grupo-atualizado",
+      "GRUPO_DESFEITO": "party:grupo-desfeito",
+      "INICIAR": "party:iniciar",
+      "LISTAR_ONLINE": "party:listar-online",
+      "PRONTO": "party:pronto",
+      "PROXIMO_TURNO": "party:proximo-turno",
+      "RESPONDER_CONVITE": "party:responder-convite",
+      "SAIR": "party:sair",
+      "TURNO_RESULTADO": "party:turno-resultado"
+    },
+    "PVP": {
+      "ACAO": "pvp:acao",
+      "DESAFIAR": "pvp:desafiar",
+      "DESAFIO_CANCELADO": "pvp:desafio-cancelado",
+      "DESAFIO_ENVIADO": "pvp:desafio-enviado",
+      "DESAFIO_EXPIRADO": "pvp:desafio-expirado",
+      "DESAFIO_RECEBIDO": "pvp:desafio-recebido",
+      "DESAFIO_RECUSADO": "pvp:desafio-recusado",
+      "DUELO_FIM": "pvp:duelo-fim",
+      "DUELO_INICIADO": "pvp:duelo-iniciado",
+      "ERRO": "pvp:erro",
+      "FICOU_OFFLINE": "pvp:ficou-offline",
+      "FICOU_ONLINE": "pvp:ficou-online",
+      "LISTAR_ONLINE": "pvp:listar-online",
+      "RESPONDER_DESAFIO": "pvp:responder-desafio",
+      "TURNO_RESULTADO": "pvp:turno-resultado"
+    },
+    "RANKED": {
+      "MATCH_FOUND": "ranked:match:found",
+      "MATCH_START": "ranked:match:start",
+      "OPONENTE_DESCONECTADO": "ranked:oponente-desconectado",
+      "OPONENTE_RECONECTADO": "ranked:oponente-reconectado",
+      "QUEUE_JOIN": "ranked:queue:join",
+      "QUEUE_LEAVE": "ranked:queue:leave",
+      "QUEUE_UPDATE": "ranked:queue:update",
+      "RATING_UPDATE": "ranked:rating:update"
+    },
+    "TORNEIO": {
+      "ENTRAR_SALA": "torneio:entrar-sala",
+      "ERRO": "torneio:erro",
+      "PRONTO": "torneio:pronto",
+      "SERIE_ATUALIZADA": "torneio:serie:atualizada",
+      "SERIE_PLACAR": "torneio:serie:placar"
+    },
+    "WORLDBOSS": {
+      "ACAO": "worldboss:acao",
+      "ENTRAR": "worldboss:entrar",
+      "ENTRAR_COMBATE": "worldboss:entrar-combate",
+      "ESTADO": "worldboss:estado",
+      "GLOBAL": "worldboss:global",
+      "IDENTIFICAR": "worldboss:identificar",
+      "SAIR": "worldboss:sair",
+      "STATUS": "worldboss:status"
+    }
+  },
+  "casual": {
+    "duelId": 10,
+    "arena": "Arena",
+    "torneio": null,
+    "a": {
+      "id": 1,
+      "nome": "Herói 1",
+      "genero": "Masculino",
+      "classe": "Guerreiro",
+      "chave": "A"
+    },
+    "b": {
+      "id": 2,
+      "nome": "Herói 2",
+      "genero": "Masculino",
+      "classe": "Guerreiro",
+      "chave": "B"
+    },
+    "vidaMaxA": 100,
+    "vidaMaxB": 100,
+    "manaMaxA": 50,
+    "manaMaxB": 50,
+    "vidaA": 70,
+    "vidaB": 70,
+    "manaA": 30,
+    "manaB": 30,
+    "poderesA": [
+      {
+        "id": 9,
+        "combat_slot": 4,
+        "nome": "Golpe",
+        "imagem_url": null,
+        "custo_mana": 5,
+        "dano_base": 20,
+        "cura_base": 0,
+        "nivel_habilidade": 1,
+        "escala_atributo": "Forca",
+        "valor_escala": 0.5
+      }
+    ],
+    "poderesB": [
+      {
+        "id": 9,
+        "combat_slot": 4,
+        "nome": "Golpe",
+        "imagem_url": null,
+        "custo_mana": 5,
+        "dano_base": 20,
+        "cura_base": 0,
+        "nivel_habilidade": 1,
+        "escala_atributo": "Forca",
+        "valor_escala": 0.5
+      }
+    ],
+    "consumiveisA": [],
+    "consumiveisB": [],
+    "turnoDe": "B",
+    "prazoSegundos": 5
+  },
+  "ranked": {
+    "duelId": 10,
+    "arena": "Arena Ranqueada de Caelum",
+    "ranked": true,
+    "assincrono": true,
+    "rankedMatchId": 11,
+    "temporada": {
+      "id": 3
+    },
+    "a": {
+      "id": 1,
+      "nome": "Herói 1",
+      "genero": "Masculino",
+      "classe": "Guerreiro",
+      "chave": "A"
+    },
+    "b": {
+      "id": 2,
+      "nome": "Herói 2",
+      "genero": "Masculino",
+      "classe": "Guerreiro",
+      "chave": "B",
+      "controladoPorIA": true
+    },
+    "ratingA": 1000,
+    "ratingB": 1050,
+    "tierA": {
+      "rating": 1000,
+      "tier": "Bronze",
+      "divisao": "IV",
+      "tierLabel": "Bronze IV",
+      "tierAsset": "bronze"
+    },
+    "tierB": {
+      "rating": 1050,
+      "tier": "Bronze",
+      "divisao": "IV",
+      "tierLabel": "Bronze IV",
+      "tierAsset": "bronze"
+    },
+    "vidaMaxA": 100,
+    "vidaMaxB": 100,
+    "manaMaxA": 50,
+    "manaMaxB": 50,
+    "vidaA": 70,
+    "vidaB": 70,
+    "manaA": 30,
+    "manaB": 30,
+    "poderesA": [
+      {
+        "id": 9,
+        "combat_slot": 4,
+        "nome": "Golpe",
+        "imagem_url": null,
+        "custo_mana": 5,
+        "dano_base": 20,
+        "cura_base": 0,
+        "nivel_habilidade": 1,
+        "escala_atributo": "Forca",
+        "valor_escala": 0.5
+      }
+    ],
+    "poderesB": [
+      {
+        "id": 9,
+        "combat_slot": 4,
+        "nome": "Golpe",
+        "imagem_url": null,
+        "custo_mana": 5,
+        "dano_base": 20,
+        "cura_base": 0,
+        "nivel_habilidade": 1,
+        "escala_atributo": "Forca",
+        "valor_escala": 0.5
+      }
+    ],
+    "consumiveisA": [],
+    "consumiveisB": [],
+    "consumiveisHabilitados": false,
+    "turnoDe": "B",
+    "prazoSegundos": 5,
+    "resync": true
+  },
+  "rating": {
+    "duelId": 10,
+    "ratingAntes": 1000,
+    "ratingDepois": 1018,
+    "delta": 18,
+    "tierAntes": {
+      "rating": 1000,
+      "tier": "Bronze",
+      "divisao": "IV",
+      "tierLabel": "Bronze IV",
+      "tierAsset": "bronze"
+    },
+    "tierDepois": {
+      "rating": 1018,
+      "tier": "Bronze",
+      "divisao": "IV",
+      "tierLabel": "Bronze IV",
+      "tierAsset": "bronze"
+    },
+    "defensorControladoPorIA": true,
+    "ratingDefensorInalterado": 1050
+  },
+  "turn": {
+    "duelId": 10,
+    "atacante": "A",
+    "nomeAcao": "Golpe",
+    "dano": 8,
+    "cura": 0,
+    "manaCurada": 0,
+    "esquivou": false,
+    "critico": false,
+    "bloqueado": false,
+    "logStatus": [],
+    "statusA": [
+      {
+        "key": "BURN",
+        "remainingTurns": 2,
+        "stacks": 1
+      }
+    ],
+    "statusB": [],
+    "combatBuffsA": [],
+    "combatBuffsB": [],
+    "vidaA": 70,
+    "vidaB": 70,
+    "manaA": 30,
+    "manaB": 30,
+    "turnoDe": "B",
+    "prazoSegundos": 5
+  },
+  "end": {
+    "duelId": 10,
+    "vencedorChave": "A",
+    "vencedor": {
+      "id": 1,
+      "nome": "Herói 1"
+    },
+    "perdedor": {
+      "id": 2,
+      "nome": "Herói 2"
+    },
+    "recompensa": {
+      "dinheiro": 5,
+      "experiencia": 7
+    },
+    "nivelAposVitoria": 2,
+    "motivo": "combate"
+  },
+  "party": {
+    "battleId": 20,
+    "zona": {
+      "id": 1,
+      "nome": "Campos"
+    },
+    "inimigo": {
+      "nome": "Monstro",
+      "nivel": 3,
+      "vida_atual": 40,
+      "vida_maxima": 90,
+      "imagem_url": null
+    },
+    "membros": [
+      {
+        "id": 2,
+        "nome": "Herói 2",
+        "genero": "Masculino",
+        "classe": "Guerreiro",
+        "vidaMax": 100,
+        "manaMax": 50,
+        "vida": 70,
+        "mana": 30,
+        "poderes": [
+          {
+            "id": 9,
+            "combat_slot": 4,
+            "nome": "Golpe",
+            "imagem_url": null,
+            "custo_mana": 5,
+            "dano_base": 20,
+            "cura_base": 0,
+            "nivel_habilidade": 1,
+            "escala_atributo": "Forca",
+            "valor_escala": 0.5
+          }
+        ],
+        "consumiveis": []
+      },
+      {
+        "id": 1,
+        "nome": "Herói 1",
+        "genero": "Masculino",
+        "classe": "Guerreiro",
+        "vidaMax": 100,
+        "manaMax": 50,
+        "vida": 70,
+        "mana": 30,
+        "poderes": [
+          {
+            "id": 9,
+            "combat_slot": 4,
+            "nome": "Golpe",
+            "imagem_url": null,
+            "custo_mana": 5,
+            "dano_base": 20,
+            "cura_base": 0,
+            "nivel_habilidade": 1,
+            "escala_atributo": "Forca",
+            "valor_escala": 0.5
+          }
+        ],
+        "consumiveis": []
+      }
+    ],
+    "ordem": [
+      "2",
+      "1"
+    ],
+    "turnoDe": "1",
+    "rodada": 4,
+    "prazoSegundos": 20,
+    "penalidadeDiferencaNivel": null
+  }
+}

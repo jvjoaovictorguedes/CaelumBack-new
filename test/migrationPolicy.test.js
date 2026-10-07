@@ -40,6 +40,8 @@ test("migration guard rejects historical edits and unregistered/out-of-order new
     assert.match(audit(folder, legacy, manifest).join("\n"), /Invalid dependency/);
     fs.writeFileSync(path.join(folder, "20261007120000-too-early.js"), source);
     assert.match(audit(folder, legacy, manifest).join("\n"), /sort after immutable legacy/);
+    fs.writeFileSync(path.join(folder, "20270230010000-invalid-date.js"), source);
+    assert.match(audit(folder, legacy, manifest).join("\n"), /Invalid calendar timestamp/);
   } finally {
     fs.rmSync(folder, { recursive: true, force: true });
   }

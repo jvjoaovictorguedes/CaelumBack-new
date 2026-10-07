@@ -15,6 +15,8 @@ function audit(folder, legacy, manifest) {
     if (!/^\d{14}-[a-z0-9]+(?:-[a-z0-9]+)*\.js$/.test(name)) issues.push(`Invalid migration name: ${name}`);
     if (name <= lastLegacy) issues.push(`Migration must sort after immutable legacy history: ${name}`);
     const stamp = name.slice(0, 14);
+    const date = new Date(`${stamp.slice(0, 4)}-${stamp.slice(4, 6)}-${stamp.slice(6, 8)}T${stamp.slice(8, 10)}:${stamp.slice(10, 12)}:${stamp.slice(12, 14)}Z`);
+    if (!Number.isFinite(date.getTime()) || date.toISOString().replace(/\D/g, "").slice(0, 14) !== stamp) issues.push(`Invalid calendar timestamp: ${name}`);
     if (stamps.has(stamp)) issues.push(`Duplicate new migration prefix: ${stamp}`);
     stamps.add(stamp);
     const record = manifest[name];

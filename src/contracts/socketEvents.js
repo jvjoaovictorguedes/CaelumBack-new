@@ -70,7 +70,6 @@ const SOCKET_EVENTS = {
     "RATING_UPDATE": "ranked:rating:update"
   },
   "TORNEIO": {
-    "DUELO_INICIADO": "torneio:duelo-iniciado",
     "ENTRAR_SALA": "torneio:entrar-sala",
     "ERRO": "torneio:erro",
     "PRONTO": "torneio:pronto",

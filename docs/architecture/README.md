@@ -1,8 +1,14 @@
-# Fase 0 — baseline arquitetural do Caelum
+# Consolidação arquitetural do Caelum
 
 Referência observada em 07/10/2026: backend `38e7eff`, frontend `3bd709db`, ambos derivados de `main`. O plano anexado é uma proposta de consolidação; o comportamento efetivo do código é a referência para esta fase.
 
-Esta entrega documenta e caracteriza o estado atual. Não cria um Combat Action Core, catálogo de constantes ou serializers novos. Não modifica gameplay, fórmulas, RNG em produção, balanceamento, recompensas, rotas, eventos, schema ou migrations. A próxima fase depende de revisar este baseline e resolver os gates pendentes.
+A Fase 0 documentou e caracterizou essa referência. Após autorização para continuar, o baseline foi estabilizado e as fases 1–7 receberam uma entrega incremental. Fórmulas, nomes de eventos/endpoints e regras de gameplay foram preservados. Consulte o relatório atual para distinguir extrações realizadas de migrações futuras.
+
+- [Entrega das fases 1–7 e validação final](consolidation.md)
+- [Contratos e serializers](phase-1-contracts.md)
+- [Núcleo de ações e fachada compatível](phase-2-action-engine.md)
+- [Política e auditoria de economia](economy-policy.md)
+- [Política de migrations e bootstrap de testes](migration-policy.md)
 
 - [Decisão e limites da consolidação](adr-0001-consolidacao-incremental.md)
 - [Matriz de capacidades por modo](combat-capabilities.md)
@@ -23,7 +29,7 @@ Contagem local dos arquivos de código, sem `node_modules`/artefatos gerados, an
 | Migrations | 419 | — |
 | Arquivos JS/TS/TSX em src | 1.058 | 319 |
 
-Arquivos que concentram responsabilidades: `combatController.js` (~102 KB), `characterController.js` (~71 KB), `PvpSocketContext.tsx` (~39 KB), `lib/api/admin.ts` (~183 KB). Serão extraídos por responsabilidade em fases próprias, não movidos nesta entrega.
+Arquivos que concentram responsabilidades: `combatController.js` (~102 KB), `characterController.js` (~71 KB), `PvpSocketContext.tsx` (~39 KB), `lib/api/admin.ts` (~183 KB). O inventário acima é histórico; as extrações atuais estão descritas no relatório de consolidação.
 
 ## Rede de segurança
 

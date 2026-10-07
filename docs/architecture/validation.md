@@ -47,7 +47,7 @@ Estas correções não foram misturadas com a documentação/novos testes de car
 
 Reprodução adicional, sem executar a nova caracterização: `combatBalance`, `duelEngineMonsterStatusEffects`, `guildMural` e `rankingAdminExclusion` passaram em conjunto com concorrência de arquivos 1 (21 testes). `rankingServiceAdmins` e `uniqueFeatConteudoInicial` executaram 9 testes (8 passaram; o caso de Sobrevivente falhou pelo ataque esquivado). Não foram feitos retries até passar nem removidas as asserções.
 
-## Riscos restantes
+## Riscos registrados na entrega original da Fase 0
 
 - CI remoto não foi executado; `npm test` local completo ainda falha. A Fase 0 ainda não atende o critério de baseline totalmente verde.
 - Inventário de contratos dos seis modos é baseado nos produtores/consumidores atuais; apenas o serializer de início/resync casual recebe um snapshot completo novo nesta entrega.
@@ -56,7 +56,7 @@ Reprodução adicional, sem executar a nova caracterização: `combatBalance`, `
 - Comentários de World Boss estão defasados em relação ao código executável; não usar esses comentários como especificação para a futura extração.
 - Preparação para multi-instância, Redis, economia canônica e decomposição de Context não foi implementada; pertence às fases seguintes.
 
-Próximo passo recomendado: estabilizar as fixtures e asserções do baseline em uma alteração específica, obter `npm test` verde e então revisar a Fase 1. Nenhuma fase seguinte foi executada automaticamente.
+Na entrega original, o próximo passo era estabilizar o baseline antes da Fase 1. A autorização posterior permitiu executar as fases seguintes; os resultados atuais estão em consolidation.md.
 
 ## Estabilização autorizada para as fases seguintes
 

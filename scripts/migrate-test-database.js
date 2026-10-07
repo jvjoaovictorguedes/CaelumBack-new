@@ -44,6 +44,15 @@ async function migrateTestDatabase(env = process.env) {
     // only in disposable tests; they are not a production catalog or balance data.
     const names = JSON.parse(fs.readFileSync(path.join(root, "test/fixtures/legacy-migration-monsters.json"), "utf8"));
     await client.query("BEGIN");
+    // Older administrative service tests use idAdmin=1 when checking audit FKs.
+    // Explicit test-only actor; no admin role, character, or usable password.
+    await client.query(`INSERT INTO "users"
+      (id, username, email, "passwordHash", "dataCriacao", "isAdmin", "createdAt", "updatedAt")
+      VALUES (1, 'legacy_audit_fixture', 'legacy-audit@caelum.test', 'disabled-test-fixture', NOW(), false, NOW(), NOW())
+      ON CONFLICT (id) DO NOTHING`);
+    await client.query(`SELECT setval(pg_get_serial_sequence('"users"', 'id'),
+      GREATEST((SELECT COALESCE(MAX(id), 1) FROM "users"),
+        (SELECT last_value FROM "users_id_seq")), true)`);
     for (const name of names) {
       await client.query(`INSERT INTO "AdventureMonsters"
         (nome, descricao, multiplicador_vida, multiplicador_dano, multiplicador_agilidade, multiplicador_velocidade, ativo, disponivel_emboscada, "createdAt", "updatedAt")

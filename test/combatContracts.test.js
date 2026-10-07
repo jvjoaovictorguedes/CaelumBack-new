@@ -4,6 +4,11 @@ const EVENTS = require("../src/contracts/socketEvents");
 const { montarPayloadDuelo, montarPayloadTurno, montarPayloadFim } = require("../src/contracts/pvpPayloads");
 const { montarPayloadInicio, montarPayloadRating } = require("../src/contracts/rankedPayloads");
 const { montarPayloadBatalha } = require("../src/contracts/partyPayloads");
+const { buildFixtures } = require("../scripts/export-combat-contracts");
+
+test("public serializers still match the versioned cross-repository fixtures", () => {
+  assert.deepEqual(buildFixtures(), require("./fixtures/combat-contracts.json"));
+});
 
 function fighter(id) {
   return { id, nome: `Herói ${id}`, genero: "Masculino", classe: "Guerreiro", vidaMax: 100, manaMax: 50,
