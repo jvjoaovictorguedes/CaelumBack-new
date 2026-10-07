@@ -96,22 +96,27 @@ async function resolverConjuntosEquipados(idPersonagem, transaction) {
   // (nunca uma query por item/threshold — §14 Performance) — isso
   // também é o que permite ao resumo de UI mostrar peças faltantes, não
   // só as equipadas.
-  const [todasPecasDosSets, todosBonusDosSets] = await Promise.all([
-    EquipmentSetPiece.findAll({
-      where: { equipment_set_id: idsSets },
-      include: [
-        { model: Item, as: "item", attributes: ["id", "nome"] },
-        { model: ForgeBlueprint, as: "blueprint", attributes: ["id", "nome"] },
-      ],
-      order: [["ordem", "ASC"], ["id", "ASC"]],
-      transaction,
-    }),
-    EquipmentSetBonus.findAll({
-      where: { equipment_set_id: idsSets },
-      order: [["pieces_required", "ASC"]],
-      transaction,
-    }),
-  ]);
+  //
+  // Sequencial, não Promise.all: com `transaction` setado (chamado a
+  // partir de buscarBonusDeAtributos, que roda em TODO ataque/uso de
+  // poder do combate), as duas queries disputariam a MESMA conexão
+  // presa à transação — mesmo motivo já corrigido em
+  // equipmentBonusService.js/combatConsumablesService.js (aviso de
+  // depreciação do pg "client already executing a query").
+  const todasPecasDosSets = await EquipmentSetPiece.findAll({
+    where: { equipment_set_id: idsSets },
+    include: [
+      { model: Item, as: "item", attributes: ["id", "nome"] },
+      { model: ForgeBlueprint, as: "blueprint", attributes: ["id", "nome"] },
+    ],
+    order: [["ordem", "ASC"], ["id", "ASC"]],
+    transaction,
+  });
+  const todosBonusDosSets = await EquipmentSetBonus.findAll({
+    where: { equipment_set_id: idsSets },
+    order: [["pieces_required", "ASC"]],
+    transaction,
+  });
 
   const pecasPorSet = new Map();
   for (const peca of todasPecasDosSets) {

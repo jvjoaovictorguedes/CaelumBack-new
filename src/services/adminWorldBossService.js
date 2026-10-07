@@ -211,13 +211,12 @@ async function substituirFasesEZonas(config, dados, transaction) {
 async function carregarComDetalhes(id, transaction) {
   const config = await WorldBossConfig.findByPk(id, { transaction });
   if (!config) return null;
-  const [fases, zonas, habilidades, resistencias, recompensasRanking] = await Promise.all([
-    WorldBossPhase.findAll({ where: { id_world_boss_config: id }, order: [["ordem", "ASC"]], transaction }),
-    WorldBossConfigZone.findAll({ where: { id_world_boss_config: id }, transaction }),
-    WorldBossAbility.findAll({ where: { id_world_boss_config: id }, include: [{ model: Power }], order: [["prioridade", "DESC"]], transaction }),
-    WorldBossStatusResistance.findAll({ where: { id_world_boss_config: id }, transaction }),
-    WorldBossRankingReward.findAll({ where: { id_world_boss_config: id }, order: [["posicao_inicio", "ASC"]], transaction }),
-  ]);
+  // Sequencial, não Promise.all: compartilham a mesma transaction.
+  const fases = await WorldBossPhase.findAll({ where: { id_world_boss_config: id }, order: [["ordem", "ASC"]], transaction });
+  const zonas = await WorldBossConfigZone.findAll({ where: { id_world_boss_config: id }, transaction });
+  const habilidades = await WorldBossAbility.findAll({ where: { id_world_boss_config: id }, include: [{ model: Power }], order: [["prioridade", "DESC"]], transaction });
+  const resistencias = await WorldBossStatusResistance.findAll({ where: { id_world_boss_config: id }, transaction });
+  const recompensasRanking = await WorldBossRankingReward.findAll({ where: { id_world_boss_config: id }, order: [["posicao_inicio", "ASC"]], transaction });
   return {
     ...config.toJSON(),
     fases,

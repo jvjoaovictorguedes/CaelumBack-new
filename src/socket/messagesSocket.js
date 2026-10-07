@@ -1,3 +1,4 @@
+const SOCKET_EVENTS = require("../contracts/socketEvents");
 // src/socket/messagesSocket.js
 //
 // Mensagens em Tempo Real v2 — Socket.IO complementa o REST
@@ -9,10 +10,10 @@
 // pros eventos certos.
 //
 // Evento de identificação PRÓPRIO ("message:identificar", não
-// "identificar" nem "guild:identificar") pela MESMA razão documentada
+// SOCKET_EVENTS.TRANSPORT.IDENTIFY nem "guild:identificar") pela MESMA razão documentada
 // em guildSocket.js: todo `register*Handlers(io)` registra seu próprio
 // `io.on("connection")` no MESMO `io`, então um nome de evento genérico
-// reusado por dois módulos dispara os dois — reusar "identificar" aqui
+// reusado por dois módulos dispara os dois — reusar SOCKET_EVENTS.TRANSPORT.IDENTIFY aqui
 // re-acionaria o handler do pvpLiveSocket nesse socket novo e
 // derrubaria a conexão de PvP ao vivo do jogador à força (achando que
 // era uma reconexão do mesmo personagem).

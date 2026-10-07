@@ -95,13 +95,12 @@ async function inscrever({ torneioId, personagem }) {
     const torneio = await Tournament.findByPk(torneioId, { transaction, lock: transaction.LOCK.UPDATE });
     if (!torneio) throw new TournamentError("nao-encontrado", "Torneio não encontrado.", 404);
 
-    const [totalInscritos, jaInscrito] = await Promise.all([
-      TournamentParticipant.count({ where: { tournament_id: torneioId }, transaction }),
-      TournamentParticipant.findOne({
-        where: { tournament_id: torneioId, character_id: personagem.id },
-        transaction,
-      }),
-    ]);
+    // Sequencial, não Promise.all: compartilham a mesma transaction.
+    const totalInscritos = await TournamentParticipant.count({ where: { tournament_id: torneioId }, transaction });
+    const jaInscrito = await TournamentParticipant.findOne({
+      where: { tournament_id: torneioId, character_id: personagem.id },
+      transaction,
+    });
 
     validarElegibilidade({ torneio, personagem, totalInscritos, jaInscrito: Boolean(jaInscrito) });
 

@@ -1,3 +1,4 @@
+const SOCKET_EVENTS = require("../contracts/socketEvents");
 // src/socket/worldBossSocket.js
 //
 // Boss Global — broadcast do evento server-wide (§11: HP/fase/estado
@@ -25,7 +26,7 @@ function combatService() {
   return require("../services/worldBossCombatService");
 }
 
-const SALA_GLOBAL = "worldboss:global";
+const SALA_GLOBAL = SOCKET_EVENTS.WORLDBOSS.GLOBAL;
 
 let ioRegistrado = null;
 
@@ -34,7 +35,7 @@ function emitGlobal(evento, payload) {
 }
 
 // Ameaça Mundial V2 §17 — combate autenticado por socket. Evento
-// PRÓPRIO "worldboss:identificar" (não o "identificar" genérico do
+// PRÓPRIO SOCKET_EVENTS.WORLDBOSS.IDENTIFICAR (não o SOCKET_EVENTS.TRANSPORT.IDENTIFY genérico do
 // pvpLiveSocket): o mesmo bug real já documentado em guildSocket.js
 // se repetiria aqui — io.on("connection") do pvpLiveSocket dispara
 // pra QUALQUER conexão nova no mesmo `io`, então usar o nome genérico
@@ -54,17 +55,17 @@ module.exports = function registerWorldBossHandlers(io) {
   ioRegistrado = io;
 
   io.on("connection", (socket) => {
-    socket.on("worldboss:entrar", async () => {
+    socket.on(SOCKET_EVENTS.WORLDBOSS.ENTRAR, async () => {
       socket.join(SALA_GLOBAL);
       try {
         const status = await worldBossStatusService.obterStatusPublico();
-        socket.emit("worldboss:status", status);
+        socket.emit(SOCKET_EVENTS.WORLDBOSS.STATUS, status);
       } catch (error) {
         console.error("Erro ao enviar status inicial da Ameaça Mundial:", error);
       }
     });
 
-    socket.on("worldboss:sair", () => {
+    socket.on(SOCKET_EVENTS.WORLDBOSS.SAIR, () => {
       socket.leave(SALA_GLOBAL);
     });
 
@@ -72,7 +73,7 @@ module.exports = function registerWorldBossHandlers(io) {
     // (mesmo padrão de pvpLiveSocket/guildSocket §24). Sem isso, qualquer
     // socket conectado conseguia atacar a Ameaça Mundial se passando por
     // outro personagem.
-    socket.on("worldboss:identificar", async ({ ticket } = {}, callback) => {
+    socket.on(SOCKET_EVENTS.WORLDBOSS.IDENTIFICAR, async ({ ticket } = {}, callback) => {
       const characterId = await personagemViaTicket(ticket);
       if (!characterId) {
         return typeof callback === "function" && callback({ erro: "Ticket inválido ou expirado." });
@@ -82,13 +83,13 @@ module.exports = function registerWorldBossHandlers(io) {
     });
 
     // §17.1 — a spec descreve o ticket vindo DIRETO no payload deste
-    // evento (não um "identificar" separado antes). Aceita os dois
+    // evento (não um SOCKET_EVENTS.TRANSPORT.IDENTIFY separado antes). Aceita os dois
     // caminhos: ticket aqui identifica na hora (útil pro primeiro
     // entrar/pro resync depois de uma queda de conexão, sempre com um
     // ticket novo — o antigo já expirou em 30s); sem ticket, reaproveita
-    // o characterId já estabelecido por um "worldboss:identificar"
+    // o characterId já estabelecido por um SOCKET_EVENTS.WORLDBOSS.IDENTIFICAR
     // anterior na MESMA conexão.
-    socket.on("worldboss:entrar-combate", async ({ ticket } = {}, callback) => {
+    socket.on(SOCKET_EVENTS.WORLDBOSS.ENTRAR_COMBATE, async ({ ticket } = {}, callback) => {
       let characterId = socket.characterId;
       if (ticket) {
         const characterIdViaTicket = await personagemViaTicket(ticket);
@@ -113,7 +114,7 @@ module.exports = function registerWorldBossHandlers(io) {
     // Resync (§17.3) — reaproveita worldBossCombatService.entrar, que já
     // é idempotente (retoma a sessão Ativa em vez de criar outra): pedir
     // o estado de novo depois de uma queda de conexão nunca duplica nada.
-    socket.on("worldboss:estado", async (_payload, callback) => {
+    socket.on(SOCKET_EVENTS.WORLDBOSS.ESTADO, async (_payload, callback) => {
       try {
         const characterId = socket.characterId;
         if (!characterId) {
@@ -131,7 +132,7 @@ module.exports = function registerWorldBossHandlers(io) {
     // evento a ação vale (§3.1: "nunca aceitar character_id arbitrário",
     // mesmo raciocínio pro evento). worldBossCombatService.executarAcao
     // já resolve isso pela sessão Ativa do próprio characterId no banco.
-    socket.on("worldboss:acao", async ({ client_action_id, tipo, id_poder } = {}, callback) => {
+    socket.on(SOCKET_EVENTS.WORLDBOSS.ACAO, async ({ client_action_id, tipo, id_poder } = {}, callback) => {
       const characterId = socket.characterId;
       if (!characterId) {
         const resposta = { accepted: false, erro: "Identifique seu personagem antes de agir." };

@@ -50,7 +50,8 @@ function alvoBase(overrides = {}) {
   };
 }
 
-test("monstro com status configurado (chance 100%) aplica a instância no jogador ao acertar, mas NÃO causa dano nessa mesma hora", async () => {
+test("monstro com status configurado (chance 100%) aplica a instância no jogador ao acertar, mas NÃO causa dano nessa mesma hora", async (t) => {
+  t.mock.method(Math, "random", () => 0.9);
   const monstro = monstroBase();
   const alvo = alvoBase();
 

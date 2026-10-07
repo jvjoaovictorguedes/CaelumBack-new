@@ -1,3 +1,5 @@
+const { poderesPublicos, montarPayloadDuelo, montarPayloadTurno, montarPayloadFim } = require("../contracts/pvpPayloads");
+const SOCKET_EVENTS = require("../contracts/socketEvents");
 // src/socket/pvpLiveSocket.js
 //
 // PVP "ao vivo": os dois jogadores precisam estar online ao mesmo tempo,
@@ -65,7 +67,7 @@ const desafiosPendentes = new Map();
 // (desafiosPendentes, chaveado pelo alvo) — nada impedia um único
 // personagem de desafiar vários alvos diferentes ao mesmo tempo. Esse
 // mapa espelha o mesmo desafio pelo lado do desafiante, então dá pra
-// rejeitar um segundo "pvp:desafiar" enquanto o primeiro ainda não foi
+// rejeitar um segundo SOCKET_EVENTS.PVP.DESAFIAR enquanto o primeiro ainda não foi
 // respondido/expirado.
 const desafiosEnviadosPor = new Map();
 // duelId -> duelo
@@ -164,20 +166,7 @@ function limparDesafioPendente(desafiadoId) {
   }
 }
 
-function poderesPublicos(poderes) {
-  return poderes.map((p) => ({
-    id: p.id,
-    combat_slot: p.combat_slot,
-    nome: p.nome,
-    imagem_url: p.imagem_url ?? null,
-    custo_mana: custoManaEfetivo(p, p.nivel_habilidade ?? 1),
-    dano_base: p.dano_base,
-    cura_base: p.cura_base,
-    nivel_habilidade: p.nivel_habilidade ?? 1,
-    escala_atributo: p.escala_atributo,
-    valor_escala: p.valor_escala,
-  }));
-}
+
 
 // Criação do duelo E resync (F5/reconexão) usam o MESMO formato de
 // payload, sempre os valores ATUAIS de `duelo` (vida/mana/turno no
@@ -186,29 +175,7 @@ function poderesPublicos(poderes) {
 // mesmos mapas `duelos`/`duelPorPersonagem`); Ranked tem seu próprio
 // montarPayloadInicio em rankedLiveSocket.js (payload bem diferente:
 // rating/tier/IA) e nunca passa por aqui.
-function montarPayloadDuelo(duelo) {
-  return {
-    duelId: duelo.id,
-    arena: duelo.arena,
-    torneio: duelo.torneio,
-    a: { id: duelo.a.id, nome: duelo.a.nome, genero: duelo.a.genero, classe: duelo.a.classe, chave: "A" },
-    b: { id: duelo.b.id, nome: duelo.b.nome, genero: duelo.b.genero, classe: duelo.b.classe, chave: "B" },
-    vidaMaxA: duelo.a.vidaMax,
-    vidaMaxB: duelo.b.vidaMax,
-    manaMaxA: duelo.a.manaMax,
-    manaMaxB: duelo.b.manaMax,
-    vidaA: duelo.a.estado.vida_atual,
-    vidaB: duelo.b.estado.vida_atual,
-    manaA: duelo.a.estado.mana_atual,
-    manaB: duelo.b.estado.mana_atual,
-    poderesA: poderesPublicos(duelo.a.poderes),
-    poderesB: poderesPublicos(duelo.b.poderes),
-    consumiveisA: duelo.a.consumiveis,
-    consumiveisB: duelo.b.consumiveis,
-    turnoDe: duelo.turnoDe,
-    prazoSegundos: PRAZO_TURNO_MS / 1000,
-  };
-}
+
 
 // Janela de reconexão genérica pra duelo casual/torneio — MESMO modelo
 // da Arena Ranqueada (JANELA_RECONEXAO_SEGUNDOS em rankedConfig.js),
@@ -245,18 +212,18 @@ function aoReconectarPadrao(io, socket, duelId) {
   }
 
   socket.join(duelo.sala);
-  socket.emit("pvp:duelo-iniciado", montarPayloadDuelo(duelo));
+  socket.emit(SOCKET_EVENTS.PVP.DUELO_INICIADO, montarPayloadDuelo(duelo));
 }
 
 module.exports = function registerPvpLiveHandlers(io) {
   io.on("connection", (socket) => {
-    socket.on("identificar", async ({ ticket } = {}, callback) => {
+    socket.on(SOCKET_EVENTS.TRANSPORT.IDENTIFY, async ({ ticket } = {}, callback) => {
       // O characterId nunca vem do cliente — só do ticket de curta
       // duração emitido via GET /api/users/socket-ticket (autenticado
       // por JWT), senão qualquer socket conectado conseguia agir como
       // qualquer personagem só informando o ID certo.
       const characterId = await personagemViaTicket(ticket);
-      if (!characterId) return socket.emit("pvp:erro", { mensagem: "Ticket inválido ou expirado." });
+      if (!characterId) return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Ticket inválido ou expirado." });
       const chave = chaveOnline(characterId);
 
       // Se esse characterId já tinha outro socket identificado (aba
@@ -274,7 +241,7 @@ module.exports = function registerPvpLiveHandlers(io) {
 
       socket.characterId = chave;
       online.set(chave, socket.id);
-      socket.broadcast.emit("pvp:ficou-online", { characterId: chave });
+      socket.broadcast.emit(SOCKET_EVENTS.PVP.FICOU_ONLINE, { characterId: chave });
 
       // Reconexão (§9 Ranked / bug reportado pra casual e torneio): se
       // este personagem já está num duelo em andamento, ressincroniza
@@ -283,7 +250,7 @@ module.exports = function registerPvpLiveHandlers(io) {
       // de abandono e manda seu próprio payload); casual e torneio (que
       // nunca setam `aoReconectar`, mas vivem nos MESMOS mapas
       // `duelos`/`duelPorPersonagem`) caem no else e reaproveitam o
-      // MESMO evento "pvp:duelo-iniciado" que o frontend já escuta — sem
+      // MESMO evento SOCKET_EVENTS.PVP.DUELO_INICIADO que o frontend já escuta — sem
       // isso, um F5 no meio de um duelo ao vivo deixava a tela em
       // branco pra sempre (o processo continuava rodando o duelo, só
       // nada reenviava o estado pro socket novo).
@@ -315,30 +282,30 @@ module.exports = function registerPvpLiveHandlers(io) {
       if (typeof callback === "function") callback();
     });
 
-    socket.on("pvp:listar-online", (_payload, callback) => {
+    socket.on(SOCKET_EVENTS.PVP.LISTAR_ONLINE, (_payload, callback) => {
       const ids = Array.from(online.keys()).filter((id) => id !== socket.characterId);
       if (typeof callback === "function") callback({ online: ids });
     });
 
-    socket.on("pvp:desafiar", async ({ idDesafiado } = {}) => {
+    socket.on(SOCKET_EVENTS.PVP.DESAFIAR, async ({ idDesafiado } = {}) => {
       const idDesafiante = socket.characterId;
       if (!idDesafiante) {
-        return socket.emit("pvp:erro", { mensagem: "Identifique seu personagem antes de desafiar." });
+        return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Identifique seu personagem antes de desafiar." });
       }
       if (!idDesafiado || String(idDesafiado) === idDesafiante) {
-        return socket.emit("pvp:erro", { mensagem: "Escolha um oponente válido." });
+        return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Escolha um oponente válido." });
       }
       if (!online.has(chaveOnline(idDesafiado))) {
-        return socket.emit("pvp:erro", { mensagem: "Esse jogador não está online agora." });
+        return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Esse jogador não está online agora." });
       }
       if (duelPorPersonagem.has(idDesafiante) || duelPorPersonagem.has(chaveOnline(idDesafiado))) {
-        return socket.emit("pvp:erro", { mensagem: "Um dos dois já está em um duelo." });
+        return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Um dos dois já está em um duelo." });
       }
       if (desafiosPendentes.has(chaveOnline(idDesafiado))) {
-        return socket.emit("pvp:erro", { mensagem: "Esse jogador já tem um desafio pendente." });
+        return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Esse jogador já tem um desafio pendente." });
       }
       if (desafiosEnviadosPor.has(idDesafiante)) {
-        return socket.emit("pvp:erro", {
+        return socket.emit(SOCKET_EVENTS.PVP.ERRO, {
           mensagem: "Você já tem um desafio pendente. Aguarde ele ser respondido ou expirar.",
         });
       }
@@ -350,11 +317,11 @@ module.exports = function registerPvpLiveHandlers(io) {
       // do cooldown/antifarm só usando o modo ao vivo.
       const erroCooldown = await verificarCooldownDesafiante(idDesafiante);
       if (erroCooldown) {
-        return socket.emit("pvp:erro", { mensagem: erroCooldown });
+        return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: erroCooldown });
       }
       const erroAntifarmPar = await verificarAntifarmPar(idDesafiante, idDesafiado);
       if (erroAntifarmPar) {
-        return socket.emit("pvp:erro", { mensagem: erroAntifarmPar });
+        return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: erroAntifarmPar });
       }
 
       // PvP v2 §16 — exclusão mútua: personagem com série de torneio
@@ -364,7 +331,7 @@ module.exports = function registerPvpLiveHandlers(io) {
       const { emSerieAtiva } = require("../services/tournamentService");
       for (const id of [idDesafiante, idDesafiado]) {
         if (await emSerieAtiva(id)) {
-          return socket.emit("pvp:erro", {
+          return socket.emit(SOCKET_EVENTS.PVP.ERRO, {
             mensagem: "Um dos dois está em uma série de torneio agora.",
           });
         }
@@ -372,14 +339,14 @@ module.exports = function registerPvpLiveHandlers(io) {
 
       const desafiante = await Character.findByPk(idDesafiante);
       if (!desafiante) {
-        return socket.emit("pvp:erro", { mensagem: "Personagem desafiante não encontrado." });
+        return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Personagem desafiante não encontrado." });
       }
 
       const socketIdDesafiado = online.get(chaveOnline(idDesafiado));
       const timeoutHandle = setTimeout(() => {
         limparDesafioPendente(idDesafiado);
-        socket.emit("pvp:desafio-expirado", { idDesafiado });
-        io.to(socketIdDesafiado).emit("pvp:desafio-cancelado", { idDesafiante });
+        socket.emit(SOCKET_EVENTS.PVP.DESAFIO_EXPIRADO, { idDesafiado });
+        io.to(socketIdDesafiado).emit(SOCKET_EVENTS.PVP.DESAFIO_CANCELADO, { idDesafiante });
       }, PRAZO_ACEITAR_MS);
 
       desafiosPendentes.set(chaveOnline(idDesafiado), {
@@ -389,30 +356,30 @@ module.exports = function registerPvpLiveHandlers(io) {
       });
       desafiosEnviadosPor.set(idDesafiante, chaveOnline(idDesafiado));
 
-      socket.emit("pvp:desafio-enviado", { idDesafiado, prazoSegundos: PRAZO_ACEITAR_MS / 1000 });
-      io.to(socketIdDesafiado).emit("pvp:desafio-recebido", {
+      socket.emit(SOCKET_EVENTS.PVP.DESAFIO_ENVIADO, { idDesafiado, prazoSegundos: PRAZO_ACEITAR_MS / 1000 });
+      io.to(socketIdDesafiado).emit(SOCKET_EVENTS.PVP.DESAFIO_RECEBIDO, {
         idDesafiante,
         nomeDesafiante: desafiante.nome,
         prazoSegundos: PRAZO_ACEITAR_MS / 1000,
       });
     });
 
-    socket.on("pvp:responder-desafio", async ({ aceitar } = {}) => {
+    socket.on(SOCKET_EVENTS.PVP.RESPONDER_DESAFIO, async ({ aceitar } = {}) => {
       const idDesafiado = socket.characterId;
       if (!idDesafiado) return;
       const pendente = desafiosPendentes.get(idDesafiado);
       if (!pendente) {
-        return socket.emit("pvp:erro", { mensagem: "Esse desafio não existe mais." });
+        return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Esse desafio não existe mais." });
       }
       limparDesafioPendente(idDesafiado);
 
       if (!aceitar) {
-        io.to(pendente.socketIdDesafiante).emit("pvp:desafio-recusado", { idDesafiado });
+        io.to(pendente.socketIdDesafiante).emit(SOCKET_EVENTS.PVP.DESAFIO_RECUSADO, { idDesafiado });
         return;
       }
 
       if (!online.has(pendente.idDesafiante)) {
-        return socket.emit("pvp:erro", { mensagem: "O desafiante saiu antes de você aceitar." });
+        return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "O desafiante saiu antes de você aceitar." });
       }
 
       try {
@@ -454,20 +421,20 @@ module.exports = function registerPvpLiveHandlers(io) {
         socketA?.join(sala);
         socketB?.join(sala);
 
-        io.to(sala).emit("pvp:duelo-iniciado", montarPayloadDuelo(duelo));
+        io.to(sala).emit(SOCKET_EVENTS.PVP.DUELO_INICIADO, montarPayloadDuelo(duelo));
 
         iniciarTimerDeTurno(io, duelId);
       } catch (error) {
         console.error("Erro ao iniciar duelo ao vivo:", error);
-        socket.emit("pvp:erro", { mensagem: "Não foi possível iniciar o duelo." });
+        socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Não foi possível iniciar o duelo." });
       }
     });
 
-    socket.on("pvp:acao", async ({ tipo, idPoder, idItem } = {}) => {
+    socket.on(SOCKET_EVENTS.PVP.ACAO, async ({ tipo, idPoder, idItem } = {}) => {
       const characterId = socket.characterId;
       if (!characterId) return;
       const duelId = duelPorPersonagem.get(characterId);
-      if (!duelId) return socket.emit("pvp:erro", { mensagem: "Você não está em nenhum duelo." });
+      if (!duelId) return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Você não está em nenhum duelo." });
 
       const duelo = duelos.get(duelId);
       if (!duelo) return;
@@ -478,12 +445,12 @@ module.exports = function registerPvpLiveHandlers(io) {
       // clique durante o await do item dispare uma segunda ação (de
       // qualquer tipo) antes da primeira terminar de processar.
       if (duelo.processandoAcao) {
-        return socket.emit("pvp:erro", { mensagem: "Aguarde, sua última ação ainda está sendo processada." });
+        return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Aguarde, sua última ação ainda está sendo processada." });
       }
 
       const chave = duelo.a.id === Number(characterId) ? "A" : "B";
       if (duelo.turnoDe !== chave) {
-        return socket.emit("pvp:erro", { mensagem: "Ainda não é seu turno." });
+        return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Ainda não é seu turno." });
       }
 
       const lutadorAtacante = chave === "A" ? duelo.a : duelo.b;
@@ -492,7 +459,7 @@ module.exports = function registerPvpLiveHandlers(io) {
       if (tipo === "power") {
         const power = lutadorAtacante.poderes.find((p) => p.id === Number(idPoder));
         if (!power) {
-          return socket.emit("pvp:erro", { mensagem: "Poder inválido." });
+          return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Poder inválido." });
         }
         // buscarPoderesDoPersonagem só filtra is_active — todo poder
         // Passivo concedido nasce com is_active:true (e nem pode ser
@@ -503,10 +470,10 @@ module.exports = function registerPvpLiveHandlers(io) {
         // explicitamente (ver combatController.js) mas o PvP ao vivo
         // nunca chegou a checar.
         if (power.tipo_poder !== "Ativo") {
-          return socket.emit("pvp:erro", { mensagem: "Este poder não pode ser usado manualmente em combate." });
+          return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Este poder não pode ser usado manualmente em combate." });
         }
         if (custoManaEfetivo(power, power.nivel_habilidade ?? 1) > lutadorAtacante.estado.mana_atual) {
-          return socket.emit("pvp:erro", { mensagem: "Mana insuficiente para esse poder." });
+          return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Mana insuficiente para esse poder." });
         }
         acao = { tipo: "power", power };
       } else if (tipo === "item") {
@@ -515,7 +482,7 @@ module.exports = function registerPvpLiveHandlers(io) {
         // Barrado aqui, no único ponto por onde uma ação de item entra,
         // em vez de espalhar a checagem por quem monta o duelo.
         if (duelo.ranked) {
-          return socket.emit("pvp:erro", {
+          return socket.emit(SOCKET_EVENTS.PVP.ERRO, {
             mensagem: "Consumíveis não podem ser usados na Arena Ranqueada.",
           });
         }
@@ -530,17 +497,17 @@ module.exports = function registerPvpLiveHandlers(io) {
             where: { id_personagem: characterId, id_item: idItem },
           });
           if (!inventoryEntry || inventoryEntry.quantidade < 1) {
-            return socket.emit("pvp:erro", { mensagem: "Você não possui esse item no inventário." });
+            return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Você não possui esse item no inventário." });
           }
 
           const item = await Item.findByPk(idItem);
           if (!item || item.tipo_item !== "Consumivel") {
-            return socket.emit("pvp:erro", { mensagem: "Este item não pode ser usado em combate." });
+            return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Este item não pode ser usado em combate." });
           }
 
           const efeito = await ConsumableProperties.findByPk(idItem);
           if (!efeito) {
-            return socket.emit("pvp:erro", { mensagem: "Este item não possui efeito configurado." });
+            return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Este item não possui efeito configurado." });
           }
           // Motor moderno (ConsumableEffect/registry) — mesma precedência
           // do PvE/Grupo: um HEAL_HP_*/RESTORE_MANA_* aqui faz
@@ -552,7 +519,7 @@ module.exports = function registerPvpLiveHandlers(io) {
           // esgotado) pode ter disparado enquanto a consulta rodava.
           const dueloAtual = duelos.get(duelId);
           if (!dueloAtual || dueloAtual.turnoDe !== chave) {
-            return socket.emit("pvp:erro", { mensagem: "Esse turno não é mais válido." });
+            return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Esse turno não é mais válido." });
           }
 
           inventoryEntry.quantidade -= 1;
@@ -575,7 +542,7 @@ module.exports = function registerPvpLiveHandlers(io) {
           };
         } catch (error) {
           console.error("Erro ao usar item em duelo ao vivo:", error);
-          return socket.emit("pvp:erro", { mensagem: "Não foi possível usar esse item agora." });
+          return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Não foi possível usar esse item agora." });
         } finally {
           duelo.processandoAcao = false;
         }
@@ -595,7 +562,7 @@ module.exports = function registerPvpLiveHandlers(io) {
       const characterId = socket.characterId;
 
       // Um novo socket autenticado pro MESMO personagem já derruba o
-      // antigo em "identificar" (acima) e assume `online.get(characterId)`
+      // antigo em SOCKET_EVENTS.TRANSPORT.IDENTIFY (acima) e assume `online.get(characterId)`
       // antes desse handler rodar (o disconnect do socket antigo só
       // dispara depois, de forma assíncrona). Então, se o mapeamento já
       // não aponta mais pra este socket, isso é uma reconexão/substituição
@@ -607,7 +574,7 @@ module.exports = function registerPvpLiveHandlers(io) {
       if (!eraSocketAtivo) return;
 
       online.delete(characterId);
-      socket.broadcast.emit("pvp:ficou-offline", { characterId });
+      socket.broadcast.emit(SOCKET_EVENTS.PVP.FICOU_OFFLINE, { characterId });
 
       limparDesafioPendente(characterId);
       for (const [idDesafiado, pendente] of Array.from(desafiosPendentes.entries())) {
@@ -615,7 +582,7 @@ module.exports = function registerPvpLiveHandlers(io) {
           limparDesafioPendente(idDesafiado);
           const socketIdDesafiado = online.get(idDesafiado);
           if (socketIdDesafiado) {
-            io.to(socketIdDesafiado).emit("pvp:desafio-cancelado", { idDesafiante: characterId });
+            io.to(socketIdDesafiado).emit(SOCKET_EVENTS.PVP.DESAFIO_CANCELADO, { idDesafiante: characterId });
           }
         }
       }
@@ -626,7 +593,7 @@ module.exports = function registerPvpLiveHandlers(io) {
         // disconnect, sem nenhuma janela — um F5 (que dispara disconnect
         // antes do navegador recarregar e reconectar) já dava a vitória
         // pro oponente por desistência antes do jogador conseguir voltar;
-        // o resync em "identificar" (abaixo) nunca chegava a executar
+        // o resync em SOCKET_EVENTS.TRANSPORT.IDENTIFY (abaixo) nunca chegava a executar
         // porque o duelo já tinha sido apagado. Arena Ranqueada sempre
         // teve sua própria janela de reconexão (§9, aoDesconectar
         // setado pelo rankedLiveSocket.js); agora casual e torneio
@@ -728,30 +695,7 @@ async function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
     else duelo.danoTotalB += dano;
   }
 
-  const payloadTurno = {
-    duelId,
-    atacante: chave,
-    nomeAcao: bloqueado ? nomeAcao : foiAutomatico ? `${nomeAcao} (tempo esgotado)` : nomeAcao,
-    dano,
-    cura,
-    manaCurada,
-    esquivou,
-    critico: Boolean(critico),
-    bloqueado: Boolean(bloqueado),
-    logStatus,
-    statusA: duelo.statusEffects.A.map((s) => ({ key: s.key, remainingTurns: s.remainingTurns, stacks: s.stacks })),
-    statusB: duelo.statusEffects.B.map((s) => ({ key: s.key, remainingTurns: s.remainingTurns, stacks: s.stacks })),
-    // Habilidades V2.0 (item 10) — combatBuffs já era rastreado em
-    // duelo.combatBuffs (ver resolverTurnoComStatus acima), mas nunca
-    // chegava no payload do socket, então o frontend nunca tinha como
-    // mostrar os ícones de buff/debuff do duelo ao vivo.
-    combatBuffsA: (duelo.combatBuffs?.A ?? []).map((b) => ({ atributo: b.atributo, valor: b.valor, remainingTurns: b.remainingTurns })),
-    combatBuffsB: (duelo.combatBuffs?.B ?? []).map((b) => ({ atributo: b.atributo, valor: b.valor, remainingTurns: b.remainingTurns })),
-    vidaA: duelo.a.estado.vida_atual,
-    vidaB: duelo.b.estado.vida_atual,
-    manaA: duelo.a.estado.mana_atual,
-    manaB: duelo.b.estado.mana_atual,
-  };
+  const payloadTurno = montarPayloadTurno({ duelo, duelId, chave, bloqueado, nomeAcao, foiAutomatico, dano, cura, manaCurada, esquivou, critico, logStatus });
 
   // DoT (Burn/Bleed/Poison que o próprio atacante carrega) pode matá-lo
   // no FIM do turno dele, depois da ação — mesmo caso do PvE. Prioridade:
@@ -793,7 +737,7 @@ async function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
         }
       }
     }
-    io.to(duelo.sala).emit("pvp:turno-resultado", { ...payloadTurno, turnoDe: null });
+    io.to(duelo.sala).emit(SOCKET_EVENTS.PVP.TURNO_RESULTADO, { ...payloadTurno, turnoDe: null });
     // Duelos ranked setam `duelo.finalizar` (rankedLiveSocket.js) pra
     // persistir rating em vez de PvpStatus/PvpMatches — casual continua
     // usando finalizarDuelo direto, sem essa propriedade.
@@ -817,7 +761,7 @@ async function executarTurno(io, duelId, chave, acao, foiAutomatico = false) {
   duelo.turnoDe = chave === "A" ? "B" : "A";
   payloadTurno.turnoDe = duelo.turnoDe;
   payloadTurno.prazoSegundos = PRAZO_TURNO_MS / 1000;
-  io.to(duelo.sala).emit("pvp:turno-resultado", payloadTurno);
+  io.to(duelo.sala).emit(SOCKET_EVENTS.PVP.TURNO_RESULTADO, payloadTurno);
 
   iniciarTimerDeTurno(io, duelId);
 
@@ -850,18 +794,10 @@ async function finalizarDuelo(io, duelId, vencedorChave, motivo = "combate") {
       rodadas: duelo.acoes,
     });
 
-    io.to(duelo.sala).emit("pvp:duelo-fim", {
-      duelId,
-      vencedorChave,
-      vencedor: { id: vencedor.id, nome: vencedor.nome },
-      perdedor: { id: perdedor.id, nome: perdedor.nome },
-      recompensa,
-      nivelAposVitoria,
-      motivo,
-    });
+    io.to(duelo.sala).emit(SOCKET_EVENTS.PVP.DUELO_FIM, montarPayloadFim({ duelId, vencedorChave, vencedor, perdedor, recompensa, nivelAposVitoria, motivo }));
   } catch (error) {
     console.error("Erro ao finalizar duelo ao vivo:", error);
-    io.to(duelo.sala).emit("pvp:erro", { mensagem: "Erro ao finalizar o duelo." });
+    io.to(duelo.sala).emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Erro ao finalizar o duelo." });
   }
 
   for (const socket of io.sockets.adapter.rooms.get(duelo.sala) || []) {

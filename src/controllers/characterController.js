@@ -1022,20 +1022,21 @@ exports.comprarPoder = async (req, res) => {
         throw Object.assign(new Error("Personagem não encontrado."), { statusCode: 404 });
       }
 
-      const [vinculoClasse, vinculoRaca, vinculoNatureza] = await Promise.all([
-        ClassAbilities.findOne({
-          where: { id_classe: character.id_classe, id_poder: idPower },
-          transaction,
-        }),
-        RaceAbilities.findOne({
-          where: { id_raca: character.id_raca, id_power: idPower },
-          transaction,
-        }),
-        NatureAbilities.findOne({
-          where: { natureza_magica: character.natureza_magica, id_poder: idPower },
-          transaction,
-        }),
-      ]);
+      // Sequencial, não Promise.all: as três compartilham a mesma
+      // transaction (presa a uma única conexão) — mesmo motivo já
+      // corrigido em equipmentBonusService.js.
+      const vinculoClasse = await ClassAbilities.findOne({
+        where: { id_classe: character.id_classe, id_poder: idPower },
+        transaction,
+      });
+      const vinculoRaca = await RaceAbilities.findOne({
+        where: { id_raca: character.id_raca, id_power: idPower },
+        transaction,
+      });
+      const vinculoNatureza = await NatureAbilities.findOne({
+        where: { natureza_magica: character.natureza_magica, id_poder: idPower },
+        transaction,
+      });
       const vinculo = vinculoClasse ?? vinculoRaca ?? vinculoNatureza;
       if (!vinculo) {
         throw Object.assign(
@@ -1477,10 +1478,9 @@ async function concederHabilidadesDeEvolucao(character, idEvolucao, transaction)
   });
   if (vinculos.length === 0) return;
 
-  const [powers, aprendidos] = await Promise.all([
-    Power.findAll({ where: { id: vinculos.map((v) => v.id_power) }, transaction }),
-    CharacterAbilities.findAll({ where: { id_personagem: character.id }, transaction }),
-  ]);
+  // Sequencial, não Promise.all: compartilham a mesma transaction.
+  const powers = await Power.findAll({ where: { id: vinculos.map((v) => v.id_power) }, transaction });
+  const aprendidos = await CharacterAbilities.findAll({ where: { id_personagem: character.id }, transaction });
   const powerPorId = new Map(powers.map((p) => [p.id, p]));
   const idsJaAprendidos = new Set(aprendidos.map((linha) => linha.id_power));
   let vagasAtivasRestantes = Math.max(

@@ -1,3 +1,4 @@
+const SOCKET_EVENTS = require("../contracts/socketEvents");
 // src/socket/guildSocket.js
 //
 // Chat de guilda em tempo real, com histórico persistido (apagado todo
@@ -87,13 +88,13 @@ function removerDaSalaDeGuild(characterId) {
 module.exports = function registerGuildHandlers(io) {
   ioRegistrado = io;
   io.on("connection", (socket) => {
-    // Nome de evento PRÓPRIO (não "identificar" genérico) — o mesmo `io`
+    // Nome de evento PRÓPRIO (não SOCKET_EVENTS.TRANSPORT.IDENTIFY genérico) — o mesmo `io`
     // atende tanto guildSocket quanto pvpLiveSocket, e os dois listeners
     // ficam registrados no MESMO objeto `socket` sempre que qualquer um
     // dos dois recebe uma conexão nova (io.on("connection") dispara pra
-    // todo mundo). Enquanto os dois escutavam "identificar", abrir o
+    // todo mundo). Enquanto os dois escutavam SOCKET_EVENTS.TRANSPORT.IDENTIFY, abrir o
     // chat da guilda (um socket novo, separado do socket do PvP ao vivo)
-    // também disparava o "identificar" do pvpLiveSocket nesse socket
+    // também disparava o SOCKET_EVENTS.TRANSPORT.IDENTIFY do pvpLiveSocket nesse socket
     // novo — que aí registrava esse personagem como "online" no PvP com
     // um socket.id diferente do que já estava lá, e o pvpLiveSocket
     // DESCONECTAVA à força o socket antigo (o de verdade, o do PvP ao

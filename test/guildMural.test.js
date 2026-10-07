@@ -23,10 +23,9 @@ function testeComBanco(nome, fn) {
 
 async function criarGuildComMembro(cargo) {
   const { personagem: fundador } = await criarPersonagem({ nivel: 10 });
-  const chave = sufixo();
   const sigla = Math.random().toString(36).slice(2, 7).toUpperCase();
   const guild = await Guild.create({
-    nome: `Guilda ${chave}`.slice(0, 24),
+    nome: `Guilda ${fundador.id}`,
     sigla,
     id_fundador: fundador.id,
     id_lider: fundador.id,

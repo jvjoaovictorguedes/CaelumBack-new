@@ -42,10 +42,9 @@ async function avaliarUmRequisito(requisito, personagem, transaction) {
       return { atendido: atual >= requisito.quantidade, atual, meta: requisito.quantidade, rotulo: `${requisito.quantidade} de ouro` };
     }
     case "ITEM": {
-      const [entrada, item] = await Promise.all([
-        CharacterInventory.findOne({ where: { id_personagem: personagem.id, id_item: requisito.reference_id }, transaction }),
-        Item.findByPk(requisito.reference_id, { attributes: ["id", "nome", "imagem_url"], transaction }),
-      ]);
+      // Sequencial, não Promise.all: compartilham a mesma transaction.
+      const entrada = await CharacterInventory.findOne({ where: { id_personagem: personagem.id, id_item: requisito.reference_id }, transaction });
+      const item = await Item.findByPk(requisito.reference_id, { attributes: ["id", "nome", "imagem_url"], transaction });
       const atual = entrada?.quantidade ?? 0;
       return {
         atendido: atual >= requisito.quantidade,
@@ -71,14 +70,13 @@ async function avaliarUmRequisito(requisito, personagem, transaction) {
       return { atendido, atual: personagem.rank, meta: requisito.reference_key, rotulo: `Rank ${requisito.reference_key} na Guilda dos Aventureiros` };
     }
     case "ACHIEVEMENT": {
-      const [conquista, achievement] = await Promise.all([
-        CharacterAchievement.findOne({
-          where: { id_personagem: personagem.id },
-          include: [{ model: Achievement, as: "achievement", where: { key: requisito.reference_key } }],
-          transaction,
-        }),
-        Achievement.findOne({ where: { key: requisito.reference_key }, transaction }),
-      ]);
+      // Sequencial, não Promise.all: compartilham a mesma transaction.
+      const conquista = await CharacterAchievement.findOne({
+        where: { id_personagem: personagem.id },
+        include: [{ model: Achievement, as: "achievement", where: { key: requisito.reference_key } }],
+        transaction,
+      });
+      const achievement = await Achievement.findOne({ where: { key: requisito.reference_key }, transaction });
       return {
         atendido: Boolean(conquista),
         atual: Boolean(conquista),
