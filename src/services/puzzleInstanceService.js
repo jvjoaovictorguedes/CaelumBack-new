@@ -94,40 +94,84 @@ function gerarSeed() {
 // índice parcial cross-table pra isso (exigiria desnormalizar
 // id_blueprint em puzzle_participants só pra esse propósito; ver
 // relatório de entrega pro trade-off documentado).
+//
+// Hardening 1.2 (itens 4/5/6) — esta função é o ponto que mais precisa
+// de locks reais, porque a decisão "pode criar uma Instance" depende de
+// TRÊS entidades de lifecycle independente ao mesmo tempo
+// (EventDefinition PUBLISHED, EventEdition ACTIVE, BlueprintVersion
+// PUBLISHED), cada uma podendo mudar por uma transaction concorrente
+// enquanto esta decide. Toda a cadeia de locks segue a ordem central
+// documentada em eventDefinitionService.js: Definition → Edition →
+// Blueprint → Version → Character. Os IDs usados pra escolher CADA
+// lock vêm sempre de leituras NÃO travadas anteriores (FKs são
+// imutáveis, nunca mudam depois de criadas — só o `status` de cada
+// entidade muda, e é exatamente esse campo que cada lock protege).
 async function criarOuObterInstancia(idEventEdition, idBlueprint, personagem, transaction) {
   async function processar(t) {
-    const edicao = await EventEdition.findByPk(idEventEdition, { transaction: t });
-    if (!edicao) throw erro("Edição não encontrada.", 404);
-    if (edicao.status !== "ACTIVE") throw erro("Essa edição não está ativa.", 409);
+    const edicaoPreview = await EventEdition.findByPk(idEventEdition, { transaction: t });
+    if (!edicaoPreview) throw erro("Edição não encontrada.", 404);
 
-    // Hardening item 2: nunca confiar só na listagem pública
-    // (listarAtivasPublicas) pra segurança — reconfirma aqui, no
-    // momento exato da criação, que o evento-pai ainda está PUBLISHED
-    // (pode ter sido arquivado depois da edição ter sido ativada).
-    const definicao = await eventDefinitionService.obterPorId(edicao.id_event_definition, t);
+    // LOCK 1 (ordem: Definition) — fecha o item 5 da encomenda: nunca
+    // basta LER o status e continuar; precisa travar a mesma linha que
+    // eventDefinitionService.transicionar(ARCHIVED) trava, pra
+    // serializar de verdade contra um ARCHIVE concorrente.
+    const definicao = await eventDefinitionService.obterPorId(edicaoPreview.id_event_definition, t, {
+      lock: true,
+    });
     if (definicao.status !== "PUBLISHED") {
       throw erro("O evento dessa edição não está publicado.", 409, "EVENTO_NAO_PUBLICADO");
     }
 
-    const blueprint = await PuzzleBlueprint.findByPk(idBlueprint, { transaction: t });
-    if (!blueprint) throw erro("Blueprint não encontrado.", 404);
-    if (blueprint.id_event_definition !== edicao.id_event_definition) {
+    // LOCK 2 (ordem: Edition, depois de Definition) — fecha o item 4 da
+    // encomenda, o TOCTOU mais importante: sem travar a MESMA linha que
+    // eventEditionService.transicionar(ENDED/CANCELLED) trava, uma
+    // transaction concorrente podia encerrar/cancelar a edição enquanto
+    // esta continuava com a leitura antiga de ACTIVE. Com o lock, o
+    // resultado concorrente é sempre um dos dois permitidos: OU a
+    // criação da Instance vence primeiro (e a Edition só termina
+    // depois, já com a Instance existindo), OU o END/CANCEL vence
+    // primeiro (e esta chamada recebe o erro abaixo, baseada no status
+    // fresco pós-lock — nunca os dois ao mesmo tempo com leitura stale).
+    const edicao = await EventEdition.findByPk(idEventEdition, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!edicao) throw erro("Edição não encontrada.", 404);
+    if (edicao.status !== "ACTIVE") throw erro("Essa edição não está ativa.", 409);
+
+    const blueprintPreview = await PuzzleBlueprint.findByPk(idBlueprint, { transaction: t });
+    if (!blueprintPreview) throw erro("Blueprint não encontrado.", 404);
+    if (blueprintPreview.id_event_definition !== edicao.id_event_definition) {
       throw erro("Esse blueprint não pertence ao evento dessa edição.", 400);
     }
 
-    // obterUltimaPublicada já filtra status=PUBLISHED — a versão
-    // selecionada nunca é outra coisa (hardening item 2).
+    // LOCK 3 (ordem: Blueprint, depois de Edition) — a mesma linha
+    // estável que puzzleBlueprintService.criarNovaVersao e
+    // .transicionar (ARCHIVED de uma version) travam. É isso que fecha
+    // o item 6: enquanto esta transaction segura o lock do Blueprint,
+    // NENHUMA outra consegue arquivar nenhuma version desse blueprint
+    // (transicionar trava o MESMO Blueprint antes de tocar a Version) —
+    // então a leitura abaixo de "última version PUBLISHED", mesmo sem
+    // lock própria na Version, é segura: ninguém pode mudar o status de
+    // nenhuma version deste blueprint enquanto não soltarmos este lock.
+    const blueprint = await PuzzleBlueprint.findByPk(idBlueprint, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!blueprint) throw erro("Blueprint não encontrado.", 404);
+
+    // obterUltimaPublicada já filtra status=PUBLISHED — combinado com o
+    // LOCK 3 acima, a versão selecionada nunca pode ser arquivada por
+    // baixo dos nossos pés entre esta leitura e o INSERT da Instance.
+    // Instances JÁ EXISTENTES continuam normalmente apontando pra
+    // versões arquivadas depois — isso é histórico correto; a garantia
+    // aqui é só sobre Instances NOVAS (hardening 1.2, item 6).
     const versaoPublicada = await puzzleBlueprintService.obterUltimaPublicada(idBlueprint, t);
 
-    // GARANTIA REAL DE EXCLUSÃO MÚTUA (hardening item 1): travar
-    // PuzzleParticipant/PuzzleInstance não serializa nada quando nenhuma
-    // linha ainda existe (SELECT FOR UPDATE não bloqueia linha
-    // inexistente). A linha ESTÁVEL que SEMPRE existe pro personagem é
-    // o próprio Character — travamos ela antes de procurar/decidir, o
-    // que serializa qualquer concorrência pro MESMO personagem (2
-    // réplicas/transactions concorrentes pro mesmo personagem nunca
-    // passam da linha abaixo ao mesmo tempo). actionGuardService.
-    // exclusive() nunca seria suficiente aqui — é process-local.
+    // LOCK 4 (ordem: Character, sempre por último — nunca participa da
+    // cadeia Definition/Edition/Blueprint/Version por FK, é uma garantia
+    // de exclusão mútua independente). GARANTIA REAL (hardening 1.1,
+    // item 1): travar PuzzleParticipant/PuzzleInstance não serializa
+    // nada quando nenhuma linha ainda existe (SELECT FOR UPDATE não
+    // bloqueia linha inexistente). A linha ESTÁVEL que SEMPRE existe
+    // pro personagem é o próprio Character — travamos ela antes de
+    // procurar/decidir, o que serializa qualquer concorrência pro
+    // MESMO personagem. actionGuardService.exclusive() nunca seria
+    // suficiente aqui — é process-local.
     const personagemTravado = await Character.findByPk(personagem.id, {
       transaction: t,
       lock: t.LOCK.UPDATE,

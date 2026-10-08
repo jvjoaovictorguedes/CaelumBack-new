@@ -811,6 +811,252 @@ testeComBanco("criarNovaVersao rejeita quando o evento-pai já foi arquivado", a
   );
 });
 
+// ---------------------------------------------------------------------
+// 16. HARDENING 1.2 — concorrência real entre múltiplas transactions
+//     independentes nos invariantes cruzados da fundação. Nenhum teste
+//     presume qual transaction vence a corrida do lock — aceita
+//     qualquer vencedor válido e prova que nenhum estado final
+//     impossível pode existir (TOCTOU fechado com locks reais, nunca
+//     "ler e confiar").
+// ---------------------------------------------------------------------
+
+testeComBanco(
+  "criar EventEdition vs ARCHIVE EventDefinition: nunca uma edição nasce com leitura stale de PUBLISHED pós-archive",
+  async () => {
+    const definicao = await eventDefinitionService.criar({ key: `def-${slug()}`, nome: "Teste" });
+    await eventDefinitionService.transicionar(definicao.id, "PUBLISHED");
+
+    const resultados = await Promise.allSettled([
+      eventEditionService.criar(definicao.id, { key: `ed-${slug()}`, nome: "Edição concorrente" }),
+      eventDefinitionService.transicionar(definicao.id, "ARCHIVED"),
+    ]);
+    const [resultadoEdicao, resultadoArchive] = resultados;
+
+    // Nada bloqueia o archive nesse cenário (nenhuma edição ACTIVE/
+    // SCHEDULED ainda existe) — ele sempre sucede, ganhe ou perca a
+    // corrida do lock.
+    assert.equal(resultadoArchive.status, "fulfilled");
+    const definicaoFinal = await EventDefinition.findByPk(definicao.id);
+    assert.equal(definicaoFinal.status, "ARCHIVED");
+
+    if (resultadoEdicao.status === "rejected") {
+      // archive venceu a corrida do lock — a criação viu ARCHIVED fresco
+      assert.equal(resultadoEdicao.reason.statusCode, 409);
+      const total = await EventEdition.count({ where: { id_event_definition: definicao.id } });
+      assert.equal(total, 0, "nenhuma edição nasceu depois do commit do archive");
+    } else {
+      // criação venceu a corrida do lock — aconteceu validamente ANTES
+      // do archive (definição ainda PUBLISHED no momento do create)
+      const total = await EventEdition.count({ where: { id_event_definition: definicao.id } });
+      assert.equal(total, 1);
+    }
+  },
+);
+
+testeComBanco(
+  "criar PuzzleBlueprint vs ARCHIVE EventDefinition: nunca um blueprint nasce com leitura stale de PUBLISHED pós-archive",
+  async () => {
+    const definicao = await eventDefinitionService.criar({ key: `def-${slug()}`, nome: "Teste" });
+    await eventDefinitionService.transicionar(definicao.id, "PUBLISHED");
+
+    const resultados = await Promise.allSettled([
+      puzzleBlueprintService.criarBlueprint(definicao.id, { key: `bp-${slug()}`, nome: "Blueprint concorrente" }),
+      eventDefinitionService.transicionar(definicao.id, "ARCHIVED"),
+    ]);
+    const [resultadoBlueprint, resultadoArchive] = resultados;
+
+    assert.equal(resultadoArchive.status, "fulfilled");
+    const definicaoFinal = await EventDefinition.findByPk(definicao.id);
+    assert.equal(definicaoFinal.status, "ARCHIVED");
+
+    if (resultadoBlueprint.status === "rejected") {
+      assert.equal(resultadoBlueprint.reason.statusCode, 409);
+      const total = await PuzzleBlueprint.count({ where: { id_event_definition: definicao.id } });
+      assert.equal(total, 0, "nenhum blueprint nasceu depois do commit do archive");
+    } else {
+      // preserva o invariante "nunca um blueprint sem sua version 1" —
+      // mesmo na corrida, o create é atômico (mesma transaction)
+      const { blueprint, versao } = resultadoBlueprint.value;
+      assert.ok(blueprint.id);
+      assert.equal(versao.version, 1);
+      const totalVersoes = await PuzzleBlueprintVersion.count({ where: { id_blueprint: blueprint.id } });
+      assert.equal(totalVersoes, 1);
+    }
+  },
+);
+
+testeComBanco(
+  "criarNovaVersao vs ARCHIVE EventDefinition: nunca uma revisão nova nasce com leitura stale de PUBLISHED pós-archive",
+  async () => {
+    const definicao = await eventDefinitionService.criar({ key: `def-${slug()}`, nome: "Teste" });
+    await eventDefinitionService.transicionar(definicao.id, "PUBLISHED");
+    const { blueprint } = await puzzleBlueprintService.criarBlueprint(definicao.id, {
+      key: `bp-${slug()}`,
+      nome: "Teste",
+    });
+
+    const resultados = await Promise.allSettled([
+      puzzleBlueprintService.criarNovaVersao(blueprint.id, { config: { titulo_publico: "V2 concorrente" } }),
+      eventDefinitionService.transicionar(definicao.id, "ARCHIVED"),
+    ]);
+    const [resultadoVersao, resultadoArchive] = resultados;
+
+    assert.equal(resultadoArchive.status, "fulfilled");
+    const definicaoFinal = await EventDefinition.findByPk(definicao.id);
+    assert.equal(definicaoFinal.status, "ARCHIVED");
+
+    const totalVersoes = await PuzzleBlueprintVersion.count({ where: { id_blueprint: blueprint.id } });
+    if (resultadoVersao.status === "rejected") {
+      assert.equal(resultadoVersao.reason.statusCode, 409);
+      assert.equal(totalVersoes, 1, "só a v1 original existe — nenhuma v2 nasceu depois do commit do archive");
+    } else {
+      assert.equal(resultadoVersao.value.version, 2);
+      assert.equal(totalVersoes, 2, "v1 + v2, nunca colisão/duplicata — versionamento monotônico preservado");
+    }
+  },
+);
+
+testeComBanco(
+  "criar PuzzleInstance vs END da EventEdition: ou a Instance vence e a edição só termina depois, ou o END vence e a criação é recusada — nunca os dois com leitura stale",
+  async () => {
+    const { edicao, blueprint } = await sequelize.transaction((t) => criarFundacaoCompleta(t));
+    const { personagem } = await criarPersonagem({ nivel: 5 });
+
+    const resultados = await Promise.allSettled([
+      puzzleInstanceService.criarOuObterInstancia(edicao.id, blueprint.id, {
+        id: personagem.id,
+        nome: personagem.nome,
+      }),
+      eventEditionService.transicionar(edicao.id, "ENDED"),
+    ]);
+    const [resultadoInstancia, resultadoEnd] = resultados;
+
+    // ACTIVE -> ENDED nunca depende de mais nada; sempre sucede aqui.
+    assert.equal(resultadoEnd.status, "fulfilled");
+    const edicaoFinal = await EventEdition.findByPk(edicao.id);
+    assert.equal(edicaoFinal.status, "ENDED");
+
+    const totalInstancias = await PuzzleInstance.count({ where: { id_event_edition: edicao.id } });
+    if (resultadoInstancia.status === "rejected") {
+      assert.equal(resultadoInstancia.reason.statusCode, 409);
+      assert.equal(totalInstancias, 0, "nenhuma Instance nasceu depois do commit do END");
+    } else {
+      assert.equal(resultadoInstancia.value.criada, true);
+      assert.equal(totalInstancias, 1, "a Instance nasceu validamente antes do END vencer");
+    }
+  },
+);
+
+testeComBanco(
+  "criar PuzzleInstance vs CANCEL da EventEdition: mesmo invariante do END — nunca leitura stale",
+  async () => {
+    const { edicao, blueprint } = await sequelize.transaction((t) => criarFundacaoCompleta(t));
+    const { personagem } = await criarPersonagem({ nivel: 5 });
+
+    const resultados = await Promise.allSettled([
+      puzzleInstanceService.criarOuObterInstancia(edicao.id, blueprint.id, {
+        id: personagem.id,
+        nome: personagem.nome,
+      }),
+      eventEditionService.transicionar(edicao.id, "CANCELLED"),
+    ]);
+    const [resultadoInstancia, resultadoCancel] = resultados;
+
+    assert.equal(resultadoCancel.status, "fulfilled");
+    const edicaoFinal = await EventEdition.findByPk(edicao.id);
+    assert.equal(edicaoFinal.status, "CANCELLED");
+
+    const totalInstancias = await PuzzleInstance.count({ where: { id_event_edition: edicao.id } });
+    if (resultadoInstancia.status === "rejected") {
+      assert.equal(resultadoInstancia.reason.statusCode, 409);
+      assert.equal(totalInstancias, 0, "nenhuma Instance nasceu depois do commit do CANCEL");
+    } else {
+      assert.equal(resultadoInstancia.value.criada, true);
+      assert.equal(totalInstancias, 1, "a Instance nasceu validamente antes do CANCEL vencer");
+    }
+  },
+);
+
+testeComBanco(
+  "criar PuzzleInstance vs ARCHIVE direto da EventDefinition (mesmo lock do service): nunca nasce com leitura stale de PUBLISHED",
+  async () => {
+    const { edicao, blueprint, definicao } = await sequelize.transaction((t) => criarFundacaoCompleta(t));
+    const { personagem } = await criarPersonagem({ nivel: 5 });
+
+    // Arquiva usando o MESMO lock (FOR UPDATE na linha do Definition)
+    // que eventDefinitionService.transicionar usa — aqui direto no
+    // model pra isolar especificamente a garantia do lock em
+    // criarOuObterInstancia (item 5), sem depender do guard separado
+    // "sem edição ACTIVE/SCHEDULED" (item 3, já coberto pelos testes da
+    // seção 13) que normalmente impediria esse archive nesse cenário.
+    async function arquivarDiretoComLock() {
+      return sequelize.transaction(async (t) => {
+        const d = await EventDefinition.findByPk(definicao.id, { transaction: t, lock: t.LOCK.UPDATE });
+        d.status = "ARCHIVED";
+        await d.save({ transaction: t });
+        return d;
+      });
+    }
+
+    const resultados = await Promise.allSettled([
+      puzzleInstanceService.criarOuObterInstancia(edicao.id, blueprint.id, {
+        id: personagem.id,
+        nome: personagem.nome,
+      }),
+      arquivarDiretoComLock(),
+    ]);
+    const [resultadoInstancia, resultadoArchive] = resultados;
+
+    assert.equal(resultadoArchive.status, "fulfilled");
+
+    const totalInstancias = await PuzzleInstance.count({ where: { id_event_edition: edicao.id } });
+    if (resultadoInstancia.status === "rejected") {
+      assert.equal(resultadoInstancia.reason.statusCode, 409);
+      assert.equal(totalInstancias, 0, "nenhuma Instance nasceu com leitura stale de PUBLISHED");
+    } else {
+      assert.equal(resultadoInstancia.value.criada, true);
+    }
+  },
+);
+
+testeComBanco(
+  "criar PuzzleInstance vs ARCHIVE da BlueprintVersion selecionada: nunca nasce apontando pra uma version que venceu a corrida pra ARCHIVED",
+  async () => {
+    const { edicao, blueprint, versao } = await sequelize.transaction((t) => criarFundacaoCompleta(t));
+    const { personagem } = await criarPersonagem({ nivel: 5 });
+
+    const resultados = await Promise.allSettled([
+      puzzleInstanceService.criarOuObterInstancia(edicao.id, blueprint.id, {
+        id: personagem.id,
+        nome: personagem.nome,
+      }),
+      puzzleBlueprintService.transicionar(versao.id, "ARCHIVED"),
+    ]);
+    const [resultadoInstancia, resultadoArchiveVersao] = resultados;
+
+    // PUBLISHED -> ARCHIVED nunca depende de mais nada; sempre sucede.
+    assert.equal(resultadoArchiveVersao.status, "fulfilled");
+    const versaoFinal = await PuzzleBlueprintVersion.findByPk(versao.id);
+    assert.equal(versaoFinal.status, "ARCHIVED");
+
+    const totalInstancias = await PuzzleInstance.count({ where: { id_event_edition: edicao.id } });
+    if (resultadoInstancia.status === "rejected") {
+      // obterUltimaPublicada não achou nenhuma version PUBLISHED (a
+      // única existente acabou de arquivar) — 409 limpo, nunca uma
+      // Instance órfã/inconsistente.
+      assert.equal(resultadoInstancia.reason.statusCode, 409);
+      assert.equal(totalInstancias, 0, "nenhuma Instance nova nasceu apontando pra v1 depois dela arquivar primeiro");
+    } else {
+      assert.equal(resultadoInstancia.value.criada, true);
+      assert.equal(
+        resultadoInstancia.value.instancia.id_blueprint_version,
+        versao.id,
+        "se a criação venceu a corrida, ela aponta corretamente pra v1 — histórico correto mesmo arquivada depois",
+      );
+    }
+  },
+);
+
 test.after(async () => {
   if (temBanco) await sequelize.close();
 });

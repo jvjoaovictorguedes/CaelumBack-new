@@ -3,6 +3,32 @@
 // concreta — isso é EventEdition). Lifecycle próprio, nunca
 // compartilhado com os outros 4 domínios (Fase 0 revisada, item 1 da
 // encomenda de Fase 1).
+//
+// ORDEM DE LOCK DO DOMÍNIO (hardening 1.2 — documentação central;
+// nenhum service decide uma ordem própria, todos seguem esta mesma
+// cadeia quando precisam travar mais de uma entidade na MESMA
+// transaction):
+//
+//   EventDefinition → EventEdition → PuzzleBlueprint →
+//   PuzzleBlueprintVersion → Character
+//
+// PuzzleBlueprint raramente precisa de lock próprio (não tem lifecycle/
+// status — só PuzzleBlueprintVersion tem); ele entra na cadeia só
+// quando serve de "ponto de serialização" pra proteger a escolha da
+// última revisão PUBLISHED contra um ARCHIVED concorrente dessa mesma
+// revisão (ver puzzleInstanceService.criarOuObterInstancia e
+// puzzleBlueprintService.transicionar/criarNovaVersao).
+//
+// Regra prática: cada service descobre a hierarquia com leituras NÃO
+// travadas primeiro (FKs são imutáveis — id_event_definition,
+// id_blueprint etc. nunca mudam depois de criados, então ler sem lock
+// só pra descobrir "qual linha travar depois" é seguro), e só então
+// adquire os locks de verdade NESTA ordem. Nunca o inverso (ex.: nunca
+// travar Version antes de Definition) — é isso que evita deadlock entre
+// transactions concorrentes que preisam das mesmas duas entidades.
+// Character entra por último e nunca participa dessa cadeia por FK —
+// é travado só como garantia de exclusão mútua na criação idempotente
+// de PuzzleInstance (ver hardening 1.1, item 1).
 const { Op } = require("sequelize");
 const { sequelize } = require("../config/database");
 const { EventDefinition, EventEdition } = require("../models/eventPuzzleModels");
