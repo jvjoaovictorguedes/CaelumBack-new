@@ -1,0 +1,30 @@
+{
+  "20270206010001-anti-automation-foundation.js": {
+    "createdAt": "2026-10-07T21:02:21.214Z",
+    "dependsOn": []
+  },
+  "20270206010002-combat-typing-expand-neutral.js": {
+    "createdAt": "2026-10-07T22:08:01.597Z",
+    "dependsOn": [
+      "20270206010001-anti-automation-foundation.js"
+    ]
+  },
+  "20270206010003-combat-typing-buff-data.js": {
+    "createdAt": "2026-10-07T22:20:33.648Z",
+    "dependsOn": [
+      "20270206010002-combat-typing-expand-neutral.js"
+    ]
+  },
+  "20270206010004-combat-typing-initial-content.js": {
+    "createdAt": "2026-10-07T22:26:25.747Z",
+    "dependsOn": [
+      "20270206010003-combat-typing-buff-data.js"
+    ]
+  },
+  "20270206010005-world-crisis-reconstruction.js": {
+    "createdAt": "2026-10-08T00:02:04.810Z",
+    "dependsOn": [
+      "20270206010004-combat-typing-initial-content.js"
+    ]
+  }
+}

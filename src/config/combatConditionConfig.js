@@ -15,11 +15,11 @@ const CONDITIONS = [
 // de contrato pra validação (Admin/service), nunca interpretado como
 // código. `campos` lista as chaves obrigatórias da config em JSON.
 const CONFIG_ESPERADA = {
-  SELF_HP_BELOW_PCT: { campos: ["limite_pct"], descricao: "Vida ATUAL do próprio ator abaixo de limite_pct (0-100)." },
-  TARGET_HP_BELOW_PCT: { campos: ["limite_pct"], descricao: "Vida ATUAL do alvo abaixo de limite_pct (0-100)." },
-  SELF_HAS_STATUS: { campos: ["status_key"], descricao: "O próprio ator carrega o Status status_key." },
-  TARGET_HAS_STATUS: { campos: ["status_key"], descricao: "O alvo carrega o Status status_key." },
-  TARGET_HAS_DEBUFF_GROUP: { campos: ["stack_group"], descricao: "O alvo carrega um modificador do stack_group indicado." },
+  SELF_HP_BELOW_PCT: { campos: ["limite_pct"], descricao: "Vida ATUAL do próprio ator abaixo de limite_pct (0-100).", fields: [{ key: "limite_pct", label: "HP próprio abaixo de (%)", type: "number", min: 0, max: 100, required: true }] },
+  TARGET_HP_BELOW_PCT: { campos: ["limite_pct"], descricao: "Vida ATUAL do alvo abaixo de limite_pct (0-100).", fields: [{ key: "limite_pct", label: "HP do alvo abaixo de (%)", type: "number", min: 0, max: 100, required: true }] },
+  SELF_HAS_STATUS: { campos: ["status_key"], descricao: "O próprio ator carrega o Status status_key.", fields: [{ key: "status_key", label: "Status no próprio personagem", type: "select", optionsSource: "statusKeys", required: true }] },
+  TARGET_HAS_STATUS: { campos: ["status_key"], descricao: "O alvo carrega o Status status_key.", fields: [{ key: "status_key", label: "Status no alvo", type: "select", optionsSource: "statusKeys", required: true }] },
+  TARGET_HAS_DEBUFF_GROUP: { campos: ["stack_group"], descricao: "O alvo carrega um modificador do stack_group indicado.", fields: [{ key: "stack_group", label: "Grupo de debuff no alvo", type: "text", optionsSource: "stackGroups", maxLength: 60, required: true }] },
 };
 
 function conditionKeyValida(conditionKey) {

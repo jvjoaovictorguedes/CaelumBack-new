@@ -20,6 +20,7 @@ const PADRAO = {
     liberar_boss: true,
     comprar_beneficios: true,
     gerenciar_mural: true,
+    retirar_itens_tesouro: true,
   },
   Oficial: {
     convidar: true,
@@ -35,7 +36,11 @@ const PADRAO = {
     // podem postar/remover") — Oficial é o cargo logo abaixo de
     // Fundador em HIERARQUIA, então só esses dois entram true aqui.
     gerenciar_mural: true,
+    retirar_itens_tesouro: true,
   },
+  // Tesouro V2 §8: "Veterano — Sim ou configurável" — default inicial
+  // true, guilda pode desligar via override em GuildRolePermissions sem
+  // precisar mexer nesta matriz.
   Veterano: {
     convidar: true,
     aceitar_candidatura: false,
@@ -47,6 +52,7 @@ const PADRAO = {
     liberar_boss: false,
     comprar_beneficios: false,
     gerenciar_mural: false,
+    retirar_itens_tesouro: true,
   },
   Membro: {
     convidar: false,
@@ -59,6 +65,7 @@ const PADRAO = {
     liberar_boss: false,
     comprar_beneficios: false,
     gerenciar_mural: false,
+    retirar_itens_tesouro: false,
   },
   Recruta: {
     convidar: false,
@@ -71,6 +78,7 @@ const PADRAO = {
     liberar_boss: false,
     comprar_beneficios: false,
     gerenciar_mural: false,
+    retirar_itens_tesouro: false,
   },
 };
 

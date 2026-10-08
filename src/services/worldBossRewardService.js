@@ -204,7 +204,7 @@ async function processarRecompensas(eventId) {
   const evento = await sequelize.transaction(async (transaction) => {
     const linha = await WorldBossEvent.findByPk(eventId, { transaction, lock: transaction.LOCK.UPDATE });
     if (!linha) return null;
-    if (linha.status !== EVENT_STATUS.DEFEATED) return null;
+    if (![EVENT_STATUS.DEFEATED,EVENT_STATUS.FAILED].includes(linha.status)) return null;
     if (linha.participation_rewards_status === PARTICIPATION_REWARDS_STATUS.DONE) return null;
     linha.participation_rewards_status = PARTICIPATION_REWARDS_STATUS.PROCESSING;
     await linha.save({ transaction });
@@ -224,8 +224,8 @@ async function processarRecompensas(eventId) {
     // §11.5 — ordem sugerida: Descoberta, Participação, Maior Dano,
     // Golpe Final. Nunca usada pra unicidade (cada grant já é
     // independente/idempotente por si só) — só a sequência recomendada.
-    await sequelize.transaction((transaction) => concederMaiorDanoSeElegivel(evento, transaction));
-    await sequelize.transaction((transaction) => concederGolpeFinalSeElegivel(evento, transaction));
+    if(evento.status===EVENT_STATUS.DEFEATED){await sequelize.transaction((transaction) => concederMaiorDanoSeElegivel(evento, transaction));
+    await sequelize.transaction((transaction) => concederGolpeFinalSeElegivel(evento, transaction));}
 
     await WorldBossEvent.update(
       { participation_rewards_status: PARTICIPATION_REWARDS_STATUS.DONE },
@@ -249,7 +249,7 @@ async function processarRecompensas(eventId) {
 async function retomarRecompensasPendentes() {
   const eventos = await WorldBossEvent.findAll({
     where: {
-      status: EVENT_STATUS.DEFEATED,
+      status: [EVENT_STATUS.DEFEATED,EVENT_STATUS.FAILED],
       participation_rewards_status: [PARTICIPATION_REWARDS_STATUS.PENDING, PARTICIPATION_REWARDS_STATUS.PROCESSING],
     },
   });

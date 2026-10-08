@@ -18,7 +18,7 @@ const { EVENT_STATUS, EVENT_STATUS_ABERTOS, GAME_SETTINGS_DEFAULT } = require(".
 // só pra diagnóstico/telemetria; a leitura do snapshot NUNCA deve travar
 // num schema_version específico, porque eventos antigos (V1, sem essa
 // chave) continuam existindo no banco e precisam continuar legíveis.
-const SNAPSHOT_SCHEMA_VERSION = 2;
+const SNAPSHOT_SCHEMA_VERSION = 3;
 
 async function existeEventoAberto(transaction) {
   const evento = await WorldBossEvent.findOne({ where: { status: EVENT_STATUS_ABERTOS }, transaction });
@@ -58,6 +58,8 @@ async function montarSnapshotHabilidades(idConfig, transaction) {
     power_snapshot: hab.Power
       ? {
           id: hab.Power.id,
+          tipo_dano:hab.Power.tipo_dano,
+          ...Object.fromEntries(Object.keys(require("../models/combatTypingModels").fields.power).map(k=>[k,hab.Power[k]])),
           nome: hab.Power.nome,
           imagem_url: hab.Power.imagem_url,
           dano_base: hab.Power.dano_base,
@@ -99,9 +101,13 @@ async function montarSnapshot(config, transaction) {
     transaction,
   });
   const habilidades = await montarSnapshotHabilidades(config.id, transaction);
+  await require("./combatTypingService").catalog();
 
   return {
     schema_version: SNAPSHOT_SCHEMA_VERSION,
+    combat_duration_seconds: config.combat_duration_seconds,
+    failure_crisis_snapshot: gameSettingCache.obter("worldcrisis.enabled",false) ? await require("./worldCrisisConfigService").snapshot(config.id_failure_crisis_config,transaction) : null,
+    combatTyping:require("./combatTypingService").monsterProfile(config),
     nome: config.nome,
     descricao: config.descricao,
     lore: config.lore,
@@ -109,6 +115,7 @@ async function montarSnapshot(config, transaction) {
     fundo_url: config.fundo_url,
     vida_base: Number(config.vida_base),
     defesa: config.defesa,
+    ...Object.fromEntries(Object.keys(require("../models/combatTypingModels").fields.monster).map(k=>[k,config[k]])),
     // §4.1 — atributos de combate/raid do Boss.
     nivel: config.nivel,
     forca: config.forca,
@@ -182,6 +189,7 @@ async function montarSnapshot(config, transaction) {
 // evento ainda cadastrado). Nunca cria uma segunda se já existe um
 // evento aberto OU uma linha em COOLDOWN esperando (idempotente).
 async function agendarProximoCiclo(transaction, { apartirDe = new Date() } = {}) {
+  if (gameSettingCache.obter("worldcrisis.pause_worldboss_during_active_crisis",true) && await require("./worldCrisisService").current(transaction)) return null;
   if (await existeEventoAberto(transaction)) return null;
 
   const jaEmCooldown = await WorldBossEvent.findOne({ where: { status: EVENT_STATUS.COOLDOWN }, transaction });
@@ -242,6 +250,7 @@ async function ativarEvento(evento, transaction) {
 // chamada periodicamente pelo scheduler (nunca pelo Admin, que usa
 // ativarEvento direto pra pular a espera).
 async function ativarSeElegivel(transaction) {
+  if (gameSettingCache.obter("worldcrisis.pause_worldboss_during_active_crisis",true) && await require("./worldCrisisService").current(transaction)) return null;
   const evento = await WorldBossEvent.findOne({
     where: { status: EVENT_STATUS.COOLDOWN },
     transaction,

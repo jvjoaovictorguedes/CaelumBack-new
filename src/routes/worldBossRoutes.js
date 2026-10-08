@@ -5,6 +5,8 @@ const worldBossCombatController = require("../controllers/worldBossCombatControl
 const authMiddleware = require("../middlewares/authMiddleware");
 const { carregarPersonagemAtual } = require("../middlewares/currentCharacterMiddleware");
 
+const automation = require("../antiAutomation/httpMiddleware").protect("worldBoss");
+
 const router = express.Router();
 router.use(authMiddleware);
 
@@ -12,7 +14,7 @@ router.get("/status", worldBossController.obterStatus);
 router.get("/ranking", worldBossController.obterRanking);
 router.get("/history", worldBossController.obterHistorico);
 
-router.use(carregarPersonagemAtual);
+router.use(carregarPersonagemAtual, automation);
 router.get("/ranking/me", worldBossController.obterMinhaPosicaoNoRanking);
 router.post("/join", worldBossCombatController.entrar);
 router.post("/leave", worldBossCombatController.sair);

@@ -281,6 +281,12 @@ testeComBanco("retry com a mesma idempotencyKey não duplica output nem XP", asy
   assert.equal(await estoqueDe(personagem.id, item.id), recipe.quantidade_resultado, "resultado não deveria duplicar no replay");
   const progresso = await CharacterAlchemyProgress.findOne({ where: { id_personagem: personagem.id } });
   assert.equal(progresso.experiencia, primeiro.experiencia_total, "XP não deveria duplicar no replay");
+  const concurrentKey=key+"-concurrent";
+  const concurrent=await Promise.all(Array.from({length:10},()=>alchemyService.prepararLote(personagem.id,recipe.id,{quantity:1,idempotencyKey:concurrentKey})));
+  assert.equal(concurrent.filter(r=>!r.idempotent_replay).length,1);
+  assert.equal(concurrent.filter(r=>r.idempotent_replay).length,9);
+  assert.equal(await estoqueDe(personagem.id,item.id),recipe.quantidade_resultado*2);
+  await assert.rejects(()=>alchemyService.prepararLote(personagem.id,recipe.id,{quantity:2,idempotencyKey:concurrentKey}),e=>e.code==="ACTION_REPLAYED");
 });
 
 // ---------------------------------------------------------------------

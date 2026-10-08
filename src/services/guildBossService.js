@@ -16,6 +16,7 @@ const GuildBossContribution = require("../models/GuildBossContribution");
 const GuildTreasuryTransaction = require("../models/GuildTreasuryTransaction");
 const { concederExperiencia } = require("./guildXpService");
 const { adicionarExperiencia } = require("./experienceService");
+const { pontuarContribuicao } = require("./guildContributionService");
 const {
   buscarBonusDeAtributos,
   personagemComBonus,
@@ -333,6 +334,18 @@ async function distribuirRecompensa(tentativa, chefe, transaction, { registrarLo
         resultadoXP = await adicionarExperiencia(c.id_personagem, xp, { transaction });
       }
       recompensasPorPersonagem.push({ idPersonagem: c.id_personagem, dinheiro, xp, nivel: resultadoXP?.nivel });
+
+      // Contribuição V2 §15 — mesma fórmula já reservada em
+      // PONTOS_CONTRIBUICAO (base fixa + proporcional à participação de
+      // dano), nunca antes usada: Boss nunca pontuava em GuildContribution.
+      const pontosBoss = Math.round(
+        guildConfig.PONTOS_CONTRIBUICAO.BossBase +
+          guildConfig.PONTOS_CONTRIBUICAO.BossPorParticipacaoDano * participacao,
+      );
+      await pontuarContribuicao(tentativa.id_guild, c.id_personagem, pontosBoss, transaction, {
+        sourceType: "GUILD_BOSS",
+        sourceId: tentativa.id,
+      });
     }
   }
 

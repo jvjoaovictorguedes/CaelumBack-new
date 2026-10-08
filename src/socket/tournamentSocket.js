@@ -1,3 +1,4 @@
+const SOCKET_EVENTS = require("../contracts/socketEvents");
 // src/socket/tournamentSocket.js
 //
 // Torneios (PvP v2 §16) — camada ao vivo. Como no ranqueado, NÃO
@@ -9,7 +10,7 @@
 //
 // Consumíveis: HABILITADOS, igual ao duelo casual. A desativação é
 // exclusiva do ranqueado (§10) — este duelo não seta `duelo.ranked`,
-// então o handler de "pvp:acao" continua aceitando item normalmente.
+// então o handler de SOCKET_EVENTS.PVP.ACAO continua aceitando item normalmente.
 const TournamentParticipant = require("../models/TournamentParticipant");
 const TournamentSeries = require("../models/TournamentSeries");
 const tournamentMatchService = require("../services/tournamentMatchService");
@@ -47,13 +48,13 @@ async function iniciarJogoDaSerie(io, serieId) {
   const chaveB = pvpLiveSocket.chaveOnline(b.character_id);
 
   if (!pvpLiveSocket.online.has(chaveA) || !pvpLiveSocket.online.has(chaveB)) {
-    io.to(salaDaSerie(serieId)).emit("torneio:erro", {
+    io.to(salaDaSerie(serieId)).emit(SOCKET_EVENTS.TORNEIO.ERRO, {
       mensagem: "Os dois participantes precisam estar online para o jogo começar.",
     });
     return null;
   }
   if (pvpLiveSocket.duelPorPersonagem.has(chaveA) || pvpLiveSocket.duelPorPersonagem.has(chaveB)) {
-    io.to(salaDaSerie(serieId)).emit("torneio:erro", {
+    io.to(salaDaSerie(serieId)).emit(SOCKET_EVENTS.TORNEIO.ERRO, {
       mensagem: "Um dos participantes já está em outro duelo.",
     });
     return null;
@@ -109,7 +110,7 @@ async function iniciarJogoDaSerie(io, serieId) {
   socketA?.join(sala);
   socketB?.join(sala);
 
-  io.to(sala).emit("pvp:duelo-iniciado", pvpLiveSocket.montarPayloadDuelo(duelo));
+  io.to(sala).emit(SOCKET_EVENTS.PVP.DUELO_INICIADO, pvpLiveSocket.montarPayloadDuelo(duelo));
 
   pvpLiveSocket.iniciarTimerDeTurno(io, duelId);
   log("jogo:iniciado", { serie: serieId, duelId, a: a.character_id, b: b.character_id });
@@ -141,13 +142,13 @@ async function finalizarJogoDeTorneio(io, duelId, vencedorChave, motivo = "comba
     });
   } catch (error) {
     console.error("[torneio] Falha ao registrar resultado de jogo:", error);
-    io.to(duelo.sala).emit("torneio:erro", { mensagem: "Erro ao registrar o resultado do jogo." });
+    io.to(duelo.sala).emit(SOCKET_EVENTS.TORNEIO.ERRO, { mensagem: "Erro ao registrar o resultado do jogo." });
     return;
   }
 
   const serie = await TournamentSeries.findByPk(duelo.serieId);
 
-  io.to(duelo.sala).emit("pvp:duelo-fim", {
+  io.to(duelo.sala).emit(SOCKET_EVENTS.PVP.DUELO_FIM, {
     duelId,
     vencedorChave,
     vencedor: vencedorChave === "A" ? { id: duelo.a.id, nome: duelo.a.nome } : { id: duelo.b.id, nome: duelo.b.nome },
@@ -156,7 +157,7 @@ async function finalizarJogoDeTorneio(io, duelId, vencedorChave, motivo = "comba
     torneio: true,
   });
 
-  io.to(duelo.sala).emit("torneio:serie:placar", {
+  io.to(duelo.sala).emit(SOCKET_EVENTS.TORNEIO.SERIE_PLACAR, {
     serieId: duelo.serieId,
     placar: { a: serie?.score_a ?? 0, b: serie?.score_b ?? 0 },
     formato: serie?.format,
@@ -191,7 +192,7 @@ function iniciarVarreduraReadyCheck(io) {
       for (const serie of vencidas) {
         const resolvida = await tournamentMatchService.resolverReadyCheckExpirado(serie.id);
         if (resolvida) {
-          io.to(salaDaSerie(serie.id)).emit("torneio:serie:atualizada", {
+          io.to(salaDaSerie(serie.id)).emit(SOCKET_EVENTS.TORNEIO.SERIE_ATUALIZADA, {
             serieId: serie.id,
             status: resolvida.status,
             vencedorSerie: resolvida.winner_participant_id ?? null,
@@ -237,7 +238,7 @@ function iniciarVarreduraSeriesTravadas(io) {
         if (iniciado) continue;
         const resolvida = await tournamentMatchService.resolverSerieTravada(serie.id);
         if (resolvida) {
-          io.to(salaDaSerie(serie.id)).emit("torneio:serie:atualizada", {
+          io.to(salaDaSerie(serie.id)).emit(SOCKET_EVENTS.TORNEIO.SERIE_ATUALIZADA, {
             serieId: serie.id,
             status: resolvida.status,
             vencedorSerie: resolvida.winner_participant_id ?? null,
@@ -257,19 +258,19 @@ module.exports = function registerTournamentHandlers(io) {
   iniciarVarreduraSeriesTravadas(io);
 
   io.on("connection", (socket) => {
-    // Reaproveita socket.characterId de pvpLiveSocket."identificar".
+    // Reaproveita socket.characterId de pvpLiveSocket.SOCKET_EVENTS.TRANSPORT.IDENTIFY.
 
-    socket.on("torneio:entrar-sala", async ({ serieId } = {}) => {
+    socket.on(SOCKET_EVENTS.TORNEIO.ENTRAR_SALA, async ({ serieId } = {}) => {
       if (!socket.characterId || !serieId) return;
       const serie = await TournamentSeries.findByPk(serieId);
-      if (!serie) return socket.emit("torneio:erro", { mensagem: "Série não encontrada." });
+      if (!serie) return socket.emit(SOCKET_EVENTS.TORNEIO.ERRO, { mensagem: "Série não encontrada." });
       const { a, b } = await participantesDaSerie(serie);
       const ids = [a?.character_id, b?.character_id].map(String);
       if (!ids.includes(socket.characterId)) {
-        return socket.emit("torneio:erro", { mensagem: "Você não participa desta série." });
+        return socket.emit(SOCKET_EVENTS.TORNEIO.ERRO, { mensagem: "Você não participa desta série." });
       }
       socket.join(salaDaSerie(serieId));
-      socket.emit("torneio:serie:atualizada", {
+      socket.emit(SOCKET_EVENTS.TORNEIO.SERIE_ATUALIZADA, {
         serieId,
         status: serie.status,
         placar: { a: serie.score_a, b: serie.score_b },
@@ -282,20 +283,20 @@ module.exports = function registerTournamentHandlers(io) {
 
     // §16 — ready check. O participante é resolvido pelo characterId da
     // sessão do socket, nunca por id enviado no payload.
-    socket.on("torneio:pronto", async ({ serieId } = {}) => {
+    socket.on(SOCKET_EVENTS.TORNEIO.PRONTO, async ({ serieId } = {}) => {
       if (!socket.characterId || !serieId) return;
       try {
         const serie = await TournamentSeries.findByPk(serieId);
-        if (!serie) return socket.emit("torneio:erro", { mensagem: "Série não encontrada." });
+        if (!serie) return socket.emit(SOCKET_EVENTS.TORNEIO.ERRO, { mensagem: "Série não encontrada." });
 
         const { a, b } = await participantesDaSerie(serie);
         const meu = [a, b].find((p) => p && String(p.character_id) === socket.characterId);
-        if (!meu) return socket.emit("torneio:erro", { mensagem: "Você não participa desta série." });
+        if (!meu) return socket.emit(SOCKET_EVENTS.TORNEIO.ERRO, { mensagem: "Você não participa desta série." });
 
         // Exclusão mútua (§16): não dá pra confirmar torneio estando em
         // outro duelo (casual ou ranqueado) agora.
         if (pvpLiveSocket.duelPorPersonagem.has(socket.characterId)) {
-          return socket.emit("torneio:erro", {
+          return socket.emit(SOCKET_EVENTS.TORNEIO.ERRO, {
             mensagem: "Termine o duelo em andamento antes de confirmar a série do torneio.",
           });
         }
@@ -305,7 +306,7 @@ module.exports = function registerTournamentHandlers(io) {
           participantId: meu.id,
         });
 
-        io.to(salaDaSerie(serieId)).emit("torneio:serie:atualizada", {
+        io.to(salaDaSerie(serieId)).emit(SOCKET_EVENTS.TORNEIO.SERIE_ATUALIZADA, {
           serieId,
           status: atualizada.status,
           readyA: atualizada.ready_a,
@@ -316,7 +317,7 @@ module.exports = function registerTournamentHandlers(io) {
           await iniciarJogoDaSerie(io, serieId);
         }
       } catch (error) {
-        socket.emit("torneio:erro", {
+        socket.emit(SOCKET_EVENTS.TORNEIO.ERRO, {
           mensagem: error.codigo ? error.message : "Não foi possível confirmar agora.",
         });
       }

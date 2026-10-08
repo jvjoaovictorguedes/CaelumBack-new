@@ -188,7 +188,8 @@ testeComBanco("Silêncio bloqueia poder mas não ataque básico", async () => {
   assert.equal(rAtaque.statusCode, 200);
 });
 
-testeComBanco("DoT pode terminar o combate em vitória antes do contra-ataque do inimigo", async () => {
+testeComBanco("DoT pode terminar o combate em vitória antes do contra-ataque do inimigo", async (t) => {
+  t.mock.method(Math, "random", () => 0.9);
   const { personagem } = await criarPersonagem({ nivel: 5 });
   await encontroDeTreino(personagem, {
     vida_maxima: 30,

@@ -125,6 +125,7 @@ async function construirHabilidadesParaEncontro(idMonstro, { transaction, capabi
     resultado.push({
       id: ability.id,
       powerId: power.id,
+      powerTyping: { id:power.id,tipo_dano:power.tipo_dano,...Object.fromEntries(Object.keys(require("../models/combatTypingModels").fields.power).map(k=>[k,power[k]])) },
       nome: power.nome,
       capabilities: capabilitiesExecutaveis,
       prioridadeBase: ability.prioridade_base,
@@ -242,14 +243,9 @@ function executarPoder({
     const defensorComBuffs = bonusDefesaTotal
       ? { ...personagemAtual, defesa: (personagemAtual.defesa || 0) + bonusDefesaTotal }
       : personagemAtual;
-    const danoFinal = Math.max(
-      1,
-      Math.round(
-        aplicarMitigacaoDeDefesa(danoComCritico, defensorComBuffs) *
-          multiplicadorDefesaTaverna *
-          combatModifierService.multiplicadorDanoRecebido(modificadoresJogador),
-      ),
-    );
+    const resolution=require("./combatTypingService").resolveDamage({amount:danoComCritico,actor:inimigoAtual,target:defensorComBuffs,power:habilidade.powerTyping,context:"PVE",finalMultiplier:multiplicadorDefesaTaverna*combatModifierService.multiplicadorDanoRecebido(modificadoresJogador),defenderBuffs:combatBuffs.player});
+    const danoFinal=resolution.totalDamage;
+    log.push(require("./combatTypingService").describe(resolution));
     danoRecebidoContraAtaque = danoFinal;
 
     const absorcaoEscudo = combatBuffService.absorverDano(escudo.player, danoFinal);
@@ -407,7 +403,9 @@ function executarPoderEmGrupo({ habilidade, inimigo, alvoEstado, alvoStatus, alv
     const bonusDefesaTotal =
       combatBuffService.bonusDeDefesa(alvoBuffs ?? []) + combatModifierService.bonusDefesa(modificadoresDefensor ?? new Map());
     const defensorComBuffs = bonusDefesaTotal ? { ...alvoEstado, defesa: (alvoEstado.defesa || 0) + bonusDefesaTotal } : alvoEstado;
-    dano = Math.max(1, Math.round(aplicarMitigacaoDeDefesa(danoComCritico, defensorComBuffs)));
+    const resolution=require("./combatTypingService").resolveDamage({amount:danoComCritico,actor:inimigo,target:defensorComBuffs,power:habilidade.powerTyping,context:"PARTY",defenderBuffs:alvoBuffs});
+    dano=resolution.totalDamage;
+    log.push(require("./combatTypingService").describe(resolution));
 
     alvoEstado.vida_atual = Math.max(0, alvoEstado.vida_atual - dano);
     log.push(
@@ -478,6 +476,7 @@ async function construirHabilidadesParaGuildBoss(idGuildBossConfig, { transactio
     resultado.push({
       id: ability.id,
       powerId: power.id,
+      powerTyping: { id:power.id,tipo_dano:power.tipo_dano,...Object.fromEntries(Object.keys(require("../models/combatTypingModels").fields.power).map(k=>[k,power[k]])) },
       nome: power.nome,
       capabilities,
       prioridadeBase: ability.prioridade_base,

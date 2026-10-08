@@ -1,3 +1,5 @@
+const { montarPayloadBatalha } = require("../contracts/partyPayloads");
+const SOCKET_EVENTS = require("../contracts/socketEvents");
 // src/socket/partySocket.js
 //
 // Party da Aventura (PvE em grupo): convite estilo Duelo ao vivo
@@ -9,13 +11,13 @@
 // sobreviver a um restart do servidor (só o resultado final, XP/ouro/
 // drop, é persistido no banco quando a batalha termina).
 //
-// De propósito SEM "identificar" próprio: reaproveita socket.characterId
-// já setado pelo "identificar" do pvpLiveSocket — este módulo só atende
+// De propósito SEM SOCKET_EVENTS.TRANSPORT.IDENTIFY próprio: reaproveita socket.characterId
+// já setado pelo SOCKET_EVENTS.TRANSPORT.IDENTIFY do pvpLiveSocket — este módulo só atende
 // conexões que já passaram por lá (o PvpSocketProvider do frontend é
 // global, montado uma vez pra todo o dashboard, então characterId já
 // está disponível antes de qualquer tela de Aventura usar isto). Ver o
 // comentário equivalente em guildSocket.js sobre o motivo de NÃO usar
-// "identificar" genérico quando o socket é outro — aqui não se aplica
+// SOCKET_EVENTS.TRANSPORT.IDENTIFY genérico quando o socket é outro — aqui não se aplica
 // porque é a MESMA conexão, mas vale registrar o porquê.
 
 const Character = require("../models/Character");
@@ -33,6 +35,8 @@ const { persistirEstadoFinalDoMembro, calcularPenalidadeDiferencaNivel } = requi
 const { registrarProgressoContrato } = require("../services/adventureGuildObjectiveService");
 const { custoManaEfetivo, resolverResultadoDeAcerto } = require("../services/combatFormulas");
 const combatModifierService = require("../services/combatModifierService");
+const powerRuntime = require("../services/powerCombatRuntime");
+const combatBuffService = require("../services/combatBuffService");
 const statusEffectService = require("../services/statusEffectService");
 const { definicaoDoStatus, ACTION_TYPE } = require("../config/statusEffectConfig");
 const {
@@ -78,7 +82,7 @@ function membrosPublicos(grupo) {
 }
 
 function emitirGrupoAtualizado(io, grupo) {
-  io.to(`party:${grupo.id}`).emit("party:grupo-atualizado", {
+  io.to(`party:${grupo.id}`).emit(SOCKET_EVENTS.PARTY.GRUPO_ATUALIZADO, {
     partyId: grupo.id,
     hostId: grupo.hostId,
     membros: membrosPublicos(grupo),
@@ -110,7 +114,7 @@ function removerDoGrupo(io, characterId) {
     for (const idRestante of grupo.ordem) {
       grupoPorPersonagem.delete(idRestante);
     }
-    io.to(`party:${partyId}`).emit("party:grupo-desfeito", {
+    io.to(`party:${partyId}`).emit(SOCKET_EVENTS.PARTY.GRUPO_DESFEITO, {
       motivo: chave === grupo.hostId ? "anfitriao_saiu" : "grupo_vazio",
     });
     grupos.delete(partyId);
@@ -139,7 +143,7 @@ module.exports = function registerPartyHandlers(io) {
     const convidante = grupo?.membros.get(pendente.idConvidante);
     if (!grupo || !convidante) return;
 
-    socket.emit("party:convite-recebido", {
+    socket.emit(SOCKET_EVENTS.PARTY.CONVITE_RECEBIDO, {
       idConvidante: pendente.idConvidante,
       nomeConvidante: convidante.nome,
       partyId: grupo.id,
@@ -152,8 +156,8 @@ module.exports = function registerPartyHandlers(io) {
     // Nomes dos jogadores online pra convidar — a UI só tinha o id (via
     // `online`, que só guarda characterId -> socketId) e mostrava
     // "Jogador #123" na lista de convite (bug reportado). Callback igual
-    // "pvp:listar-online" (pvpLiveSocket.js), só que também resolve nome.
-    socket.on("party:listar-online", async (_payload, callback) => {
+    // SOCKET_EVENTS.PVP.LISTAR_ONLINE (pvpLiveSocket.js), só que também resolve nome.
+    socket.on(SOCKET_EVENTS.PARTY.LISTAR_ONLINE, async (_payload, callback) => {
       if (typeof callback !== "function") return;
       const characterId = socket.characterId;
       const ids = Array.from(online.keys()).filter((id) => id !== characterId);
@@ -170,18 +174,18 @@ module.exports = function registerPartyHandlers(io) {
     // (party:convidar), e o anfitrião só via o lobby depois que ALGUÉM
     // aceitasse. Agora dá pra formar o grupo (só você) e já ver o lobby
     // pra ir chamando gente com calma, um de cada vez.
-    socket.on("party:criar", async () => {
+    socket.on(SOCKET_EVENTS.PARTY.CRIAR, async () => {
       const characterId = socket.characterId;
       if (!characterId) {
-        return socket.emit("party:erro", { mensagem: "Identifique seu personagem antes de criar um grupo." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Identifique seu personagem antes de criar um grupo." });
       }
       if (grupoPorPersonagem.has(characterId) || batalhaPorPersonagem.has(characterId)) {
-        return socket.emit("party:erro", { mensagem: "Você já está em outro grupo ou em batalha." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Você já está em outro grupo ou em batalha." });
       }
 
       const anfitriao = await Character.findByPk(characterId, { attributes: ["id", "nome"] });
       if (!anfitriao) {
-        return socket.emit("party:erro", { mensagem: "Personagem não encontrado." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Personagem não encontrado." });
       }
 
       const grupo = {
@@ -199,26 +203,26 @@ module.exports = function registerPartyHandlers(io) {
       emitirGrupoAtualizado(io, grupo);
     });
 
-    socket.on("party:convidar", async ({ idConvidado } = {}) => {
+    socket.on(SOCKET_EVENTS.PARTY.CONVIDAR, async ({ idConvidado } = {}) => {
       const idConvidante = socket.characterId;
       if (!idConvidante) {
-        return socket.emit("party:erro", { mensagem: "Identifique seu personagem antes de convidar." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Identifique seu personagem antes de convidar." });
       }
       const chaveConvidado = chaveOnline(idConvidado);
       if (!idConvidado || chaveConvidado === idConvidante) {
-        return socket.emit("party:erro", { mensagem: "Escolha um amigo válido pra convidar." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Escolha um amigo válido pra convidar." });
       }
       if (!online.has(chaveConvidado)) {
-        return socket.emit("party:erro", { mensagem: "Esse jogador não está online agora." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Esse jogador não está online agora." });
       }
       if (grupoPorPersonagem.has(chaveConvidado) || batalhaPorPersonagem.has(chaveConvidado)) {
-        return socket.emit("party:erro", { mensagem: "Esse jogador já está em outro grupo ou em batalha." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Esse jogador já está em outro grupo ou em batalha." });
       }
       if (batalhaPorPersonagem.has(idConvidante)) {
-        return socket.emit("party:erro", { mensagem: "Você já está numa batalha em grupo." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Você já está numa batalha em grupo." });
       }
       if (convitesPendentes.has(chaveConvidado)) {
-        return socket.emit("party:erro", { mensagem: "Esse jogador já tem um convite pendente." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Esse jogador já tem um convite pendente." });
       }
 
       let grupo = grupos.get(grupoPorPersonagem.get(idConvidante));
@@ -231,15 +235,15 @@ module.exports = function registerPartyHandlers(io) {
         };
         grupos.set(grupo.id, grupo);
       } else if (grupo.hostId !== idConvidante) {
-        return socket.emit("party:erro", { mensagem: "Só o anfitrião do grupo pode chamar mais gente." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Só o anfitrião do grupo pode chamar mais gente." });
       }
 
       if (grupo.emBatalha) {
-        return socket.emit("party:erro", { mensagem: "Não dá pra chamar mais gente com o grupo em batalha." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Não dá pra chamar mais gente com o grupo em batalha." });
       }
 
       if (grupo.membros.size >= partyBattleConfig.TAMANHO_MAXIMO_GRUPO) {
-        return socket.emit("party:erro", { mensagem: `O grupo já está cheio (máximo ${partyBattleConfig.TAMANHO_MAXIMO_GRUPO}).` });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: `O grupo já está cheio (máximo ${partyBattleConfig.TAMANHO_MAXIMO_GRUPO}).` });
       }
 
       // Anfitrião entra no próprio grupo já na primeira chamada (antes
@@ -248,7 +252,7 @@ module.exports = function registerPartyHandlers(io) {
         const anfitriao = await Character.findByPk(idConvidante, { attributes: ["id", "nome"] });
         if (!anfitriao) {
           grupos.delete(grupo.id);
-          return socket.emit("party:erro", { mensagem: "Personagem não encontrado." });
+          return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Personagem não encontrado." });
         }
         grupo.membros.set(idConvidante, { id: anfitriao.id, nome: anfitriao.nome, classe: null, pronto: false });
         grupo.ordem.push(idConvidante);
@@ -260,8 +264,8 @@ module.exports = function registerPartyHandlers(io) {
       const socketIdConvidado = online.get(chaveConvidado);
       const timeoutHandle = setTimeout(() => {
         limparConvitePendente(chaveConvidado);
-        socket.emit("party:convite-expirado", { idConvidado: chaveConvidado });
-        io.to(socketIdConvidado).emit("party:convite-cancelado", { idConvidante });
+        socket.emit(SOCKET_EVENTS.PARTY.CONVITE_EXPIRADO, { idConvidado: chaveConvidado });
+        io.to(socketIdConvidado).emit(SOCKET_EVENTS.PARTY.CONVITE_CANCELADO, { idConvidante });
       }, partyBattleConfig.PRAZO_CONVITE_MS);
 
       convitesPendentes.set(chaveConvidado, {
@@ -272,8 +276,8 @@ module.exports = function registerPartyHandlers(io) {
         criadoEm: Date.now(),
       });
 
-      socket.emit("party:convite-enviado", { idConvidado: chaveConvidado, prazoSegundos: partyBattleConfig.PRAZO_CONVITE_MS / 1000 });
-      io.to(socketIdConvidado).emit("party:convite-recebido", {
+      socket.emit(SOCKET_EVENTS.PARTY.CONVITE_ENVIADO, { idConvidado: chaveConvidado, prazoSegundos: partyBattleConfig.PRAZO_CONVITE_MS / 1000 });
+      io.to(socketIdConvidado).emit(SOCKET_EVENTS.PARTY.CONVITE_RECEBIDO, {
         idConvidante,
         nomeConvidante: convidante.nome,
         partyId: grupo.id,
@@ -282,34 +286,34 @@ module.exports = function registerPartyHandlers(io) {
       });
     });
 
-    socket.on("party:responder-convite", async ({ aceitar } = {}) => {
+    socket.on(SOCKET_EVENTS.PARTY.RESPONDER_CONVITE, async ({ aceitar } = {}) => {
       const idConvidado = socket.characterId;
       if (!idConvidado) return;
       const pendente = convitesPendentes.get(idConvidado);
       if (!pendente) {
-        return socket.emit("party:erro", { mensagem: "Esse convite não existe mais." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Esse convite não existe mais." });
       }
       limparConvitePendente(idConvidado);
 
       if (!aceitar) {
-        io.to(pendente.socketIdConvidante).emit("party:convite-recusado", { idConvidado });
+        io.to(pendente.socketIdConvidante).emit(SOCKET_EVENTS.PARTY.CONVITE_RECUSADO, { idConvidado });
         return;
       }
 
       const grupo = grupos.get(pendente.partyId);
       if (!grupo) {
-        return socket.emit("party:erro", { mensagem: "Esse grupo não existe mais." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Esse grupo não existe mais." });
       }
       if (grupo.membros.size >= partyBattleConfig.TAMANHO_MAXIMO_GRUPO) {
-        return socket.emit("party:erro", { mensagem: "O grupo ficou cheio antes de você aceitar." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "O grupo ficou cheio antes de você aceitar." });
       }
       if (grupoPorPersonagem.has(idConvidado) || batalhaPorPersonagem.has(idConvidado)) {
-        return socket.emit("party:erro", { mensagem: "Você já está em outro grupo ou em batalha." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Você já está em outro grupo ou em batalha." });
       }
 
       const personagem = await Character.findByPk(idConvidado, { attributes: ["id", "nome"] });
       if (!personagem) {
-        return socket.emit("party:erro", { mensagem: "Personagem não encontrado." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Personagem não encontrado." });
       }
 
       grupo.membros.set(idConvidado, { id: personagem.id, nome: personagem.nome, classe: null, pronto: false });
@@ -320,11 +324,11 @@ module.exports = function registerPartyHandlers(io) {
       emitirGrupoAtualizado(io, grupo);
     });
 
-    socket.on("party:pronto", ({ pronto } = {}) => {
+    socket.on(SOCKET_EVENTS.PARTY.PRONTO, ({ pronto } = {}) => {
       const characterId = socket.characterId;
       if (!characterId) return;
       const partyId = grupoPorPersonagem.get(characterId);
-      if (!partyId) return socket.emit("party:erro", { mensagem: "Você não está em nenhum grupo." });
+      if (!partyId) return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Você não está em nenhum grupo." });
       const grupo = grupos.get(partyId);
       if (!grupo) return;
       const membro = grupo.membros.get(characterId);
@@ -333,7 +337,7 @@ module.exports = function registerPartyHandlers(io) {
       emitirGrupoAtualizado(io, grupo);
     });
 
-    socket.on("party:sair", () => {
+    socket.on(SOCKET_EVENTS.PARTY.SAIR, () => {
       const characterId = socket.characterId;
       if (!characterId) return;
       removerDoGrupo(io, characterId);
@@ -342,25 +346,25 @@ module.exports = function registerPartyHandlers(io) {
     // Remover alguém do grupo (só o anfitrião) — igual convidar mais
     // gente, funciona a qualquer momento antes da batalha começar, não
     // só na tela de montar o grupo.
-    socket.on("party:expulsar", ({ idAlvo } = {}) => {
+    socket.on(SOCKET_EVENTS.PARTY.EXPULSAR, ({ idAlvo } = {}) => {
       const characterId = socket.characterId;
       if (!characterId) return;
       const partyId = grupoPorPersonagem.get(characterId);
-      if (!partyId) return socket.emit("party:erro", { mensagem: "Você não está em nenhum grupo." });
+      if (!partyId) return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Você não está em nenhum grupo." });
       const grupo = grupos.get(partyId);
       if (!grupo) return;
       if (grupo.hostId !== characterId) {
-        return socket.emit("party:erro", { mensagem: "Só o anfitrião pode remover alguém do grupo." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Só o anfitrião pode remover alguém do grupo." });
       }
       if (grupo.emBatalha) {
-        return socket.emit("party:erro", { mensagem: "Não dá pra remover alguém com o grupo em batalha." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Não dá pra remover alguém com o grupo em batalha." });
       }
       const chaveAlvo = chaveOnline(idAlvo);
       if (chaveAlvo === characterId) {
-        return socket.emit("party:erro", { mensagem: 'Use "Sair do grupo" pra sair você mesmo.' });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: 'Use "Sair do grupo" pra sair você mesmo.' });
       }
       if (!grupo.membros.has(chaveAlvo)) {
-        return socket.emit("party:erro", { mensagem: "Esse jogador não está mais no grupo." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Esse jogador não está mais no grupo." });
       }
 
       grupo.membros.delete(chaveAlvo);
@@ -370,36 +374,37 @@ module.exports = function registerPartyHandlers(io) {
       const socketIdAlvo = online.get(chaveAlvo);
       const socketDoAlvo = socketIdAlvo ? io.sockets.sockets.get(socketIdAlvo) : null;
       socketDoAlvo?.leave(`party:${partyId}`);
-      socketDoAlvo?.emit("party:expulso", { partyId });
+      socketDoAlvo?.emit(SOCKET_EVENTS.PARTY.EXPULSO, { partyId });
 
       emitirGrupoAtualizado(io, grupo);
     });
 
-    socket.on("party:iniciar", async ({ idZona } = {}) => {
+    socket.on(SOCKET_EVENTS.PARTY.INICIAR, async ({ idZona } = {}) => {
       const characterId = socket.characterId;
       if (!characterId) return;
       const partyId = grupoPorPersonagem.get(characterId);
-      if (!partyId) return socket.emit("party:erro", { mensagem: "Você não está em nenhum grupo." });
+      if (!partyId) return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Você não está em nenhum grupo." });
       const grupo = grupos.get(partyId);
       if (!grupo) return;
       if (grupo.hostId !== characterId) {
-        return socket.emit("party:erro", { mensagem: "Só o anfitrião pode iniciar a aventura." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Só o anfitrião pode iniciar a aventura." });
       }
       if (grupo.emBatalha) {
-        return socket.emit("party:erro", { mensagem: "O grupo já está em batalha." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "O grupo já está em batalha." });
       }
       if (grupo.membros.size < partyBattleConfig.TAMANHO_MINIMO_GRUPO) {
-        return socket.emit("party:erro", { mensagem: `Precisa de pelo menos ${partyBattleConfig.TAMANHO_MINIMO_GRUPO} aventureiros pra formar um grupo.` });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: `Precisa de pelo menos ${partyBattleConfig.TAMANHO_MINIMO_GRUPO} aventureiros pra formar um grupo.` });
       }
       const naoProntos = grupo.ordem.filter((id) => !grupo.membros.get(id)?.pronto);
       if (naoProntos.length > 0) {
-        return socket.emit("party:erro", { mensagem: "Ainda tem gente que não marcou 'pronto'." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Ainda tem gente que não marcou 'pronto'." });
       }
 
       try {
+        await require("../services/worldCrisisAccessService").assertAccessible("ADVENTURE_ZONE",idZona);
         const zona = await AdventureZone.findByPk(idZona);
         if (!zona) {
-          return socket.emit("party:erro", { mensagem: "Área de caça inválida." });
+          return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Área de caça inválida." });
         }
         const monstrosDaZona = await AdventureZoneMonster.findAll({
           where: { id_area: zona.id, ativo: true },
@@ -409,7 +414,7 @@ module.exports = function registerPartyHandlers(io) {
           include: [{ model: AdventureMonster, as: "monstro", where: { ativo: true }, required: true }],
         });
         if (monstrosDaZona.length === 0) {
-          return socket.emit("party:erro", { mensagem: "Área de Caça sem monstros configurados." });
+          return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Área de Caça sem monstros configurados." });
         }
 
         // vidaCheia: false — batalha de grupo entra com a vida/mana REAL
@@ -425,7 +430,7 @@ module.exports = function registerPartyHandlers(io) {
           grupo.ordem.map((id) => carregarLutador(id, { vidaCheia: false, contexto: "PARTY" })),
         );
         if (membros.some((m) => !m)) {
-          return socket.emit("party:erro", { mensagem: "Não foi possível carregar todos os personagens do grupo." });
+          return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Não foi possível carregar todos os personagens do grupo." });
         }
         // Motor de Status (mesmo princípio do Duelo ao vivo/PvE solo) —
         // lista de instâncias ATIVAS de cada aliado, vazia no início do
@@ -438,7 +443,7 @@ module.exports = function registerPartyHandlers(io) {
         }
         const derrotados = membros.filter((m) => m.estado.vida_atual <= 0);
         if (derrotados.length > 0) {
-          return socket.emit("party:erro", {
+          return socket.emit(SOCKET_EVENTS.PARTY.ERRO, {
             mensagem: `${derrotados.map((m) => m.nome).join(", ")} está derrotado e precisa se recuperar antes de entrar em batalha.`,
           });
         }
@@ -454,7 +459,7 @@ module.exports = function registerPartyHandlers(io) {
         // mesmo critério "todo mundo precisa poder entrar" do filtro de
         // monstro logo abaixo, nunca só a média do grupo.
         if (menorNivelDoGrupo < zona.nivel_jogador_minimo) {
-          return socket.emit("party:erro", {
+          return socket.emit(SOCKET_EVENTS.PARTY.ERRO, {
             mensagem: `O grupo precisa ter todo mundo nível ${zona.nivel_jogador_minimo}+ pra entrar em "${zona.nome}".`,
           });
         }
@@ -463,7 +468,7 @@ module.exports = function registerPartyHandlers(io) {
           (zm) => menorNivelDoGrupo >= (zm.nivel_jogador_minimo ?? 1),
         );
         if (monstrosElegiveis.length === 0) {
-          return socket.emit("party:erro", {
+          return socket.emit(SOCKET_EVENTS.PARTY.ERRO, {
             mensagem: "Nenhuma criatura dessa Área de Caça está disponível pro nível do grupo ainda.",
           });
         }
@@ -524,6 +529,7 @@ module.exports = function registerPartyHandlers(io) {
           // (só vida/dano escalam por tamanho de grupo); preservada tal
           // qual configurada no catálogo.
           defesa: monstro.defesa ?? 0,
+          combatTyping: (await require("../services/combatTypingService").catalog(),require("../services/combatTypingService").monsterProfile(monstro)),
           xp_recompensa: monstro.xp_recompensa,
           ouro_recompensa: monstro.ouro_recompensa,
         };
@@ -604,43 +610,43 @@ module.exports = function registerPartyHandlers(io) {
         // finalizarBatalha) quando a batalha termina.
         grupo.emBatalha = true;
 
-        io.to(sala).emit("party:batalha-iniciada", montarPayloadBatalha(batalha));
+        io.to(sala).emit(SOCKET_EVENTS.PARTY.BATALHA_INICIADA, montarPayloadBatalha(batalha));
 
         iniciarTimerDeTurnoGrupo(io, battleId);
       } catch (error) {
         console.error("Erro ao iniciar batalha em grupo:", error);
-        socket.emit("party:erro", { mensagem: "Não foi possível iniciar a aventura em grupo." });
+        socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Não foi possível iniciar a aventura em grupo." });
       }
     });
 
-    socket.on("party:acao", async ({ tipo, idPoder, idItem } = {}) => {
+    socket.on(SOCKET_EVENTS.PARTY.ACAO, async ({ tipo, idPoder, idItem } = {}) => {
       const characterId = socket.characterId;
       if (!characterId) return;
       const battleId = batalhaPorPersonagem.get(characterId);
-      if (!battleId) return socket.emit("party:erro", { mensagem: "Você não está em nenhuma batalha." });
+      if (!battleId) return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Você não está em nenhuma batalha." });
       const batalha = batalhas.get(battleId);
       if (!batalha) return;
-      if (batalha.processandoAcao) {
-        return socket.emit("party:erro", { mensagem: "Aguarde, a última ação ainda está sendo processada." });
+      if (batalha.processandoAcao || batalha.resolvendoTurno) {
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Aguarde, a última ação ainda está sendo processada." });
       }
       if (batalha.fase !== "aliados" || batalha.ordem[batalha.turnoIndex] !== characterId) {
-        return socket.emit("party:erro", { mensagem: "Ainda não é o seu turno." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Ainda não é o seu turno." });
       }
 
       const atacante = batalha.membros.get(characterId);
       if (!atacante || atacante.estado.vida_atual <= 0) {
-        return socket.emit("party:erro", { mensagem: "Você não pode agir derrotado." });
+        return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Você não pode agir derrotado." });
       }
 
       let acao = { tipo: "attack" };
       if (tipo === "power") {
         const power = atacante.poderes.find((p) => p.id === Number(idPoder));
-        if (!power) return socket.emit("party:erro", { mensagem: "Poder inválido." });
+        if (!power) return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Poder inválido." });
         if (power.tipo_poder !== "Ativo") {
-          return socket.emit("party:erro", { mensagem: "Este poder não pode ser usado manualmente em combate." });
+          return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Este poder não pode ser usado manualmente em combate." });
         }
         if (custoManaEfetivo(power, power.nivel_habilidade ?? 1) > atacante.estado.mana_atual) {
-          return socket.emit("party:erro", { mensagem: "Mana insuficiente para esse poder." });
+          return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Mana insuficiente para esse poder." });
         }
         acao = { tipo: "power", power };
       } else if (tipo === "item") {
@@ -648,7 +654,7 @@ module.exports = function registerPartyHandlers(io) {
         try {
           const consumivel = atacante.consumiveis.find((c) => c.id_item === Number(idItem));
           if (!consumivel || consumivel.quantidade < 1) {
-            return socket.emit("party:erro", { mensagem: "Você não possui esse item no inventário." });
+            return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Você não possui esse item no inventário." });
           }
           acao = {
             tipo: "item",
@@ -676,7 +682,7 @@ module.exports = function registerPartyHandlers(io) {
     // Mesmo princípio de guildboss:entrar (guildBossSocket.js): se este
     // personagem já está numa batalha de grupo em andamento, reentra na
     // sala e manda o estado ATUAL (não o inicial) pro socket novo.
-    socket.on("party:entrar-batalha", () => {
+    socket.on(SOCKET_EVENTS.PARTY.ENTRAR_BATALHA, () => {
       const characterId = socket.characterId;
       if (!characterId) return;
       const battleId = batalhaPorPersonagem.get(characterId);
@@ -684,7 +690,7 @@ module.exports = function registerPartyHandlers(io) {
       const batalha = batalhas.get(battleId);
       if (!batalha) return;
       socket.join(batalha.sala);
-      socket.emit("party:batalha-estado", montarPayloadBatalha(batalha));
+      socket.emit(SOCKET_EVENTS.PARTY.BATALHA_ESTADO, montarPayloadBatalha(batalha));
     });
 
     socket.on("disconnect", () => {
@@ -726,6 +732,15 @@ function iniciarTimerDeTurnoGrupo(io, battleId) {
 }
 
 async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatico = false) {
+  const current = batalhas.get(battleId);
+  if (!current) return;
+  if (current.resolvendoTurno || current.fase !== "aliados" || current.ordem[current.turnoIndex] !== characterId) return;
+  current.resolvendoTurno = true;
+  try { return await executarTurnoAliadoSemGuard(io, battleId, characterId, acao, foiAutomatico); }
+  finally { current.resolvendoTurno = false; }
+}
+
+async function executarTurnoAliadoSemGuard(io, battleId, characterId, acao, foiAutomatico = false) {
   const batalha = batalhas.get(battleId);
   if (!batalha) return;
   clearTimeout(batalha.timer);
@@ -745,6 +760,16 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
   // Item 7 — gatilhos reativos ON_HIT/ON_KILL do aliado, mesmo princípio.
   const gatilhosAtacante = await combatModifierService.resolverGatilhosDoPersonagem(atacante.estado, "PARTY");
 
+  const source = powerRuntime.participant(atacante.estado, {
+    key: characterId, team: "allies", triggers: gatilhosAtacante, modifiers: modificadoresAtacante,
+    hpMax: atacante.vidaMax, mpMax: atacante.manaMax, status: atacante.status, cooldowns: atacante.cooldowns,
+  });
+  const enemy = powerRuntime.participant(batalha.inimigo, { key: "enemy", team: "enemies",
+    status: batalha.inimigo.status, hpMax: batalha.inimigo.vida_maxima, cooldowns: batalha.inimigo.cooldowns });
+  const otherAllies = [...batalha.membros.values()].filter((m) => m !== atacante).map((m) =>
+    powerRuntime.participant(m.estado, { key: m.id, team: "allies", status: m.status,
+      hpMax: m.vidaMax, mpMax: m.manaMax, cooldowns: m.cooldowns }));
+  const runtime = [source, enemy, ...otherAllies];
   // Motor de Status (Evolução do Motor de Status) — mesma engrenagem do
   // Duelo ao vivo/PvE solo: ticks de DoT no FIM do turno de quem agiu
   // (nunca na hora do golpe que aplicou o status), bloqueio de ação por
@@ -752,6 +777,7 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
   // aliado no monstro quando o ataque básico acerta.
   const {
     nomeAcao,
+    damageResolution,
     dano,
     cura,
     manaCurada,
@@ -780,16 +806,23 @@ async function executarTurnoAliado(io, battleId, characterId, acao, foiAutomatic
     nomeDefensor: batalha.inimigo.nome,
     modificadoresAtacante,
     gatilhosAtacante,
+    runtime,
+    contexto: "PARTY",
   });
+  for (const m of batalha.membros.values()) {
+    const p = runtime.find((p) => p.actor === m.estado);
+    if (p && m !== atacante) m.status = p.status;
+  }
   atacante.status = statusAtacante;
   batalha.inimigo.status = statusDefensor;
   atacante.combatBuffs = buffsAtacante ?? atacante.combatBuffs;
 
-  io.to(batalha.sala).emit("party:turno-resultado", {
+  io.to(batalha.sala).emit(SOCKET_EVENTS.PARTY.TURNO_RESULTADO, {
     battleId,
     origem: "aliado",
     idAtor: characterId,
     nomeAcao: bloqueado ? nomeAcao : foiAutomatico ? `${nomeAcao} (tempo esgotado)` : nomeAcao,
+    damageResolution,
     dano,
     cura,
     manaCurada,
@@ -849,7 +882,7 @@ function sairDaBatalhaPorDesconexao(io, characterId) {
     return;
   }
 
-  io.to(batalha.sala).emit("party:turno-resultado", {
+  io.to(batalha.sala).emit(SOCKET_EVENTS.PARTY.TURNO_RESULTADO, {
     battleId,
     origem: "aliado",
     idAtor: characterId,
@@ -873,48 +906,7 @@ function sairDaBatalhaPorDesconexao(io, characterId) {
 // (mesmo princípio de montarEstadoBatalha em guildBossSocket.js). Usa
 // sempre os valores ATUAIS de `batalha` (vida/mana/turno/rodada no
 // momento), nunca os iniciais.
-function montarPayloadBatalha(batalha) {
-  return {
-    battleId: batalha.id,
-    zona: batalha.zona,
-    inimigo: {
-      nome: batalha.inimigo.nome,
-      nivel: batalha.inimigo.nivel,
-      vida_atual: batalha.inimigo.vida_atual,
-      vida_maxima: batalha.inimigo.vida_maxima,
-      imagem_url: batalha.inimigo.imagem_url,
-    },
-    membros: batalha.ordem.map((id) => {
-      const m = batalha.membros.get(id);
-      return {
-        id: m.id,
-        nome: m.nome,
-        genero: m.genero,
-        classe: m.classe,
-        vidaMax: m.vidaMax,
-        manaMax: m.manaMax,
-        vida: m.estado.vida_atual,
-        mana: m.estado.mana_atual,
-        poderes: poderesPublicos(m.poderes),
-        consumiveis: m.consumiveis,
-      };
-    }),
-    ordem: batalha.ordem,
-    turnoDe: batalha.ordem[batalha.turnoIndex],
-    rodada: batalha.rodada,
-    prazoSegundos: partyBattleConfig.PRAZO_TURNO_MS / 1000,
-    // Transparência: se a recompensa vai sair reduzida pela diferença de
-    // nível dentro do grupo, o grupo sabe disso ANTES de lutar (e
-    // continua sabendo depois de um F5), não só ao ver o número final
-    // menor em party:batalha-fim.
-    penalidadeDiferencaNivel: batalha.penalidadeDiferencaNivel?.aplicada
-      ? {
-          multiplicador: batalha.penalidadeDiferencaNivel.multiplicador,
-          diferencaNivel: batalha.penalidadeDiferencaNivel.diferenca,
-        }
-      : null,
-  };
-}
+
 
 // Motor de Status — formato mínimo que o frontend precisa pra desenhar
 // os ícones (StatusEffectIcons.tsx), mesmo shape de statusA/statusB do
@@ -965,7 +957,7 @@ function avancarTurnoAliado(io, battleId) {
   const proximoIndex = proximoAliadoVivoIndex(batalha, batalha.turnoIndex + 1);
   if (proximoIndex !== -1) {
     batalha.turnoIndex = proximoIndex;
-    io.to(batalha.sala).emit("party:proximo-turno", {
+    io.to(batalha.sala).emit(SOCKET_EVENTS.PARTY.PROXIMO_TURNO, {
       battleId,
       turnoDe: batalha.ordem[proximoIndex],
       prazoSegundos: partyBattleConfig.PRAZO_TURNO_MS / 1000,
@@ -1024,7 +1016,20 @@ async function executarTurnoMonstro(io, battleId) {
   // membro que está sendo atacado (defensor aqui), mesmo critério de
   // executarTurnoAliado acima: só resolvido pro lado que é um Character
   // de verdade.
-  const modificadoresDefensor = await combatModifierService.resolverModificadoresDoPersonagem(alvo.estado, "PARTY");
+  let modificadoresDefensor = await combatModifierService.resolverModificadoresDoPersonagem(alvo.estado, "PARTY");
+  const gatilhosDefensor = await combatModifierService.resolverGatilhosDoPersonagem(alvo.estado, "PARTY");
+  const target = powerRuntime.participant(alvo.estado, { key: alvo.id, team: "allies",
+    modifiers: modificadoresDefensor, triggers: gatilhosDefensor, status: alvo.status,
+    hpMax: alvo.vidaMax, mpMax: alvo.manaMax, cooldowns: alvo.cooldowns });
+  const source = powerRuntime.participant(batalha.inimigo, { key: "enemy", team: "enemies",
+    hpMax: batalha.inimigo.vida_maxima, status: batalha.inimigo.status });
+  const runtime = [source, target, ...[...batalha.membros.values()].filter((m) => m !== alvo).map((m) =>
+    powerRuntime.participant(m.estado, { key: m.id, team: "allies", hpMax: m.vidaMax,
+      mpMax: m.manaMax, status: m.status, cooldowns: m.cooldowns }))];
+  powerRuntime.start(target, source, runtime);
+  alvo.status = target.status;
+  modificadoresDefensor = powerRuntime.effective(target);
+  const vidaAntesDaPower = alvo.estado.vida_atual;
 
   let nomeAcao;
   let dano;
@@ -1062,6 +1067,7 @@ async function executarTurnoMonstro(io, battleId) {
             ? `${batalha.inimigo.nome}, cego, errou o ataque!`
             : `${alvo.nome} esquivou do ataque de ${batalha.inimigo.nome}!`,
         ];
+        if (resultadoAcerto.reason === "DODGE") powerRuntime.emit("ON_DODGE", target, source, runtime);
       } else {
         const log = [];
         const resultadoPower = monsterCombatAdapter.executarPoderEmGrupo({
@@ -1080,6 +1086,14 @@ async function executarTurnoMonstro(io, battleId) {
         batalha.inimigo.status = resultadoPower.statusAtacante;
         alvo.status = resultadoPower.statusDefensor;
         alvo.combatBuffs = resultadoPower.buffsDefensor ?? alvo.combatBuffs;
+        const absorbed = combatBuffService.absorverDano(target.shield,
+          Math.max(0, vidaAntesDaPower - alvo.estado.vida_atual));
+        target.shield = absorbed.escudo;
+        alvo.estado.vida_atual = Math.max(0, vidaAntesDaPower - absorbed.danoResidual);
+        target.status = alvo.status;
+        if (alvo.estado.vida_atual < vidaAntesDaPower) powerRuntime.emit("ON_DAMAGE_TAKEN", target, source, runtime);
+        alvo.status = target.status;
+        powerRuntime.end(source, target, runtime);
         logStatus = log;
       }
     }
@@ -1105,6 +1119,11 @@ async function executarTurnoMonstro(io, battleId) {
       nomeAtacante: batalha.inimigo.nome,
       nomeDefensor: alvo.nome,
       modificadoresDefensor,
+      gatilhosDefensor,
+      runtime,
+      contexto: "PARTY",
+      vidaMaxDefensor: alvo.vidaMax,
+      manaMaxDefensor: alvo.manaMax,
     });
     nomeAcao = resultado.nomeAcao;
     dano = resultado.dano;
@@ -1117,6 +1136,12 @@ async function executarTurnoMonstro(io, battleId) {
     batalha.inimigo.combatBuffs = resultado.buffsAtacante ?? batalha.inimigo.combatBuffs;
   }
 
+  for (const member of batalha.membros.values()) {
+    if (member === alvo) continue;
+    const participant = runtime.find((p) => p.actor === member.estado);
+    if (participant) member.status = participant.status;
+  }
+
   // Fim do turno do monstro (§8.1 equivalente de Party) — cooldown recém
   // iniciado neste MESMO turno não decrementa ainda (mesma semântica de
   // Solo/personagem: só os turnos SEGUINTES contam).
@@ -1125,7 +1150,7 @@ async function executarTurnoMonstro(io, battleId) {
     habilidadeEscolhida ? new Set([cooldownService.chaveDoPoder(habilidadeEscolhida.powerId)]) : undefined,
   );
 
-  io.to(batalha.sala).emit("party:turno-resultado", {
+  io.to(batalha.sala).emit(SOCKET_EVENTS.PARTY.TURNO_RESULTADO, {
     battleId,
     origem: "monstro",
     idAlvo: alvo.id,
@@ -1157,7 +1182,7 @@ async function executarTurnoMonstro(io, battleId) {
   batalha.turnoIndex = primeiroVivoIndex;
   batalha.fase = "aliados";
 
-  io.to(batalha.sala).emit("party:proximo-turno", {
+  io.to(batalha.sala).emit(SOCKET_EVENTS.PARTY.PROXIMO_TURNO, {
     battleId,
     turnoDe: batalha.ordem[primeiroVivoIndex],
     prazoSegundos: partyBattleConfig.PRAZO_TURNO_MS / 1000,
@@ -1212,13 +1237,14 @@ async function finalizarBatalha(io, battleId, vitoria, motivo = vitoria ? "comba
           // está carregando: o alvo é desincentivar o farm de boost em
           // si, não só "punir" o personagem fraco que está sendo ajudado.
           const multiplicador = batalha.penalidadeDiferencaNivel?.multiplicador ?? 1;
-          const xpConcedida = Math.round((batalha.inimigo.xp_recompensa ?? 0) * multiplicador);
+          const crisisReward=await require("../services/worldCrisisEffectService").apply((batalha.inimigo.xp_recompensa??0)*multiplicador,(batalha.inimigo.ouro_recompensa??0)*multiplicador,"ADVENTURE_PARTY",transaction);
+          const xpConcedida = crisisReward.xp;
           const resultadoXp = await adicionarExperiencia(id, xpConcedida, { transaction, personagem: character });
 
-          const ouro = Math.round((batalha.inimigo.ouro_recompensa ?? 0) * multiplicador);
+          const ouro = crisisReward.gold;
           concederOuro(character, ouro);
 
-          const drop = await rolarDropDeVitoria(character, batalha.inimigo, transaction);
+          const drop = await rolarDropDeVitoria(character, batalha.inimigo, transaction,"ADVENTURE_PARTY");
           if (drop) drops[id] = drop;
 
           // Guilda dos Aventureiros (§23/§45) — bug reportado: vitória em
@@ -1237,6 +1263,7 @@ async function finalizarBatalha(io, battleId, vitoria, motivo = vitoria ? "comba
           await registrarProgressoContrato(character, "GanharOuro", ouro, {}, transaction);
 
           recompensas[id] = {
+            crisis_penalty:crisisReward.crisis_penalty,
             experiencia: xpConcedida,
             dinheiro: ouro,
             nivel: resultadoXp.nivel,
@@ -1251,7 +1278,7 @@ async function finalizarBatalha(io, battleId, vitoria, motivo = vitoria ? "comba
     }
   }
 
-  io.to(batalha.sala).emit("party:batalha-fim", {
+  io.to(batalha.sala).emit(SOCKET_EVENTS.PARTY.BATALHA_FIM, {
     battleId,
     vitoria,
     motivo,
@@ -1281,3 +1308,5 @@ async function finalizarBatalha(io, battleId, vitoria, motivo = vitoria ? "comba
     emitirGrupoAtualizado(io, grupo);
   }
 }
+
+module.exports.estaEmBatalha = id => batalhaPorPersonagem.has(String(id));

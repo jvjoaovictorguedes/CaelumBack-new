@@ -3,8 +3,10 @@ const fishingController = require("../controllers/fishingController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const { carregarPersonagemAtual } = require("../middlewares/currentCharacterMiddleware");
 
+const automation = require("../antiAutomation/httpMiddleware").protect("fishing");
+
 const router = express.Router();
-router.use(authMiddleware, carregarPersonagemAtual);
+router.use(authMiddleware, carregarPersonagemAtual, automation);
 
 router.get("/progress", fishingController.getProgresso);
 router.get("/zones", fishingController.getZonas);

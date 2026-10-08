@@ -51,7 +51,10 @@ test.after(async () => {
     await Character.destroy({ where: { id: personagensCriados } });
   }
   if (usuariosCriados.length > 0) await User.destroy({ where: { id: usuariosCriados } });
-  if (itensCriados.length > 0) await Item.destroy({ where: { id: itensCriados } });
+  if (itensCriados.length > 0) {
+    await WeaponProperties.destroy({ where: { id_item: itensCriados } });
+    await Item.destroy({ where: { id: itensCriados } });
+  }
   await sequelize.close();
 });
 
@@ -266,7 +269,7 @@ testeComBanco("encomenda: entregarEncomenda (stack) transfere o item, paga o lí
   assert.equal(lojistaDepois.dinheiro, 46, "lojista recebe o valor líquido (total - taxa) só na entrega");
 
   const estoqueLojista = await CharacterInventory.findOne({ where: { id_personagem: lojista.id, id_item: item.id } });
-  assert.equal(estoqueLojista.quantidade, 0, "os 5 combinados saem do inventário do lojista");
+  assert.equal(estoqueLojista, null, "stack esgotado é removido; os 5 combinados saem do inventário do lojista");
   const estoqueCliente = await CharacterInventory.findOne({ where: { id_personagem: cliente.id, id_item: item.id } });
   assert.equal(estoqueCliente.quantidade, 5, "cliente recebe os 5 itens entregues");
 
@@ -293,6 +296,7 @@ testeComBanco("encomenda: entregarEncomenda (equipamento) usa a transferência D
     dano_max: 10,
     tipo_dano: "Fisico",
     tipo_arma: "Espada",
+    bonus_atributo: "Forca",
   });
   await novaLojaComEncomendas(lojista);
   cliente.dinheiro = 1000;

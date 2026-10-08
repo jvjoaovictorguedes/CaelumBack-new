@@ -1,3 +1,4 @@
+const { debitarOuro } = require("../services/goldService");
 // src/controllers/shopController.js
 const { sequelize } = require("../config/database");
 const Character = require("../models/Character");
@@ -66,7 +67,7 @@ exports.purchaseItem = async (req, res) => {
       }
 
       // Debita o valor do personagem
-      character.dinheiro -= precoTotal;
+      debitarOuro(character, precoTotal);
       await character.save({ transaction });
 
       // Inventário v2 (§4/§11) — equipamento vira instância individual

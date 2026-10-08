@@ -62,4 +62,27 @@ function sortearInterrupcaoDeMonstro() {
   return crypto.randomInt(0, BASE_SORTEIO) < expeditionConfig.CHANCE_MONSTRO_PPM;
 }
 
-module.exports = { sortearQualidade, sortearRecurso, sortearQuantidade, sortearInterrupcaoDeMonstro };
+// Rola se ESTA coleta (já sabida NÃO interrompida por monstro) também
+// encontra uma Receita, junto com o resultado normal de recurso —
+// checado independentemente do sorteio de qualidade/recurso (ver
+// expeditionService.coletar), nunca no lugar dele.
+function sortearAchadoDeReceita() {
+  return crypto.randomInt(0, BASE_SORTEIO) < expeditionConfig.CHANCE_RECEITA_PPM;
+}
+
+// Escolha uniforme (sem peso) entre uma lista não vazia — usado pro
+// pool de Receitas, que ao contrário dos recursos de região não tem
+// `peso` configurado por raridade.
+function escolherAleatorio(lista) {
+  if (!lista || lista.length === 0) return null;
+  return lista[crypto.randomInt(0, lista.length)];
+}
+
+module.exports = {
+  sortearQualidade,
+  sortearRecurso,
+  sortearQuantidade,
+  sortearInterrupcaoDeMonstro,
+  sortearAchadoDeReceita,
+  escolherAleatorio,
+};

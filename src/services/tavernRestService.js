@@ -1,3 +1,4 @@
+const { debitarOuro } = require("./goldService");
 // Sistema de Taverna §4 — Descanso: serviço instantâneo pago em Gold que
 // restaura Vida/Mana pros máximos efetivos. Reaproveita as MESMAS
 // funções de vida/mana máxima e bônus de atributo que o resto do jogo
@@ -132,7 +133,7 @@ async function confirmarDescanso(characterId) {
 
     if (custo > 0) {
       if (character.dinheiro < custo) throw erro("Gold insuficiente para descansar.", 400);
-      character.dinheiro -= custo;
+      debitarOuro(character, custo);
     }
 
     const agora = new Date();

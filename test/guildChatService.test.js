@@ -3,7 +3,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { bancoDisponivel, criarPersonagem, sufixo, sequelize } = require("./helpers/db");
+const { bancoDisponivel, criarPersonagem, sequelize } = require("./helpers/db");
 const Guild = require("../src/models/Guild");
 const GuildChatMessage = require("../src/models/GuildChatMessage");
 const { persistirMensagem, buscarHistorico } = require("../src/services/guildChatService");
@@ -22,13 +22,12 @@ function testeComBanco(nome, fn) {
 
 async function criarGuild() {
   const { personagem } = await criarPersonagem({ nivel: 10 });
-  const chave = sufixo();
   // sigla precisa ser única e curta (STRING(5)) — sufixo() cru colide
   // fácil quando truncado pros 5 primeiros caracteres (mesmo pid, mesmo
   // segundo em chamadas seguidas dentro do mesmo teste).
   const sigla = Math.random().toString(36).slice(2, 7).toUpperCase();
   const guild = await Guild.create({
-    nome: `Guilda ${chave}`.slice(0, 24),
+    nome: `Guilda ${personagem.id}`,
     sigla,
     id_fundador: personagem.id,
     id_lider: personagem.id,

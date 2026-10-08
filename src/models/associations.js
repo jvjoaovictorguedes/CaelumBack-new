@@ -88,6 +88,10 @@ const GuildMemberMissionProgress = require("./GuildMemberMissionProgress");
 const GuildBossConfig = require("./GuildBossConfig");
 const GuildBossAttempt = require("./GuildBossAttempt");
 const GuildBossContribution = require("./GuildBossContribution");
+const GuildTreasuryStack = require("./GuildTreasuryStack");
+const GuildTreasuryEquipmentInstance = require("./GuildTreasuryEquipmentInstance");
+const GuildTreasuryItemTransaction = require("./GuildTreasuryItemTransaction");
+const GuildContributionEvent = require("./GuildContributionEvent");
 const EquipmentSet = require("./EquipmentSet");
 const EquipmentSetPiece = require("./EquipmentSetPiece");
 const EquipmentSetBonus = require("./EquipmentSetBonus");
@@ -321,6 +325,31 @@ GuildMemberMissionProgress.belongsTo(Character, { foreignKey: "id_personagem" })
 GuildBossAttempt.belongsTo(GuildBossConfig, { foreignKey: "id_guild_boss_config", as: "chefe" });
 GuildBossAttempt.belongsTo(Guild, { foreignKey: "id_guild" });
 GuildBossContribution.belongsTo(GuildBossAttempt, { foreignKey: "id_guild_boss_attempt" });
+
+// Tesouro da Guilda V2 — Armazém de itens (GuildTreasuryStack +
+// GuildTreasuryEquipmentInstance) e ledger estruturado de movimentações
+// (GuildTreasuryItemTransaction). `item` como alias explícito (mesmo
+// critério documentado no topo deste arquivo pra toda associação com
+// Item) — nunca um include implícito sem alias.
+Guild.hasMany(GuildTreasuryStack, { foreignKey: "id_guild", as: "estoqueTesouro" });
+GuildTreasuryStack.belongsTo(Guild, { foreignKey: "id_guild" });
+GuildTreasuryStack.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+
+Guild.hasMany(GuildTreasuryEquipmentInstance, { foreignKey: "id_guild", as: "equipamentosTesouro" });
+GuildTreasuryEquipmentInstance.belongsTo(Guild, { foreignKey: "id_guild" });
+GuildTreasuryEquipmentInstance.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+GuildTreasuryEquipmentInstance.belongsTo(Character, { foreignKey: "depositado_por", as: "depositante" });
+
+Guild.hasMany(GuildTreasuryItemTransaction, { foreignKey: "id_guild", as: "movimentacoesTesouro" });
+GuildTreasuryItemTransaction.belongsTo(Guild, { foreignKey: "id_guild" });
+GuildTreasuryItemTransaction.belongsTo(Character, { foreignKey: "id_personagem" });
+GuildTreasuryItemTransaction.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+
+// Contribuição V2 — ledger de eventos por trás do ranking semanal/
+// mensal/histórico (guildContributionService.pontuarContribuicao).
+Guild.hasMany(GuildContributionEvent, { foreignKey: "id_guild", as: "eventosContribuicao" });
+GuildContributionEvent.belongsTo(Guild, { foreignKey: "id_guild" });
+GuildContributionEvent.belongsTo(Character, { foreignKey: "id_personagem" });
 GuildBossContribution.belongsTo(Character, { foreignKey: "id_personagem" });
 
 // Arena Ranqueada (PvP Competitivo v1) — também é a fonte da aba PvP do

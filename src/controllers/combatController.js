@@ -1,3 +1,4 @@
+const { calcularDanoBasico, calcularEfeitoPoder } = require("../services/combatActionEngine");
 // src/controllers/combatController.js
 //
 // Motor de combate por turnos (PvE).
@@ -19,9 +20,7 @@ const ConsumableProperties = require("../models/ConsumableProperties");
 const consumableEffectService = require("../services/consumableEffectService");
 const { adicionarExperiencia } = require("../services/experienceService");
 const {
-  calcularDanoBasico,
   aplicarMitigacaoDeDefesa,
-  calcularEfeitoPoder,
   custoManaEfetivo,
   chanceDeEsquiva,
   resolverResultadoDeAcerto,
@@ -58,6 +57,7 @@ const achievementService = require("../services/achievementService");
 const statusEffectService = require("../services/statusEffectService");
 const combatBuffService = require("../services/combatBuffService");
 const combatModifierService = require("../services/combatModifierService");
+const powerRuntime = require("../services/powerCombatRuntime");
 const cooldownService = require("../services/cooldownService");
 const { resolverEfeitosDoUso } = require("../services/combatEffectResolver");
 const { resolverEfeitosDeArmaNoHit } = require("../services/weaponEffectResolver");
@@ -341,6 +341,7 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
     const encontroEmAndamentoSemLock = encontroValido(characterSemLock);
     if (encontroEmAndamentoSemLock) {
       const { criadoEm, statsPersonagem, ...inimigoAtual } = encontroEmAndamentoSemLock;
+      inimigoAtual.encounterId ??= String(criadoEm);
       return res.status(200).json({
         status: "success",
         data: { enemy: inimigoAtual },
@@ -361,6 +362,7 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
     }
 
     const zona = sessaoAtivaSemLock.area;
+    await require("../services/worldCrisisAccessService").assertAccessible("ADVENTURE_ZONE",zona.id);
     const todosVinculosDaZona = await AdventureZoneMonster.findAll({
       where: { id_area: zona.id, ativo: true },
       // ativo:true no vínculo não basta — o admin também pode
@@ -461,6 +463,7 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
     // em encontro_pve) porque a resposta deste endpoint usa `inimigo`
     // direto quando é um encontro NOVO.
     inimigo.imagem_url = monstro?.imagem_url ?? null;
+    await require("../services/combatTypingService").attachMonster(inimigo,monstro);
 
     // Ideia #3 da fila de melhorias — captura os efeitos de status do
     // monstro UMA vez, no início do encontro (mesmo princípio já usado
@@ -525,6 +528,7 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       velocidade: jogadorEfetivo.velocidade,
       defesa: jogadorEfetivo.defesa,
       arma_equipada: jogadorEfetivo.arma_equipada,
+      combatTyping: jogadorEfetivo.combatTyping,
       armaEquipadaEfeitos: efeitosDaArmaEquipada.map((e) => ({
         status_key: e.status_key,
         chance_ppm: e.chance_ppm,
@@ -565,6 +569,7 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       const encontroEmAndamento = encontroValido(character);
       if (encontroEmAndamento) {
         const { criadoEm, statsPersonagem: _ignorado, ...inimigoAtual } = encontroEmAndamento;
+        inimigoAtual.encounterId ??= String(criadoEm);
         return res.status(200).json({
           status: "success",
           data: { enemy: inimigoAtual },
@@ -575,6 +580,7 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       // outra zona) nesse meio-tempo — revalida contra a sessão ATUAL
       // em vez de confiar na lida sem lock lá em cima.
       const sessaoAtiva = await obterSessaoAtiva(character.id, { transaction });
+      await require("../services/worldCrisisAccessService").assertAccessible("ADVENTURE_ZONE",zona.id,transaction);
       if (!sessaoAtiva || sessaoAtiva.area.id !== zona.id) {
         return res.status(409).json({
           message: "Entre em uma Área de Caça antes de procurar uma criatura.",
@@ -591,6 +597,8 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       // é o que executarTurno usa depois pra decidir recompensa/espólio
       // de zona e atualizar os contadores da sessão (ver
       // adventureRewardService.js).
+      inimigo.encounterId = require("node:crypto").randomUUID();
+      inimigo.combatTurn = 0;
       character.encontro_pve = {
         ...inimigo,
         criadoEm: Date.now(),
@@ -681,6 +689,11 @@ exports.executarTurno = async (req, res) => {
         });
       }
 
+      inimigoAtual.encounterId ??= String(inimigoAtual.criadoEm);
+      if(req.body.stateVersion !== undefined) {
+        require("../antiAutomation/actionGuardService").assertVersion(req.body.stateVersion,inimigoAtual.combatTurn || 0);
+        if(req.body.encounterId !== (inimigoAtual.encounterId || String(inimigoAtual.criadoEm))) throw require("../antiAutomation/antiAutomationErrors").failure("INVALID_ACTION_STATE",409);
+      }
       return await processarTurno({ req, res, character, inimigoAtual, transaction, proezasParaAnunciar });
     });
 
@@ -691,6 +704,7 @@ exports.executarTurno = async (req, res) => {
     await uniqueFeatPublicService.anunciarConquistas(proezasParaAnunciar);
     return resposta;
   } catch (error) {
+    if(error.code && error.statusCode)return res.status(error.statusCode).json(require("../antiAutomation/antiAutomationErrors").payload(error));
     console.error(
       "Erro ao processar turno de combate:",
       error
@@ -719,6 +733,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     // salvo) caem no fallback de character.toJSON() puro — janela
     // curta e não reexplorável (só afeta uma luta já em andamento no
     // exato momento do deploy).
+    await require("../services/combatTypingService").catalog();
     const personagemAtual = {
       ...character.toJSON(),
       ...inimigoAtual.statsPersonagem,
@@ -759,7 +774,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     // camada ADICIONAL por cima, nunca o substitui. Monstro de PvE não
     // tem CharacterAbilities (nunca aprende Power), então o mapa dele é
     // sempre vazio — resolverModificadoresDoPersonagem já trata isso.
-    const modificadoresJogador = await combatModifierService.resolverModificadoresDoPersonagem(
+    let modificadoresJogador = await combatModifierService.resolverModificadoresDoPersonagem(
       personagemAtual,
       "PVE",
       { transaction },
@@ -769,21 +784,6 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     const gatilhosJogador = await combatModifierService.resolverGatilhosDoPersonagem(personagemAtual, "PVE", {
       transaction,
     });
-    // Aplica um proc (ON_HIT a cada golpe que causou dano, ON_KILL só
-    // quando ESSE MESMO golpe derrubou o inimigo) — chamado nos dois
-    // pontos onde dano é debitado da Vida do inimigo (poder e ataque
-    // básico), nunca duplicado.
-    function aplicarProcDoJogador(triggerKey, inimigoFoiDerrotado) {
-      if (triggerKey === "ON_KILL" && !inimigoFoiDerrotado) return;
-      const proc = combatModifierService.processarGatilho(gatilhosJogador.get(triggerKey) ?? []);
-      const regen = combatModifierService.regenInstantanea(proc, vidaMaximaEfetiva, manaMaximaEfetiva);
-      if (regen.vida > 0) {
-        personagemAtual.vida_atual = Math.min(vidaMaximaEfetiva, personagemAtual.vida_atual + regen.vida);
-      }
-      if (regen.mana > 0) {
-        personagemAtual.mana_atual = Math.min(manaMaximaEfetiva, personagemAtual.mana_atual + regen.mana);
-      }
-    }
 
     if (personagemAtual.vida_atual <= 0) {
       return res.status(400).json({
@@ -803,6 +803,37 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     // vitória mais abaixo.
     // ==========================================================
     const { statusEffects, combatBuffs, escudo, cooldowns, combatTurn } = estadoDeStatusECooldown(inimigoAtual);
+    personagemAtual.powerCombatState = inimigoAtual.playerPowerCombatState ?? { started: false, turn: 0, effects: [] };
+    const runtimePlayer = powerRuntime.participant(personagemAtual, {
+      key: "player", team: "player", triggers: gatilhosJogador, modifiers: modificadoresJogador,
+      hpMax: vidaMaximaEfetiva, mpMax: manaMaximaEfetiva,
+    });
+    const runtimeEnemy = powerRuntime.participant(inimigoAtual, { key: "enemy", team: "enemy",
+      hpMax: inimigoAtual.vida_maxima ?? inimigoAtual.vida_atual });
+    const runtime = [runtimePlayer, runtimeEnemy];
+    modificadoresJogador = powerRuntime.effective(runtimePlayer, true);
+    function syncRuntime() {
+      runtimePlayer.status = statusEffects.player;
+      runtimeEnemy.status = statusEffects.enemy;
+      runtimePlayer.shield = escudo.player;
+      runtimeEnemy.shield = escudo.enemy;
+      runtimePlayer.cooldowns = cooldowns.player;
+      runtimeEnemy.cooldowns = cooldowns.enemy;
+    }
+    function saveRuntime() {
+      statusEffects.player = runtimePlayer.status;
+      statusEffects.enemy = runtimeEnemy.status;
+      escudo.player = runtimePlayer.shield;
+      escudo.enemy = runtimeEnemy.shield;
+      modificadoresJogador = powerRuntime.effective(runtimePlayer);
+      inimigoAtual.playerPowerCombatState = personagemAtual.powerCombatState;
+    }
+    function aplicarProcDoJogador(triggerKey, inimigoFoiDerrotado) {
+      if (triggerKey === "ON_KILL" && !inimigoFoiDerrotado) return;
+      syncRuntime();
+      powerRuntime.emit(triggerKey, runtimePlayer, runtimeEnemy, runtime);
+      saveRuntime();
+    }
     const cooldownsPlayerAplicadosNesteTurno = new Set();
     const cooldownsEnemyAplicadosNesteTurno = new Set();
 
@@ -1015,16 +1046,22 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     // PODER
     // ==========================================================
 
+    syncRuntime();
+    powerRuntime.begin(runtimePlayer, runtimeEnemy, runtime);
+    inimigoAtual.lastDamageResolution=null;
+    saveRuntime();
+    const vidaAntesDaAcao = personagemAtual.vida_atual;
     if (poderUsado) {
       personagemAtual.mana_atual -=
         custoManaComModificadores(poderUsado, nivelHabilidadeUsada, modificadoresJogador);
+      aplicarProcDoJogador("ON_CAST", false);
 
       // Cooldown só entra AGORA — a habilidade já passou por todas as
       // validações e foi consumida como ação válida (§35). Marcado como
       // "aplicado neste turno" pra decrementarCooldowns (fim do turno do
       // jogador, mais abaixo) não descontar um turno dela hoje mesmo
       // (ver cooldownService.js).
-      cooldowns.player = cooldownService.iniciarCooldown(cooldowns.player, poderUsado.id, poderUsado.cooldown);
+      cooldowns.player = cooldownService.iniciarCooldown(cooldowns.player, poderUsado.id, Math.max(0, (poderUsado.cooldown ?? 0) - combatModifierService.reducaoDeCooldownTurnos(modificadoresJogador)));
       cooldownsPlayerAplicadosNesteTurno.add(cooldownService.chaveDoPoder(poderUsado.id));
 
       const contextoCriticoPoder = {};
@@ -1086,6 +1123,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           defensor: inimigoAtual,
           blindPotency: blindDoAtacante?.potency ?? 0,
           modificadoresAtacante: modificadoresJogador,
+          modificadoresDefensor: powerRuntime.effective(runtimeEnemy),
         });
         if (!resultadoAcerto.hit) {
           curaBloqueadaPorEsquiva = true;
@@ -1096,7 +1134,10 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           );
         } else {
           if (contextoCriticoPoder.critico) criticoJogador = true;
-          const danoMitigado = aplicarMitigacaoDeDefesa(dano, inimigoAtual);
+          const damageResolution=require("../services/combatTypingService").resolveDamage({amount:dano,actor:personagemAtual,target:{...inimigoAtual,defesa:(inimigoAtual.defesa??0)+combatModifierService.bonusDefesa(powerRuntime.effective(runtimeEnemy))},power:poderUsado,context:"PVE",finalMultiplier:combatModifierService.multiplicadorDanoRecebido(powerRuntime.effective(runtimeEnemy)),buffs:combatBuffs.player,defenderBuffs:combatBuffs.enemy});
+          const danoMitigado=damageResolution.totalDamage;
+          inimigoAtual.lastDamageResolution=damageResolution;
+          log.push(require("../services/combatTypingService").describe(damageResolution));
           danoCausadoNoInimigo = danoMitigado;
           // GRANT_SHIELD do inimigo (spec Caldeirão §13) — absorve
           // antes da Vida dele.
@@ -1119,6 +1160,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
             );
           }
           aplicarProcDoJogador("ON_HIT", false);
+          if (criticoJogador) aplicarProcDoJogador("ON_CRIT", false);
           if (inimigoAtual.vida_atual <= 0) aplicarProcDoJogador("ON_KILL", true);
 
           log.push(
@@ -1158,7 +1200,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         // ainda não tem chokepoint único pra entrar (cura vem de Poder
         // aqui, de item em outro handler) — documentado, não aplicado
         // silenciosamente em só um dos dois caminhos.
-        const curaEfetiva = Math.round(cura * combatModifierService.multiplicadorCuraFeita(modificadoresJogador));
+        const curaEfetiva = Math.round(cura * combatModifierService.multiplicadorCuraFeita(modificadoresJogador) * combatModifierService.multiplicadorCuraRecebida(modificadoresJogador));
         personagemAtual.vida_atual = Math.min(
           vidaMaximaEfetiva,
           personagemAtual.vida_atual + curaEfetiva
@@ -1251,6 +1293,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         defensor: inimigoAtual,
         blindPotency: blindDoAtacante?.potency ?? 0,
         modificadoresAtacante: modificadoresJogador,
+        modificadoresDefensor: powerRuntime.effective(runtimeEnemy),
       });
 
       if (!resultadoAcerto.hit) {
@@ -1262,17 +1305,17 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       } else {
         const contextoCriticoAtaque = {};
         const danoBasicoEnfraquecido = Math.round(
-          calcularDanoBasico(personagemAtual, contextoCriticoAtaque, modificadoresJogador) *
+          require("../services/combatTypingService").basicDamage(personagemAtual, contextoCriticoAtaque, modificadoresJogador, "PVE") *
             statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.player) *
             combatBuffService.modificadorDeDanoSaida(combatBuffs.player) *
             combatModifierService.multiplicadorDanoSaida(modificadoresJogador) *
             multiplicadorDanoTaverna,
         );
         if (contextoCriticoAtaque.critico) criticoJogador = true;
-        const dano = aplicarMitigacaoDeDefesa(
-          danoBasicoEnfraquecido,
-          inimigoAtual,
-        );
+        const damageResolution=require("../services/combatTypingService").resolveDamage({amount:danoBasicoEnfraquecido,actor:personagemAtual,target:{...inimigoAtual,defesa:(inimigoAtual.defesa??0)+combatModifierService.bonusDefesa(powerRuntime.effective(runtimeEnemy))},context:"PVE",finalMultiplier:combatModifierService.multiplicadorDanoRecebido(powerRuntime.effective(runtimeEnemy)),buffs:combatBuffs.player,defenderBuffs:combatBuffs.enemy});
+        const dano=damageResolution.totalDamage;
+        inimigoAtual.lastDamageResolution=damageResolution;
+        log.push(require("../services/combatTypingService").describe(damageResolution));
         danoCausadoNoInimigo = dano;
 
         // GRANT_SHIELD do inimigo (spec Caldeirão §13) — absorve antes
@@ -1296,6 +1339,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           );
         }
         aplicarProcDoJogador("ON_HIT", false);
+          if (criticoJogador) aplicarProcDoJogador("ON_CRIT", false);
         if (inimigoAtual.vida_atual <= 0) aplicarProcDoJogador("ON_KILL", true);
 
         log.push(
@@ -1335,7 +1379,14 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         }
       }
     }
+    if (personagemAtual.vida_atual > vidaAntesDaAcao) aplicarProcDoJogador("ON_HEAL", false);
     } // fecha `if (!jogadorBloqueadoNesteTurno && !jogadorPassouTurno)`
+    if (jogadorBloqueadoNesteTurno || jogadorPassouTurno) {
+      syncRuntime();
+      powerRuntime.begin(runtimePlayer, runtimeEnemy, runtime);
+    inimigoAtual.lastDamageResolution=null;
+      saveRuntime();
+    }
 
     // Fim do turno do JOGADOR (§23 passos 8/9, parte cooldown) — só o
     // cooldown decrementa aqui; a duração de status do jogador decrementa
@@ -1395,6 +1446,8 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         dinheiroGanho = Math.round(dinheiroGanho * (1 + ouroPercentualTotal / 100));
       }
 
+      const crisisReward=await require("../services/worldCrisisEffectService").apply(xpGanho,dinheiroGanho,inimigoAtual.huntId?"HUNT":"ADVENTURE_SOLO",transaction);
+      xpGanho=crisisReward.xp;dinheiroGanho=crisisReward.gold;
       // O personagem já está travado (LOCK.UPDATE) desde o início desta
       // mesma transação, em executarTurno — XP, dinheiro, vida, mana e o
       // fim do encontro saem todos num único save (dentro de
@@ -1616,6 +1669,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           enemy: inimigoAtual,
 
           rewards: {
+            crisis_penalty:crisisReward.crisis_penalty,
             experiencia: xpGanho,
             dinheiro: dinheiroGanho,
           },
@@ -1640,7 +1694,12 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       });
     }
 
+    if(require("../services/combatTypingService").enabled("PVE")) combatBuffs.player=require("../services/combatTypingService").applyPowerBuffs(combatBuffs.player,poderUsado);
+
     if (inimigoAtual.vida_atual <= 0) {
+      syncRuntime();
+      powerRuntime.end(runtimePlayer, runtimeEnemy, runtime);
+      saveRuntime();
       return await concederVitoriaEResponder();
     }
 
@@ -1666,6 +1725,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       eventos: statusTickEventsJogador,
     });
     danoStatusJogador = Math.max(0, vidaJogadorAntesDoTick - personagemAtual.vida_atual);
+    if (danoStatusJogador > 0) aplicarProcDoJogador("ON_DAMAGE_TAKEN", false);
 
     // REGEN_HP/REGEN_MANA (ConsumableEffect APPLY_COMBAT_BUFF — spec
     // Caldeirão §13) — mesmo ponto do tick de DoT acima (fim do PRÓPRIO
@@ -1675,14 +1735,17 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     const regenVida =
       combatBuffService.regenDeVidaDoTurno(combatBuffs.player, vidaMaximaEfetiva) +
       combatModifierService.regenVidaDoTurno(modificadoresJogador, vidaMaximaEfetiva);
-    if (regenVida > 0) {
+    if (regenVida > 0 && personagemAtual.vida_atual > 0) {
       const vidaAntesDoRegen = personagemAtual.vida_atual;
       personagemAtual.vida_atual = Math.min(vidaMaximaEfetiva, personagemAtual.vida_atual + regenVida);
       const curouDeFato = personagemAtual.vida_atual - vidaAntesDoRegen;
       // Só loga se realmente curou algo — já no teto, o clamp zera o
       // delta e um log de "regenerou 10" seria enganoso (mesmo critério
       // de HEAL_HP_FLAT/PERCENT em consumableEffectRegistry.js).
-      if (curouDeFato > 0) log.push(`Você regenerou ${curouDeFato} de vida.`);
+      if (curouDeFato > 0) {
+        log.push(`Você regenerou ${curouDeFato} de vida.`);
+        aplicarProcDoJogador("ON_HEAL", false);
+      }
     }
     const regenMana =
       combatBuffService.regenDeManaDoTurno(combatBuffs.player, manaMaximaEfetiva) +
@@ -1710,6 +1773,9 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     // poção funcionou. Devolvido em character.vida_apos_sua_acao pro
     // front mostrar o resultado de verdade antes de aplicar o golpe do
     // inimigo por cima.
+    syncRuntime();
+    powerRuntime.end(runtimePlayer, runtimeEnemy, runtime);
+    saveRuntime();
     const vidaAposAcaoJogador = personagemAtual.vida_atual;
     const manaAposAcaoJogador = personagemAtual.mana_atual;
 
@@ -1760,6 +1826,10 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     // bloqueado, seu contra-ataque deve ser pulado sem exigir chamada
     // adicional") — um Freeze/Stun/Paralyze que o jogador aplicou no
     // inimigo também precisa consumir o turno dele aqui, sem deadlock.
+    syncRuntime();
+    powerRuntime.begin(runtimeEnemy, runtimePlayer, runtime);
+    saveRuntime();
+    const vidaAntesDoContraAtaque = personagemAtual.vida_atual;
     const controleDoTurnoInimigo = statusEffectService.resolverAcoesBloqueadasDoTurno(statusEffects.enemy, combatTurn);
     statusEffects.enemy = controleDoTurnoInimigo.lista;
     const inimigoBloqueadoNesteTurno = controleDoTurnoInimigo.bloqueadas.has(ACTION_TYPE.BASIC_ATTACK);
@@ -1802,6 +1872,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         defensor: personagemAtual,
         blindPotency: blindDoInimigo?.potency ?? 0,
         modificadoresDefensor: modificadoresJogador,
+        modificadoresAtacante: powerRuntime.effective(runtimeEnemy),
       });
 
       if (!resultadoAcerto.hit) {
@@ -1810,6 +1881,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
             ? `${inimigoAtual.nome}, cego, errou o ataque!`
             : `Você esquivou do ataque de ${inimigoAtual.nome}!`,
         );
+        if (resultadoAcerto.reason === "DODGE") aplicarProcDoJogador("ON_DODGE", false);
       } else if (habilidadeEscolhida) {
         // IA de Combate PvE & Habilidades de Monstros V1 — execução
         // delegada pro adapter, que reaproveita os MESMOS serviços do
@@ -1840,7 +1912,8 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
             ? crypto.randomInt(inimigoAtual.dano_min, inimigoAtual.dano_max + 1)
             : inimigoAtual.dano_base;
         const danoRecebidoEnfraquecido = Math.round(
-          Math.max(1, danoBrutoInimigo) * statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.enemy),
+          Math.max(1, danoBrutoInimigo) * statusEffectService.multiplicadorDeDanoDeSaida(statusEffects.enemy) *
+            combatModifierService.multiplicadorDanoSaida(powerRuntime.effective(runtimeEnemy)),
         );
         // Precisão/Crítico (Velocidade) — o ataque do MONSTRO não passa
         // por calcularDanoBasico (a rolagem dele é o próprio intervalo
@@ -1871,14 +1944,9 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         const defensorComBuffs = bonusDefesaTotal
           ? { ...personagemAtual, defesa: (personagemAtual.defesa || 0) + bonusDefesaTotal }
           : personagemAtual;
-        const danoRecebido = Math.max(
-          1,
-          Math.round(
-            aplicarMitigacaoDeDefesa(danoComCriticoInimigo, defensorComBuffs) *
-              multiplicadorDefesaTaverna *
-              combatModifierService.multiplicadorDanoRecebido(modificadoresJogador),
-          ),
-        );
+        const incoming=require("../services/combatTypingService").resolveDamage({amount:danoComCriticoInimigo,actor:inimigoAtual,target:defensorComBuffs,context:"PVE",finalMultiplier:multiplicadorDefesaTaverna*combatModifierService.multiplicadorDanoRecebido(modificadoresJogador),buffs:combatBuffs.enemy,defenderBuffs:combatBuffs.player});
+        const danoRecebido=incoming.totalDamage;
+        log.push(require("../services/combatTypingService").describe(incoming));
         danoRecebidoContraAtaque = danoRecebido;
 
         // GRANT_SHIELD (spec Caldeirão §13) — absorve ANTES da Vida,
@@ -1942,6 +2010,8 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     // preenchido pelo branch `habilidadeEscolhida` acima (cooldown recém-
     // iniciado não decrementa no mesmo turno, mesma semântica de
     // iniciarCooldown/decrementarCooldowns do personagem).
+    powerRuntime.end(runtimeEnemy, runtimePlayer, runtime);
+    if (personagemAtual.vida_atual < vidaAntesDoContraAtaque) aplicarProcDoJogador("ON_DAMAGE_TAKEN", false);
     cooldowns.enemy = cooldownService.decrementarCooldowns(cooldowns.enemy, cooldownsEnemyAplicadosNesteTurno);
 
     // ==========================================================
@@ -2011,6 +2081,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       eventos: statusTickEventsInimigo,
     });
     danoStatusInimigo = Math.max(0, vidaInimigoAntesDoTick - inimigoAtual.vida_atual);
+    if (vidaInimigoAntesDoTick > 0 && inimigoAtual.vida_atual <= 0) aplicarProcDoJogador("ON_KILL", true);
 
     // REGEN_HP do inimigo (mesmo princípio do jogador acima) — hoje
     // nunca populado (só item de jogador concede combatBuffs), mas
@@ -2048,6 +2119,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
     // Persiste o estado atualizado do inimigo (vida restante) E o
     // estado de status/cooldown/turno pro próximo turno (§37 —
     // extensão do JSONB já existente).
+    inimigoAtual.combatTurn = combatTurn;
     character.encontro_pve = { ...inimigoAtual, statusEffects, combatBuffs, escudo, cooldowns, combatTurn };
     await character.save({ transaction });
 

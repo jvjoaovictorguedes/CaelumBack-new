@@ -14,6 +14,7 @@ const { bancoDisponivel, criarPersonagem, sequelize } = require("./helpers/db");
 require("../src/models/associations");
 
 const rankingController = require("../src/controllers/rankingController");
+const { online } = require("../src/socket/pvpLiveSocket");
 
 let temBanco = false;
 test.before(async () => {
@@ -60,6 +61,7 @@ for (const type of TIPOS_QUE_O_FRONTEND_ENVIA) {
     assert.equal(statusCode, 200, `esperava 200, recebeu ${statusCode} — corpo: ${JSON.stringify(corpo)}`);
     assert.equal(corpo.status, "success");
     assert.ok(Array.isArray(corpo.data.itens));
+    assert.equal(corpo.data.totalOnline, 0);
   });
 }
 
@@ -82,4 +84,18 @@ testeComBanco("GET /ranking?type=pvp (nome antigo, pré-separação casual/ranqu
   const { statusCode, corpo } = resultado();
   assert.equal(statusCode, 400);
   assert.match(corpo.message, /Tipo de ranking inválido/);
+});
+
+testeComBanco("total online inclui o próprio jogador e personagens fora da página, sem duplicar conexões", async (t) => {
+  t.after(() => online.clear());
+  online.set("900000001", "socket-a");
+  online.set("900000002", "socket-b");
+  online.set("900000001", "socket-reconectado");
+  const { req, res, resultado } = reqRes({ query: { type: "level", page: "999999" }, personagemAtual: { id: 900000001 } });
+  await rankingController.obterRanking(req, res);
+  assert.equal(resultado().statusCode, 200);
+  assert.equal(resultado().corpo.data.totalOnline, 2);
+  online.delete("900000002");
+  await rankingController.obterRanking(req, res);
+  assert.equal(resultado().corpo.data.totalOnline, 1);
 });

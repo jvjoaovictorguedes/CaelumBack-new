@@ -83,7 +83,7 @@ async function concederItem(idPersonagem, idItem, quantidade, transaction) {
 // dar `character.save()`, isso aqui só ajusta o campo em memória igual
 // o resto do combatController faz com dinheiro/xp).
 // Retorna null (nada caiu) ou { tipo: "item"|"ouro", ... } pro log/UI.
-async function rolarDropDeVitoria(character, inimigo, transaction) {
+async function rolarDropDeVitoria(character, inimigo, transaction, context="ADVENTURE_SOLO") {
   const rolagem = crypto.randomInt(0, BASE_SORTEIO);
 
   if (rolagem < CHANCE_ITEM_BASE10000) {
@@ -94,7 +94,8 @@ async function rolarDropDeVitoria(character, inimigo, transaction) {
   }
 
   if (rolagem < CHANCE_ITEM_BASE10000 + CHANCE_OURO_BONUS_BASE10000) {
-    const ouro = 5 + inimigo.nivel * 3 + crypto.randomInt(0, inimigo.nivel * 3 + 1);
+    const baseOuro = 5 + inimigo.nivel * 3 + crypto.randomInt(0, inimigo.nivel * 3 + 1);
+    const ouro=(await require("./worldCrisisEffectService").apply(0,baseOuro,context,transaction)).gold;
     concederOuro(character, ouro);
     return { tipo: "ouro", dinheiro: ouro };
   }

@@ -11,6 +11,7 @@ const { sequelize } = require("../config/database");
 const GuildBossConfig = sequelize.define(
   "GuildBossConfig",
   {
+    ...require("./combatTypingModels").fields.monster,
     id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
     rank: { type: DataTypes.STRING(10), allowNull: false, unique: true },
     nome_chefe: { type: DataTypes.STRING(100), allowNull: false },

@@ -114,7 +114,41 @@ const PONTOS_CONTRIBUICAO = {
   // contribuição" ilimitadamente.
   DoacaoPorOuro: 1 / 10000,
   DoacaoTetoPorDoacao: 50,
+  // Tesouro V2 §17.1 — teto SEMANAL de pontos vindos só de doação de
+  // ouro (proteção contra "comprar atividade"). O ouro continua sendo
+  // doado normalmente acima do teto — só os PONTOS extras da semana
+  // param de contar (checado em guildContributionService somando
+  // GuildContributionEvent.source_type=GOLD_DONATION do ciclo atual).
+  DoacaoTetoPontosSemanal: 200,
 };
+
+// Tesouro V2 §4.2 — capacidade de slots do Armazém, por MARCO de nível
+// da guilda (nunca hardcoded num componente de frontend). Degrau: vale
+// o maior marco com nivel <= nível atual da guilda. Tabela mutável
+// em-lugar (mesmo padrão de REQUISITOS_RANK_GUILDA acima) pra admin
+// poder recalibrar sem deploy.
+const CAPACIDADE_TESOURO_POR_NIVEL = {
+  1: 30,
+  5: 40,
+  10: 50,
+  15: 60,
+  20: 75,
+  25: 100,
+};
+
+// Única função central que calcula capacidade efetiva — nunca duplicar
+// essa conta no controller/frontend (spec §4.2: "deve existir uma única
+// função central para calcular capacidade efetiva").
+function capacidadeTesouroEfetiva(nivelGuilda) {
+  const marcos = Object.keys(CAPACIDADE_TESOURO_POR_NIVEL)
+    .map(Number)
+    .sort((a, b) => a - b);
+  let capacidade = CAPACIDADE_TESOURO_POR_NIVEL[marcos[0]];
+  for (const marco of marcos) {
+    if (nivelGuilda >= marco) capacidade = CAPACIDADE_TESOURO_POR_NIVEL[marco];
+  }
+  return capacidade;
+}
 
 function pontosMissaoRank(rank) {
   const indice = indiceDoRankGuilda(rank);
@@ -216,6 +250,12 @@ function aplicarOverridesBalanceamento(grupo, valores) {
       }
       break;
     }
+    case "guild.tesouro": {
+      if (valores.CAPACIDADE_TESOURO_POR_NIVEL) {
+        Object.assign(CAPACIDADE_TESOURO_POR_NIVEL, valores.CAPACIDADE_TESOURO_POR_NIVEL);
+      }
+      break;
+    }
     case "guild.contribuicao": {
       if (valores.PONTOS_CONTRIBUICAO) Object.assign(PONTOS_CONTRIBUICAO, valores.PONTOS_CONTRIBUICAO);
       if (typeof valores.XP_GUILDA_MISSAO_RANK_MIN === "number") {
@@ -280,6 +320,8 @@ module.exports = {
   NIVEL_MAXIMO_BUFF,
   BUFF_NIVEIS,
   PONTOS_CONTRIBUICAO,
+  CAPACIDADE_TESOURO_POR_NIVEL,
+  capacidadeTesouroEfetiva,
   pontosMissaoRank,
   xpGuildaMissaoRank,
   BOSS_FRACAO_IGUALITARIA,

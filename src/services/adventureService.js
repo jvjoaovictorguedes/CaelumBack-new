@@ -17,7 +17,10 @@ async function listarZonas(nivelPersonagem) {
     order: [["ordem", "ASC"]],
   });
 
+  const event=await require("./worldCrisisService").current();
+  const restricted=event?require("./worldCrisisService").restrictions(event):[];
   return zonas.map((zona) => ({
+    bloqueada_por_crise:restricted.some(r=>r.target_id===zona.id),crise_restricao:restricted.find(r=>r.target_id===zona.id)??null,
     id: zona.id,
     nome: zona.nome,
     descricao: zona.descricao,
@@ -74,6 +77,7 @@ async function obterSessaoAtiva(idPersonagem, { transaction, lock } = {}) {
 // Character na mesma transação (mesmo padrão de exclusão mútua com
 // Portal de Ranque que o resto do combate usa).
 async function entrarNaZona(idPersonagem, idZona, transaction) {
+  await require("./worldCrisisAccessService").assertAccessible("ADVENTURE_ZONE",idZona,transaction);
   const zona = await AdventureZone.findOne({
     where: { id: idZona, ativa: true },
     transaction,

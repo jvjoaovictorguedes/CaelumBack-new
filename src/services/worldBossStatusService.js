@@ -13,6 +13,7 @@ const STATUS_PUBLICOS = [
   EVENT_STATUS.ACTIVE,
   EVENT_STATUS.DEFEATED,
   EVENT_STATUS.CANCELLED,
+  EVENT_STATUS.FAILED,
 ];
 
 // Fase ativa é a de MENOR hp_percentual_max cujo limite ainda cobre o
@@ -64,6 +65,7 @@ async function obterStatusPublico() {
     fase_atual: faseAtualDoSnapshot(snapshot, hpPercentual),
     discovered_at: evento.discovered_at,
     activated_at: evento.activated_at,
+    combat_expires_at:evento.combat_expires_at,remaining_ms:evento.combat_expires_at?Math.max(0,new Date(evento.combat_expires_at)-Date.now()):null,failed_at:evento.failed_at,failure_reason:evento.failure_reason,
     auto_awaken_at: evento.status === EVENT_STATUS.DISCOVERED ? evento.auto_awaken_at : null,
     defeated_at: evento.defeated_at,
     descobridor: descobridor ? { id: descobridor.id, nome: descobridor.nome } : null,
@@ -104,7 +106,7 @@ function relogioDeCombatePublico(evento) {
 // (DEFEATED) — CANCELLED não é uma "aparição" pra mostrar na Guilda.
 async function obterHistoricoRecente({ limit = 5 } = {}) {
   const eventos = await WorldBossEvent.findAll({
-    where: { status: EVENT_STATUS.DEFEATED },
+    where: { status: [EVENT_STATUS.DEFEATED,EVENT_STATUS.FAILED] },
     order: [["defeated_at", "DESC"]],
     limit: Math.max(1, Math.min(20, Number(limit) || 5)),
   });
@@ -121,7 +123,7 @@ async function obterHistoricoRecente({ limit = 5 } = {}) {
   return eventos.map((evento) => {
     const snapshot = evento.config_snapshot ?? {};
     return {
-      event_id: evento.id,
+      event_id: evento.id,status:evento.status,failed_at:evento.failed_at,
       nome: snapshot.nome ?? null,
       imagem_url: snapshot.imagem_url ?? null,
       defeated_at: evento.defeated_at,

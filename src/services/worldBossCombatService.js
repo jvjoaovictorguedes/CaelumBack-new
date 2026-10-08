@@ -62,6 +62,7 @@ const gameSettingCache = require("./gameSettingCache");
 const uniqueFeatService = require("./uniqueFeatService");
 const uniqueFeatPublicService = require("./uniqueFeatPublicService");
 const combatModifierService = require("./combatModifierService");
+const powerRuntime = require("./powerCombatRuntime");
 
 function erro(mensagem, statusCode = 400) {
   return Object.assign(new Error(mensagem), { statusCode });
@@ -148,7 +149,7 @@ function montarResultadoSemAcao({
 }
 
 async function obterEventoAtivo(transaction) {
-  return WorldBossEvent.findOne({ where: { status: EVENT_STATUS.ACTIVE }, transaction });
+  return WorldBossEvent.findOne({ where: { status: EVENT_STATUS.ACTIVE }, transaction, lock: transaction?.LOCK.UPDATE });
 }
 
 // Entra (ou retoma) a sessão individual do personagem contra o evento
@@ -157,9 +158,10 @@ async function obterEventoAtivo(transaction) {
 // único parcial também garante isso no banco, esta checagem só evita
 // a query extra de tentar e falhar).
 async function entrar(characterId) {
-  return sequelize.transaction(async (transaction) => {
+  const result = await sequelize.transaction(async (transaction) => {
     const evento = await obterEventoAtivo(transaction);
     if (!evento) throw erro("Não há Ameaça Mundial ativa agora.");
+    if(await require("./worldBossFailureService").failLocked(evento,transaction))return {expired:true};
 
     let sessao = await WorldBossCombatSession.findOne({
       where: { character_id: characterId, status: COMBAT_SESSION_STATUS.ATIVO },
@@ -225,6 +227,7 @@ async function entrar(characterId) {
       lutador: estadoLutador(personagem, base, vidaMax, manaMax),
       poderes: poderes.map((p) => ({
         id: p.id,
+    combat_slot: p.combat_slot,
         nome: p.nome,
         imagem_url: p.imagem_url ?? null,
         custo_mana: custoManaEfetivo(p, p.nivel_habilidade ?? 1),
@@ -252,6 +255,8 @@ async function entrar(characterId) {
       status: await worldBossStatusService.obterStatusPublico(),
     };
   });
+  if(result.expired)throw erro("O prazo da Ameaça Mundial terminou.",409);
+  return result;
 }
 
 async function sair(characterId) {
@@ -286,10 +291,9 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
   // caso) já commitou de verdade.
   let erroPendente = null;
   const contexto = await sequelize.transaction(async (transaction) => {
-    const sessao = await WorldBossCombatSession.findOne({
+    let sessao = await WorldBossCombatSession.findOne({
       where: { character_id: characterId, status: COMBAT_SESSION_STATUS.ATIVO },
       transaction,
-      lock: transaction.LOCK.UPDATE,
     });
     if (!sessao) {
       erroPendente = erro("Você não está numa sessão de combate contra a Ameaça Mundial.");
@@ -301,6 +305,9 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
       transaction,
       lock: transaction.LOCK.UPDATE,
     });
+    sessao = await WorldBossCombatSession.findByPk(sessao.id,{transaction,lock:transaction.LOCK.UPDATE});
+    if(evento && await require("./worldBossFailureService").failLocked(evento,transaction)){erroPendente=erro("O prazo da Ameaça Mundial terminou.",409);return null;}
+    if (!sessao || sessao.status !== COMBAT_SESSION_STATUS.ATIVO){erroPendente=erro("A sessão foi encerrada.",409);return null;}
     if (!evento || evento.status !== EVENT_STATUS.ACTIVE) {
       sessao.status = COMBAT_SESSION_STATUS.ENCERRADA;
       await sessao.save({ transaction });
@@ -335,7 +342,8 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
     const personagem = await carregarPersonagemTravado(characterId, transaction);
     if (!personagem) throw erro("Personagem não encontrado.", 404);
     const { base, vidaMax, manaMax } = await personagemEfetivoDe(personagem, transaction);
-    const atacanteEstado = { ...base, vida_atual: personagem.vida_atual, mana_atual: personagem.mana_atual };
+    const atacanteEstado = { ...base, vida_atual: personagem.vida_atual, mana_atual: personagem.mana_atual,
+      powerCombatState: sessao.state?.powerCombatState };
 
     // §7 — motor de status existente, nunca um paralelo: o jogador tem
     // sua PRÓPRIA lista de status contra esta Ameaça Mundial (debuffs
@@ -369,14 +377,32 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
     // tipos de ação que existem contra a Ameaça Mundial — não há item
     // aqui, então "pass" é a única alternativa quando o jogador não
     // quer/não pode agir).
+    async function executeSkippedTurn() {
+      const boss = { vida_atual: Number(evento.hp_current), powerCombatState: evento.runtime_state?.powerCombatState };
+      const source = powerRuntime.participant(atacanteEstado, { key: characterId, team: "players", hpMax: vidaMax,
+        mpMax: manaMax, status: listaJogador, cooldowns: cooldownsJogador,
+        modifiers: await combatModifierService.resolverModificadoresDoPersonagem(base, "WORLD_BOSS", { transaction }),
+        triggers: await combatModifierService.resolverGatilhosDoPersonagem(base, "WORLD_BOSS", { transaction }) });
+      const target = powerRuntime.participant(boss, { key: "boss", team: "boss", status: evento.runtime_state?.status_boss ?? [] });
+      powerRuntime.begin(source, target);
+      powerRuntime.end(source, target);
+      listaJogador = source.status;
+      personagem.vida_atual = atacanteEstado.vida_atual;
+      personagem.mana_atual = atacanteEstado.mana_atual;
+      sessao.state = { ...(sessao.state ?? {}), powerCombatState: atacanteEstado.powerCombatState };
+      evento.runtime_state = { ...(evento.runtime_state ?? {}), powerCombatState: boss.powerCombatState, status_boss: target.status };
+      await evento.save({ transaction });
+    }
     if (tipo === "pass") {
+      await executeSkippedTurn();
       await personagem.save({ transaction });
       cooldownsJogador = cooldownService.decrementarCooldowns(cooldownsJogador);
       sessao.state = {
         ...(sessao.state ?? {}),
         status: statusEffectService.decrementarDuracoes(listaJogador),
         cooldowns: cooldownsJogador,
-        ultima_acao_jogador_em: Date.now(),
+        combatAffinityBuffs:require("./combatBuffService").decrementarDuracoes(sessao.state?.combatAffinityBuffs??[]),
+      ultima_acao_jogador_em: Date.now(),
       };
       await sessao.save({ transaction });
       return montarResultadoSemAcao({
@@ -394,13 +420,15 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
     const tipoAcaoStatus = tipo === "power" ? ACTION_TYPE.POWER : ACTION_TYPE.BASIC_ATTACK;
 
     if (controleJogador.bloqueadas.has(tipoAcaoStatus)) {
+      await executeSkippedTurn();
       await personagem.save({ transaction });
       cooldownsJogador = cooldownService.decrementarCooldowns(cooldownsJogador);
       sessao.state = {
         ...(sessao.state ?? {}),
         status: statusEffectService.decrementarDuracoes(listaJogador),
         cooldowns: cooldownsJogador,
-        ultima_acao_jogador_em: Date.now(),
+        combatAffinityBuffs:require("./combatBuffService").decrementarDuracoes(sessao.state?.combatAffinityBuffs??[]),
+      ultima_acao_jogador_em: Date.now(),
       };
       await sessao.save({ transaction });
       return montarResultadoSemAcao({
@@ -435,7 +463,9 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
 
     const snapshot = evento.config_snapshot ?? {};
     const hpAntes = Math.max(0, Number(evento.hp_current));
-    const bossDefensor = { defesa: snapshot.defesa ?? 0, agilidade: 0, vida_atual: hpAntes };
+    await require("./combatTypingService").catalog();
+    const bossDefensor = { combatTyping: snapshot.combatTyping??require("./combatTypingService").monsterProfile(snapshot), defesa: snapshot.defesa ?? 0, agilidade: 0, vida_atual: hpAntes,
+      powerCombatState: evento.runtime_state?.powerCombatState };
 
     // 3) Efeitos "Self" do poder usado aplicam sempre, dano ou não — os
     // de alvo "Enemy" só entram depois (passo 5), se o golpe acertar.
@@ -465,8 +495,18 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
     // Item 7 — gatilhos reativos ON_HIT/ON_KILL do jogador.
     const gatilhosJogador = await combatModifierService.resolverGatilhosDoPersonagem(atacanteEstado, "WORLD_BOSS");
 
+    const source = powerRuntime.participant(atacanteEstado, { key: characterId, team: "players",
+      triggers: gatilhosJogador, modifiers: modificadoresJogador, hpMax: vidaMax, mpMax: manaMax,
+      status: listaJogador, cooldowns: cooldownsJogador });
+    const enemy = powerRuntime.participant(bossDefensor, { key: "boss", team: "boss",
+      status: evento.runtime_state?.status_boss ?? [] });
+    const runtime = [source, enemy];
+    powerRuntime.begin(source, enemy, runtime);
+    listaJogador = source.status;
     const blindDoJogador = listaJogador.find((s) => s.key === "BLIND");
     const resultado = aplicarAcao({
+      contexto:"WORLD_BOSS",
+      buffsAtacante:sessao.state?.combatAffinityBuffs??[],
       atacante: atacanteEstado,
       defensor: bossDefensor,
       acao,
@@ -478,15 +518,17 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
         combatModifierService.multiplicadorDanoSaida(modificadoresJogador),
       modificadoresAtacante: modificadoresJogador,
       gatilhosAtacante: gatilhosJogador,
+      runtime,
     });
+    listaJogador = source.status;
 
-    const hpDepois = Math.max(0, Math.round(bossDefensor.vida_atual));
+    let hpDepois = Math.max(0, Math.round(bossDefensor.vida_atual));
     const danoEfetivo = Math.max(0, hpAntes - hpDepois);
 
     // 5) Dano DIRETO quebra Freeze do Boss e libera proc de arma
     // (ataque básico) + efeitos de poder alvo Enemy — os dois passando
     // pela resistência do Boss (§7.1) antes de entrar de verdade.
-    let statusBoss = evento.runtime_state?.status_boss ?? [];
+    let statusBoss = enemy.status;
     if (danoEfetivo > 0) {
       statusBoss = statusEffectService.removerFreezeAoReceberDanoDireto(statusBoss, danoEfetivo).lista;
 
@@ -527,6 +569,12 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
       contexto: "WORLD_BOSS",
     });
     const morreuNoTick = vidaAntesDoTick > 0 && atacanteEstado.vida_atual <= 0;
+    source.status = listaJogador;
+    enemy.status = statusBoss;
+    if (vidaAntesDoTick > atacanteEstado.vida_atual) powerRuntime.emit("ON_DAMAGE_TAKEN", source, enemy, runtime);
+    powerRuntime.end(source, enemy, runtime);
+    listaJogador = source.status;
+    statusBoss = enemy.status;
 
     personagem.vida_atual = Math.max(0, Math.min(Math.round(atacanteEstado.vida_atual), vidaMax));
     personagem.mana_atual = Math.max(0, Math.min(Math.round(atacanteEstado.mana_atual), manaMax));
@@ -547,13 +595,16 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
     sessao.state = {
       ...(sessao.state ?? {}),
       status: statusEffectService.decrementarDuracoes(listaJogador),
+      powerCombatState: atacanteEstado.powerCombatState,
       cooldowns: cooldownsJogador,
+      combatAffinityBuffs:require("./combatBuffService").decrementarDuracoes(resultado.novosBuffsAtacante),
       ultima_acao_jogador_em: Date.now(),
     };
     await sessao.save({ transaction });
 
+    hpDepois = Math.max(0, Math.round(bossDefensor.vida_atual));
     evento.hp_current = hpDepois;
-    evento.runtime_state = { ...(evento.runtime_state ?? {}), status_boss: statusBoss };
+    evento.runtime_state = { ...(evento.runtime_state ?? {}), status_boss: statusBoss, powerCombatState: bossDefensor.powerCombatState };
     let golpeFinal = false;
     if (hpAntes > 0 && hpDepois === 0) {
       golpeFinal = true;
@@ -632,6 +683,7 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
 
     return {
       nomeAcao: resultado.nomeAcao,
+      damageResolution:resultado.damageResolution,
       dano: danoEfetivo,
       esquivou: resultado.esquivou,
       // Precisão/Crítico (Velocidade) — vem pronto de aplicarAcao

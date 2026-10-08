@@ -451,7 +451,12 @@ testeComBanco("Captura bem-sucedida cria exatamente 1 Item + 1 CatchRecord + XP 
 
   // Retry de finalize (chamar reel de novo numa sessão já CAUGHT) NÃO
   // duplica recompensa — idempotência (spec §30/§35.2).
-  await fishingService.recolher(personagem.id, sessaoInicial.id, true);
+  const retries = await Promise.all(Array.from({ length: 10 }, () =>
+    fishingService.recolher(personagem.id, sessaoInicial.id, true)));
+  assert.ok(retries.every((estado) => estado.fase === "CAUGHT"));
+  const progressoDepoisRetry = await CharacterFishingProgress.findOne({ where: { id_personagem: personagem.id } });
+  assert.equal(progressoDepoisRetry.experiencia, progresso.experiencia);
+  assert.equal(progressoDepoisRetry.total_capturado, 1);
   const entradaDepoisRetry = await CharacterInventory.findOne({ where: { id_personagem: personagem.id, id_item: itemPeixe.id } });
   assert.equal(entradaDepoisRetry.quantidade, 1);
   const registrosDepoisRetry = await FishingCatchRecord.findAll({ where: { id_personagem: personagem.id, id_species: especie.id } });
@@ -521,4 +526,51 @@ testeComBanco("Falha (linha arrebentada) não concede Item nem XP (spec §35.2)"
   assert.equal(entradaInventario, null, "falha não deveria conceder o Item do peixe");
   const registros = await FishingCatchRecord.findAll({ where: { id_personagem: personagem.id, id_species: especie.id } });
   assert.equal(registros.length, 0, "falha não deveria criar CatchRecord");
+});
+
+// Baseline anti-automação: trava de sessão serializa writes, mas não
+// identifica qual step o cliente está consumindo. Esta caracterização
+// registra a lacuna atual, sem adicionar uma regra nova ao gameplay.
+testeComBanco("BASELINE anti-automação: 10 reels concorrentes ainda consomem 10 passos distintos", async () => {
+  const { personagem } = await criarPersonagem();
+  const { especie } = await criarEspecie({ dificuldade_base: 1 });
+  const zona = await criarZonaComEspecie(especie);
+  await posicionarPersonagemNaZona(personagem.id, zona.id);
+  const { item, instancia } = await criarVaraMaximaParaPersonagem(personagem.id);
+  await FishingRodProperties.update({ forca_linha: 1, controle: 1, recolhimento: 1, precisao: 1, estabilidade: 1 }, { where: { id_item: item.id } });
+  const sessao = await fishingService.iniciarSessao(personagem.id, { zoneId: zona.id, rodInstanceId: instancia.id, baitItemId: null });
+  await fishingService.lancar(personagem.id, sessao.id);
+  // Simula apenas a precondição server-side da luta, sem esperar uma mordida.
+  await FishingSession.update({ fase: "FIGHTING", sequence: 0, progresso: 0, tensao: 0, behavior_seed: 42 }, { where: { id: sessao.id } });
+  const respostas = await Promise.all(Array.from({ length: 10 }, () => fishingService.recolher(personagem.id, sessao.id, false)));
+  assert.equal(respostas.length, 10);
+  const persistida = await FishingSession.findByPk(sessao.id);
+  assert.equal(persistida.sequence, 10);
+  assert.equal(persistida.fase, "FIGHTING");
+  const actionIds=Array.from({length:10},()=>require("node:crypto").randomUUID());
+  const guarded=await Promise.allSettled(Array.from({length:10},(_,i)=>fishingService.recolher(personagem.id,sessao.id,false,{actionId:actionIds[i],stateVersion:10})));
+  assert.equal(guarded.filter(r=>r.status==="fulfilled").length,1);
+  assert.ok(guarded.filter(r=>r.status==="rejected").every(r=>r.reason.code==="INVALID_ACTION_STATE"));
+  assert.equal((await FishingSession.findByPk(sessao.id)).sequence,11);
+  const winner=guarded.findIndex(r=>r.status==="fulfilled");
+  const actionId=actionIds[winner];
+  const replay=await fishingService.recolher(personagem.id,sessao.id,false,{actionId,stateVersion:10});
+  assert.deepEqual(replay,JSON.parse(JSON.stringify(guarded[winner].value)));
+  assert.equal((await FishingSession.findByPk(sessao.id)).sequence,11);
+  await assert.rejects(()=>fishingService.recolher(personagem.id,sessao.id,true,{actionId,stateVersion:10}),e=>e.code==="ACTION_REPLAYED");
+  const app=require("express")();app.use(require("express").json());app.use("/api/fishing",require("../src/routes/fishingRoutes"));
+  const server=require("node:http").createServer(app);await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
+  const token=require("jsonwebtoken").sign({id:personagem.id_usuario,proposito:"session"},require("../src/config/jwt").JWT_SECRET,{expiresIn:"1m"});
+  const url=`http://127.0.0.1:${server.address().port}/api/fishing/sessions/${sessao.id}/reel`;
+  const request=body=>fetch(url,{method:"POST",headers:{authorization:`Bearer ${token}`,"content-type":"application/json"},body:JSON.stringify(body)});
+  try {
+    assert.equal((await request({active:false})).status,409);
+    const retry=await request({active:false,stateVersion:10,actionId});assert.equal(retry.status,200);
+    const data=await retry.json();assert.equal(data.data.sessao.sequence,11);assert.equal(data.riskScore,undefined);
+    assert.equal((await request({active:false,stateVersion:10,actionId:require("node:crypto").randomUUID()})).status,409);
+    assert.equal((await FishingSession.findByPk(sessao.id)).sequence,11);
+  }finally{await new Promise(resolve=>server.close(resolve));}
+
+
+  assert.equal(await FishingCatchRecord.count({ where: { id_personagem: personagem.id } }), 0);
 });

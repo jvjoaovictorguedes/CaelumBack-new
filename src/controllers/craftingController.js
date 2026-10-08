@@ -1,3 +1,4 @@
+const { debitarOuro } = require("../services/goldService");
 // src/controllers/craftingController.js
 const { Op } = require("sequelize");
 const { sequelize } = require("../config/database");
@@ -183,7 +184,7 @@ exports.iniciarForja = async (req, res) => {
         }
       }
 
-      character.dinheiro -= receita.ouro_custo;
+      debitarOuro(character, receita.ouro_custo);
       await character.save({ transaction });
 
       const iniciadoEm = new Date();

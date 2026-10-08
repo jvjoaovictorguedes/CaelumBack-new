@@ -11,8 +11,9 @@ const fishingTournamentService = require("../services/fishingTournamentService")
 
 function tratarErro(res, error, mensagemPadrao) {
   const statusCode = error.statusCode || 500;
+  if(res.locals)res.locals.automationSignal=error.code === "ACTION_REPLAYED" ? "ACTION_REPLAY" : "INVALID_STATE";
   if (statusCode === 500) console.error(mensagemPadrao, error);
-  res.status(statusCode).json({ message: error.statusCode ? error.message : mensagemPadrao });
+  res.status(statusCode).json({ message: error.statusCode ? error.message : mensagemPadrao, ...(error.code ? {code:error.code} : {}), ...(error.retryAfterMs !== undefined ? {retryAfterMs:error.retryAfterMs} : {}) });
 }
 
 exports.getProgresso = async (req, res) => {
@@ -175,7 +176,7 @@ exports.postHook = async (req, res) => {
 
 exports.postReel = async (req, res) => {
   try {
-    const sessao = await fishingService.recolher(req.personagemAtual.id, Number(req.params.id), Boolean(req.body.active));
+    const sessao = await fishingService.recolher(req.personagemAtual.id, Number(req.params.id), Boolean(req.body.active), { actionId:req.body.actionId,stateVersion:req.body.stateVersion });
     res.status(200).json({ status: "success", data: { sessao } });
   } catch (error) {
     tratarErro(res, error, "Erro ao recolher a linha.");

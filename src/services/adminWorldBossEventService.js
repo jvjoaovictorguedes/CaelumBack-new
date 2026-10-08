@@ -135,6 +135,7 @@ async function emitirStatusAtualizado() {
 async function forcarDescoberta({ characterId, motivo, idAdmin, req }) {
   exigirMotivo(motivo);
   const evento = await sequelize.transaction(async (transaction) => {
+    if(await require("./worldCrisisService").current(transaction))throw erro("Conclua ou cancele a reconstrução antes de despertar outra ameaça.",409);
     // DISCOVERED/ACTIVE já são "a Ameaça está rolando de verdade" —
     // forçar de novo por cima não faz sentido (cancele o ciclo atual
     // primeiro). COOLDOWN/DORMANT, por outro lado, são exatamente os
@@ -179,6 +180,7 @@ async function forcarDescoberta({ characterId, motivo, idAdmin, req }) {
     // uma segunda ação admin só pra chegar em ACTIVE.
     linha.status = EVENT_STATUS.ACTIVE;
     linha.activated_at = agora;
+    require("./worldBossFailureService").deadline(linha,linha.activated_at);
     await linha.save({ transaction });
 
     await registrarAcao({
@@ -203,6 +205,7 @@ async function forcarDescoberta({ characterId, motivo, idAdmin, req }) {
 async function despertarManualmente({ motivo, idAdmin, req }) {
   exigirMotivo(motivo);
   const evento = await sequelize.transaction(async (transaction) => {
+    if(await require("./worldCrisisService").current(transaction))throw erro("Conclua ou cancele a reconstrução antes de despertar outra ameaça.",409);
     const linha = await WorldBossEvent.findOne({
       where: { status: EVENT_STATUS.DISCOVERED },
       transaction,
@@ -213,6 +216,7 @@ async function despertarManualmente({ motivo, idAdmin, req }) {
     const antes = linha.toJSON();
     linha.status = EVENT_STATUS.ACTIVE;
     linha.activated_at = new Date();
+    require("./worldBossFailureService").deadline(linha,linha.activated_at);
     await linha.save({ transaction });
 
     await registrarAcao({

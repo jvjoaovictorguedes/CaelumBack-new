@@ -3,6 +3,7 @@ const { sequelize } = require("../config/database");
 const Item = require("./Item");
 
 const WeaponProperties = sequelize.define("WeaponProperties", {
+    ...require("./combatTypingModels").fields.weapon,
   id_item: {
     type: DataTypes.INTEGER,
     primaryKey: true,
@@ -37,7 +38,7 @@ const WeaponProperties = sequelize.define("WeaponProperties", {
       "Lança",
       "Orbe"
     ),
-    allowNull: false,
+    allowNull: true,
   },
   bonus_atributo: {
     type: DataTypes.ENUM(
@@ -61,4 +62,8 @@ const WeaponProperties = sequelize.define("WeaponProperties", {
   },
 });
 
+WeaponProperties.beforeValidate(async weapon=>{
+ if(!weapon.isNewRecord && weapon.changed("tipo_dano") && !weapon.changed("damage_nature_override"))weapon.damage_nature_override=weapon.tipo_dano;
+ if(weapon.tipo_arma && (!weapon.weapon_type_id || (!weapon.isNewRecord && weapon.changed("tipo_arma") && !weapon.changed("weapon_type_id")))){const type=await require("./combatTypingModels").WeaponType.findOne({where:{legacy_tipo_arma:weapon.tipo_arma}});if(type){weapon.weapon_type_id=type.id;weapon.damage_nature_override=weapon.tipo_dano;}}
+});
 module.exports = WeaponProperties;

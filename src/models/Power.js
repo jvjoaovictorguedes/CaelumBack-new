@@ -2,6 +2,7 @@ const { DataTypes } = require("sequelize");
 const { sequelize } = require("../config/database");
 
 const Power = sequelize.define("Power", {
+    ...require("./combatTypingModels").fields.power,
   id: {
     type: DataTypes.INTEGER,
     autoIncrement: true,
@@ -95,4 +96,8 @@ const Power = sequelize.define("Power", {
   },
 });
 
+Power.beforeValidate(power=>{
+  if(power.isNewRecord && !power.changed("affinity_mode")) power.affinity_mode=power.tipo_dano==="Fisico"?"INHERIT_WEAPON":"NEUTRAL";
+  if(power.changed("tipo_dano") && ["Verdadeiro","Nenhum"].includes(power.tipo_dano)){power.affinity_mode="NEUTRAL";power.affinity_id=null;power.added_affinity_id=null;power.added_damage_pct=0;}
+});
 module.exports = Power;

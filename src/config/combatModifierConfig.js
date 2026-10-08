@@ -96,6 +96,22 @@ const REAPPLY_POLICIES = {
 
 const REAPPLY_POLICIES_VALIDAS = Object.keys(REAPPLY_POLICIES);
 
+const DESCRICAO_DA_POLITICA = {
+  STRONGEST: "Só o efeito de maior magnitude do grupo prevalece.",
+  REFRESH: "Mantém a magnitude existente e renova a duração.",
+  REPLACE: "A nova aplicação substitui valor e duração.",
+  BLOCK_WHILE_ACTIVE: "Ignora novas aplicações enquanto o efeito estiver ativo.",
+  STACK: "Permite acumular múltiplas instâncias até o máximo configurado.",
+  UNIQUE_SOURCE: "Uma instância por fonte; fontes diferentes podem coexistir.",
+};
+
+const DESCRICAO_DO_ALVO = {
+  SELF: "Quem possui/usa a habilidade",
+  ENEMY: "Alvo inimigo",
+  ALL_ALLIES: "Todos os aliados",
+  ALL_ENEMIES: "Todos os inimigos",
+};
+
 function effectKeyValida(effectKey) {
   return EFFECT_KEYS.includes(effectKey);
 }
@@ -118,6 +134,8 @@ module.exports = {
   TARGETS,
   REAPPLY_POLICIES,
   REAPPLY_POLICIES_VALIDAS,
+  DESCRICAO_DA_POLITICA,
+  DESCRICAO_DO_ALVO,
   effectKeyValida,
   metadadosDoEfeito,
   targetValido,

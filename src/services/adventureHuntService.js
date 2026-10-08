@@ -44,6 +44,7 @@ async function aceitarOferta(idPersonagem, idOferta, transaction) {
     lock: transaction.LOCK.UPDATE,
   });
   if (!oferta) throw erroCacada(404, "Caçada não encontrada.");
+  if(oferta.id_zona_referencia)await require("./worldCrisisAccessService").assertAccessible("ADVENTURE_ZONE",oferta.id_zona_referencia,transaction);
   if (oferta.status !== "Offered") {
     throw erroCacada(409, "Esta oferta não está mais disponível para aceite.");
   }

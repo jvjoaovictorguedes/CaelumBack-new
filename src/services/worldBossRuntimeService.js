@@ -1,3 +1,4 @@
+const typing=require("./combatTypingService");
 // Ameaça Mundial V2 — Etapa 3: relógio global do Boss (§3.2/§9). O Boss
 // age no seu próprio ritmo (next_action_at), independente de quantos
 // jogadores estão atacando — nunca um contra-ataque "por hit recebido"
@@ -28,6 +29,7 @@ const {
   resolverResultadoDeAcerto,
   comMultiplicadoresDeClasse,
   vidaMaximaDe,
+  manaMaximaDe,
 } = require("./combatFormulas");
 const { personagemComBonus, buscarBonusDeAtributos } = require("./equipmentBonusService");
 const statusEffectService = require("./statusEffectService");
@@ -35,6 +37,8 @@ const { resolverEfeitosDoUso } = require("./combatEffectResolver");
 const { ACTION_TYPE } = require("../config/statusEffectConfig");
 const { emitGlobal } = require("../socket/worldBossSocket");
 const combatModifierService = require("./combatModifierService");
+const powerRuntime = require("./powerCombatRuntime");
+const combatBuffService = require("./combatBuffService");
 const { EVENT_STATUS, COMBAT_SESSION_STATUS } = require("../config/worldBossConfig");
 const crypto = require("crypto");
 
@@ -128,9 +132,12 @@ function resolverDanoBasico({
   alvoDefesa,
   multiplicadorDanoRecebido = 1,
   modificadoresAlvo = new Map(),
+  modificadoresBoss = new Map(),
 }) {
   const atacante = {
+    combatTyping:snapshot.combatTyping??typing.monsterProfile(snapshot),
     forca: snapshot.forca,
+    inteligencia:snapshot.inteligencia,
     agilidade: snapshot.agilidade,
     // Velocidade (Precisão/Crítico) — faltava aqui (só o ataque de
     // HABILIDADE, resolverEfeitoDeHabilidade abaixo, já levava isso em
@@ -144,17 +151,17 @@ function resolverDanoBasico({
 
   // DODGE_CHANCE_PCT (Habilidades V2.0 item 8) do jogador-alvo — Boss
   // nunca tem CharacterAbilities, então só o lado defensor importa aqui.
-  const resultadoAcerto = resolverResultadoDeAcerto({ atacante, defensor, modificadoresDefensor: modificadoresAlvo });
+  const resultadoAcerto = resolverResultadoDeAcerto({ atacante, defensor, modificadoresDefensor: modificadoresAlvo, modificadoresAtacante: modificadoresBoss });
   if (!resultadoAcerto.hit) return { dano: 0, esquivou: true, critico: false };
 
   const contextoCritico = {};
-  const danoBase = calcularDanoBasico(atacante, contextoCritico);
+  const danoBase = typing.basicDamage(atacante, contextoCritico, modificadoresBoss,"WORLD_BOSS");
   const danoFase = danoBase * (1 + Number(fase.modificador_dano_percentual || 0) / 100);
-  const danoComFuria = danoFase * (1 + furiaPct / 100);
-  const danoMitigado = aplicarMitigacaoDeDefesa(Math.round(danoComFuria), { defesa: alvoDefesa });
-  const danoFinal = Math.max(1, Math.round(danoMitigado * multiplicadorDanoRecebido));
+  const danoComFuria = danoFase * (1 + furiaPct / 100) * combatModifierService.multiplicadorDanoSaida(modificadoresBoss);
+  const damageResolution=typing.resolveDamage({amount:Math.round(danoComFuria),actor:atacante,target:{...alvoBase,defesa:alvoDefesa},context:"WORLD_BOSS",finalMultiplier:multiplicadorDanoRecebido});
+  const danoFinal=damageResolution.totalDamage;
 
-  return { dano: danoFinal, esquivou: false, critico: Boolean(contextoCritico.critico) };
+  return { dano: danoFinal, damageResolution, esquivou: false, critico: Boolean(contextoCritico.critico) };
 }
 
 // --- Ameaça Mundial V2 — Etapa 5: Habilidades do Boss + IA (§6) ---
@@ -297,8 +304,10 @@ function resolverEfeitoDeHabilidade({
   alvoDefesa,
   multiplicadorDanoRecebido = 1,
   modificadoresAlvo = new Map(),
+  modificadoresBoss = new Map(),
 }) {
   const atacante = {
+    combatTyping:snapshot.combatTyping??typing.monsterProfile(snapshot),
     forca: snapshot.forca,
     agilidade: snapshot.agilidade,
     inteligencia: snapshot.inteligencia,
@@ -308,26 +317,18 @@ function resolverEfeitoDeHabilidade({
   };
   const defensor = { agilidade: alvoBase?.agilidade || 0 };
 
-  const resultadoAcerto = resolverResultadoDeAcerto({ atacante, defensor, modificadoresDefensor: modificadoresAlvo });
+  const resultadoAcerto = resolverResultadoDeAcerto({ atacante, defensor, modificadoresDefensor: modificadoresAlvo, modificadoresAtacante: modificadoresBoss });
   if (!resultadoAcerto.hit) return { dano: 0, cura: 0, esquivou: true, critico: false };
 
   const contextoCritico = {};
-  const efeito = calcularEfeitoPoder(ability.power_snapshot, atacante, 1, contextoCritico);
+  const efeito = calcularEfeitoPoder(ability.power_snapshot, atacante, 1, contextoCritico, modificadoresBoss);
   const modificadorFase = 1 + Number(fase.modificador_dano_percentual || 0) / 100;
   const escalaFuria = ability.escala_com_furia ? 1 + furiaPct / 100 : 1;
 
-  const danoFinal =
-    efeito.dano > 0
-      ? Math.max(
-          1,
-          Math.round(
-            aplicarMitigacaoDeDefesa(Math.round(efeito.dano * modificadorFase * escalaFuria), { defesa: alvoDefesa }) *
-              multiplicadorDanoRecebido,
-          ),
-        )
-      : 0;
+  const damageResolution=typing.resolveDamage({amount:Math.round(efeito.dano * modificadorFase * escalaFuria * combatModifierService.multiplicadorDanoSaida(modificadoresBoss)),actor:atacante,target:{...alvoBase,defesa:alvoDefesa},power:ability.power_snapshot,context:"WORLD_BOSS",finalMultiplier:multiplicadorDanoRecebido});
+  const danoFinal=damageResolution.totalDamage;
 
-  return { dano: danoFinal, cura: efeito.cura, esquivou: false, critico: Boolean(contextoCritico.critico) };
+  return { dano: danoFinal, damageResolution, cura: efeito.cura, esquivou: false, critico: Boolean(contextoCritico.critico) };
 }
 
 // Cura/buff SELF (§6.4) — o Boss nunca esquiva de si mesmo, e cura
@@ -335,6 +336,7 @@ function resolverEfeitoDeHabilidade({
 // (esse modificador é só pra dano ofensivo).
 function resolverEfeitoSelf({ snapshot, ability }) {
   const atacante = {
+    combatTyping:snapshot.combatTyping??typing.monsterProfile(snapshot),
     forca: snapshot.forca,
     agilidade: snapshot.agilidade,
     inteligencia: snapshot.inteligencia,
@@ -352,6 +354,55 @@ function resolverEfeitoSelf({ snapshot, ability }) {
 // estático na sessão (não `.save()` de uma instância já carregada em
 // outro ponto) — mesma correção já aplicada nos testes da Etapa 3 pra
 // nunca depender de um objeto Sequelize potencialmente desatualizado.
+async function reactiveTarget(evento, efetivo, transaction) {
+  const { personagem, base, vidaMax } = efetivo;
+  const session = await WorldBossCombatSession.findOne({
+    where: { event_id: evento.id, character_id: personagem.id, status: COMBAT_SESSION_STATUS.ATIVO },
+    transaction, lock: transaction.LOCK.UPDATE,
+  });
+  base.vida_atual = personagem.vida_atual;
+  base.mana_atual = personagem.mana_atual;
+  base.powerCombatState = session?.state?.powerCombatState;
+  base.combatAffinityBuffs=session?.state?.combatAffinityBuffs??[];
+  const target = powerRuntime.participant(base, { key: personagem.id, team: "players", hpMax: vidaMax,
+    mpMax: manaMaximaDe(base),
+    status: session?.state?.status ?? [], cooldowns: session?.state?.cooldowns ?? {},
+    modifiers: await combatModifierService.resolverModificadoresDoPersonagem(base, "WORLD_BOSS", { transaction }),
+    triggers: await combatModifierService.resolverGatilhosDoPersonagem(base, "WORLD_BOSS", { transaction }) });
+  const boss = powerRuntime.participant({ vida_atual: Number(evento.hp_current), powerCombatState: evento.runtime_state?.powerCombatState },
+    { key: "boss", team: "boss", status: evento.runtime_state?.status_boss ?? [] });
+  powerRuntime.start(target, boss);
+  return { target, boss, session };
+}
+
+async function settleReactiveDamage(runtime, result, efetivo, evento, transaction, agora) {
+  const { target, boss, session } = runtime;
+  const before = target.actor.vida_atual;
+  if (!result.esquivou && result.dano > 0) {
+    const absorption = combatBuffService.absorverDano(target.shield, result.dano);
+    target.shield = absorption.escudo;
+    target.actor.vida_atual = Math.max(0, before - absorption.danoResidual);
+    if (target.actor.vida_atual < before) powerRuntime.emit("ON_DAMAGE_TAKEN", target, boss);
+  } else if (result.esquivou) powerRuntime.emit("ON_DODGE", target, boss);
+  const personagem = efetivo.personagem;
+  personagem.vida_atual = target.actor.vida_atual;
+  personagem.mana_atual = target.actor.mana_atual;
+  personagem.ultima_atualizacao_vida = agora;
+  await personagem.save({ transaction });
+  target.actor.powerCombatState.shield = target.shield;
+  if (session) {
+    session.state = { ...(session.state ?? {}), status: target.status, cooldowns: target.cooldowns,
+      powerCombatState: target.actor.powerCombatState };
+    if (personagem.vida_atual <= 0) {
+      session.status = COMBAT_SESSION_STATUS.DERROTADO;
+      session.derrotado_at = agora;
+    }
+    await session.save({ transaction });
+  }
+  evento.runtime_state = { ...(evento.runtime_state ?? {}), powerCombatState: boss.actor.powerCombatState, status_boss: boss.status };
+  return personagem.vida_atual <= 0;
+}
+
 async function aplicarEfeitoDeHabilidadeEmAlvos({ characterIds, snapshot, fase, furiaPct, ability, evento, transaction, agora }) {
   // §6.1/§7 — Powers reutilizados já podem ter PowerStatusEffect
   // configurado (mesmo cadastro do PvP/PvE); rolado UMA VEZ pra este
@@ -360,6 +411,7 @@ async function aplicarEfeitoDeHabilidadeEmAlvos({ characterIds, snapshot, fase, 
   // paralelo. `target: "Enemy"` é quem importa aqui — "Self" é tratado
   // fora, por quem chama (a cura/buff SELF do próprio Boss).
   const bossComoAtacante = {
+    combatTyping:snapshot.combatTyping??typing.monsterProfile(snapshot),
     forca: snapshot.forca,
     agilidade: snapshot.agilidade,
     inteligencia: snapshot.inteligencia,
@@ -386,7 +438,8 @@ async function aplicarEfeitoDeHabilidadeEmAlvos({ characterIds, snapshot, fase, 
     // Habilidades V2.0 §7/§9/§11/§26 (Fase 5) — modificadores PASSIVOS
     // do alvo (DEFENSE_FLAT soma na Defesa, DAMAGE_TAKEN_PCT multiplica
     // o dano já mitigado), mesmo contexto WORLD_BOSS do teto de DoT.
-    const modificadoresAlvo = await combatModifierService.resolverModificadoresDoPersonagem(base, "WORLD_BOSS");
+    const reactive = await reactiveTarget(evento, efetivo, transaction);
+    const modificadoresAlvo = powerRuntime.effective(reactive.target);
     const efeito = resolverEfeitoDeHabilidade({
       snapshot,
       fase,
@@ -396,24 +449,9 @@ async function aplicarEfeitoDeHabilidadeEmAlvos({ characterIds, snapshot, fase, 
       alvoDefesa: (base.defesa || 0) + combatModifierService.bonusDefesa(modificadoresAlvo),
       multiplicadorDanoRecebido: combatModifierService.multiplicadorDanoRecebido(modificadoresAlvo),
       modificadoresAlvo,
+      modificadoresBoss: powerRuntime.effective(reactive.boss),
     });
-    let derrotado = false;
-
-    if (!efeito.esquivou && efeito.dano > 0) {
-      const vidaAntes = personagem.vida_atual;
-      const vidaDepois = Math.max(0, vidaAntes - efeito.dano);
-      personagem.vida_atual = vidaDepois;
-      personagem.ultima_atualizacao_vida = agora;
-      await personagem.save({ transaction });
-
-      if (vidaDepois === 0 && vidaAntes > 0) {
-        derrotado = true;
-        await WorldBossCombatSession.update(
-          { status: COMBAT_SESSION_STATUS.DERROTADO, derrotado_at: agora },
-          { where: { event_id: evento.id, character_id: characterId, status: COMBAT_SESSION_STATUS.ATIVO }, transaction },
-        );
-      }
-    }
+    const derrotado = await settleReactiveDamage(reactive, efeito, efetivo, evento, transaction, agora);
 
     // Só quem foi de fato atingido (nunca esquivou) recebe o status —
     // mesmo critério do motor existente (proc de arma/poder só no hit).
@@ -490,6 +528,7 @@ async function processarProximaAcao() {
     if (!evento) return;
 
     const agora = new Date();
+    if(await require("./worldBossFailureService").failLocked(evento,transaction,agora))return;
     if (evento.next_action_at && new Date(evento.next_action_at).getTime() > agora.getTime()) return;
 
     const snapshot = evento.config_snapshot ?? {};
@@ -616,6 +655,11 @@ async function processarProximaAcao() {
     // rastreado de UM personagem específico) — só chipa até 1 de HP,
     // nunca zera.
     let statusBoss = evento.runtime_state?.status_boss ?? [];
+    const bossClock = powerRuntime.participant({ vida_atual: Number(evento.hp_current),
+      powerCombatState: evento.runtime_state?.powerCombatState }, { key: "boss", team: "boss", status: statusBoss });
+    const noTarget = powerRuntime.participant({ vida_atual: 0 }, { team: "players" });
+    powerRuntime.begin(bossClock, noTarget);
+    evento.runtime_state = { ...(evento.runtime_state ?? {}), powerCombatState: bossClock.actor.powerCombatState };
 
     const controleBoss = statusEffectService.resolverAcoesBloqueadasDoTurno(statusBoss, bossActionSeqDaAcao);
     statusBoss = controleBoss.lista;
@@ -709,7 +753,8 @@ async function processarProximaAcao() {
           const { personagem, base, vidaMax } = efetivo;
           // Habilidades V2.0 §7/§9/§11/§26 (Fase 5) — mesmo critério de
           // aplicarEfeitoDeHabilidadeEmAlvos acima.
-          const modificadoresAlvo = await combatModifierService.resolverModificadoresDoPersonagem(base, "WORLD_BOSS");
+          const reactive = await reactiveTarget(evento, efetivo, transaction);
+          const modificadoresAlvo = powerRuntime.effective(reactive.target);
           danoInfo = resolverDanoBasico({
             snapshot,
             fase,
@@ -718,23 +763,9 @@ async function processarProximaAcao() {
             alvoDefesa: (base.defesa || 0) + combatModifierService.bonusDefesa(modificadoresAlvo),
             multiplicadorDanoRecebido: combatModifierService.multiplicadorDanoRecebido(modificadoresAlvo),
             modificadoresAlvo,
+            modificadoresBoss: powerRuntime.effective(reactive.boss),
           });
-          let alvoDerrotado = false;
-
-          if (!danoInfo.esquivou && danoInfo.dano > 0) {
-            const vidaAntes = personagem.vida_atual;
-            const vidaDepois = Math.max(0, vidaAntes - danoInfo.dano);
-            personagem.vida_atual = vidaDepois;
-            personagem.ultima_atualizacao_vida = agora;
-            await personagem.save({ transaction });
-
-            if (vidaDepois === 0 && vidaAntes > 0) {
-              alvoDerrotado = true;
-              alvoBasico.status = COMBAT_SESSION_STATUS.DERROTADO;
-              alvoBasico.derrotado_at = agora;
-              await alvoBasico.save({ transaction });
-            }
-          }
+          const alvoDerrotado = await settleReactiveDamage(reactive, danoInfo, efetivo, evento, transaction, agora);
 
           resultado = {
             ...(resultado ?? {}),
@@ -742,6 +773,7 @@ async function processarProximaAcao() {
               character_id: alvoBasico.character_id,
               nome: personagem.nome,
               dano: danoInfo.dano,
+              damageResolution:danoInfo.damageResolution,
               esquivou: danoInfo.esquivou,
               critico: Boolean(danoInfo.critico),
               vida_atual: personagem.vida_atual,
@@ -784,6 +816,7 @@ async function processarProximaAcao() {
       }),
     );
 
+    powerRuntime.end(bossClock, noTarget);
     evento.boss_action_seq = bossActionSeqDaAcao;
     evento.phase_action_seq = phaseActionSeq;
     evento.furia_current_pct = furiaPct;

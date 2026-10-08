@@ -154,6 +154,8 @@ async function buscarBonusDeAtributos(idPersonagem, transaction) {
         id_item: item.id,
         dano_min: weaponEfetivo.dano_min,
         dano_max: weaponEfetivo.dano_max,
+        ...Object.fromEntries(Object.keys(require("../models/combatTypingModels").fields.weapon).map(k=>[k,weaponEfetivo[k]??item.weaponProperties[k]])),
+        tipo_dano: weaponEfetivo.tipo_dano ?? item.weaponProperties.tipo_dano,
       };
     }
   }
@@ -189,7 +191,8 @@ async function buscarBonusDeAtributos(idPersonagem, transaction) {
     bonus[campo] = Math.round(bonus[campo]);
   }
 
-  return { ...bonus, arma, activeSetEffects: setState.activeEffects };
+  const combatTyping=await require("./combatTypingService").equipmentProfile(equipamentos.map(e=>e.id_item ?? e.item?.id).filter(Boolean),arma);
+  return { ...bonus, arma, combatTyping, activeSetEffects: setState.activeEffects };
 }
 
 // Devolve uma cópia do personagem com os atributos somados ao bônus de
@@ -208,6 +211,7 @@ function personagemComBonus(personagemBase, bonus) {
     // distribuível) — vem inteiramente do equipamento.
     defesa: Math.round(b.defesa || 0),
     arma_equipada: b.arma ?? null,
+    combatTyping: b.combatTyping ?? null,
   };
 }
 

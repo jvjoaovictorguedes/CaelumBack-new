@@ -235,14 +235,17 @@ async function transfer(idInstancia, idNovoPersonagem, transaction) {
   return instancia;
 }
 
-// Transferência DIRETA de dono (Inventario -> Inventario), sem passar
-// pelo estado intermediário "Mercado" — usada na entrega de Encomenda
-// (Loja do Aventureiro V2 §7/§8: "a encomenda não precisa reservar o
-// equipamento durante toda a produção, só validar+transferir de forma
-// atômica no clique final de entrega"). Mesmas validações de posse/
-// estado/loadout que reserveForMarket teria feito, só que termina com o
-// dono já trocado em vez de ficar "Mercado" esperando um comprador.
-async function transferDireto(idPersonagemAtual, idInstancia, idNovoPersonagem, transaction) {
+// Validação compartilhada de "essa instância pode sair das mãos do dono
+// agora" — posse + estado (nem Equipada nem Mercado) + não presa num
+// loadout externo (Vara de Pesca, Ferraria). Usada por transferDireto
+// (entrega de Encomenda) e por guildTreasuryService (depósito no
+// Tesouro da Guilda — spec Tesouro V2 §9.3: "A validação deve
+// reutilizar/refatorar equipmentInstanceService. Não duplicar
+// validações de estado nos controllers"). Sempre dentro de uma
+// transaction já aberta pelo chamador; trava a instância (LOCK.UPDATE)
+// e devolve ela já carregada, sem persistir nenhuma mudança — quem
+// chama decide o que fazer com a posse depois.
+async function validarInstanciaTransferivel(idPersonagemAtual, idInstancia, transaction) {
   const instancia = await CharacterEquipmentInstance.findOne({
     where: { id: idInstancia },
     transaction,
@@ -270,6 +273,16 @@ async function transferDireto(idPersonagemAtual, idInstancia, idNovoPersonagem, 
     throw erro("Desequipe essa ferramenta da Ferraria antes de entregar este equipamento.", 400);
   }
 
+  return instancia;
+}
+
+// Transferência DIRETA de dono (Inventario -> Inventario), sem passar
+// pelo estado intermediário "Mercado" — usada na entrega de Encomenda
+// (Loja do Aventureiro V2 §7/§8: "a encomenda não precisa reservar o
+// equipamento durante toda a produção, só validar+transferir de forma
+// atômica no clique final de entrega").
+async function transferDireto(idPersonagemAtual, idInstancia, idNovoPersonagem, transaction) {
+  const instancia = await validarInstanciaTransferivel(idPersonagemAtual, idInstancia, transaction);
   instancia.id_personagem = idNovoPersonagem;
   await instancia.save({ transaction });
   return instancia;
@@ -375,6 +388,7 @@ module.exports = {
   releaseFromMarket,
   transfer,
   transferDireto,
+  validarInstanciaTransferivel,
   listarInstancias,
   formatarInstancia,
   formatarEquipado,

@@ -1,0 +1,198 @@
+[
+  {
+    "file": "src/controllers/characterInventoryController.js",
+    "statement": "CharacterInventory.destroy(",
+    "fingerprint": "007a5cb856fb752b4c7e7be481d88dda5a378ca170d2d12b772a2af73234e04b",
+    "classification": "legacy-review",
+    "reason": "Existing mutation preserved; future changes require economy review"
+  },
+  {
+    "file": "src/controllers/characterController.js",
+    "statement": "character.dinheiro -= custoOuro",
+    "fingerprint": "04c40bb733bfec07917b8c4862c73e728fd6736235dabd5e1de93f97a9fb9508",
+    "classification": "legacy-review",
+    "reason": "Existing mutation preserved; future changes require economy review"
+  },
+  {
+    "file": "src/services/playerShopCommissionService.js",
+    "statement": "lojista.dinheiro += valorLiquido",
+    "fingerprint": "057e53e2a60b8d3cb47dc052b0be47c4c38cd8dbee034509afe206bef729f34a",
+    "classification": "authorized-player-transfer",
+    "reason": "Existing transaction-backed P2P/escrow; does not create lifetime earnings"
+  },
+  {
+    "file": "src/services/fishingNavigationService.js",
+    "statement": "character.dinheiro -= vessel.preco",
+    "fingerprint": "0ba11de1436aa5688eafad1510b7284f5148db702bd6d0c04130be157b706002",
+    "classification": "legacy-review",
+    "reason": "Existing mutation preserved; future changes require economy review"
+  },
+  {
+    "file": "src/services/playerShopCommissionService.js",
+    "statement": "cliente.dinheiro += encomenda.ouro_reservado",
+    "fingerprint": "0d406ee9fa5d8cb8d7aea5633e307264b08e78b6a5c5046d4e8ff62ab56f2bd3",
+    "classification": "authorized-player-transfer",
+    "reason": "Existing transaction-backed P2P/escrow; does not create lifetime earnings"
+  },
+  {
+    "file": "src/controllers/characterInventoryController.js",
+    "statement": "CharacterInventory.update(",
+    "fingerprint": "15ccf01f3a2b323626dfc582bf3f7d1767247f9d256b514fb01a344ddf98bb0e",
+    "classification": "legacy-review",
+    "reason": "Existing mutation preserved; future changes require economy review"
+  },
+  {
+    "file": "src/services/goldService.js",
+    "statement": "character.dinheiro -= valor",
+    "fingerprint": "1aacbd078ce6a3078e1027957b1ccf470a782bf290aac1dd2ee955f777aa0c3f",
+    "classification": "canonical",
+    "reason": "Canonic reward/spending accounting"
+  },
+  {
+    "file": "src/services/playerShopCommissionService.js",
+    "statement": "cliente.dinheiro -= precoTotal",
+    "fingerprint": "203c3fdfd4bcb07428fde6c917d06744f55588d8862b307a37411a5b7a850962",
+    "classification": "authorized-player-transfer",
+    "reason": "Existing transaction-backed P2P/escrow; does not create lifetime earnings"
+  },
+  {
+    "file": "src/services/marketService.js",
+    "statement": "comprador.dinheiro -= precoTotal",
+    "fingerprint": "2377a9ca20f48b2181dac3dd6c3bc6c158882905d27583d90e0737fa8a6f9c92",
+    "classification": "authorized-player-transfer",
+    "reason": "Existing transaction-backed P2P/escrow; does not create lifetime earnings"
+  },
+  {
+    "file": "src/controllers/guildController.js",
+    "statement": "personagem.dinheiro -= valorNumerico",
+    "fingerprint": "3163d180c4cb1168890a76fb715d009e5c76774e88762d61ba61a6fb15763cd4",
+    "classification": "legacy-review",
+    "reason": "Existing mutation preserved; future changes require economy review"
+  },
+  {
+    "file": "src/controllers/characterController.js",
+    "statement": "character.dinheiro -= evolucao.custo",
+    "fingerprint": "32e403a47f6df38eaf6b69afb2487306913a3c8929c201a4cb92ffc73bb886b1",
+    "classification": "legacy-review",
+    "reason": "Existing mutation preserved; future changes require economy review"
+  },
+  {
+    "file": "src/services/classEvolutionRequirementService.js",
+    "statement": "personagem.dinheiro -= requisito.quantidade",
+    "fingerprint": "48532b2eb182f4693d8ad9b4004cf318025a83b147ff4b12e0c3818f38ab3ef6",
+    "classification": "legacy-review",
+    "reason": "Existing mutation preserved; future changes require economy review"
+  },
+  {
+    "file": "src/services/marketService.js",
+    "statement": "vendedor.dinheiro += valorLiquidoVendedor",
+    "fingerprint": "49a768109f7aad4caa55f65b2935eacfc0aa8288560758629e4b10b4e5b3941b",
+    "classification": "authorized-player-transfer",
+    "reason": "Existing transaction-backed P2P/escrow; does not create lifetime earnings"
+  },
+  {
+    "file": "src/services/equipmentInstanceService.js",
+    "statement": "CharacterEquipmentInstance.create(",
+    "fingerprint": "54d5b6b381f8e8702dc059f2307934467dbb720fe0c1084f24020e6d67e7b571",
+    "classification": "canonical",
+    "reason": "Existing mutation preserved; future changes require economy review"
+  },
+  {
+    "file": "src/services/alchemyService.js",
+    "statement": "character.dinheiro -= custoOuroTotal",
+    "fingerprint": "592a5c679eb83ebd4689209f0a1f43b7ce213eed365dc89029fdde2ab7eb76c7",
+    "classification": "legacy-review",
+    "reason": "Existing mutation preserved; future changes require economy review"
+  },
+  {
+    "file": "src/controllers/characterAbilitiesController.js",
+    "statement": "personagem.dinheiro -= custo.ouro",
+    "fingerprint": "6855e9a37ab8f4b62614f25e849e8bc271a2ae89fdd2ab490aabcbff92490f49",
+    "classification": "legacy-review",
+    "reason": "Existing mutation preserved; future changes require economy review"
+  },
+  {
+    "file": "src/services/tavernGameService.js",
+    "statement": "character.dinheiro -= valorAposta",
+    "fingerprint": "782077bd90ceb3c3e7da67f90d1a914c5ef2bcb2639781f066cac6d4fabd01c9",
+    "classification": "legacy-review",
+    "reason": "Existing mutation preserved; future changes require economy review"
+  },
+  {
+    "file": "src/services/tavernBuffService.js",
+    "statement": "character.dinheiro -= oferta.preco_gold",
+    "fingerprint": "85abe716376b8a51d0b403dba2840d5a1dc71e5c1dde1f115065a39908f89990",
+    "classification": "legacy-review",
+    "reason": "Existing mutation preserved; future changes require economy review"
+  },
+  {
+    "file": "src/services/equipmentInstanceService.js",
+    "statement": "CharacterEquipmentInstance.update(",
+    "fingerprint": "93fddddbe1e586fbfa6a88c30f693dd761568cbc65aa4d425498b35a6a803736",
+    "classification": "canonical",
+    "reason": "Existing mutation preserved; future changes require economy review"
+  },
+  {
+    "file": "src/services/equipmentInstanceService.js",
+    "statement": "CharacterEquipmentInstance.update(",
+    "fingerprint": "93fddddbe1e586fbfa6a88c30f693dd761568cbc65aa4d425498b35a6a803736",
+    "classification": "canonical",
+    "reason": "Existing mutation preserved; future changes require economy review"
+  },
+  {
+    "file": "src/services/forgeRefinementService.js",
+    "statement": "character.dinheiro -= info.ouro",
+    "fingerprint": "9ad14e75d2f34db8b3634ff451b97e2bfa079231ba202130161127f0a3e258cb",
+    "classification": "legacy-review",
+    "reason": "Existing mutation preserved; future changes require economy review"
+  },
+  {
+    "file": "src/services/playerShopDemandService.js",
+    "statement": "lojista.dinheiro -= total",
+    "fingerprint": "a436c3df8d1d31886657b9b4b0fcaeaa49f00cad4f1b71d14c9e46b637ea3c45",
+    "classification": "authorized-player-transfer",
+    "reason": "Existing transaction-backed P2P/escrow; does not create lifetime earnings"
+  },
+  {
+    "file": "src/controllers/guildController.js",
+    "statement": "personagem.dinheiro -= CUSTO_CRIACAO",
+    "fingerprint": "a4c57566888168b6c07ddc7cc62b53450a110ed2ee9767b603493e4432c32185",
+    "classification": "legacy-review",
+    "reason": "Existing mutation preserved; future changes require economy review"
+  },
+  {
+    "file": "src/services/playerShopDemandService.js",
+    "statement": "lojista.dinheiro += demanda.ouro_reservado",
+    "fingerprint": "a779b4f02b2873abdd81b400732dc5bb01433c505766c1798e7d14a340e002ec",
+    "classification": "authorized-player-transfer",
+    "reason": "Existing transaction-backed P2P/escrow; does not create lifetime earnings"
+  },
+  {
+    "file": "src/services/playerShopDemandService.js",
+    "statement": "lojista.dinheiro += demanda.ouro_reservado",
+    "fingerprint": "a779b4f02b2873abdd81b400732dc5bb01433c505766c1798e7d14a340e002ec",
+    "classification": "authorized-player-transfer",
+    "reason": "Existing transaction-backed P2P/escrow; does not create lifetime earnings"
+  },
+  {
+    "file": "src/services/playerShopDemandService.js",
+    "statement": "fornecedor.dinheiro += valorPago",
+    "fingerprint": "c1fcb139cf93f5b3be0ad69f7ff5012a3915e882806ee21372131b928c1053df",
+    "classification": "authorized-player-transfer",
+    "reason": "Existing transaction-backed P2P/escrow; does not create lifetime earnings"
+  },
+  {
+    "file": "src/services/goldService.js",
+    "statement": "character.dinheiro_total_ganho += valor",
+    "fingerprint": "ceff71ebdf00a83f8d7051ffe8545786c33db283c59b172631371c4e5a3e87e9",
+    "classification": "canonical",
+    "reason": "Canonic reward/spending accounting"
+  },
+  {
+    "file": "src/services/goldService.js",
+    "statement": "character.dinheiro += valor",
+    "fingerprint": "fc46c6ab047ece3a9700256321ff2cdb6c53a5b63bc0e629f0500d0ff0eed964",
+    "classification": "canonical",
+    "reason": "Canonic reward/spending accounting"
+  }
+]

@@ -167,7 +167,12 @@ async function obterRegiao(idPersonagem, idZona) {
       continue;
     }
 
+    await require("./combatTypingService").catalog();
+    const typingProfile=require("./combatTypingService").monsterProfile(v.monstro);
     monstrosDescobertos.push({
+      family:typingProfile.family,
+      basicAttackProfile:{nature:typingProfile.basicNature,affinity:require("./combatTypingService").affinity(typingProfile.basicAffinityId)},
+      effectiveAffinities:require("./combatTypingService").publicDefense({combatTyping:typingProfile}),
       descoberto: true,
       nome: v.monstro.nome,
       // "raridade" aqui é o tipo de aparição da zona (Comum/Raro), não

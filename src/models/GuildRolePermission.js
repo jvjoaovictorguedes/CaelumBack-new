@@ -48,6 +48,9 @@ const GuildRolePermission = sequelize.define(
         "liberar_boss",
         "comprar_beneficios",
         "gerenciar_mural",
+        // Tesouro da Guilda V2 §8 — quem pode RETIRAR do Armazém de
+        // itens (depositar não exige permissão nenhuma).
+        "retirar_itens_tesouro",
       ),
       allowNull: false,
     },

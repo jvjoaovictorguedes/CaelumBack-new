@@ -13,14 +13,7 @@
 // modificadorDeDanoSaida(buffsDaPoção) * combatModifierService.
 // multiplicadorDanoSaida(modificadoresDoPersonagem).
 //
-// Só cobre PASSIVO por enquanto (§26 ordem recomendada, passo 5): todo
-// efeito com trigger "PASSIVE" conta sempre que a Power estiver
-// aprendida — Passiva (tipo_poder=Passivo) sempre; Power Ativa só
-// enquanto estiver marcada no loadout (is_active=true), pro mesmo
-// critério de "ocupa slot" que já vale pro resto do jogo. Gatilhos
-// reativos (ON_HIT, ON_CRIT, COMBAT_START, etc.) ficam pra próxima fase
-// — ver dispararGatilho abaixo, que já valida o shape mas ainda não é
-// chamado de lugar nenhum do motor real.
+// Passivas são agregadas; eventos reativos são executados pelo powerCombatRuntime.
 const Power = require("../models/Power");
 const CharacterAbilities = require("../models/CharacterAbilities");
 const PowerCombatEffect = require("../models/PowerCombatEffect");
@@ -34,7 +27,7 @@ const {
   reapplyPolicyValida,
   REAPPLY_POLICIES,
 } = require("../config/combatModifierConfig");
-const { triggerValido } = require("../config/combatTriggerConfig");
+const { triggerValido, TRIGGERS } = require("../config/combatTriggerConfig");
 const { contextoValido, CONTEXTOS_DE_COMBATE } = require("../config/combatContextConfig");
 const { multiplicadorEfeito: multiplicadorPorNivelHabilidade } = require("./abilityLevelService");
 const { resolverModificadoresDeEfeitosDeEvolucao } = require("./classEvolutionEffectService");
@@ -223,38 +216,11 @@ async function resolverModificadoresDoPersonagem(personagem, contexto, { transac
   return modificadores;
 }
 
-// Item 7 — gatilhos reativos (ON_HIT/ON_KILL por enquanto, ver
-// REACTIVE_EFFECT_KEYS_IMPLEMENTADAS abaixo). Diferente de PASSIVE
-// (resolverModificadoresDoPersonagem acima), aqui NUNCA agrega de
-// antemão: cada linha carrega seu próprio chance_ppm e só é decidida no
-// INSTANTE do evento (um golpe pode acertar e não procar; o próximo
-// pode procar), então o resultado é uma lista crua por trigger — quem
-// quiser o Map final chama processarGatilho(linhas) no momento certo
-// (ver duelEngine.aplicarAcao), rolando o dado ali, nunca aqui.
-const TRIGGERS_REATIVOS_SUPORTADOS = ["ON_HIT", "ON_KILL"];
+// Linhas reativas mantêm origem, alvo, condição e duração. Chance é
+// sorteada apenas quando o evento ocorre, nunca durante a consulta.
+const TRIGGERS_REATIVOS_SUPORTADOS = TRIGGERS.filter((trigger) => trigger !== "PASSIVE");
+const REACTIVE_EFFECT_KEYS_IMPLEMENTADAS = require("../config/combatModifierConfig").EFFECT_KEYS;
 
-// Único subconjunto de EFFECT_KEYS com significado definido como "proc
-// instantâneo" hoje — reaproveita REGEN_HP_FLAT/PERCENT e
-// REGEN_MANA_FLAT/PERCENT (mesmos effect_keys do regen passivo por
-// turno) como "cura/restaura instantânea ao acertar/matar", chance_ppm
-// decidindo se procou. Qualquer outro effect_key configurado num
-// trigger reativo é ignorado aqui (documentado, nunca silenciosamente
-// tratado como passivo) — mesmo critério de EFFECT_KEYS_IMPLEMENTADAS
-// em classEvolutionEffectService.js: escopo fechado, expande quando
-// alguém definir o que ON_CRIT/dano-bônus/debuff-no-alvo significam de
-// verdade.
-const REACTIVE_EFFECT_KEYS_IMPLEMENTADAS = [
-  "REGEN_HP_FLAT",
-  "REGEN_HP_PERCENT",
-  "REGEN_MANA_FLAT",
-  "REGEN_MANA_PERCENT",
-];
-
-// Mesmo formato de retorno de resolverModificadoresDoPersonagem (Map),
-// mas chaveado por trigger -> array de linhas CRUAS (nunca agregadas,
-// nunca com o dado rolado) pra quem chama resolver UMA vez por turno
-// (mesmo princípio de "nunca uma query por golpe") e processar o proc
-// de fato a cada evento real (ver processarGatilho).
 async function resolverGatilhosDoPersonagem(personagem, contexto, { transaction } = {}) {
   const porTrigger = new Map(TRIGGERS_REATIVOS_SUPORTADOS.map((t) => [t, []]));
   if (!contextoValido(contexto)) {
@@ -293,6 +259,14 @@ async function resolverGatilhosDoPersonagem(personagem, contexto, { transaction 
       const linhas = porTrigger.get(efeito.trigger);
       if (!linhas) continue;
       linhas.push({
+        id: efeito.id,
+        sourcePowerId: power.id,
+        target: efeito.target ?? "SELF",
+        duration_turns: efeito.duration_turns,
+        condition_key: efeito.condition_key,
+        condition_config: efeito.condition_config,
+        config: efeito.config,
+        dispellable: efeito.dispellable,
         effect_key: efeito.effect_key,
         magnitude: magnitudeEfetiva(efeito, personagem, aprendida.nivel_habilidade),
         stack_group: efeito.stack_group,
@@ -415,15 +389,12 @@ function curaPorLifesteal(mapaModificadores, danoEfetivoNaVida) {
   return Math.max(0, Math.round(danoEfetivoNaVida * (pct / 100)));
 }
 
-// §14 — valida o shape de um gatilho reativo (ON_HIT/ON_CRIT/...) sem
-// ainda disparar nada no motor real (próxima fase da migração, §26
-// passo 5 em diante). Existe aqui pra Admin/preview poderem validar um
-// PowerCombatEffect de trigger reativo mesmo antes do motor consumi-lo.
+// Consulta de capacidade do catálogo; execução no runtime de combate.
 function dispararGatilho(triggerKey) {
   if (!triggerValido(triggerKey)) {
     throw erro(`trigger desconhecido: "${triggerKey}".`);
   }
-  return { suportado: triggerKey === "PASSIVE" };
+  return { suportado: triggerKey === "PASSIVE" || TRIGGERS_REATIVOS_SUPORTADOS.includes(triggerKey) };
 }
 
 module.exports = {
