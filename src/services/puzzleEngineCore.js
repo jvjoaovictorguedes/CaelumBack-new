@@ -47,6 +47,13 @@
 // @property {Object} config    - BlueprintVersion.config inteiro (imutável durante a simulação)
 // @property {string} seed      - PuzzleInstance.seed
 // @property {Object} registry  - criado por puzzleComponentRegistry.criarRegistryDeComponentes()
+// @property {function} [posProcessarComponentes] - hook OPCIONAL, puro e determinístico:
+//   ({ config, components, registry }) => novoMapaDeComponents. Existe pra domínios cujo
+//   resultado de uma ação depende do GRAFO inteiro, não só do componente alvo (ex.: Fase 3 —
+//   girar um Motor precisa recalcular RPM/sentido de toda engrenagem/eixo conectado, não só
+//   do Motor em si). Sem esse hook o engine só muda o componente alvo da ação — comportamento
+//   padrão, usado por quem não tem semântica de grafo (e por todos os testes já existentes
+//   da Fase 2, que nunca passam esse campo).
 //
 // @typedef {Object} PuzzleResult - retorno de executarAcao()
 // @property {PuzzleState} state
@@ -247,6 +254,16 @@ function avaliarCondicoesDeclaradas(condicoes, estado) {
 // ---------------------------------------------------------------------------
 // Construção do PuzzleState inicial a partir do config — chamado uma vez
 // na criação da PuzzleInstance (puzzleInstanceService, Fase 8).
+function aplicarPosProcessamento(contexto, components) {
+  const { config, registry, posProcessarComponentes } = contexto;
+  if (typeof posProcessarComponentes !== "function") return components;
+  const novoMapa = posProcessarComponentes({ config, components, registry });
+  if (!novoMapa || typeof novoMapa !== "object" || Array.isArray(novoMapa)) {
+    throw erro("posProcessarComponentes precisa devolver um objeto { componentId: state }.");
+  }
+  return novoMapa;
+}
+
 function construirEstadoInicial(contexto) {
   const { config, registry } = contexto;
   validarConfig(config);
@@ -256,7 +273,8 @@ function construirEstadoInicial(contexto) {
     const tipo = registry.obter(comp.type);
     components[comp.id] = tipo.criarEstado(comp.props || {});
   }
-  const estadoBase = { components, rngContador: 0, objetivosConcluidos: [], public: {} };
+  const componentesPosProcessados = aplicarPosProcessamento(contexto, components);
+  const estadoBase = { components: componentesPosProcessados, rngContador: 0, objetivosConcluidos: [], public: {} };
   const { objetivosConcluidos } = avaliarObjetivos(config.objectives, estadoBase, []);
   return { ...estadoBase, objetivosConcluidos, public: construirFeedbackPublico(config, registry, estadoBase) };
 }
@@ -328,7 +346,7 @@ function executarAcao(contexto, state, action) {
 
   const estadoIntermediario = {
     ...state,
-    components: novosComponentes,
+    components: aplicarPosProcessamento(contexto, novosComponentes),
     rngContador: state.rngContador + 1,
   };
 
