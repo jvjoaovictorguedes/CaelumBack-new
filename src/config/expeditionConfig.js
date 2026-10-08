@@ -156,6 +156,14 @@ function tempoColetaMsAtual() {
 // dominar o ritmo normal de coleta.
 let CHANCE_MONSTRO_PPM = 60_000; // 6% — mesmo motivo do `let` em TEMPO_COLETA_MS acima.
 
+// Chance (mesma escala PPM) de UMA COLETA NÃO INTERROMPIDA também
+// encontrar uma Receita (Item tipo_item="Receita" — ForgeRecipe/
+// AlchemyRecipe) junto com o resultado normal — independe de
+// profissão/região/qualidade sorteada, igual CHANCE_MONSTRO_PPM acima.
+// Pedido do jogador: todas as Receitas do catálogo entram nesse mesmo
+// pool uniforme (sem peso por raridade), 0.1% de base.
+let CHANCE_RECEITA_PPM = 1_000; // 0.1%
+
 // Recompensa de XP/Ouro da vitória contra o monstro de emboscada
 // (fórmula: BASE + NIVEL_DO_MONSTRO * POR_NIVEL) — usada em
 // combatController.js no fallback genérico de recompensa (encontro sem
@@ -253,6 +261,13 @@ function aplicarOverridesBalanceamento(grupo, valores) {
       }
       break;
     }
+    case "expedition.recipeFind": {
+      if (typeof valores.CHANCE_RECEITA_PPM === "number") {
+        CHANCE_RECEITA_PPM = valores.CHANCE_RECEITA_PPM;
+        module.exports.CHANCE_RECEITA_PPM = CHANCE_RECEITA_PPM;
+      }
+      break;
+    }
     default:
       break;
   }
@@ -275,6 +290,7 @@ module.exports = {
   EMBOSCADA_XP_POR_NIVEL,
   EMBOSCADA_OURO_BASE,
   EMBOSCADA_OURO_POR_NIVEL,
+  CHANCE_RECEITA_PPM,
   deslocamentoDeNivelPorRegiao,
   aplicarOverridesBalanceamento,
 };

@@ -15,6 +15,9 @@ const ExpeditionResource = require("../models/ExpeditionResource");
 const ExpeditionResourceItem = require("../models/ExpeditionResourceItem");
 const CharacterInventory = require("../models/CharacterInventory");
 const Item = require("../models/Item");
+const ForgeRecipe = require("../models/ForgeRecipe");
+const AlchemyRecipe = require("../models/AlchemyRecipe");
+const { Op } = require("sequelize");
 const expeditionConfig = require("../config/expeditionConfig");
 const {
   CHANCE_POR_NIVEL_PPM,
@@ -22,7 +25,14 @@ const {
   NIVEL_MAXIMO,
   deslocamentoDeNivelPorRegiao,
 } = expeditionConfig;
-const { sortearQualidade, sortearRecurso, sortearQuantidade, sortearInterrupcaoDeMonstro } = require("./expeditionRollService");
+const {
+  sortearQualidade,
+  sortearRecurso,
+  sortearQuantidade,
+  sortearInterrupcaoDeMonstro,
+  sortearAchadoDeReceita,
+  escolherAleatorio,
+} = require("./expeditionRollService");
 const { sortearMonstroEmboscada } = require("./adventureRollService");
 const AdventureMonster = require("../models/AdventureMonster");
 const { nivelPorXpTotal, xpParaProximoNivel, aplicarGanhoDeXp } = require("./expeditionProgressionService");
@@ -94,6 +104,34 @@ function chancesDeQualidadePorNivel(nivel) {
     .filter(([, ppm]) => ppm > 0)
     .map(([qualidade, ppm]) => ({ qualidade, chance_percentual: ppm / 10_000 }));
   return { qualidades, chance_nada_percentual: (BASE_SORTEIO - somaPpm) / 10_000 };
+}
+
+// Pedido do jogador: TODAS as Receitas do jogo (Ferreiro + Alquimia)
+// entram no pool de achado "em qualquer lugar da Expedição" — nunca
+// filtra por profissão/região, nem por o personagem já conhecer a
+// Receita (uma cópia extra continua vendível/negociável, mesmo padrão
+// já usado pelos itens de Receita em forgeRecipeService.aprenderReceita).
+// Sem peso: escolherAleatorio trata todo item de Receita ativo com a
+// mesma chance.
+async function buscarItemDeReceitaAleatorio(transaction) {
+  const [receitasForja, receitasAlquimia] = await Promise.all([
+    ForgeRecipe.findAll({ where: { ativo: true }, attributes: ["id_item"], transaction }),
+    AlchemyRecipe.findAll({
+      where: { ativo: true, modo_desbloqueio: "DESCOBERTA", id_item_receita: { [Op.ne]: null } },
+      attributes: ["id_item_receita"],
+      transaction,
+    }),
+  ]);
+  const idsItens = [
+    ...receitasForja.map((r) => r.id_item),
+    ...receitasAlquimia.map((r) => r.id_item_receita),
+  ];
+  const idItemEscolhido = escolherAleatorio(idsItens);
+  if (!idItemEscolhido) return null;
+
+  const item = await Item.findByPk(idItemEscolhido, { transaction });
+  if (!item) return null;
+  return { id: item.id, nome: item.nome, raridade: item.raridade, imagem_url: item.imagem_url };
 }
 
 async function listarRegioes(id_personagem, profissaoFiltro) {
@@ -394,6 +432,18 @@ async function coletar(id_personagem, id_regiao) {
       };
     }
 
+    // Achado de Receita (CHANCE_RECEITA_PPM, 0.1% por padrão) — checado
+    // independente do sorteio de qualidade/recurso acima (pode achar
+    // material E receita na mesma coleta, ou só receita mesmo com
+    // resultado "Nada"), igual pedido: em qualquer lugar da Expedição.
+    let receitaEncontrada = null;
+    if (sortearAchadoDeReceita()) {
+      receitaEncontrada = await buscarItemDeReceitaAleatorio(transaction);
+      if (receitaEncontrada) {
+        await addStack(id_personagem, receitaEncontrada.id, 1, transaction);
+      }
+    }
+
     // Buff Global "XpExpedicao" (Painel Administrativo Fase 15) — evento
     // temporal server-wide — soma com EXPEDITION_XP_PCT da Taverna
     // (§13) ANTES de arredondar, mesma regra de sempre: dois +5% viram
@@ -444,6 +494,7 @@ async function coletar(id_personagem, id_regiao) {
       interrompida: false,
       resultado,
       item_ganho: itemGanho,
+      receita_encontrada: receitaEncontrada,
       quantidade: quantidadeGanha,
       xp_ganho: progresso.xpGanho,
       subiu_nivel: progresso.subiuNivel,
