@@ -16,6 +16,18 @@
 // e fishingService.js:384) — só pra devolver um 409 educado sem nem
 // tentar o UPDATE quando já dá pra saber que está staleado; nunca
 // substitui a garantia atômica do banco.
+//
+// CONCORRÊNCIA NA CRIAÇÃO (hardening pós-Fase-1): `SELECT ... FOR UPDATE`
+// NUNCA bloqueia uma linha que ainda não existe — travar
+// PuzzleParticipant/PuzzleInstance antes de criá-los não serializa nada,
+// porque não há linha nenhuma pra travar na primeira chamada. Duas
+// transactions concorrentes podiam as duas "não encontrar" e as duas
+// criarem uma Instance+Participant cada, violando o invariante "1
+// instância ativa por personagem+blueprint+edição" sem nunca tocar a
+// UNIQUE (id_instance, id_personagem) — os id_instance são diferentes.
+// A correção real é travar uma linha ESTÁVEL que SEMPRE existe pro
+// personagem (o próprio Character) ANTES de procurar/decidir — ver
+// `criarOuObterInstancia`.
 const crypto = require("crypto");
 const { Op } = require("sequelize");
 const { sequelize } = require("../config/database");
@@ -26,11 +38,30 @@ const {
   PuzzleInstance,
   PuzzleParticipant,
 } = require("../models/eventPuzzleModels");
+const Character = require("../models/Character");
+const eventDefinitionService = require("./eventDefinitionService");
 const puzzleBlueprintService = require("./puzzleBlueprintService");
 const { assertVersion } = require("../antiAutomation/actionGuardService");
 
 function erro(mensagem, statusCode = 400, code) {
   return Object.assign(new Error(mensagem), { statusCode, code });
+}
+
+// Mesmo raciocínio de MAX_CONFIG_BYTES (puzzleBlueprintService) — state é
+// produzido tanto pelo cliente (via futuros endpoints de mutação) quanto
+// internamente pelo próprio servidor, então o limite HTTP de 100kb do
+// Express NÃO é suficiente por si só (hardening item 4).
+const MAX_STATE_BYTES = 65536; // 64KB
+
+function validarState(novoState) {
+  if (novoState === null || typeof novoState !== "object" || Array.isArray(novoState)) {
+    throw erro("state precisa ser um objeto JSON (nunca array na raiz).", 400);
+  }
+  const serializado = JSON.stringify(novoState);
+  if (Buffer.byteLength(serializado, "utf8") > MAX_STATE_BYTES) {
+    throw erro(`state não pode passar de ${MAX_STATE_BYTES} bytes serializado.`, 400);
+  }
+  return novoState;
 }
 
 // CREATED → ACTIVE → COMPLETED|FAILED|ABANDONED|EXPIRED. CREATED e
@@ -59,8 +90,7 @@ function gerarSeed() {
 
 // Idempotência (seção 13 da encomenda): se o personagem já tem uma
 // PuzzleInstance CREATED/ACTIVE desse blueprint (qualquer versão)
-// dentro dessa edição, devolve ela em vez de criar outra. Essa
-// transaction+lock é a garantia real contra corrida — NÃO existe
+// dentro dessa edição, devolve ela em vez de criar outra. NÃO existe
 // índice parcial cross-table pra isso (exigiria desnormalizar
 // id_blueprint em puzzle_participants só pra esse propósito; ver
 // relatório de entrega pro trade-off documentado).
@@ -70,12 +100,44 @@ async function criarOuObterInstancia(idEventEdition, idBlueprint, personagem, tr
     if (!edicao) throw erro("Edição não encontrada.", 404);
     if (edicao.status !== "ACTIVE") throw erro("Essa edição não está ativa.", 409);
 
+    // Hardening item 2: nunca confiar só na listagem pública
+    // (listarAtivasPublicas) pra segurança — reconfirma aqui, no
+    // momento exato da criação, que o evento-pai ainda está PUBLISHED
+    // (pode ter sido arquivado depois da edição ter sido ativada).
+    const definicao = await eventDefinitionService.obterPorId(edicao.id_event_definition, t);
+    if (definicao.status !== "PUBLISHED") {
+      throw erro("O evento dessa edição não está publicado.", 409, "EVENTO_NAO_PUBLICADO");
+    }
+
     const blueprint = await PuzzleBlueprint.findByPk(idBlueprint, { transaction: t });
     if (!blueprint) throw erro("Blueprint não encontrado.", 404);
     if (blueprint.id_event_definition !== edicao.id_event_definition) {
       throw erro("Esse blueprint não pertence ao evento dessa edição.", 400);
     }
 
+    // obterUltimaPublicada já filtra status=PUBLISHED — a versão
+    // selecionada nunca é outra coisa (hardening item 2).
+    const versaoPublicada = await puzzleBlueprintService.obterUltimaPublicada(idBlueprint, t);
+
+    // GARANTIA REAL DE EXCLUSÃO MÚTUA (hardening item 1): travar
+    // PuzzleParticipant/PuzzleInstance não serializa nada quando nenhuma
+    // linha ainda existe (SELECT FOR UPDATE não bloqueia linha
+    // inexistente). A linha ESTÁVEL que SEMPRE existe pro personagem é
+    // o próprio Character — travamos ela antes de procurar/decidir, o
+    // que serializa qualquer concorrência pro MESMO personagem (2
+    // réplicas/transactions concorrentes pro mesmo personagem nunca
+    // passam da linha abaixo ao mesmo tempo). actionGuardService.
+    // exclusive() nunca seria suficiente aqui — é process-local.
+    const personagemTravado = await Character.findByPk(personagem.id, {
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
+    if (!personagemTravado) throw erro("Personagem não encontrado.", 404);
+
+    // SÓ DEPOIS do lock procuramos uma instância existente — qualquer
+    // outra transaction concorrente pro mesmo personagem já está
+    // bloqueada na linha do Character acima, então não existe mais
+    // corrida possível daqui em diante.
     const existente = await PuzzleParticipant.findOne({
       where: { id_personagem: personagem.id },
       include: [
@@ -93,16 +155,13 @@ async function criarOuObterInstancia(idEventEdition, idBlueprint, personagem, tr
         },
       ],
       transaction: t,
-      lock: t.LOCK.UPDATE,
     });
     if (existente) return { instancia: existente.instancia, criada: false };
-
-    const versao = await puzzleBlueprintService.obterUltimaPublicada(idBlueprint, t);
 
     const instancia = await PuzzleInstance.create(
       {
         id_event_edition: idEventEdition,
-        id_blueprint_version: versao.id,
+        id_blueprint_version: versaoPublicada.id,
         seed: gerarSeed(),
         state: {},
       },
@@ -152,6 +211,12 @@ async function aplicarMutacao(idInstance, expectedVersion, { novoStatus, novoSta
     throw erro("expectedVersion inválido.", 400);
   }
 
+  // Hardening item 4: validação de FORMA pura, antes de qualquer round-
+  // trip de banco — state é produzido tanto pelo cliente quanto pelo
+  // próprio servidor (engine futuro), então o limite HTTP de 100kb do
+  // Express não é garantia suficiente por si só.
+  const estadoValidado = novoState !== undefined ? validarState(novoState) : undefined;
+
   const atual = await PuzzleInstance.findByPk(idInstance);
   if (!atual) throw erro("Instância não encontrada.", 404);
 
@@ -175,7 +240,7 @@ async function aplicarMutacao(idInstance, expectedVersion, { novoStatus, novoSta
   }
 
   const camposNovos = { state_version: sequelize.literal("state_version + 1") };
-  if (novoState !== undefined) camposNovos.state = novoState;
+  if (estadoValidado !== undefined) camposNovos.state = estadoValidado;
   if (novoStatus !== undefined) {
     camposNovos.status = novoStatus;
     if (novoStatus === "ACTIVE" && !atual.started_at) camposNovos.started_at = new Date();
@@ -222,6 +287,7 @@ function dtoRuntime(instancia) {
 
 module.exports = {
   TRANSICOES_VALIDAS,
+  MAX_STATE_BYTES,
   transicaoValida,
   gerarSeed,
   criarOuObterInstancia,

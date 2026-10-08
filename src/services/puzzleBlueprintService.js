@@ -44,7 +44,12 @@ function transicaoValida(atual, novo) {
 }
 
 async function criarBlueprint(idEventDefinition, { key, nome, descricao } = {}, transaction) {
-  await eventDefinitionService.obterPorId(idEventDefinition, transaction);
+  const definicao = await eventDefinitionService.obterPorId(idEventDefinition, transaction);
+  // Hardening item 2: EventDefinition ARCHIVED é terminal — nunca ganha
+  // blueprint novo.
+  if (definicao.status === "ARCHIVED") {
+    throw erro("Esse evento foi arquivado — não é possível criar novos blueprints.", 409);
+  }
   if (typeof key !== "string" || !/^[a-z0-9-]{3,60}$/.test(key)) {
     throw erro("Key inválida — use só letras minúsculas, números e hífen (3-60 caracteres).", 400);
   }
@@ -75,22 +80,58 @@ async function criarBlueprint(idEventDefinition, { key, nome, descricao } = {}, 
 // Nova revisão — version = MAX(version) + 1 pro blueprint, sempre
 // DRAFT. Nunca reaproveita um número de versão já usado, mesmo que a
 // versão anterior tenha sido arquivada sem nunca ter sido publicada.
+//
+// Hardening item 5: o invariante "nunca colide, sempre monotônico" é do
+// PRÓPRIO service — nunca depende de quem chama fornecer uma
+// transaction pro LOCK.UPDATE ser efetivo. Sem transaction nenhuma, o
+// lock antigo (`transaction?.LOCK?.UPDATE`) resolvia pra `undefined` e
+// não travava NADA.
+//
+// A trava certa NÃO é a linha de MAX(version): `SELECT ... FOR UPDATE
+// ORDER BY version DESC LIMIT 1` trava a linha que ERA a última no
+// momento da leitura, mas se outra transaction concorrente SUBIU uma
+// versão nova enquanto esta esperava o lock, o Postgres não reavalia o
+// ORDER BY/LIMIT depois de desbloquear (EvalPlanQual só reage a UPDATE/
+// DELETE na própria linha travada, nunca a um INSERT novo) — a segunda
+// transaction calcularia a MESMA "próxima versão" já usada pela
+// primeira e colidiria na UNIQUE (id_blueprint, version) com um 500
+// inesperado em vez de uma versão monotônica limpa.
+//
+// A linha ESTÁVEL que SEMPRE existe pro mesmo blueprint é o PRÓPRIO
+// PuzzleBlueprint — travamos ela antes de ler/calcular a próxima
+// versão, serializando qualquer concorrência pro MESMO blueprint (mesmo
+// raciocínio do lock no Character em puzzleInstanceService.
+// criarOuObterInstancia).
 async function criarNovaVersao(idBlueprint, { config } = {}, transaction) {
-  const blueprint = await PuzzleBlueprint.findByPk(idBlueprint, { transaction });
-  if (!blueprint) throw erro("Blueprint não encontrado.", 404);
+  async function aplicar(t) {
+    const blueprint = await PuzzleBlueprint.findByPk(idBlueprint, {
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
+    if (!blueprint) throw erro("Blueprint não encontrado.", 404);
 
-  const ultima = await PuzzleBlueprintVersion.findOne({
-    where: { id_blueprint: idBlueprint },
-    order: [["version", "DESC"]],
-    transaction,
-    lock: transaction?.LOCK?.UPDATE,
-  });
-  const proximaVersao = (ultima?.version ?? 0) + 1;
+    // Hardening item 2: nunca criar revisão nova destinada a publicação
+    // se o evento-pai já foi arquivado.
+    const definicao = await eventDefinitionService.obterPorId(blueprint.id_event_definition, t);
+    if (definicao.status === "ARCHIVED") {
+      throw erro("Esse evento foi arquivado — não é possível criar novas revisões.", 409);
+    }
 
-  return PuzzleBlueprintVersion.create(
-    { id_blueprint: idBlueprint, version: proximaVersao, config: validarConfig(config) },
-    { transaction },
-  );
+    const ultima = await PuzzleBlueprintVersion.findOne({
+      where: { id_blueprint: idBlueprint },
+      order: [["version", "DESC"]],
+      transaction: t,
+    });
+    const proximaVersao = (ultima?.version ?? 0) + 1;
+
+    return PuzzleBlueprintVersion.create(
+      { id_blueprint: idBlueprint, version: proximaVersao, config: validarConfig(config) },
+      { transaction: t },
+    );
+  }
+
+  if (transaction) return aplicar(transaction);
+  return sequelize.transaction(aplicar);
 }
 
 // Editar `config` só é permitido enquanto DRAFT — essa é a garantia de
@@ -121,6 +162,21 @@ async function transicionar(idVersion, novoStatus, { idAdmin } = {}, transaction
     if (!transicaoValida(versao.status, novoStatus)) {
       throw erro(`Transição inválida: ${versao.status} → ${novoStatus}.`, 409, "LIFECYCLE_INVALIDO");
     }
+
+    // Hardening item 2: carrega Version → Blueprint → EventDefinition e
+    // confirma PUBLISHED antes de publicar a revisão. `{ lock: true }`
+    // trava a linha do Definition (mesmo lock usado por
+    // eventEditionService.transicionar pra ACTIVE), serializando de
+    // verdade contra um ARCHIVE concorrente.
+    if (novoStatus === "PUBLISHED") {
+      const blueprint = await PuzzleBlueprint.findByPk(versao.id_blueprint, { transaction: t });
+      if (!blueprint) throw erro("Blueprint não encontrado.", 404);
+      const definicao = await eventDefinitionService.obterPorId(blueprint.id_event_definition, t, { lock: true });
+      if (definicao.status !== "PUBLISHED") {
+        throw erro("Só é possível publicar uma revisão de um evento PUBLISHED.", 409, "EVENTO_NAO_PUBLICADO");
+      }
+    }
+
     versao.status = novoStatus;
     if (novoStatus === "PUBLISHED") {
       versao.published_at = new Date();

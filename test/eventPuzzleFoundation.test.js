@@ -198,6 +198,7 @@ testeComBanco("EventDefinition: DRAFT→PUBLISHED→ARCHIVED válido; PUBLISHED�
 
 testeComBanco("EventEdition: CANCELLED alcançável de DRAFT/SCHEDULED/ACTIVE; nunca de ENDED", async () => {
   const definicao = await eventDefinitionService.criar({ key: `def-${slug()}`, nome: "Teste" });
+  await eventDefinitionService.transicionar(definicao.id, "PUBLISHED");
   const edicao = await eventEditionService.criar(definicao.id, { key: `ed-${slug()}`, nome: "Teste" });
   await eventEditionService.transicionar(edicao.id, "ACTIVE");
   await eventEditionService.transicionar(edicao.id, "ENDED");
@@ -547,6 +548,268 @@ testeComBanco(
     assert.equal(total, 0, "nenhuma PuzzleInstance órfã sobrevive ao rollback da transaction composta");
   },
 );
+
+// ---------------------------------------------------------------------
+// 12. HARDENING — corrida real na CRIAÇÃO de PuzzleInstance. SELECT FOR
+//     UPDATE não bloqueia uma linha inexistente, então travar
+//     PuzzleParticipant/PuzzleInstance (que podem não existir ainda) não
+//     serializava nada — 2 réplicas concorrentes podiam as duas "não
+//     encontrar" e as duas criarem uma Instance+Participant cada. A
+//     correção trava o Character (linha estável que SEMPRE existe)
+//     antes de procurar/decidir. Isto dispara 2 chamadas de verdade via
+//     Promise.allSettled (2 transactions/round-trips reais, não 2
+//     chamadas sequenciais em memória).
+// ---------------------------------------------------------------------
+
+testeComBanco(
+  "criarOuObterInstancia: 2 chamadas concorrentes pro MESMO personagem nunca criam 2 Instances — exatamente 1 instância e 1 participante",
+  async () => {
+    const { edicao, blueprint } = await sequelize.transaction((t) => criarFundacaoCompleta(t));
+    const { personagem } = await criarPersonagem({ nivel: 5 });
+
+    const resultados = await Promise.allSettled([
+      puzzleInstanceService.criarOuObterInstancia(edicao.id, blueprint.id, {
+        id: personagem.id,
+        nome: personagem.nome,
+      }),
+      puzzleInstanceService.criarOuObterInstancia(edicao.id, blueprint.id, {
+        id: personagem.id,
+        nome: personagem.nome,
+      }),
+    ]);
+
+    const sucessos = resultados.filter((r) => r.status === "fulfilled");
+    assert.equal(
+      sucessos.length,
+      2,
+      "as 2 chamadas concorrentes terminam com sucesso (idempotência real, nunca erro/corrida)",
+    );
+
+    const ids = sucessos.map((r) => r.value.instancia.id);
+    assert.equal(ids[0], ids[1], "as 2 chamadas terminam referenciando a MESMA PuzzleInstance");
+
+    const criadas = sucessos.filter((r) => r.value.criada === true);
+    assert.equal(criadas.length, 1, "exatamente 1 das 2 chamadas de fato CRIA a instância; a outra recupera");
+
+    const totalInstancias = await PuzzleInstance.count({ where: { id_event_edition: edicao.id } });
+    assert.equal(
+      totalInstancias,
+      1,
+      "nunca existem 2 PuzzleInstances CREATED/ACTIVE pro mesmo personagem+blueprint+edição",
+    );
+
+    const totalParticipantes = await PuzzleParticipant.count({ where: { id_personagem: personagem.id } });
+    assert.equal(totalParticipantes, 1, "exatamente 1 Participant correspondente");
+  },
+);
+
+// ---------------------------------------------------------------------
+// 13. HARDENING — invariantes de lifecycle cruzado entre EventDefinition
+//     e seus filhos. Nenhum desses depende só da listagem pública
+//     (listarAtivasPublicas) — cada service revalida por si só.
+// ---------------------------------------------------------------------
+
+testeComBanco("DRAFT definition + tentar ACTIVE edition → rejeita", async () => {
+  const definicao = await eventDefinitionService.criar({ key: `def-${slug()}`, nome: "Teste" });
+  const edicao = await eventEditionService.criar(definicao.id, { key: `ed-${slug()}`, nome: "Teste" });
+  await assert.rejects(
+    () => eventEditionService.transicionar(edicao.id, "ACTIVE"),
+    (e) => e.statusCode === 409 && e.code === "EVENTO_NAO_PUBLICADO",
+  );
+});
+
+testeComBanco("ARCHIVED definition + tentar criar edition → rejeita", async () => {
+  const definicao = await eventDefinitionService.criar({ key: `def-${slug()}`, nome: "Teste" });
+  await eventDefinitionService.transicionar(definicao.id, "ARCHIVED");
+  await assert.rejects(
+    () => eventEditionService.criar(definicao.id, { key: `ed-${slug()}`, nome: "Teste" }),
+    (e) => e.statusCode === 409,
+  );
+});
+
+testeComBanco("ARCHIVED definition + tentar criar blueprint → rejeita", async () => {
+  const definicao = await eventDefinitionService.criar({ key: `def-${slug()}`, nome: "Teste" });
+  await eventDefinitionService.transicionar(definicao.id, "ARCHIVED");
+  await assert.rejects(
+    () => puzzleBlueprintService.criarBlueprint(definicao.id, { key: `bp-${slug()}`, nome: "Teste" }),
+    (e) => e.statusCode === 409,
+  );
+});
+
+testeComBanco("DRAFT definition + tentar PUBLISH blueprint version → rejeita", async () => {
+  const definicao = await eventDefinitionService.criar({ key: `def-${slug()}`, nome: "Teste" });
+  const { versao } = await puzzleBlueprintService.criarBlueprint(definicao.id, {
+    key: `bp-${slug()}`,
+    nome: "Teste",
+  });
+  await assert.rejects(
+    () => puzzleBlueprintService.transicionar(versao.id, "PUBLISHED"),
+    (e) => e.statusCode === 409 && e.code === "EVENTO_NAO_PUBLICADO",
+  );
+});
+
+testeComBanco("ARCHIVED definition + tentar PUBLISH blueprint version → rejeita", async () => {
+  const definicao = await eventDefinitionService.criar({ key: `def-${slug()}`, nome: "Teste" });
+  const { versao } = await puzzleBlueprintService.criarBlueprint(definicao.id, {
+    key: `bp-${slug()}`,
+    nome: "Teste",
+  });
+  await eventDefinitionService.transicionar(definicao.id, "ARCHIVED");
+  await assert.rejects(
+    () => puzzleBlueprintService.transicionar(versao.id, "PUBLISHED"),
+    (e) => e.statusCode === 409 && e.code === "EVENTO_NAO_PUBLICADO",
+  );
+});
+
+testeComBanco(
+  "ACTIVE edition de definition não-PUBLISHED nunca permite criar Instance (defesa em profundidade — nunca confia só na listagem pública)",
+  async () => {
+    const { definicao, edicao, blueprint } = await sequelize.transaction((t) => criarFundacaoCompleta(t));
+    const { personagem } = await criarPersonagem({ nivel: 5 });
+
+    // Simula um estado de borda em que a definição foi arquivada por
+    // fora do fluxo normal (ex.: dado legado), SEM passar pelo guard de
+    // eventDefinitionService.transicionar — a edição continua ACTIVE.
+    // A criação de Instance precisa recusar de qualquer forma.
+    await EventDefinition.update({ status: "ARCHIVED" }, { where: { id: definicao.id } });
+
+    await assert.rejects(
+      () =>
+        puzzleInstanceService.criarOuObterInstancia(edicao.id, blueprint.id, {
+          id: personagem.id,
+          nome: personagem.nome,
+        }),
+      (e) => e.statusCode === 409 && e.code === "EVENTO_NAO_PUBLICADO",
+    );
+  },
+);
+
+testeComBanco("tentar ARCHIVE definition com edição ACTIVE → rejeita", async () => {
+  const { definicao } = await sequelize.transaction((t) => criarFundacaoCompleta(t));
+  await assert.rejects(
+    () => eventDefinitionService.transicionar(definicao.id, "ARCHIVED"),
+    (e) => e.statusCode === 409 && e.code === "EDICOES_PENDENTES",
+  );
+});
+
+testeComBanco("tentar ARCHIVE definition com edição SCHEDULED também rejeita", async () => {
+  const definicao = await eventDefinitionService.criar({ key: `def-${slug()}`, nome: "Teste" });
+  await eventDefinitionService.transicionar(definicao.id, "PUBLISHED");
+  const edicao = await eventEditionService.criar(definicao.id, { key: `ed-${slug()}`, nome: "Teste" });
+  await eventEditionService.transicionar(edicao.id, "SCHEDULED");
+  await assert.rejects(
+    () => eventDefinitionService.transicionar(definicao.id, "ARCHIVED"),
+    (e) => e.statusCode === 409 && e.code === "EDICOES_PENDENTES",
+  );
+});
+
+testeComBanco("após END das edições, ARCHIVE funciona normalmente", async () => {
+  const { definicao, edicao } = await sequelize.transaction((t) => criarFundacaoCompleta(t));
+  await eventEditionService.transicionar(edicao.id, "ENDED");
+  const arquivada = await eventDefinitionService.transicionar(definicao.id, "ARCHIVED");
+  assert.equal(arquivada.status, "ARCHIVED");
+});
+
+// ---------------------------------------------------------------------
+// 14. HARDENING — limite real de PuzzleInstance.state (MAX_STATE_BYTES).
+//     O limite HTTP de 100kb do Express não é suficiente por si só
+//     porque o state também é produzido internamente pelo servidor.
+// ---------------------------------------------------------------------
+
+testeComBanco("aplicarMutacao rejeita novoState que não é objeto JSON (string)", async () => {
+  const { edicao, blueprint } = await sequelize.transaction((t) => criarFundacaoCompleta(t));
+  const { personagem } = await criarPersonagem({ nivel: 5 });
+  const { instancia } = await puzzleInstanceService.criarOuObterInstancia(edicao.id, blueprint.id, {
+    id: personagem.id,
+    nome: personagem.nome,
+  });
+  await assert.rejects(
+    () => puzzleInstanceService.aplicarMutacao(instancia.id, 0, { novoState: "não é objeto" }),
+    (e) => e.statusCode === 400,
+  );
+});
+
+testeComBanco("aplicarMutacao rejeita array como raiz de novoState", async () => {
+  const { edicao, blueprint } = await sequelize.transaction((t) => criarFundacaoCompleta(t));
+  const { personagem } = await criarPersonagem({ nivel: 5 });
+  const { instancia } = await puzzleInstanceService.criarOuObterInstancia(edicao.id, blueprint.id, {
+    id: personagem.id,
+    nome: personagem.nome,
+  });
+  await assert.rejects(
+    () => puzzleInstanceService.aplicarMutacao(instancia.id, 0, { novoState: [1, 2, 3] }),
+    (e) => e.statusCode === 400,
+  );
+});
+
+testeComBanco(
+  "aplicarMutacao rejeita novoState acima de MAX_STATE_BYTES, mesmo produzido internamente pelo servidor",
+  async () => {
+    const { edicao, blueprint } = await sequelize.transaction((t) => criarFundacaoCompleta(t));
+    const { personagem } = await criarPersonagem({ nivel: 5 });
+    const { instancia } = await puzzleInstanceService.criarOuObterInstancia(edicao.id, blueprint.id, {
+      id: personagem.id,
+      nome: personagem.nome,
+    });
+    const estadoGigante = { public: { lixo: "x".repeat(puzzleInstanceService.MAX_STATE_BYTES + 1) } };
+    await assert.rejects(
+      () => puzzleInstanceService.aplicarMutacao(instancia.id, 0, { novoState: estadoGigante }),
+      (e) => e.statusCode === 400,
+    );
+    const recarregada = await PuzzleInstance.findByPk(instancia.id);
+    assert.equal(recarregada.state_version, 0, "a tentativa rejeitada nunca incrementa state_version");
+  },
+);
+
+// ---------------------------------------------------------------------
+// 15. HARDENING — criarNovaVersao é seguro POR SI SÓ, mesmo sem o
+//     chamador fornecer uma transaction. Prova de concorrência real:
+//     2 criações simultâneas da MESMA blueprint nunca colidem/500.
+// ---------------------------------------------------------------------
+
+testeComBanco(
+  "criarNovaVersao: 2 criações concorrentes da mesma blueprint nunca colidem — versões distintas e monotônicas",
+  async () => {
+    const { blueprint } = await sequelize.transaction((t) => criarFundacaoCompleta(t));
+
+    const resultados = await Promise.allSettled([
+      puzzleBlueprintService.criarNovaVersao(blueprint.id, { config: { titulo_publico: "A" } }),
+      puzzleBlueprintService.criarNovaVersao(blueprint.id, { config: { titulo_publico: "B" } }),
+    ]);
+
+    const sucessos = resultados.filter((r) => r.status === "fulfilled");
+    assert.equal(sucessos.length, 2, "as 2 criações concorrentes terminam com sucesso, nunca 500 por colisão");
+
+    const versoes = sucessos.map((r) => r.value.version).sort((a, b) => a - b);
+    assert.deepEqual(versoes, [2, 3], "versões distintas e monotônicas (a v1 já existia da fundação)");
+
+    const total = await PuzzleBlueprintVersion.count({ where: { id_blueprint: blueprint.id } });
+    assert.equal(total, 3, "nenhuma versão perdida nem duplicada");
+  },
+);
+
+testeComBanco(
+  "criarNovaVersao sem transaction fornecida pelo chamador ainda é seguro (abre a própria transaction)",
+  async () => {
+    const { blueprint } = await sequelize.transaction((t) => criarFundacaoCompleta(t));
+    const v2 = await puzzleBlueprintService.criarNovaVersao(blueprint.id, { config: {} }); // sem 3º argumento
+    assert.equal(v2.version, 2);
+    assert.equal(v2.status, "DRAFT");
+  },
+);
+
+testeComBanco("criarNovaVersao rejeita quando o evento-pai já foi arquivado", async () => {
+  const definicao = await eventDefinitionService.criar({ key: `def-${slug()}`, nome: "Teste" });
+  const { blueprint } = await puzzleBlueprintService.criarBlueprint(definicao.id, {
+    key: `bp-${slug()}`,
+    nome: "Teste",
+  });
+  await eventDefinitionService.transicionar(definicao.id, "ARCHIVED");
+  await assert.rejects(
+    () => puzzleBlueprintService.criarNovaVersao(blueprint.id, { config: {} }),
+    (e) => e.statusCode === 409,
+  );
+});
 
 test.after(async () => {
   if (temBanco) await sequelize.close();

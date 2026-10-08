@@ -25,7 +25,12 @@ function transicaoValida(atual, novo) {
 }
 
 async function criar(idEventDefinition, { key, nome, starts_at, ends_at, metadata } = {}, transaction) {
-  await eventDefinitionService.obterPorId(idEventDefinition, transaction);
+  const definicao = await eventDefinitionService.obterPorId(idEventDefinition, transaction);
+  // Hardening item 2: EventDefinition ARCHIVED é terminal — nunca ganha
+  // edição nova (DRAFT/PUBLISHED podem; ver TRANSICOES_VALIDAS lá).
+  if (definicao.status === "ARCHIVED") {
+    throw erro("Esse evento foi arquivado — não é possível criar novas edições.", 409);
+  }
   if (typeof key !== "string" || !/^[a-z0-9-]{3,60}$/.test(key)) {
     throw erro("Key inválida — use só letras minúsculas, números e hífen (3-60 caracteres).", 400);
   }
@@ -69,6 +74,19 @@ async function transicionar(id, novoStatus, transaction) {
     if (!transicaoValida(edicao.status, novoStatus)) {
       throw erro(`Transição inválida: ${edicao.status} → ${novoStatus}.`, 409, "LIFECYCLE_INVALIDO");
     }
+
+    // Hardening item 2: nunca ativar uma edição de um evento que não
+    // está PUBLISHED — nunca confiar só na listagem pública pra
+    // segurança. `{ lock: true }` trava a linha do Definition (mesmo
+    // lock que eventDefinitionService.transicionar usa pra arquivar),
+    // serializando de verdade contra um ARCHIVE concorrente.
+    if (novoStatus === "ACTIVE") {
+      const definicao = await eventDefinitionService.obterPorId(edicao.id_event_definition, t, { lock: true });
+      if (definicao.status !== "PUBLISHED") {
+        throw erro("Só é possível ativar uma edição de um evento PUBLISHED.", 409, "EVENTO_NAO_PUBLICADO");
+      }
+    }
+
     edicao.status = novoStatus;
     try {
       await edicao.save({ transaction: t });
