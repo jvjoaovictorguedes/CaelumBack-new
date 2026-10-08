@@ -11,9 +11,14 @@ const { capabilityValida, ehCapabilityDeSustainProibidaEmBossColetivo } = requir
 
 // Modos cobertos por esta policy — PVP_CASUAL/RANKED/TOURNAMENT ficam de
 // fora (§1 "PvP fora de escopo: jogadores continuam escolhendo as
-// próprias ações"), e TEMPLE_BOSS ainda não existe como contexto no
-// motor (§8 "será especificado no documento separado do Templo").
-const MODOS_PVE = ["PVE", "PARTY", "GUILD_BOSS", "WORLD_BOSS"];
+// próprias ações"). TEMPLE_BOSS (templo_veu_celestial_v1_caelum.docx
+// §8.4 "filosofia do matchup") entra em MODOS_PVE mas NUNCA em
+// BOSSES_COLETIVOS — a Provação Final é solo (nunca HP compartilhado
+// nem fila de vários jogadores), então a hard rule de sustain que
+// protege Guild/World Boss (dano coletivo correndo contra cura) não se
+// aplica aqui: o Guardião pode ter HEAL_HP/REGEN_HP/SHIELD na própria
+// build, como qualquer monstro PvE normal.
+const MODOS_PVE = ["PVE", "PARTY", "GUILD_BOSS", "WORLD_BOSS", "TEMPLE_BOSS"];
 const BOSSES_COLETIVOS = ["GUILD_BOSS", "WORLD_BOSS"];
 
 function erro(mensagem) {

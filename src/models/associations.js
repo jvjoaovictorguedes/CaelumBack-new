@@ -773,4 +773,25 @@ GuildBossConfigModel.hasMany(GuildBossAbility, { foreignKey: "id_guild_boss_conf
 GuildBossAbility.belongsTo(GuildBossConfigModel, { foreignKey: "id_guild_boss_config", as: "bossConfig" });
 GuildBossAbility.belongsTo(Power, { foreignKey: "id_power", as: "power" });
 
+// Templo do Véu Celestial (templo_veu_celestial_v1_caelum.docx) — Fase 1.
+const TempleEvent = require("./TempleEvent");
+const TempleMission = require("./TempleMission");
+const CharacterTempleMissionProgress = require("./CharacterTempleMissionProgress");
+const CharacterTempleProgress = require("./CharacterTempleProgress");
+
+TempleEvent.belongsTo(Item, { foreignKey: "id_currency_item", as: "moeda" });
+
+TempleEvent.hasMany(TempleMission, { foreignKey: "id_event", as: "missoes" });
+TempleMission.belongsTo(TempleEvent, { foreignKey: "id_event", as: "evento" });
+
+TempleEvent.hasMany(CharacterTempleMissionProgress, { foreignKey: "id_event", as: "progressoMissoes" });
+CharacterTempleMissionProgress.belongsTo(TempleEvent, { foreignKey: "id_event" });
+Character.hasMany(CharacterTempleMissionProgress, { foreignKey: "character_id" });
+CharacterTempleMissionProgress.belongsTo(Character, { foreignKey: "character_id" });
+
+TempleEvent.hasMany(CharacterTempleProgress, { foreignKey: "id_event", as: "progressoPersonagens" });
+CharacterTempleProgress.belongsTo(TempleEvent, { foreignKey: "id_event" });
+Character.hasMany(CharacterTempleProgress, { foreignKey: "character_id" });
+CharacterTempleProgress.belongsTo(Character, { foreignKey: "character_id" });
+
 module.exports = {};
