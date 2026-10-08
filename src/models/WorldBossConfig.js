@@ -8,6 +8,8 @@ const WorldBossConfig = sequelize.define(
   "WorldBossConfig",
   {
     ...require("./combatTypingModels").fields.monster,
+    combat_duration_seconds: {type: DataTypes.INTEGER, allowNull: true},
+    id_failure_crisis_config: {type: DataTypes.INTEGER, allowNull: true},
     id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
     nome: { type: DataTypes.STRING(150), allowNull: false },
     descricao: { type: DataTypes.TEXT, allowNull: false },
@@ -53,4 +55,8 @@ const WorldBossConfig = sequelize.define(
   { tableName: "world_boss_configs" },
 );
 
+WorldBossConfig.beforeValidate(async (c,options)=>{
+ if(c.combat_duration_seconds!=null&&(!Number.isInteger(c.combat_duration_seconds)||c.combat_duration_seconds<1||c.combat_duration_seconds>604800))throw Object.assign(new Error("Prazo deve estar entre 1 segundo e 7 dias."),{statusCode:400});
+ if(c.id_failure_crisis_config){if(!c.combat_duration_seconds)throw Object.assign(new Error("Perfil de crise exige prazo de combate."),{statusCode:400});const p=await require("../services/worldCrisisConfigService").snapshot(c.id_failure_crisis_config,options.transaction);if(!p)throw new Error("Perfil inválido.");}
+});
 module.exports = WorldBossConfig;

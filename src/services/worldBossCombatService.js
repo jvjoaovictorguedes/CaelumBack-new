@@ -149,7 +149,7 @@ function montarResultadoSemAcao({
 }
 
 async function obterEventoAtivo(transaction) {
-  return WorldBossEvent.findOne({ where: { status: EVENT_STATUS.ACTIVE }, transaction });
+  return WorldBossEvent.findOne({ where: { status: EVENT_STATUS.ACTIVE }, transaction, lock: transaction?.LOCK.UPDATE });
 }
 
 // Entra (ou retoma) a sessão individual do personagem contra o evento
@@ -158,9 +158,10 @@ async function obterEventoAtivo(transaction) {
 // único parcial também garante isso no banco, esta checagem só evita
 // a query extra de tentar e falhar).
 async function entrar(characterId) {
-  return sequelize.transaction(async (transaction) => {
+  const result = await sequelize.transaction(async (transaction) => {
     const evento = await obterEventoAtivo(transaction);
     if (!evento) throw erro("Não há Ameaça Mundial ativa agora.");
+    if(await require("./worldBossFailureService").failLocked(evento,transaction))return {expired:true};
 
     let sessao = await WorldBossCombatSession.findOne({
       where: { character_id: characterId, status: COMBAT_SESSION_STATUS.ATIVO },
@@ -254,6 +255,8 @@ async function entrar(characterId) {
       status: await worldBossStatusService.obterStatusPublico(),
     };
   });
+  if(result.expired)throw erro("O prazo da Ameaça Mundial terminou.",409);
+  return result;
 }
 
 async function sair(characterId) {
@@ -288,10 +291,9 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
   // caso) já commitou de verdade.
   let erroPendente = null;
   const contexto = await sequelize.transaction(async (transaction) => {
-    const sessao = await WorldBossCombatSession.findOne({
+    let sessao = await WorldBossCombatSession.findOne({
       where: { character_id: characterId, status: COMBAT_SESSION_STATUS.ATIVO },
       transaction,
-      lock: transaction.LOCK.UPDATE,
     });
     if (!sessao) {
       erroPendente = erro("Você não está numa sessão de combate contra a Ameaça Mundial.");
@@ -303,6 +305,9 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
       transaction,
       lock: transaction.LOCK.UPDATE,
     });
+    sessao = await WorldBossCombatSession.findByPk(sessao.id,{transaction,lock:transaction.LOCK.UPDATE});
+    if(evento && await require("./worldBossFailureService").failLocked(evento,transaction)){erroPendente=erro("O prazo da Ameaça Mundial terminou.",409);return null;}
+    if (!sessao || sessao.status !== COMBAT_SESSION_STATUS.ATIVO){erroPendente=erro("A sessão foi encerrada.",409);return null;}
     if (!evento || evento.status !== EVENT_STATUS.ACTIVE) {
       sessao.status = COMBAT_SESSION_STATUS.ENCERRADA;
       await sessao.save({ transaction });
@@ -396,7 +401,7 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
         ...(sessao.state ?? {}),
         status: statusEffectService.decrementarDuracoes(listaJogador),
         cooldowns: cooldownsJogador,
-        combatAffinityBuffs:require("./combatBuffService").decrementarDuracoes(resultado.novosBuffsAtacante),
+        combatAffinityBuffs:require("./combatBuffService").decrementarDuracoes(sessao.state?.combatAffinityBuffs??[]),
       ultima_acao_jogador_em: Date.now(),
       };
       await sessao.save({ transaction });
@@ -422,7 +427,7 @@ async function executarAcao(characterId, { tipo, idPoder } = {}) {
         ...(sessao.state ?? {}),
         status: statusEffectService.decrementarDuracoes(listaJogador),
         cooldowns: cooldownsJogador,
-        combatAffinityBuffs:require("./combatBuffService").decrementarDuracoes(resultado.novosBuffsAtacante),
+        combatAffinityBuffs:require("./combatBuffService").decrementarDuracoes(sessao.state?.combatAffinityBuffs??[]),
       ultima_acao_jogador_em: Date.now(),
       };
       await sessao.save({ transaction });

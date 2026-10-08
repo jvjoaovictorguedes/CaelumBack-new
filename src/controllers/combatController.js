@@ -362,6 +362,7 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
     }
 
     const zona = sessaoAtivaSemLock.area;
+    await require("../services/worldCrisisAccessService").assertAccessible("ADVENTURE_ZONE",zona.id);
     const todosVinculosDaZona = await AdventureZoneMonster.findAll({
       where: { id_area: zona.id, ativo: true },
       // ativo:true no vínculo não basta — o admin também pode
@@ -579,6 +580,7 @@ exports.gerarInimigoParaPersonagem = async (req, res) => {
       // outra zona) nesse meio-tempo — revalida contra a sessão ATUAL
       // em vez de confiar na lida sem lock lá em cima.
       const sessaoAtiva = await obterSessaoAtiva(character.id, { transaction });
+      await require("../services/worldCrisisAccessService").assertAccessible("ADVENTURE_ZONE",zona.id,transaction);
       if (!sessaoAtiva || sessaoAtiva.area.id !== zona.id) {
         return res.status(409).json({
           message: "Entre em uma Área de Caça antes de procurar uma criatura.",
@@ -1444,6 +1446,8 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         dinheiroGanho = Math.round(dinheiroGanho * (1 + ouroPercentualTotal / 100));
       }
 
+      const crisisReward=await require("../services/worldCrisisEffectService").apply(xpGanho,dinheiroGanho,inimigoAtual.huntId?"HUNT":"ADVENTURE_SOLO",transaction);
+      xpGanho=crisisReward.xp;dinheiroGanho=crisisReward.gold;
       // O personagem já está travado (LOCK.UPDATE) desde o início desta
       // mesma transação, em executarTurno — XP, dinheiro, vida, mana e o
       // fim do encontro saem todos num único save (dentro de
@@ -1665,6 +1669,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           enemy: inimigoAtual,
 
           rewards: {
+            crisis_penalty:crisisReward.crisis_penalty,
             experiencia: xpGanho,
             dinheiro: dinheiroGanho,
           },

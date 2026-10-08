@@ -17,6 +17,7 @@ router.use(authMiddleware, adminMiddleware);
 
 const catalogo = express.Router();
 catalogo.use(requireAdminPermission("worldboss.manage"));
+catalogo.get("/crisis-configs",async(req,res,next)=>{try{res.json({status:"success",data:await require("../models/worldCrisisModels").Config.findAll({attributes:["id","nome","ativo"]})});}catch(e){next(e);}});
 catalogo.get("/configs", adminWorldBossController.listar);
 catalogo.get("/configs/:id", adminWorldBossController.obter);
 catalogo.post("/configs", adminWorldBossController.criar);

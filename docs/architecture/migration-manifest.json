@@ -20,5 +20,11 @@
     "dependsOn": [
       "20270206010003-combat-typing-buff-data.js"
     ]
+  },
+  "20270206010005-world-crisis-reconstruction.js": {
+    "createdAt": "2026-10-08T00:02:04.810Z",
+    "dependsOn": [
+      "20270206010004-combat-typing-initial-content.js"
+    ]
   }
 }

@@ -401,6 +401,7 @@ module.exports = function registerPartyHandlers(io) {
       }
 
       try {
+        await require("../services/worldCrisisAccessService").assertAccessible("ADVENTURE_ZONE",idZona);
         const zona = await AdventureZone.findByPk(idZona);
         if (!zona) {
           return socket.emit(SOCKET_EVENTS.PARTY.ERRO, { mensagem: "Área de caça inválida." });
@@ -1236,13 +1237,14 @@ async function finalizarBatalha(io, battleId, vitoria, motivo = vitoria ? "comba
           // está carregando: o alvo é desincentivar o farm de boost em
           // si, não só "punir" o personagem fraco que está sendo ajudado.
           const multiplicador = batalha.penalidadeDiferencaNivel?.multiplicador ?? 1;
-          const xpConcedida = Math.round((batalha.inimigo.xp_recompensa ?? 0) * multiplicador);
+          const crisisReward=await require("../services/worldCrisisEffectService").apply((batalha.inimigo.xp_recompensa??0)*multiplicador,(batalha.inimigo.ouro_recompensa??0)*multiplicador,"ADVENTURE_PARTY",transaction);
+          const xpConcedida = crisisReward.xp;
           const resultadoXp = await adicionarExperiencia(id, xpConcedida, { transaction, personagem: character });
 
-          const ouro = Math.round((batalha.inimigo.ouro_recompensa ?? 0) * multiplicador);
+          const ouro = crisisReward.gold;
           concederOuro(character, ouro);
 
-          const drop = await rolarDropDeVitoria(character, batalha.inimigo, transaction);
+          const drop = await rolarDropDeVitoria(character, batalha.inimigo, transaction,"ADVENTURE_PARTY");
           if (drop) drops[id] = drop;
 
           // Guilda dos Aventureiros (§23/§45) — bug reportado: vitória em
@@ -1261,6 +1263,7 @@ async function finalizarBatalha(io, battleId, vitoria, motivo = vitoria ? "comba
           await registrarProgressoContrato(character, "GanharOuro", ouro, {}, transaction);
 
           recompensas[id] = {
+            crisis_penalty:crisisReward.crisis_penalty,
             experiencia: xpConcedida,
             dinheiro: ouro,
             nivel: resultadoXp.nivel,

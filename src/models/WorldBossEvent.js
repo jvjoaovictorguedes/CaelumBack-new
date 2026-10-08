@@ -9,10 +9,13 @@ const { sequelize } = require("../config/database");
 const WorldBossEvent = sequelize.define(
   "WorldBossEvent",
   {
+    combat_expires_at: {type: DataTypes.DATE},
+    failed_at: {type: DataTypes.DATE},
+    failure_reason: {type: DataTypes.STRING(30)},
     id: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
     id_world_boss_config: { type: DataTypes.INTEGER, allowNull: false },
     status: {
-      type: DataTypes.ENUM("COOLDOWN", "DORMANT", "DISCOVERED", "ACTIVE", "DEFEATED", "CANCELLED"),
+      type: DataTypes.ENUM("COOLDOWN", "DORMANT", "DISCOVERED", "ACTIVE", "DEFEATED", "CANCELLED", "FAILED"),
       allowNull: false,
     },
     hp_max: { type: DataTypes.BIGINT, allowNull: false },

@@ -37,6 +37,7 @@ function erro(mensagem, statusCode = 400) {
 }
 
 const CAMPOS_CONFIG = [
+  "combat_duration_seconds","id_failure_crisis_config",
   "nome",
   "descricao",
   "lore",
@@ -335,6 +336,8 @@ async function duplicateAdminWorldBossConfig(id, { idAdmin, req }) {
         mana_maxima: original.mana_maxima,
         regeneracao_mana_por_acao: original.regeneracao_mana_por_acao,
         intervalo_acao_ms: original.intervalo_acao_ms,
+        combat_duration_seconds:original.combat_duration_seconds,
+        id_failure_crisis_config:original.id_failure_crisis_config,
         reentrada_permitida: original.reentrada_permitida,
         cooldown_reentrada_segundos: original.cooldown_reentrada_segundos,
         ativo: false,

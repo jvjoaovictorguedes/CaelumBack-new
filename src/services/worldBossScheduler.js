@@ -61,12 +61,14 @@ async function despertarSeNecessario() {
 
     evento.status = EVENT_STATUS.ACTIVE;
     evento.activated_at = new Date();
+    require("./worldBossFailureService").deadline(evento,evento.activated_at);
     await evento.save({ transaction });
     return evento;
   });
 }
 
 async function tick() {
+  try {await require("./worldBossFailureService").tick({recover:true});await require("./worldCrisisRewardService").recover();} catch(error){console.error("[worldcrisis] recovery failed",error);}
   try {
     await sequelize.transaction((transaction) => worldBossLifecycleService.agendarProximoCiclo(transaction));
   } catch (error) {
@@ -98,14 +100,18 @@ async function tick() {
 
 async function tickCombate() {
   try {
+    await require("./worldBossFailureService").tick();
     await worldBossRuntimeService.processarProximaAcao();
   } catch (error) {
     console.error("[worldBossScheduler] falha no tick de combate do boss:", error);
   }
 }
 
+let lastCrisisBroadcast=0;
 async function tickRanking() {
   try {
+  const crisis=await require("./worldCrisisService").current();
+  if(crisis&&Date.now()-lastCrisisBroadcast>=3000){lastCrisisBroadcast=Date.now();await require("./worldCrisisService").emitStatus(crisis.id,"worldcrisis:ranking-update");}
     const evento = await WorldBossEvent.findOne({ where: { status: EVENT_STATUS.ACTIVE } });
     if (!evento) return;
     const ranking = await worldBossRankingService.obterRanking({ eventId: evento.id });

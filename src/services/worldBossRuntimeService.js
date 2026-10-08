@@ -528,6 +528,7 @@ async function processarProximaAcao() {
     if (!evento) return;
 
     const agora = new Date();
+    if(await require("./worldBossFailureService").failLocked(evento,transaction,agora))return;
     if (evento.next_action_at && new Date(evento.next_action_at).getTime() > agora.getTime()) return;
 
     const snapshot = evento.config_snapshot ?? {};

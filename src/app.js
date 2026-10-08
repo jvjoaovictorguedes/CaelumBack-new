@@ -255,6 +255,8 @@ app.use("/api/alchemy", alchemyRoutes);
 app.use("/api/fishing", fishingRoutes);
 app.use("/api/tavern", tavernRoutes);
 app.use("/api/world-boss", worldBossRoutes);
+app.use("/api/world-crisis",require("./routes/worldCrisisRoutes"));
+app.use("/api/admin/world-crisis",require("./routes/adminWorldCrisisRoutes"));
 app.use("/api/expeditions", expeditionRoutes);
 app.use("/api/patch-notes", patchNotesRoutes);
 app.use("/api/wiki", wikiRoutes);

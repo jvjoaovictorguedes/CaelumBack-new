@@ -24,7 +24,7 @@ const ORDEM_DESEMPATE = [
 async function eventoParaRanking(eventId) {
   if (eventId) return WorldBossEvent.findByPk(eventId);
   return WorldBossEvent.findOne({
-    where: { status: [EVENT_STATUS.ACTIVE, EVENT_STATUS.DEFEATED] },
+    where: { status: [EVENT_STATUS.ACTIVE, EVENT_STATUS.DEFEATED,EVENT_STATUS.FAILED] },
     order: [["id", "DESC"]],
   });
 }
