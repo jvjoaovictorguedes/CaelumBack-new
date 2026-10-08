@@ -853,4 +853,10 @@ PuzzleInstance.hasMany(PuzzleParticipant, { foreignKey: "id_instance", as: "part
 PuzzleParticipant.belongsTo(PuzzleInstance, { foreignKey: "id_instance", as: "instancia" });
 PuzzleParticipant.belongsTo(Character, { foreignKey: "id_personagem", as: "personagem" });
 
+// Anti-automação — o painel admin precisa identificar QUEM é o
+// personagem por trás de um id_personagem (nome, não só o número) sem
+// forçar quem lê AutomationRiskState/Event/Challenge a saber disso.
+const AutomationRiskState = require("./AutomationRiskState");
+AutomationRiskState.belongsTo(Character, { foreignKey: "id_personagem", as: "personagem" });
+
 module.exports = {};
