@@ -17,6 +17,7 @@ const UniquePowerEffect = sequelize.define(
     allow_party: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     allow_guild_boss: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     allow_world_boss: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+    allow_temple_boss: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     allow_pvp_casual: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     allow_ranked: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     allow_tournament: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },

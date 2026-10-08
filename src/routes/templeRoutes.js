@@ -12,6 +12,7 @@ router.get("/status", templeController.obterStatus);
 router.get("/missions", templeController.listarMissoes);
 router.get("/relicary", templeController.obterRelicario);
 router.get("/relicary/history", templeController.listarHistoricoRelicario);
+router.get("/boss/status", templeController.obterStatusDoBoss);
 
 router.use(automation);
 router.post("/missions/:key/deliver", templeController.entregarItem);

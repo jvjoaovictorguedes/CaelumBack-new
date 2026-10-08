@@ -13,6 +13,7 @@ const registerMessagesHandlers = require("./socket/messagesSocket");
 const registerPartyHandlers = require("./socket/partySocket");
 const registerGuildBossHandlers = require("./socket/guildBossSocket");
 const registerWorldBossHandlers = require("./socket/worldBossSocket");
+const registerTempleBossHandlers = require("./socket/templeBossSocket");
 const registerUniqueFeatHandlers = require("./socket/uniqueFeatSocket");
 const registerGlobalChatHandlers = require("./socket/globalChatSocket");
 
@@ -379,6 +380,13 @@ const io = new SocketIOServer(server, {
       ? { origin: origensPermitidas, credentials: true }
       : { origin: "*" },
 });
+// Cada módulo de socket (PvP/Ranked/Torneio/Guilda/Party/Guild Boss/
+// World Boss/Temple Boss/...) registra seu PRÓPRIO listener de
+// "connection" — nunca um switch gigante compartilhado. O padrão
+// EventEmitter da Namespace do socket.io só avisa (nunca quebra) acima
+// de 10 listeners; sobe o teto de propósito em vez de silenciar o
+// warning, já que mais módulos desse tipo são esperados.
+io.setMaxListeners(30);
 io.on("connection", socket => require("./antiAutomation/socketProtection").install(socket));
 registerPvpLiveHandlers(io);
 registerRankedLiveHandlers(io);
@@ -398,6 +406,7 @@ registerMessagesHandlers(io);
 registerPartyHandlers(io);
 registerGuildBossHandlers(io);
 registerWorldBossHandlers(io);
+registerTempleBossHandlers(io);
 registerUniqueFeatHandlers(io);
 registerGlobalChatHandlers(io);
 require("./services/worldBossScheduler").iniciar();

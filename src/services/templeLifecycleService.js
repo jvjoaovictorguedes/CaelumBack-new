@@ -10,6 +10,11 @@ const TempleEvent = require("../models/TempleEvent");
 const TempleMission = require("../models/TempleMission");
 const TempleRewardPool = require("../models/TempleRewardPool");
 const TempleRewardEntry = require("../models/TempleRewardEntry");
+const TempleBossConfig = require("../models/TempleBossConfig");
+const TempleBossPhase = require("../models/TempleBossPhase");
+const TempleBossStatusResistance = require("../models/TempleBossStatusResistance");
+const AdventureMonster = require("../models/AdventureMonster");
+const { construirHabilidadesParaEncontro } = require("./monsterCombatAdapter");
 const { EVENT_STATUS } = require("../config/templeConfig");
 
 // §12.2 — versão do formato do snapshot, só pra diagnóstico/telemetria
@@ -67,6 +72,73 @@ async function montarSnapshotRelicario(evento, transaction) {
   };
 }
 
+// §8.2/§8.3/§12.2 — identidade/calibração do Guardião congeladas na
+// ativação: ai_profile/abilities vêm do AdventureMonster-base (mesma
+// fundação de "IA de Combate PvE & Habilidades de Monstros V1",
+// reaproveitada via monsterCombatAdapter.construirHabilidadesParaEncontro
+// — nunca um catálogo de IA paralelo), fases/resistências do catálogo
+// próprio do Templo. null quando o evento não tem Guardião configurado
+// (admin ainda não montou, ou desativou de propósito).
+async function montarSnapshotBoss(evento, transaction) {
+  const bossConfig = await TempleBossConfig.findOne({
+    where: { id_event: evento.id, ativo: true },
+    transaction,
+  });
+  if (!bossConfig) return null;
+
+  const monstroBase = await AdventureMonster.findByPk(bossConfig.id_monstro_base, { transaction });
+  if (!monstroBase) return null;
+
+  const fases = await TempleBossPhase.findAll({
+    where: { id_boss_config: bossConfig.id },
+    order: [["ordem", "ASC"]],
+    transaction,
+  });
+  const resistencias = await TempleBossStatusResistance.findAll({
+    where: { id_boss_config: bossConfig.id },
+    transaction,
+  });
+  const abilities = await construirHabilidadesParaEncontro(bossConfig.id_monstro_base, { transaction });
+
+  return {
+    boss_config_id: bossConfig.id,
+    id_monstro_base: monstroBase.id,
+    nome_exibicao: bossConfig.nome_exibicao ?? monstroBase.nome,
+    lore: bossConfig.lore,
+    imagem_url: monstroBase.imagem_url,
+    ai_profile: monstroBase.ai_profile,
+    base: {
+      vida_maxima: monstroBase.vida_maxima,
+      dano_min: monstroBase.dano_min,
+      dano_max: monstroBase.dano_max,
+      defesa: monstroBase.defesa,
+      agilidade: monstroBase.agilidade,
+      velocidade: monstroBase.velocidade,
+    },
+    scaling: {
+      target_turns_to_kill: bossConfig.target_turns_to_kill,
+      target_boss_actions_survivable: bossConfig.target_boss_actions_survivable,
+      scaling_min_multiplier: bossConfig.scaling_min_multiplier,
+      scaling_max_multiplier: bossConfig.scaling_max_multiplier,
+    },
+    reward_sigils_primeira_vitoria: bossConfig.reward_sigils_primeira_vitoria,
+    phases: fases.map((f) => ({
+      ordem: f.ordem,
+      hp_threshold_pct: f.hp_threshold_pct,
+      nome_exibicao: f.nome_exibicao,
+      dano_multiplicador: f.dano_multiplicador,
+      defesa_multiplicador: f.defesa_multiplicador,
+      enrage: f.enrage,
+    })),
+    status_resistances: resistencias.map((r) => ({
+      status_key: r.status_key,
+      imune: r.imune,
+      resistencia_pct: r.resistencia_pct,
+    })),
+    abilities,
+  };
+}
+
 async function montarSnapshot(evento, transaction) {
   const missoes = await TempleMission.findAll({
     where: { id_event: evento.id, ativo: true },
@@ -74,6 +146,7 @@ async function montarSnapshot(evento, transaction) {
     transaction,
   });
   const relicary = await montarSnapshotRelicario(evento, transaction);
+  const boss = await montarSnapshotBoss(evento, transaction);
 
   return {
     schema_version: SNAPSHOT_SCHEMA_VERSION,
@@ -93,12 +166,11 @@ async function montarSnapshot(evento, transaction) {
       descricao: missao.descricao,
       ordem: missao.ordem,
     })),
-    // §12.2 — relicary agora congela o pool/entries ativos do evento no
-    // momento da ativação (null se o Admin não montou nenhum pool, ou
-    // montou um sem entries — nunca um objeto "pronto" pela metade).
-    // Guardião (Fase 5) preenche esta chave quando a Fase existir.
+    // §12.2 — relicary/boss congelam o catálogo ativo do evento no
+    // momento da ativação (null se o Admin não montou nenhum — nunca um
+    // objeto "pronto" pela metade).
     relicary,
-    boss: null,
+    boss,
   };
 }
 

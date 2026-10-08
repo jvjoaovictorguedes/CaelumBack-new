@@ -330,6 +330,7 @@ const CAMPOS_COMBAT_EFFECT = [
   "allow_party",
   "allow_guild_boss",
   "allow_world_boss",
+  "allow_temple_boss",
   "allow_pvp_casual",
   "allow_ranked",
   "allow_tournament",

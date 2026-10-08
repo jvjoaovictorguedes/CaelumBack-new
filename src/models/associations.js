@@ -783,6 +783,12 @@ const TempleRewardEntry = require("./TempleRewardEntry");
 const CharacterTempleDrawState = require("./CharacterTempleDrawState");
 const TempleDrawBatch = require("./TempleDrawBatch");
 const TempleDrawHistory = require("./TempleDrawHistory");
+const TempleBossConfig = require("./TempleBossConfig");
+const TempleBossPhase = require("./TempleBossPhase");
+const TempleBossStatusResistance = require("./TempleBossStatusResistance");
+const TempleBossRewardEntry = require("./TempleBossRewardEntry");
+const TempleBossAttempt = require("./TempleBossAttempt");
+const TempleBossRewardGrant = require("./TempleBossRewardGrant");
 
 TempleEvent.belongsTo(Item, { foreignKey: "id_currency_item", as: "moeda" });
 
@@ -816,5 +822,28 @@ TempleDrawBatch.hasMany(TempleDrawHistory, { foreignKey: "id_batch", as: "draws"
 TempleDrawHistory.belongsTo(TempleDrawBatch, { foreignKey: "id_batch" });
 Character.hasMany(TempleDrawHistory, { foreignKey: "character_id" });
 TempleDrawHistory.belongsTo(Character, { foreignKey: "character_id" });
+
+TempleEvent.hasOne(TempleBossConfig, { foreignKey: "id_event" });
+TempleBossConfig.belongsTo(TempleEvent, { foreignKey: "id_event" });
+TempleBossConfig.belongsTo(AdventureMonster, { foreignKey: "id_monstro_base", as: "monstroBase" });
+TempleBossConfig.hasMany(TempleBossPhase, { foreignKey: "id_boss_config", as: "fases" });
+TempleBossPhase.belongsTo(TempleBossConfig, { foreignKey: "id_boss_config" });
+TempleBossConfig.hasMany(TempleBossStatusResistance, { foreignKey: "id_boss_config", as: "resistencias" });
+TempleBossStatusResistance.belongsTo(TempleBossConfig, { foreignKey: "id_boss_config" });
+TempleBossConfig.hasMany(TempleBossRewardEntry, { foreignKey: "id_boss_config", as: "recompensas" });
+TempleBossRewardEntry.belongsTo(TempleBossConfig, { foreignKey: "id_boss_config" });
+TempleBossRewardEntry.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+
+TempleEvent.hasMany(TempleBossAttempt, { foreignKey: "id_event" });
+TempleBossAttempt.belongsTo(TempleEvent, { foreignKey: "id_event" });
+Character.hasMany(TempleBossAttempt, { foreignKey: "character_id" });
+TempleBossAttempt.belongsTo(Character, { foreignKey: "character_id" });
+
+TempleEvent.hasMany(TempleBossRewardGrant, { foreignKey: "id_event" });
+TempleBossRewardGrant.belongsTo(TempleEvent, { foreignKey: "id_event" });
+Character.hasMany(TempleBossRewardGrant, { foreignKey: "character_id" });
+TempleBossRewardGrant.belongsTo(Character, { foreignKey: "character_id" });
+TempleBossAttempt.hasOne(TempleBossRewardGrant, { foreignKey: "id_attempt" });
+TempleBossRewardGrant.belongsTo(TempleBossAttempt, { foreignKey: "id_attempt" });
 
 module.exports = {};

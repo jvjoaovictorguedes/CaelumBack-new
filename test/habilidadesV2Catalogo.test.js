@@ -34,8 +34,11 @@ const { CHAVES_VALIDAS, STATUS, UNIDADE } = require("../src/config/statusEffectC
 // Contextos
 // ---------------------------------------------------------------------
 
-test("combatContextConfig: 7 contextos canônicos, todos com rótulo pro Admin", () => {
-  assert.equal(CONTEXTOS_DE_COMBATE.length, 7);
+test("combatContextConfig: 8 contextos canônicos, todos com rótulo pro Admin", () => {
+  // TEMPLE_BOSS entrou na Fase 5 do Templo do Véu Celestial — Guardião
+  // solo reaproveita carregarLutador/combatModifierService, que exigem
+  // um contexto central de verdade (nunca um paralelo).
+  assert.equal(CONTEXTOS_DE_COMBATE.length, 8);
   for (const contexto of CONTEXTOS_DE_COMBATE) {
     assert.ok(contextoValido(contexto));
     assert.ok(ROTULO_DO_CONTEXTO[contexto], `contexto ${contexto} precisa de rótulo`);
@@ -54,7 +57,7 @@ test("combatContextConfig: NUNCA diverge da lista que uniqueFeatConfig já usa p
   assert.deepEqual(
     [...contextosDeProezas].sort(),
     [...CONTEXTOS_DE_COMBATE].sort(),
-    "a lista de contextos de Proezas Únicas e o catálogo central precisam ser EXATAMENTE os mesmos 7 nomes",
+    "a lista de contextos de Proezas Únicas e o catálogo central precisam ser EXATAMENTE os mesmos 8 nomes",
   );
 });
 

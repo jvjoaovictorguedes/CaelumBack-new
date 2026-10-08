@@ -85,6 +85,17 @@ const SOCKET_EVENTS = {
     "IDENTIFICAR": "worldboss:identificar",
     "SAIR": "worldboss:sair",
     "STATUS": "worldboss:status"
+  },
+  "TEMPLEBOSS": {
+    "ENTRAR": "templeboss:entrar",
+    "ESTADO": "templeboss:estado",
+    "ACAO": "templeboss:acao",
+    "TURNO_RESULTADO": "templeboss:turno-resultado",
+    "CAST_START": "templeboss:cast-start",
+    "FASE_ALTERADA": "templeboss:fase-alterada",
+    "FIM": "templeboss:fim",
+    "ERRO": "templeboss:erro",
+    "SAIR": "templeboss:sair"
   }
 };
 for (const domain of Object.values(SOCKET_EVENTS)) Object.freeze(domain);

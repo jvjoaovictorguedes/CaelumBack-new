@@ -37,6 +37,7 @@ const POWER_EFFECT_CONTEXT_COLUMNS = {
   PARTY: "allow_party",
   GUILD_BOSS: "allow_guild_boss",
   WORLD_BOSS: "allow_world_boss",
+  TEMPLE_BOSS: "allow_temple_boss",
   PVP_CASUAL: "allow_pvp_casual",
   RANKED: "allow_ranked",
   TOURNAMENT: "allow_tournament",

@@ -2,6 +2,7 @@ const { sequelize } = require("../config/database");
 const templeStatusService = require("../services/templeStatusService");
 const templeObjectiveService = require("../services/templeObjectiveService");
 const templeRelicaryService = require("../services/templeRelicaryService");
+const templeBossAttemptService = require("../services/templeBossAttemptService");
 
 // GET /api/temple/status — §13.1/§13.2. Sempre autenticado (nunca
 // público como worldboss/status): "meus_sigilos" é por personagem, não
@@ -96,5 +97,17 @@ exports.listarHistoricoRelicario = async (req, res) => {
   } catch (error) {
     console.error("Erro ao listar histórico do Relicário:", error);
     res.status(500).json({ status: "error", message: "Não foi possível listar o histórico do Relicário." });
+  }
+};
+
+// GET /api/temple/boss/status — §13.3: lore, Poder atual do personagem
+// e estado de desbloqueio/clear, sem revelar a fórmula de scaling.
+exports.obterStatusDoBoss = async (req, res) => {
+  try {
+    const status = await templeBossAttemptService.obterStatusPublico(req.personagemAtual.id);
+    res.status(200).json({ status: "success", data: status });
+  } catch (error) {
+    console.error("Erro ao obter status do Guardião:", error);
+    res.status(500).json({ status: "error", message: "Não foi possível obter o status do Guardião." });
   }
 };
