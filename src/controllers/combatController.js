@@ -48,6 +48,7 @@ const { concederRecompensaDeZona } = require("../services/adventureRewardService
 const expeditionConfig = require("../config/expeditionConfig");
 const { concederOuro } = require("../services/goldService");
 const { registrarProgressoContrato } = require("../services/adventureGuildObjectiveService");
+const templeObjectiveService = require("../services/templeObjectiveService");
 const { registrarProgressoMissaoGuilda } = require("../services/guildMissionService");
 const { bonusesAtivosPara } = require("../services/guildBuffService");
 const { bonusesAtivosAgora: bonusesGlobaisAtivosAgora } = require("../services/globalBuffService");
@@ -889,6 +890,16 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       log.push("Você optou por passar o turno.");
     }
 
+    // Templo do Véu Celestial §4.2 (WIN_ADVENTURE_NO_CONSUMABLE) —
+    // precisa saber se ALGUM turno deste encontro usou item, não só o
+    // atual. `inimigoAtual` já é o objeto persistido turno a turno em
+    // character.encontro_pve (ver spread no fim da função), então uma
+    // flag posta nele aqui sobrevive até a checagem de vitória mais
+    // abaixo sem precisar de nenhuma coluna/estado novo.
+    if (tipoAcaoSolicitadaJogador === ACTION_TYPE.ITEM && !jogadorBloqueadoNesteTurno) {
+      inimigoAtual.usouConsumivelNesteCombate = true;
+    }
+
     let poderUsado = null;
     let nivelHabilidadeUsada = 1;
 
@@ -1190,6 +1201,12 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
             statusEffects.enemy = statusEffectService.aplicarStatus(statusEffects.enemy, efeito);
             const def = definicaoDoStatus(efeito.key);
             log.push(`${inimigoAtual.nome} recebeu ${def.nomeUi} por ${efeito.remainingTurns} turno(s).`);
+            await templeObjectiveService.registrarProgresso(
+              character.id,
+              "APPLY_STATUS",
+              { tipoEvento: "STATUS_APPLIED", statusKey: efeito.key },
+              transaction,
+            );
           }
         }
       }
@@ -1223,6 +1240,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       // ConsumableProperties.efeito_vida/efeito_mana só roda logo abaixo
       // quando o item NÃO tem o respectivo HEAL_HP_*/RESTORE_MANA_*
       // moderno configurado — nunca os dois juntos (double-apply).
+      const statusAntesDoItem = statusEffects.player.length;
       const efeitosModernos = await consumableEffectService.aplicarEfeitosDoItem({
         idItem: action.itemId,
         statusEffects: statusEffects.player,
@@ -1239,6 +1257,19 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       combatBuffs.player = efeitosModernos.combatBuffs;
       escudo.player = efeitosModernos.escudo;
       log.push(...efeitosModernos.log);
+      // Templo do Véu Celestial §4.2 (CLEANSE_STATUS) — detecta um
+      // cleanse de verdade pela QUEDA no tamanho da lista (nunca um
+      // efeito_key específico: CLEANSE_STATUS/CLEANSE_CATEGORY do
+      // registry podem remover qualquer status, a Provação só precisa
+      // saber que algo saiu).
+      if (efeitosModernos.statusEffects.length < statusAntesDoItem) {
+        await templeObjectiveService.registrarProgresso(
+          character.id,
+          "CLEANSE_STATUS",
+          { tipoEvento: "CLEANSE_APPLIED" },
+          transaction,
+        );
+      }
 
       // Mesma fórmula (percentual da vida/mana MÁXIMA, não pontos
       // fixos) do uso fora de combate em characterInventoryController.js
@@ -1375,6 +1406,12 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
             statusEffects.enemy = statusEffectService.aplicarStatus(statusEffects.enemy, efeito);
             const def = definicaoDoStatus(efeito.key);
             log.push(`Sua arma aplicou ${def.nomeUi} em ${inimigoAtual.nome} por ${efeito.remainingTurns} turno(s)!`);
+            await templeObjectiveService.registrarProgresso(
+              character.id,
+              "APPLY_STATUS",
+              { tipoEvento: "STATUS_APPLIED", statusKey: efeito.key },
+              transaction,
+            );
           }
         }
       }
@@ -1514,6 +1551,38 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       const dinheiroGanhoTotal = dinheiroGanho + (drop?.tipo === "ouro" ? drop.dinheiro : 0);
       await registrarProgresso(character, "MatarInimigos", 1, transaction);
       await registrarProgresso(character, "GanharOuro", dinheiroGanhoTotal, transaction);
+      // Templo do Véu Celestial §4.2 — MESMO evento real de vitória
+      // confirmada alimenta WIN_ADVENTURE_NO_CONSUMABLE/
+      // DEFEAT_AFFECTED_BY_STATUS/WIN_DISTINCT_ZONES/
+      // FINAL_BLOW_WITH_POWER num só chamado; nunca um endpoint
+      // separado (§4.3 "nunca aceitar progresso cru do cliente").
+      // No-op silencioso se não há Convergência ACTIVE agora.
+      await templeObjectiveService.registrarProgresso(
+        character.id,
+        "WIN_ADVENTURE_NO_CONSUMABLE",
+        { tipoEvento: "ADVENTURE_WIN", usouConsumivel: Boolean(inimigoAtual.usouConsumivelNesteCombate) },
+        transaction,
+      );
+      await templeObjectiveService.registrarProgresso(
+        character.id,
+        "DEFEAT_AFFECTED_BY_STATUS",
+        { tipoEvento: "ADVENTURE_WIN", statusDoInimigo: statusEffects.enemy.map((s) => s.key) },
+        transaction,
+      );
+      if (inimigoAtual.id_area) {
+        await templeObjectiveService.registrarProgresso(
+          character.id,
+          "WIN_DISTINCT_ZONES",
+          { tipoEvento: "ADVENTURE_WIN", zoneId: inimigoAtual.id_area },
+          transaction,
+        );
+      }
+      await templeObjectiveService.registrarProgresso(
+        character.id,
+        "FINAL_BLOW_WITH_POWER",
+        { tipoEvento: "ADVENTURE_WIN", golpeFinalComPoder: Boolean(poderUsado) },
+        transaction,
+      );
       const resultadoMorte = await registrarMorte(character.id, inimigoAtual.nome, transaction);
       // Perfil de Jogador (§23) — mesmo evento de abate alimenta
       // conquistas de caça e de Bestiário (descoberta/maestria mudam

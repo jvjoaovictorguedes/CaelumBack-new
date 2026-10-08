@@ -49,6 +49,7 @@ const { encontroValido } = require("./pveEncounterService");
 const { gerarInimigo } = require("../controllers/combatController");
 const uniqueFeatService = require("./uniqueFeatService");
 const uniqueFeatPublicService = require("./uniqueFeatPublicService");
+const templeObjectiveService = require("./templeObjectiveService");
 
 const PROFISSOES = ["Mineracao", "Silvicultura", "Exploracao"];
 
@@ -472,6 +473,14 @@ async function coletar(id_personagem, id_regiao) {
     await registrarProgresso(character, "CompletarExpedicoes", 1, transaction);
     await registrarProgressoContrato(character, "CompletarExpedicoes", 1, {}, transaction);
     await registrarProgressoMissaoGuilda(character, "CompletarExpedicoes", 1, transaction);
+    // Templo do Véu Celestial §4.2 (COMPLETE_EXPEDITIONS) — mesma coleta
+    // válida acima, nunca uma segunda checagem de "expedição concluída".
+    await templeObjectiveService.registrarProgresso(
+      character.id,
+      "COMPLETE_EXPEDITIONS",
+      { tipoEvento: "EXPEDITION_COMPLETE" },
+      transaction,
+    );
 
     // Sistema de Proezas Únicas §16 — só na coleta NÃO interrompida (a
     // interrupção de monstro retorna mais acima, antes daqui, e nunca

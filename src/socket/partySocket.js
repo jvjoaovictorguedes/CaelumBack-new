@@ -49,6 +49,7 @@ const {
 const partyBattleConfig = require("../config/partyBattleConfig");
 const cooldownService = require("../services/cooldownService");
 const monsterCombatAdapter = require("../services/monsterCombatAdapter");
+const templeObjectiveService = require("../services/templeObjectiveService");
 
 // partyId -> { id, hostId, membros: Map<charId,{id,nome,classe,pronto}>, ordem: [charId] }
 const grupos = new Map();
@@ -1261,6 +1262,15 @@ async function finalizarBatalha(io, battleId, vitoria, motivo = vitoria ? "comba
             transaction,
           );
           await registrarProgressoContrato(character, "GanharOuro", ouro, {}, transaction);
+          // Templo do Véu Celestial §4.2 (PARTY_ADVENTURE_WINS) — mesma
+          // vitória em grupo acima, um registro por membro na SUA própria
+          // Provação (igual o contrato de Rank faz).
+          await templeObjectiveService.registrarProgresso(
+            character.id,
+            "PARTY_ADVENTURE_WINS",
+            { tipoEvento: "PARTY_ADVENTURE_WIN" },
+            transaction,
+          );
 
           recompensas[id] = {
             crisis_penalty:crisisReward.crisis_penalty,

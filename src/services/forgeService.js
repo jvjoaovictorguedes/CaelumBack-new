@@ -20,6 +20,7 @@ const forgeTelemetryService = require("./forgeTelemetryService");
 const forgeStatsService = require("./forgeStatsService");
 const uniqueFeatService = require("./uniqueFeatService");
 const uniqueFeatPublicService = require("./uniqueFeatPublicService");
+const templeObjectiveService = require("./templeObjectiveService");
 
 async function garantirProgresso(characterId, transaction) {
   const [progresso] = await CharacterForgeProgress.findOrCreate({
@@ -208,6 +209,16 @@ async function coletar(characterId, slot) {
       await registrarProgresso(personagem, "Fabricar", 1, transaction);
       await registrarProgressoContrato(personagem, "Fabricar", 1, {}, transaction);
       await registrarProgressoMissaoGuilda(personagem, "Fabricar", 1, transaction);
+      // Templo do Véu Celestial §4.2 (CRAFT_RARITY_OR_HIGHER) — raridade
+      // vem de resultado.instancia.raridade (a qualidade REAL sorteada
+      // desta cópia, igual já é feito pra Proezas Únicas acima), nunca
+      // de item.raridade (identidade canônica, sempre "Comum").
+      await templeObjectiveService.registrarProgresso(
+        personagem.id,
+        "CRAFT_RARITY_OR_HIGHER",
+        { tipoEvento: "CRAFT_SUCCESS", raridade: resultado.instancia?.raridade },
+        transaction,
+      );
     } else if (personagem && entrada.tipo_acao === TIPOS_ACAO_FORJA.REFINAMENTO && resultado.sucesso) {
       await registrarProgressoContrato(personagem, "Refinar", 1, {}, transaction);
       await registrarProgressoMissaoGuilda(personagem, "Refinar", 1, transaction);
