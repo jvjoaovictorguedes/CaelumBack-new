@@ -846,4 +846,46 @@ TempleBossRewardGrant.belongsTo(Character, { foreignKey: "character_id" });
 TempleBossAttempt.hasOne(TempleBossRewardGrant, { foreignKey: "id_attempt" });
 TempleBossRewardGrant.belongsTo(TempleBossAttempt, { foreignKey: "id_attempt" });
 
+// Evento "O Coração da Máquina Celestial" — Fase 1 (Fundação
+// Persistente). EventDefinition é o template permanente; EventEdition
+// é uma execução concreta dele. PuzzleBlueprint é a identidade lógica
+// do puzzle, versionada em PuzzleBlueprintVersion (revisão imutável
+// publicada — ver eventPuzzleModels.js pro raciocínio completo).
+// PuzzleInstance referencia a EDITION e a VERSION exatas; nunca a
+// identidade/definição "atual". PuzzleParticipant é o vínculo
+// personagem<->instância, com snapshot de nome (sobrevive a SET NULL).
+const {
+  EventDefinition,
+  EventEdition,
+  PuzzleBlueprint,
+  PuzzleBlueprintVersion,
+  PuzzleInstance,
+  PuzzleParticipant,
+} = require("./eventPuzzleModels");
+
+EventDefinition.hasMany(EventEdition, { foreignKey: "id_event_definition", as: "edicoes" });
+EventEdition.belongsTo(EventDefinition, { foreignKey: "id_event_definition", as: "definicao" });
+
+EventDefinition.hasMany(PuzzleBlueprint, { foreignKey: "id_event_definition", as: "blueprints" });
+PuzzleBlueprint.belongsTo(EventDefinition, { foreignKey: "id_event_definition", as: "definicao" });
+
+PuzzleBlueprint.hasMany(PuzzleBlueprintVersion, { foreignKey: "id_blueprint", as: "versoes" });
+PuzzleBlueprintVersion.belongsTo(PuzzleBlueprint, { foreignKey: "id_blueprint", as: "blueprint" });
+PuzzleBlueprintVersion.belongsTo(User, { foreignKey: "published_by_admin_id", as: "publicadoPor" });
+
+EventEdition.hasMany(PuzzleInstance, { foreignKey: "id_event_edition", as: "instancias" });
+PuzzleInstance.belongsTo(EventEdition, { foreignKey: "id_event_edition", as: "edicao" });
+PuzzleBlueprintVersion.hasMany(PuzzleInstance, { foreignKey: "id_blueprint_version", as: "instancias" });
+PuzzleInstance.belongsTo(PuzzleBlueprintVersion, { foreignKey: "id_blueprint_version", as: "blueprintVersion" });
+
+PuzzleInstance.hasMany(PuzzleParticipant, { foreignKey: "id_instance", as: "participantes" });
+PuzzleParticipant.belongsTo(PuzzleInstance, { foreignKey: "id_instance", as: "instancia" });
+PuzzleParticipant.belongsTo(Character, { foreignKey: "id_personagem", as: "personagem" });
+
+// Anti-automação — o painel admin precisa identificar QUEM é o
+// personagem por trás de um id_personagem (nome, não só o número) sem
+// forçar quem lê AutomationRiskState/Event/Challenge a saber disso.
+const AutomationRiskState = require("./AutomationRiskState");
+AutomationRiskState.belongsTo(Character, { foreignKey: "id_personagem", as: "personagem" });
+
 module.exports = {};

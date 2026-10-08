@@ -5,6 +5,7 @@ const Risk = require("../models/AutomationRiskState");
 const Event = require("../models/AutomationEvent");
 const Challenge = require("../models/AutomationChallenge");
 const Setting = require("../models/GameSetting");
+const Character = require("../models/Character");
 const { registrarAcao } = require("../services/adminAuditService");
 const {
   policy,
@@ -33,6 +34,7 @@ router.get(
     if (req.query.status) where.status = String(req.query.status).slice(0, 40);
     const states = await Risk.findAndCountAll({
       where,
+      include: [{ model: Character, as: "personagem", attributes: ["nome"] }],
       order: [
         ["score", "DESC"],
         ["id_personagem", "ASC"],
@@ -109,7 +111,9 @@ router.get(
         statusCode: 400,
       });
     return {
-      state: await Risk.findByPk(id),
+      state: await Risk.findByPk(id, {
+        include: [{ model: Character, as: "personagem", attributes: ["nome"] }],
+      }),
       events: await Event.findAll({
         where: { id_personagem: id },
         order: [

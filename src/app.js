@@ -285,6 +285,7 @@ app.use("/api/inventory", inventoryV2Routes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/pvp", pvpRoutes);
 app.use("/api/guilds", guildRoutes);
+app.use("/api/events", require("./routes/eventPuzzleRoutes"));
 app.use("/api/evolutions", evolutionRoutes);
 app.use("/api/market", marketRoutes);
 app.use("/api/player-shops", playerShopRoutes);
@@ -341,6 +342,7 @@ app.use("/api/admin/inventory", adminInventoryRoutes);
 app.use("/api/admin/market", adminMarketRoutes);
 app.use("/api/admin/player-shops", adminPlayerShopRoutes);
 app.use("/api/admin/music", adminMusicRoutes);
+app.use("/api/admin/event-puzzles", require("./routes/adminEventPuzzleRoutes"));
 // Pública de propósito (sem authMiddleware) — snapshot de config e
 // streaming de áudio de música precisam carregar em qualquer tela do
 // jogo, sem token de admin (§11.1).
