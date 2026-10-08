@@ -10,9 +10,12 @@ router.use(authMiddleware, carregarPersonagemAtual);
 
 router.get("/status", templeController.obterStatus);
 router.get("/missions", templeController.listarMissoes);
+router.get("/relicary", templeController.obterRelicario);
+router.get("/relicary/history", templeController.listarHistoricoRelicario);
 
 router.use(automation);
 router.post("/missions/:key/deliver", templeController.entregarItem);
 router.post("/missions/:key/claim", templeController.reclamarRecompensa);
+router.post("/relicary/draw", templeController.sortearRelicario);
 
 module.exports = router;

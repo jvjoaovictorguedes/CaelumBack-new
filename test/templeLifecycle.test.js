@@ -10,6 +10,8 @@ require("../src/models/associations");
 const Item = require("../src/models/Item");
 const TempleEvent = require("../src/models/TempleEvent");
 const TempleMission = require("../src/models/TempleMission");
+const TempleRewardPool = require("../src/models/TempleRewardPool");
+const TempleRewardEntry = require("../src/models/TempleRewardEntry");
 const CharacterInventory = require("../src/models/CharacterInventory");
 const templeLifecycleService = require("../src/services/templeLifecycleService");
 const templeScheduler = require("../src/services/templeScheduler");
@@ -100,6 +102,57 @@ testeComBanco("promoverEstados: SCHEDULED com starts_at no passado vira ACTIVE e
   assert.equal(evento.config_snapshot.missions[0].key, "rito_teste");
   assert.equal(evento.config_snapshot.schema_version, templeLifecycleService.SNAPSHOT_SCHEMA_VERSION);
 });
+
+testeComBanco(
+  "promoverEstados: ativar congela o pool/entries ativos do Relicário em config_snapshot.relicary",
+  async () => {
+    const evento = await criarEvento({ starts_at: new Date(Date.now() - 1000) });
+    const itemRecompensa = await Item.create({
+      nome: `Item Relicário ${sufixo()}`,
+      descricao: "Item de teste do Relicário",
+      tipo_item: "Material",
+      raridade: "Comum",
+      disponivel_loja: false,
+      negociavel_mercado: false,
+    });
+    itensCriados.push(itemRecompensa.id);
+    const pool = await TempleRewardPool.create({
+      id_event: evento.id,
+      nome: "Pool de teste",
+      custo_sigilos_draw: 4,
+      pity_raro_mais_garantia: 50,
+    });
+    await TempleRewardEntry.create({
+      id_pool: pool.id,
+      key: "entrada_teste",
+      reward_kind: "STACKABLE_ITEM",
+      id_item: itemRecompensa.id,
+      quantidade: 2,
+      weight: 1,
+      nome_exibicao: "Entrada de teste",
+    });
+    // Entry inativa nunca deve ir pro snapshot — só o Admin "ativo"
+    // representa a configuração vigente do pool.
+    await TempleRewardEntry.create({
+      id_pool: pool.id,
+      key: "entrada_inativa",
+      reward_kind: "STACKABLE_ITEM",
+      id_item: itemRecompensa.id,
+      weight: 1,
+      nome_exibicao: "Entrada inativa",
+      ativo: false,
+    });
+
+    await sequelize.transaction((t) => templeLifecycleService.promoverEstados(t));
+
+    await evento.reload();
+    assert.ok(evento.config_snapshot.relicary, "relicary deve ser congelado quando existe um pool ativo com entries");
+    assert.equal(evento.config_snapshot.relicary.custo_sigilos_draw, 4);
+    assert.equal(evento.config_snapshot.relicary.pity_raro_mais_garantia, 50);
+    assert.equal(evento.config_snapshot.relicary.entries.length, 1, "entry inativa não deve entrar no snapshot");
+    assert.equal(evento.config_snapshot.relicary.entries[0].key, "entrada_teste");
+  },
+);
 
 testeComBanco("promoverEstados: SCHEDULED com starts_at no futuro NÃO ativa", async () => {
   const evento = await criarEvento({ starts_at: new Date(Date.now() + 86_400_000) });

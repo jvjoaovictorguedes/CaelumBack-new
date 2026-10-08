@@ -8,6 +8,8 @@
 // segurança").
 const TempleEvent = require("../models/TempleEvent");
 const TempleMission = require("../models/TempleMission");
+const TempleRewardPool = require("../models/TempleRewardPool");
+const TempleRewardEntry = require("../models/TempleRewardEntry");
 const { EVENT_STATUS } = require("../config/templeConfig");
 
 // §12.2 — versão do formato do snapshot, só pra diagnóstico/telemetria
@@ -29,12 +31,49 @@ async function existeEventoAberto(transaction) {
 // §12.2 — freeze congelado na ativação. Editar o catálogo (TempleMission/
 // TempleRewardPool/TempleBossConfig) depois NUNCA muda uma Convergência
 // já em andamento — o runtime do evento lê só isto.
+async function montarSnapshotRelicario(evento, transaction) {
+  const pool = await TempleRewardPool.findOne({
+    where: { id_event: evento.id, ativo: true },
+    transaction,
+  });
+  if (!pool) return null;
+
+  const entradas = await TempleRewardEntry.findAll({
+    where: { id_pool: pool.id, ativo: true },
+    order: [["ordem", "ASC"]],
+    transaction,
+  });
+  if (entradas.length === 0) return null;
+
+  return {
+    pool_id: pool.id,
+    nome: pool.nome,
+    custo_sigilos_draw: pool.custo_sigilos_draw,
+    pity_raro_mais_garantia: pool.pity_raro_mais_garantia,
+    pity_featured_garantia: pool.pity_featured_garantia,
+    entries: entradas.map((entrada) => ({
+      key: entrada.key,
+      reward_kind: entrada.reward_kind,
+      id_item: entrada.id_item,
+      quantidade: entrada.quantidade,
+      raridade_instancia: entrada.raridade_instancia,
+      weight: entrada.weight,
+      eh_raro_mais: entrada.eh_raro_mais,
+      eh_featured: entrada.eh_featured,
+      eh_unico: entrada.eh_unico,
+      fallback_key: entrada.fallback_key,
+      nome_exibicao: entrada.nome_exibicao,
+    })),
+  };
+}
+
 async function montarSnapshot(evento, transaction) {
   const missoes = await TempleMission.findAll({
     where: { id_event: evento.id, ativo: true },
     order: [["ordem", "ASC"]],
     transaction,
   });
+  const relicary = await montarSnapshotRelicario(evento, transaction);
 
   return {
     schema_version: SNAPSHOT_SCHEMA_VERSION,
@@ -54,10 +93,11 @@ async function montarSnapshot(evento, transaction) {
       descricao: missao.descricao,
       ordem: missao.ordem,
     })),
-    // Relicário (Fase 4) e Guardião (Fase 5) preenchem estas chaves no
-    // mesmo snapshot quando a respectiva Fase existir — null até lá,
-    // nunca um objeto parcialmente preenchido que pareça pronto.
-    relicary: null,
+    // §12.2 — relicary agora congela o pool/entries ativos do evento no
+    // momento da ativação (null se o Admin não montou nenhum pool, ou
+    // montou um sem entries — nunca um objeto "pronto" pela metade).
+    // Guardião (Fase 5) preenche esta chave quando a Fase existir.
+    relicary,
     boss: null,
   };
 }

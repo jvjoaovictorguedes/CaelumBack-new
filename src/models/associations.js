@@ -778,6 +778,11 @@ const TempleEvent = require("./TempleEvent");
 const TempleMission = require("./TempleMission");
 const CharacterTempleMissionProgress = require("./CharacterTempleMissionProgress");
 const CharacterTempleProgress = require("./CharacterTempleProgress");
+const TempleRewardPool = require("./TempleRewardPool");
+const TempleRewardEntry = require("./TempleRewardEntry");
+const CharacterTempleDrawState = require("./CharacterTempleDrawState");
+const TempleDrawBatch = require("./TempleDrawBatch");
+const TempleDrawHistory = require("./TempleDrawHistory");
 
 TempleEvent.belongsTo(Item, { foreignKey: "id_currency_item", as: "moeda" });
 
@@ -793,5 +798,23 @@ TempleEvent.hasMany(CharacterTempleProgress, { foreignKey: "id_event", as: "prog
 CharacterTempleProgress.belongsTo(TempleEvent, { foreignKey: "id_event" });
 Character.hasMany(CharacterTempleProgress, { foreignKey: "character_id" });
 CharacterTempleProgress.belongsTo(Character, { foreignKey: "character_id" });
+
+TempleEvent.hasMany(TempleRewardPool, { foreignKey: "id_event", as: "relicarioPools" });
+TempleRewardPool.belongsTo(TempleEvent, { foreignKey: "id_event" });
+TempleRewardPool.hasMany(TempleRewardEntry, { foreignKey: "id_pool", as: "entradas" });
+TempleRewardEntry.belongsTo(TempleRewardPool, { foreignKey: "id_pool", as: "pool" });
+TempleRewardEntry.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+
+Character.hasOne(CharacterTempleDrawState, { foreignKey: "character_id" });
+CharacterTempleDrawState.belongsTo(Character, { foreignKey: "character_id" });
+
+TempleEvent.hasMany(TempleDrawBatch, { foreignKey: "id_event" });
+TempleDrawBatch.belongsTo(TempleEvent, { foreignKey: "id_event" });
+Character.hasMany(TempleDrawBatch, { foreignKey: "character_id" });
+TempleDrawBatch.belongsTo(Character, { foreignKey: "character_id" });
+TempleDrawBatch.hasMany(TempleDrawHistory, { foreignKey: "id_batch", as: "draws" });
+TempleDrawHistory.belongsTo(TempleDrawBatch, { foreignKey: "id_batch" });
+Character.hasMany(TempleDrawHistory, { foreignKey: "character_id" });
+TempleDrawHistory.belongsTo(Character, { foreignKey: "character_id" });
 
 module.exports = {};
