@@ -60,7 +60,7 @@ test.after(async () => {
 });
 
 // --------------------------------------------------------- BALANCEAMENTO
-testeComBanco("balanceamento: getBalanceamentoCompleto devolve os 5 grupos com atual+padrao", async () => {
+testeComBanco("balanceamento: getBalanceamentoCompleto devolve todos os grupos com atual+padrao", async () => {
   const tudo = await guildSettingsService.getBalanceamentoCompleto();
   for (const grupo of guildSettingsService.GRUPOS) {
     assert.ok(tudo[grupo], `grupo ${grupo} ausente`);

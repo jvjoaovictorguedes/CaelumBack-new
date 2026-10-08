@@ -28,6 +28,15 @@ const { emitParaGuild } = require("../socket/guildSocket");
 
 const CATEGORIAS = ["Diaria", "Semanal", "Mensal", "Rank"];
 
+// Contribuição V2 §15 — mapeia a categoria da missão pro source_type do
+// ledger GuildContributionEvent.
+const SOURCE_TYPE_POR_CATEGORIA = {
+  Diaria: "MISSION_DAILY",
+  Semanal: "MISSION_WEEKLY",
+  Mensal: "MISSION_MONTHLY",
+  Rank: "MISSION_RANK",
+};
+
 function cicloInicioDaCategoria(categoria, agora = new Date()) {
   if (categoria === "Semanal") return new Date(inicioDoCicloSemanal(agora));
   if (categoria === "Mensal") return new Date(inicioDoCicloMensal(agora));
@@ -156,7 +165,10 @@ async function registrarProgressoMissaoGuilda(character, tipo, quantidade, trans
 
       await concederExperiencia(guild, ciclo.missao.xp_guilda);
       guild.experiencia_total_ganha = Number(guild.experiencia_total_ganha) + ciclo.missao.xp_guilda;
-      await pontuarContribuicao(guild.id, character.id, ciclo.missao.pontos_contribuicao, transaction);
+      await pontuarContribuicao(guild.id, character.id, ciclo.missao.pontos_contribuicao, transaction, {
+        sourceType: SOURCE_TYPE_POR_CATEGORIA[categoria],
+        sourceId: ciclo.id,
+      });
 
       if (categoria === "Rank") {
         guild.missoes_rank_concluidas_no_rank_atual += 1;

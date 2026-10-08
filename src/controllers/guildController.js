@@ -11,8 +11,9 @@ const GuildContribution = require("../models/GuildContribution");
 const GuildMuralMessage = require("../models/GuildMuralMessage");
 const Character = require("../models/Character");
 const { temPermissao, podeGerenciarCargo, PADRAO, HIERARQUIA } = require("../services/guildPermissionService");
-const { pontuarContribuicao, pontosPorDoacao } = require("../services/guildContributionService");
+const { pontuarContribuicao, pontosPorDoacao, pontosDoacaoDisponiveisNaSemana } = require("../services/guildContributionService");
 const { registrarProgressoMissaoGuilda } = require("../services/guildMissionService");
+const { possuiItensNoTesouro } = require("../services/guildTreasuryService");
 const { emitParaGuild, removerDaSalaDeGuild } = require("../socket/guildSocket");
 const achievementService = require("../services/achievementService");
 
@@ -340,6 +341,11 @@ exports.dissolver = async (req, res) => {
       if (!guild) throw erro("Guilda não encontrada.", 404);
       if (guild.id_lider !== Number(idResponsavel)) {
         throw erro("Só o líder pode dissolver a guilda.", 403);
+      }
+      // Tesouro V2 §10/§26 — V1 recomendada: qualquer item no Armazém
+      // (stack ou equipamento) bloqueia a dissolução com 409.
+      if (await possuiItensNoTesouro(guild.id, transaction)) {
+        throw erro("Retire todos os itens do Tesouro da guilda antes de dissolvê-la.", 409);
       }
       await GuildMember.destroy({ where: { id_guild: guild.id }, transaction });
       guild.status = "Encerrada";
@@ -847,8 +853,17 @@ exports.doar = async (req, res) => {
       contribuicao.ouro_doado_total += valorNumerico;
       await contribuicao.save({ transaction });
 
-      // §43/§44 — contribuição normalizada, não o Gold cru.
-      await pontuarContribuicao(guild.id, idPersonagem, pontosPorDoacao(valorNumerico), transaction);
+      // §43/§44 — contribuição normalizada, não o Gold cru. Tesouro V2
+      // §17.1 — teto SEMANAL de pontos vindos de doação: o ouro em si
+      // (dinheiro/tesouro/ouro_doado_total acima) já foi creditado
+      // integralmente logo acima, sem limite nenhum; só os PONTOS de
+      // contribuição extra da semana que podem ficar zerados.
+      const pontosBase = pontosPorDoacao(valorNumerico);
+      const pontosDisponiveis = await pontosDoacaoDisponiveisNaSemana(guild.id, idPersonagem, transaction);
+      await pontuarContribuicao(guild.id, idPersonagem, Math.min(pontosBase, pontosDisponiveis), transaction, {
+        sourceType: "GOLD_DONATION",
+        metadata: { valor_ouro: valorNumerico },
+      });
 
       // As missões de categoria "GanharOuro" (ex: "Cofre Inicial: Junte
       // ouro pela Guilda") são literalmente sobre financiar a guilda —
@@ -903,20 +918,6 @@ exports.extratoTesouro = async (req, res) => {
     return res.status(200).json({ status: "success", data: { transacoes } });
   } catch (error) {
     console.error("Erro ao buscar extrato do tesouro:", error);
-    return res.status(500).json({ message: "Erro interno do servidor." });
-  }
-};
-
-exports.listarContribuicoes = async (req, res) => {
-  try {
-    const contribuicoes = await GuildContribution.findAll({
-      where: { id_guild: req.params.id },
-      include: [{ model: Character, attributes: ["id", "nome", "nivel"] }],
-      order: [["contribuicao_total", "DESC"]],
-    });
-    return res.status(200).json({ status: "success", data: { contribuicoes } });
-  } catch (error) {
-    console.error("Erro ao listar contribuições:", error);
     return res.status(500).json({ message: "Erro interno do servidor." });
   }
 };

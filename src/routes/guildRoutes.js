@@ -6,6 +6,8 @@ const guildMissionController = require("../controllers/guildMissionController");
 const guildBenefitController = require("../controllers/guildBenefitController");
 const guildMuralController = require("../controllers/guildMuralController");
 const guildEmblemController = require("../controllers/guildEmblemController");
+const guildTreasuryController = require("../controllers/guildTreasuryController");
+const guildContributionController = require("../controllers/guildContributionController");
 const authMiddleware = require("../middlewares/authMiddleware");
 const { carregarPersonagemAtual } = require("../middlewares/currentCharacterMiddleware");
 const { exigirMembroDaGuild } = require("../middlewares/guildMembershipMiddleware");
@@ -139,12 +141,66 @@ router.get(
   exigirMembroDaGuild("id"),
   guildController.extratoTesouro,
 );
+// Contribuição V2 (§11) — ranking por período + detalhe de membro
+// (GuildContributionTab.tsx consome só isto; a rota antiga não-
+// periodizada foi removida junto com listarContribuicoes, sem consumidor
+// desde a evolução do frontend). A rota literal "/period/:period"
+// precisa vir ANTES da dinâmica "/:characterId" pra não ser engolida
+// por ela.
 router.get(
-  "/:id/contributions",
+  "/:id/contributions/period/:period",
   authMiddleware,
   carregarPersonagemAtual,
   exigirMembroDaGuild("id"),
-  guildController.listarContribuicoes,
+  guildContributionController.listarPorPeriodo,
+);
+router.get(
+  "/:id/contributions/:characterId",
+  authMiddleware,
+  carregarPersonagemAtual,
+  exigirMembroDaGuild("id"),
+  guildContributionController.detalharMembro,
+);
+
+// Tesouro V2 — Armazém de itens/equipamentos (guildTreasuryService.js),
+// separado do Tesouro de ouro (extratoTesouro acima, inalterado).
+router.get(
+  "/:id/treasury/items",
+  authMiddleware,
+  carregarPersonagemAtual,
+  exigirMembroDaGuild("id"),
+  guildTreasuryController.resumo,
+);
+router.post(
+  "/:id/treasury/items/deposit",
+  authMiddleware,
+  carregarPersonagemAtual,
+  guildTreasuryController.depositarItem,
+);
+router.post(
+  "/:id/treasury/items/withdraw",
+  authMiddleware,
+  carregarPersonagemAtual,
+  guildTreasuryController.retirarItem,
+);
+router.post(
+  "/:id/treasury/equipment/deposit",
+  authMiddleware,
+  carregarPersonagemAtual,
+  guildTreasuryController.depositarEquipamento,
+);
+router.post(
+  "/:id/treasury/equipment/:instanceId/withdraw",
+  authMiddleware,
+  carregarPersonagemAtual,
+  guildTreasuryController.retirarEquipamento,
+);
+router.get(
+  "/:id/treasury/item-transactions",
+  authMiddleware,
+  carregarPersonagemAtual,
+  exigirMembroDaGuild("id"),
+  guildTreasuryController.historico,
 );
 
 // Boss da Guilda (guildBossController.js/guildBossService.js) — só

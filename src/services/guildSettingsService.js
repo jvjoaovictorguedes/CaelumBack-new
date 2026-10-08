@@ -9,7 +9,7 @@ const guildConfig = require("../config/guildConfig");
 const gameSettingCache = require("./gameSettingCache");
 const { registrarAcao } = require("./adminAuditService");
 
-const GRUPOS = ["guild.ranks", "guild.carencia", "guild.buffs", "guild.contribuicao", "guild.boss"];
+const GRUPOS = ["guild.ranks", "guild.carencia", "guild.buffs", "guild.contribuicao", "guild.boss", "guild.tesouro"];
 
 function erro(mensagem, statusCode = 400) {
   const e = new Error(mensagem);
@@ -37,6 +37,9 @@ const DEFAULTS_ORIGINAIS = {
     BOSS_AO_VIVO_FATOR_ESCALADA_DANO: guildConfig.BOSS_AO_VIVO_FATOR_ESCALADA_DANO,
     BOSS_AO_VIVO_MAX_RODADAS: guildConfig.BOSS_AO_VIVO_MAX_RODADAS,
     BOSS_AO_VIVO_TELEGRAPH_MS: guildConfig.BOSS_AO_VIVO_TELEGRAPH_MS,
+  },
+  "guild.tesouro": {
+    CAPACIDADE_TESOURO_POR_NIVEL: { ...guildConfig.CAPACIDADE_TESOURO_POR_NIVEL },
   },
 };
 
@@ -80,6 +83,8 @@ function getSnapshotAtual(grupo) {
         BOSS_AO_VIVO_MAX_RODADAS: guildConfig.BOSS_AO_VIVO_MAX_RODADAS,
         BOSS_AO_VIVO_TELEGRAPH_MS: guildConfig.BOSS_AO_VIVO_TELEGRAPH_MS,
       };
+    case "guild.tesouro":
+      return { CAPACIDADE_TESOURO_POR_NIVEL: { ...guildConfig.CAPACIDADE_TESOURO_POR_NIVEL } };
     default:
       throw erro(`Grupo de balanceamento desconhecido: ${grupo}.`);
   }
@@ -205,6 +210,28 @@ function validarGrupo(grupo, valores) {
       // errado travaria o turno do chefe por minutos sem aviso nenhum.
       if (valores.BOSS_AO_VIVO_TELEGRAPH_MS > 15_000) {
         throw erro("BOSS_AO_VIVO_TELEGRAPH_MS não pode passar de 15000 (15 segundos).");
+      }
+    }
+    return;
+  }
+
+  if (grupo === "guild.tesouro") {
+    if (valores.CAPACIDADE_TESOURO_POR_NIVEL) {
+      const marcos = Object.entries(valores.CAPACIDADE_TESOURO_POR_NIVEL);
+      if (marcos.length === 0) throw erro("CAPACIDADE_TESOURO_POR_NIVEL precisa ter ao menos um marco.");
+      let capacidadeAnterior = -Infinity;
+      for (const [nivel, capacidade] of marcos.sort(([a], [b]) => Number(a) - Number(b))) {
+        const nivelNum = Number(nivel);
+        if (!Number.isInteger(nivelNum) || nivelNum < 1) {
+          throw erro(`Nível de marco inválido em CAPACIDADE_TESOURO_POR_NIVEL: ${nivel}.`);
+        }
+        validarInteiroPositivo(`CAPACIDADE_TESOURO_POR_NIVEL[${nivel}]`, capacidade);
+        // Degrau nunca pode CAIR com o nível (capacidadeTesouroEfetiva
+        // assume marcos crescentes, guildConfig.js).
+        if (capacidade < capacidadeAnterior) {
+          throw erro("CAPACIDADE_TESOURO_POR_NIVEL precisa crescer (ou manter) conforme o nível sobe.");
+        }
+        capacidadeAnterior = capacidade;
       }
     }
     return;
