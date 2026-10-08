@@ -26,5 +26,11 @@
     "dependsOn": [
       "20270206010004-combat-typing-initial-content.js"
     ]
+  },
+  "20270206010006-discord-news.js": {
+    "createdAt": "2026-10-08T19:25:02.927Z",
+    "dependsOn": [
+      "20270206010005-world-crisis-reconstruction.js"
+    ]
   }
 }

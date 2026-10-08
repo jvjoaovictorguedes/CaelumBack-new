@@ -220,6 +220,8 @@ app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 // Limite de tamanho do corpo da requisição — sem isso, um payload JSON
 // gigante (de propósito ou por bug) era aceito e processado inteiro
 // antes de qualquer validação de rota rodar.
+// Discord verifies the original bytes before the global JSON parser.
+app.use("/api/discord", require("./routes/discordInteractionRoutes"));
 app.use(express.json({ limit: "100kb" }));
 app.use(cors(corsOptions));
 
@@ -303,6 +305,7 @@ app.use("/api/admin/admins", adminRoleRoutes);
 app.use("/api/admin/users", adminUserRoutes);
 app.use("/api/admin/referrals", adminReferralRoutes);
 app.use("/api/admin/patch-notes", adminPatchNoteRoutes);
+app.use("/api/admin/discord-news", require("./routes/adminDiscordNewsRoutes"));
 app.use("/api/admin/settings", adminGameSettingRoutes);
 app.use("/api/admin/adventure", adminAdventureRoutes);
 app.use("/api/admin/equipment-sets", adminEquipmentSetRoutes);
@@ -400,6 +403,7 @@ registerWorldBossHandlers(io);
 registerUniqueFeatHandlers(io);
 registerGlobalChatHandlers(io);
 require("./services/worldBossScheduler").iniciar();
+require("./discord/worker").start();
 // Ideia #1 da fila de melhorias — Torneio da Pesca fecha sozinho
 // (vencedor registrado + ativo:false) quando termina_em passa, nunca
 // mais exigindo o admin desativar na mão.

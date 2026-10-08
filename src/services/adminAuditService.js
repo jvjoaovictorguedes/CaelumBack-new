@@ -16,7 +16,15 @@ async function registrarAcao({
   req = null,
   transaction,
 }) {
-  return AdminActionLog.create(
+  if (!transaction) {
+    return require("../config/database").sequelize.transaction(transaction =>
+      registrarAcao({
+        idAdmin, acao, entidade, idEntidade, dadosAntes, dadosDepois,
+        motivo, req, transaction,
+      }),
+    );
+  }
+  const log = await AdminActionLog.create(
     {
       id_admin: idAdmin,
       acao,
@@ -30,6 +38,8 @@ async function registrarAcao({
     },
     { transaction },
   );
+  await require("./discordNewsService").captureAudit(log, transaction);
+  return log;
 }
 
 async function listarAcoes({ pagina = 1, porPagina = 20, idAdmin, entidade, acao } = {}) {

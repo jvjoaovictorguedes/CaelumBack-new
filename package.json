@@ -17,7 +17,8 @@
     "audit:economy": "node scripts/audit-economy-writes.js",
     "audit:migrations": "node scripts/audit-migrations.js",
     "migration:new": "node scripts/create-migration.js",
-    "migrate:test": "node scripts/migrate-test-database.js"
+    "migrate:test": "node scripts/migrate-test-database.js",
+    "discord:register": "node scripts/register-discord-commands.js"
   },
   "keywords": [],
   "author": "",
