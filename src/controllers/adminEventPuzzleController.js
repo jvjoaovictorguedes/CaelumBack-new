@@ -7,6 +7,7 @@ const eventDefinitionService = require("../services/eventDefinitionService");
 const eventEditionService = require("../services/eventEditionService");
 const puzzleBlueprintService = require("../services/puzzleBlueprintService");
 const puzzleClueService = require("../services/puzzleClueService");
+const puzzlePioneerService = require("../services/puzzlePioneerService");
 const { registrarAcao } = require("../services/adminAuditService");
 
 function tratarErro(res, error, mensagemLog) {
@@ -241,6 +242,37 @@ exports.criarPista = async (req, res) => {
     return res.status(201).json({ status: "success", data: puzzleClueService.dtoAdmin(resultado) });
   } catch (error) {
     tratarErro(res, error, "Erro ao criar pista:");
+  }
+};
+
+// ------------------------------------------- PuzzlePioneerMilestone (Fase 10)
+exports.listarMarcos = async (req, res) => {
+  try {
+    const marcos = await puzzlePioneerService.listarMilestonesAdmin(req.params.id);
+    return res.json({ status: "success", data: marcos.map(puzzlePioneerService.dtoAdmin) });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao listar marcos Pioneer:");
+  }
+};
+
+exports.criarMarco = async (req, res) => {
+  try {
+    const resultado = await sequelize.transaction(async (transaction) => {
+      const marco = await puzzlePioneerService.criarMilestone(req.params.id, req.body, transaction);
+      await registrarAcao({
+        idAdmin: req.user.id,
+        acao: "criar",
+        entidade: "PuzzlePioneerMilestone",
+        idEntidade: marco.id,
+        dadosDepois: marco.toJSON(),
+        req,
+        transaction,
+      });
+      return marco;
+    });
+    return res.status(201).json({ status: "success", data: puzzlePioneerService.dtoAdmin(resultado) });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao criar marco Pioneer:");
   }
 };
 

@@ -16,6 +16,7 @@ const engine = require("./puzzleEngineCore");
 const { resolverContexto } = require("./puzzleDomainRegistry");
 const puzzleInstanceService = require("./puzzleInstanceService");
 const puzzleClueService = require("./puzzleClueService");
+const puzzlePioneerService = require("./puzzlePioneerService");
 
 function erro(mensagem, statusCode = 400, code) {
   return Object.assign(new Error(mensagem), { statusCode, code });
@@ -92,7 +93,19 @@ async function executarAcao(idInstance, idPersonagem, acao, expectedStateVersion
     completou: instanciaAtualizada.status === "COMPLETED",
   });
 
-  return { instancia: instanciaAtualizada, resultado, pistasDesbloqueadas };
+  // Fase 10 — mesmo contrato de entrada/timing da sincronização de
+  // pistas acima (sempre depois da persistência, nunca antes). Rodam em
+  // 2 passos separados de propósito: uma falha/corrida num marco
+  // Pioneer nunca pode impedir o desbloqueio de uma pista, e vice-versa
+  // — são sistemas independentes reagindo ao MESMO state persistido.
+  const conquistasPioneiras = await puzzlePioneerService.sincronizarConquistas({
+    idPersonagem,
+    idBlueprint,
+    objetivosConcluidos: instanciaAtualizada.state.objetivosConcluidos,
+    completou: instanciaAtualizada.status === "COMPLETED",
+  });
+
+  return { instancia: instanciaAtualizada, resultado, pistasDesbloqueadas, conquistasPioneiras };
 }
 
 module.exports = { executarAcao };

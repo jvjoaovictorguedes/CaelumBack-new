@@ -25,13 +25,14 @@ let ioRegistrado = null;
 // Chamado pelo controller logo depois de uma ação HTTP bem-sucedida —
 // nunca o inverso (o socket nunca decide nem calcula nada, só repassa
 // o que o controller/service já persistiu). `pistasDesbloqueadas`
-// (Fase 9) é opcional — SOLO hoje não tem "outro espectador" pra ver
-// isso em tempo real, mas o payload já carrega pronto pra quando
-// MEMBER/co-op existir, sem precisar de uma 2ª forma de emitir.
-function emitirAtualizacaoDeInstancia(idInstance, dtoRuntime, eventos, pistasDesbloqueadas = []) {
+// (Fase 9) e `conquistasPioneiras` (Fase 10) são opcionais — SOLO hoje
+// não tem "outro espectador" pra ver isso em tempo real, mas o payload
+// já carrega pronto pra quando MEMBER/co-op existir, sem precisar de
+// uma 2ª forma de emitir.
+function emitirAtualizacaoDeInstancia(idInstance, dtoRuntime, eventos, pistasDesbloqueadas = [], conquistasPioneiras = []) {
   ioRegistrado
     ?.to(salaDaInstancia(idInstance))
-    .emit(SOCKET_EVENTS.EVENTPUZZLE.ESTADO, { instancia: dtoRuntime, eventos, pistasDesbloqueadas });
+    .emit(SOCKET_EVENTS.EVENTPUZZLE.ESTADO, { instancia: dtoRuntime, eventos, pistasDesbloqueadas, conquistasPioneiras });
 }
 
 module.exports = function registerEventPuzzleHandlers(io) {

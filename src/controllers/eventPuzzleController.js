@@ -73,7 +73,7 @@ exports.executarAcao = async (req, res) => {
       ...(req.body.componentId !== undefined ? { componentId: req.body.componentId } : {}),
       ...(req.body.payload !== undefined ? { payload: req.body.payload } : {}),
     };
-    const { instancia, resultado, pistasDesbloqueadas } = await puzzleActionService.executarAcao(
+    const { instancia, resultado, pistasDesbloqueadas, conquistasPioneiras } = await puzzleActionService.executarAcao(
       req.params.id,
       req.personagemAtual.id,
       acao,
@@ -84,13 +84,22 @@ exports.executarAcao = async (req, res) => {
     // trigger_type, que são detalhe interno de catálogo, não conteúdo
     // pro jogador).
     const pistasDto = pistasDesbloqueadas.map((p) => ({ id: p.id, titulo: p.titulo, texto: p.texto }));
+    // Fase 10 — feedback de "você acabou de virar Pioneiro disto" pro
+    // próprio jogador que conquistou; `.marco` foi anexado por
+    // puzzlePioneerService.sincronizarConquistas só pra isto (nunca
+    // persistido na linha do claim).
+    const conquistasDto = conquistasPioneiras.map((c) => ({
+      posicao: c.posicao,
+      titulo: c.marco.titulo,
+      descricao: c.marco.descricao,
+    }));
     // Socket.IO só como transporte/feedback pra quem mais estiver
     // olhando essa instância — nunca a autoridade (já persistido acima
     // via aplicarMutacao antes desta linha rodar).
-    emitirAtualizacaoDeInstancia(instancia.id, dto, resultado.eventos, pistasDto);
+    emitirAtualizacaoDeInstancia(instancia.id, dto, resultado.eventos, pistasDto, conquistasDto);
     return res.json({
       status: "success",
-      data: { instancia: dto, eventos: resultado.eventos, pistasDesbloqueadas: pistasDto },
+      data: { instancia: dto, eventos: resultado.eventos, pistasDesbloqueadas: pistasDto, conquistasPioneiras: conquistasDto },
     });
   } catch (error) {
     tratarErro(res, error, "Erro ao executar ação de puzzle:");

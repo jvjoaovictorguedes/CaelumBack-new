@@ -863,6 +863,8 @@ const {
   PuzzleParticipant,
   PuzzleClueDefinition,
   CharacterClueUnlock,
+  PuzzlePioneerMilestone,
+  PuzzlePioneerClaim,
 } = require("./eventPuzzleModels");
 
 EventDefinition.hasMany(EventEdition, { foreignKey: "id_event_definition", as: "edicoes" });
@@ -893,6 +895,14 @@ PuzzleClueDefinition.belongsTo(PuzzleBlueprint, { foreignKey: "id_blueprint", as
 PuzzleClueDefinition.hasMany(CharacterClueUnlock, { foreignKey: "id_clue_definition", as: "desbloqueios" });
 CharacterClueUnlock.belongsTo(PuzzleClueDefinition, { foreignKey: "id_clue_definition", as: "pista" });
 CharacterClueUnlock.belongsTo(Character, { foreignKey: "id_personagem", as: "personagem" });
+
+// Fase 10 — Discovery/Pioneer. Mesma associação a nível de Blueprint
+// (identidade, nunca Version) das pistas.
+PuzzleBlueprint.hasMany(PuzzlePioneerMilestone, { foreignKey: "id_blueprint", as: "marcos" });
+PuzzlePioneerMilestone.belongsTo(PuzzleBlueprint, { foreignKey: "id_blueprint", as: "blueprint" });
+PuzzlePioneerMilestone.hasMany(PuzzlePioneerClaim, { foreignKey: "id_milestone", as: "conquistas" });
+PuzzlePioneerClaim.belongsTo(PuzzlePioneerMilestone, { foreignKey: "id_milestone", as: "marco" });
+PuzzlePioneerClaim.belongsTo(Character, { foreignKey: "id_personagem", as: "personagem" });
 
 // Anti-automação — o painel admin precisa identificar QUEM é o
 // personagem por trás de um id_personagem (nome, não só o número) sem

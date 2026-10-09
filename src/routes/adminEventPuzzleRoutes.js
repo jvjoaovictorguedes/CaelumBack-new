@@ -70,4 +70,8 @@ router.patch(
 router.get("/blueprints/:id/clues", requireAdminPermission("event_puzzle.view"), controller.listarPistas);
 router.post("/blueprints/:id/clues", requireAdminPermission("event_puzzle.manage"), controller.criarPista);
 
+// Fase 10 — Marcos Pioneer (uma por Blueprint, mesma permissão).
+router.get("/blueprints/:id/milestones", requireAdminPermission("event_puzzle.view"), controller.listarMarcos);
+router.post("/blueprints/:id/milestones", requireAdminPermission("event_puzzle.manage"), controller.criarMarco);
+
 module.exports = router;

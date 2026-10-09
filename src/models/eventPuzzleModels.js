@@ -207,6 +207,58 @@ const CharacterClueUnlock = sequelize.define(
   { tableName: "character_clue_unlocks", ...timestamps },
 );
 
+// Fase 10 — Discovery/Pioneer. Mesma separação catálogo-admin +
+// histórico da Fase 9, mas PuzzlePioneerClaim tem vaga LIMITADA
+// (max_claims no milestone) — a garantia de "nunca 2 jogadores ganham a
+// mesma posição" é UNIQUE(id_milestone, posicao) + lock de verdade em
+// puzzlePioneerService.sincronizarConquistas, nunca só a constraint.
+const PuzzlePioneerMilestone = sequelize.define(
+  "PuzzlePioneerMilestone",
+  {
+    id: { type: D.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
+    id_blueprint: {
+      type: D.INTEGER,
+      allowNull: false,
+      references: { model: "puzzle_blueprints", key: "id" },
+    },
+    key: { type: D.STRING(60), allowNull: false },
+    // Diferente de PuzzleClueDefinition: sempre público, mesmo antes de
+    // qualquer claim — Hall das Lendas (Fase 11) mostra "ainda não
+    // descoberto" como teaser.
+    titulo: { type: D.STRING(160), allowNull: false },
+    descricao: { type: D.TEXT, allowNull: false },
+    trigger_type: {
+      type: D.ENUM("OBJECTIVE_COMPLETED", "INSTANCE_COMPLETED"),
+      allowNull: false,
+    },
+    objective_id: { type: D.STRING(60), allowNull: true },
+    max_claims: { type: D.INTEGER, allowNull: false, defaultValue: 1 },
+    ordem: { type: D.INTEGER, allowNull: false, defaultValue: 0 },
+  },
+  { tableName: "puzzle_pioneer_milestones", ...timestamps },
+);
+
+const PuzzlePioneerClaim = sequelize.define(
+  "PuzzlePioneerClaim",
+  {
+    id: { type: D.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
+    id_milestone: {
+      type: D.INTEGER,
+      allowNull: false,
+      references: { model: "puzzle_pioneer_milestones", key: "id" },
+    },
+    id_personagem: {
+      type: D.INTEGER,
+      allowNull: true,
+      references: { model: "Characters", key: "id" },
+    },
+    personagem_nome_snapshot: { type: D.STRING(120), allowNull: false },
+    posicao: { type: D.INTEGER, allowNull: false },
+    claimed_at: { type: D.DATE, allowNull: false, defaultValue: D.NOW },
+  },
+  { tableName: "puzzle_pioneer_claims", ...timestamps },
+);
+
 module.exports = {
   EventDefinition,
   EventEdition,
@@ -216,4 +268,6 @@ module.exports = {
   PuzzleParticipant,
   PuzzleClueDefinition,
   CharacterClueUnlock,
+  PuzzlePioneerMilestone,
+  PuzzlePioneerClaim,
 };
