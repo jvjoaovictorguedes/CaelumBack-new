@@ -90,7 +90,7 @@ const REWARD_GRANT_STATUS = { PENDING: "Pending", GRANTED: "Granted", FAILED: "F
 // como fallback por gameSettingCache.obter antes de qualquer admin
 // salvar uma config (mesmo padrão de worldBossConfig/tavernConfig).
 const GAME_SETTINGS_DEFAULT = {
-  "temple.enabled": true,
+  "temple.enabled": false,
   // §9.2 — metas de calibração do Guardião: HP/EHP alvo do Boss ~=
   // player.dpr * target_turns_to_kill; dano alvo do Boss ~=
   // player.ehp / target_boss_actions_survivable. Defaults conservadores

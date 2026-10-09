@@ -29,6 +29,7 @@ async function getLibrary(characterId,entries,typing){
  const items=ids.length?await model('Item').findAll({where:{id:{[Op.in]:ids},ativo:true},order:[['nome','ASC']],raw:true}):[];
  const read=name=>ids.length?model(name).findAll({where:{id_item:{[Op.in]:ids}},raw:true}):[];
  const [weapons,armors,consumables,overrides,effects,weaponEffects]=await Promise.all(['WeaponProperties','ArmorProperties','ConsumableProperties','ItemRarityAttributeOverride','ConsumableEffect','WeaponStatusEffect'].map(read));
- return [...buildReferenceArticles({catalog,typingConfig:typing.config(),regions,fishingZones,boss:boss||{},crisis:crisis||{}}),...buildCraftingArticles({forge,alchemy:visibleAlchemy,legacy}),...buildItemArticles({items,weapons,armors,consumables,overrides,effects,weaponEffects,sources})];
+ const templeEnabled=await require("./templeReleaseService").enabled();
+ return [...buildReferenceArticles({catalog,typingConfig:typing.config(),regions,fishingZones,templeEnabled,boss:boss||{},crisis:crisis||{}}),...buildCraftingArticles({forge,alchemy:visibleAlchemy,legacy}),...buildItemArticles({items,weapons,armors,consumables,overrides,effects,weaponEffects,sources})];
 }
 module.exports={getLibrary};

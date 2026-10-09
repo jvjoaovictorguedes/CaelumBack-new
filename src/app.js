@@ -258,6 +258,7 @@ app.use("/api/alchemy", alchemyRoutes);
 app.use("/api/fishing", fishingRoutes);
 app.use("/api/tavern", tavernRoutes);
 app.use("/api/world-boss", worldBossRoutes);
+app.use("/api/admin/temple/release", require("./routes/adminTempleReleaseRoutes"));
 app.use("/api/temple", require("./routes/templeRoutes"));
 app.use("/api/world-crisis",require("./routes/worldCrisisRoutes"));
 app.use("/api/admin/world-crisis",require("./routes/adminWorldCrisisRoutes"));

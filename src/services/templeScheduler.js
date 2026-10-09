@@ -13,6 +13,7 @@ let intervalo = null;
 
 async function tick() {
   try {
+    if (!await require('./templeReleaseService').backgroundEnabled()) return;
     await sequelize.transaction((transaction) => templeLifecycleService.promoverEstados(transaction));
   } catch (error) {
     console.error("[templeScheduler] falha ao promover estado da Convergência:", error);

@@ -66,8 +66,8 @@ function sortearInterrupcaoDeMonstro() {
 // encontra uma Receita, junto com o resultado normal de recurso —
 // checado independentemente do sorteio de qualidade/recurso (ver
 // expeditionService.coletar), nunca no lugar dele.
-function sortearAchadoDeReceita() {
-  return crypto.randomInt(0, BASE_SORTEIO) < expeditionConfig.CHANCE_RECEITA_PPM;
+function sortearAchadoDeReceita(chancePpm = expeditionConfig.CHANCE_RECEITA_PPM) {
+  return crypto.randomInt(0, BASE_SORTEIO) < chancePpm;
 }
 
 // Escolha uniforme (sem peso) entre uma lista não vazia — usado pro

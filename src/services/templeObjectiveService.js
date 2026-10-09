@@ -144,6 +144,7 @@ async function verificarDesbloqueioDoBoss(evento, characterId, transaction) {
 // nenhuma missão compatível — a maioria dos eventos reais do jogo não
 // tem Convergência ativa alguma.
 async function registrarProgresso(characterId, objectiveType, contexto, transaction) {
+  if (!await require("./templeReleaseService").backgroundEnabled(transaction)) return [];
   const evento = await obterEventoAtivo(transaction);
   if (!evento) return [];
 
