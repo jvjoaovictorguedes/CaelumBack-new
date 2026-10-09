@@ -58,6 +58,14 @@ router.get("/powers/:id", async (req, res, next) => {
     if (!p || p.usage_scope === "MONSTER")
       return res.status(404).json({ message: "Power não encontrada." });
     const c = await typing.catalog();
+    // Rebalanceamento de Powers §30 — jogador precisa ver "pode causar
+    // Queimadura" etc. aqui também (até agora só o Admin via
+    // DetalhePower.tsx via); usa o mesmo STATUS.nomeUi central (nunca
+    // reescrito aqui) que statusCatalog()/combatEffectResolver usam.
+    const PowerStatusEffect = require("../models/PowerStatusEffect");
+    const { STATUS } = require("../config/statusEffectConfig");
+    const efeitosDeStatus = await PowerStatusEffect.findAll({ where: { id_power: id, ativo: true } });
+    const statusPossiveis = [...new Set(efeitosDeStatus.map((e) => STATUS[e.status_key]?.nomeUi ?? e.status_key))];
     res.json({
       status: "success",
       data: {
@@ -69,6 +77,7 @@ router.get("/powers/:id", async (req, res, next) => {
         imbueAffinity: typing.affinity(p.imbue_affinity_id),
         imbueDamagePct: Number(p.imbue_damage_pct),
         imbueDurationTurns: p.imbue_duration_turns,
+        statusPossiveis,
         familyBonuses: c.PowerFamilyBonus.filter((b) => b.power_id === id).map(
           (b) => ({
             family:

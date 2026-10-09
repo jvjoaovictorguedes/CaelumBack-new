@@ -467,4 +467,10 @@ module.exports = {
     // valores antigos (nunca o reseed destrutivo).
     throw new Error("[rebalanceamento-powers] down() não suportado — veja o comentário no topo do arquivo.");
   },
+
+  // Exportado só pra §33 (test/powerRebalanceCatalog.test.js) iterar o
+  // catálogo canônico inteiro (ex.: "nenhuma é Verdadeiro") sem duplicar
+  // esta lista de 76 Powers num segundo arquivo — nunca usado por
+  // sequelize-cli, que só chama up()/down().
+  POWERS,
 };
