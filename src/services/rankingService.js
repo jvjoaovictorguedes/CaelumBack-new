@@ -11,6 +11,7 @@ const CharacterForgeProgress = require("../models/CharacterForgeProgress");
 const PvpStatus = require("../models/PvpStatus");
 const { estaOnline } = require("../socket/pvpLiveSocket");
 const { obterOuIniciarTemporadaAtiva } = require("./rankedSeasonService");
+const rankedTierService = require("./rankedTierService");
 const { LEADERBOARD_MINIMO_PARTIDAS } = require("../config/rankedConfig");
 const { TAMANHO_PAGINA_PADRAO } = require("../config/rankingConfig");
 
@@ -309,6 +310,11 @@ async function rankingPvp(page) {
     id: linha.character_id,
     nome: linha.personagem?.nome ?? "???",
     pontuacao: linha.rating,
+    // Mesmo helper puro que rankedController.js já usa pro status/
+    // leaderboard da Arena — faltava aqui (bug real: toda linha do
+    // ranking global mostrava "Sem classificação" mesmo pra quem tem
+    // tier de verdade, porque tier/divisao nunca eram calculados).
+    ...rankedTierService.resumoTier(linha.rating),
     vitorias: linha.vitorias,
     derrotas: linha.derrotas,
     saldo: linha.vitorias - linha.derrotas,
@@ -369,6 +375,7 @@ async function posicaoPvp(idPersonagem) {
     elegivel: true,
     posicao: linhas[0].count + 1,
     pontuacao: participacao.rating,
+    ...rankedTierService.resumoTier(participacao.rating),
     vitorias: participacao.vitorias,
     derrotas: participacao.derrotas,
     saldo: participacao.vitorias - participacao.derrotas,
