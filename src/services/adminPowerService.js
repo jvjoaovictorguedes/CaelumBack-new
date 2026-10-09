@@ -74,6 +74,13 @@ const TRIGGERS_SUPORTADOS = ["BASIC_ATTACK_HIT"]; // único suportado pelo motor
 // habilidades dos monstros") — liberado aqui, mesmo padrão de
 // escala_atributo (campo editável comum, validado contra whitelist).
 const USAGE_SCOPES_VALIDOS = ["CHARACTER", "MONSTER", "BOTH"];
+// Rebalanceamento de Powers §3/§29 — TIPO DE DANO (multiplicador de
+// Classe/Defesa) nunca se confunde com AFINIDADE (matchup ofensivo,
+// resistência/fraqueza) nem com NATUREZA MÁGICA (identidade/Evolution,
+// tratada só em NatureAbilities, fora deste arquivo).
+const TIPOS_DANO_VALIDOS = ["Fisico", "Magico", "Verdadeiro", "Nenhum"];
+const AFFINITY_MODES_VALIDOS = ["INHERIT_WEAPON", "EXPLICIT", "NEUTRAL"];
+const ACQUISITION_SCOPES_VALIDOS = ["NORMAL", "UNIQUE_FEAT"];
 
 function validarStatusKey(chave) {
   if (!CHAVES_VALIDAS.includes(chave)) {
@@ -82,7 +89,61 @@ function validarStatusKey(chave) {
 }
 
 // ------------------------------------------------------------- CATÁLOGO
-const CAMPOS_POWER = ["nome", "descricao", "tipo_poder", "custo_mana", "dano_base", "cura_base", "cooldown", "escala_atributo", "valor_escala", "imagem_url", "usage_scope"];
+// Rebalanceamento de Powers §29 — antes deste campo-set, o Admin não
+// conseguia editar NENHUM dos campos de tipagem/afinidade (só existiam
+// via migration/seed direto no banco). Separados explicitamente, nunca
+// um "Elemento" genérico que misture afinidade com natureza mágica.
+const CAMPOS_POWER = [
+  "nome",
+  "descricao",
+  "tipo_poder",
+  "custo_mana",
+  "dano_base",
+  "cura_base",
+  "cooldown",
+  "escala_atributo",
+  "valor_escala",
+  "imagem_url",
+  "usage_scope",
+  "acquisition_scope",
+  "tipo_dano",
+  "affinity_mode",
+  "affinity_id",
+  "added_affinity_id",
+  "added_damage_pct",
+  "imbue_affinity_id",
+  "imbue_damage_pct",
+  "imbue_duration_turns",
+  "defensive_affinity_id",
+  "defensive_received_pct",
+  "defensive_duration_turns",
+];
+
+// Rebalanceamento de Powers §29 — invariantes de coerência checados no
+// estado FINAL (linha existente + payload já mesclados), nunca só no
+// delta: uma Power Ativa de personagem sem cooldown, uma Passiva com
+// Mana/cooldown, EXPLICIT sem affinity_id, ou Nenhum/Verdadeiro com
+// afinidade ofensiva são sempre inconsistentes, independente de qual
+// campo foi o último a mudar na tela do Admin.
+function validarInvariantesDePower(estadoFinal) {
+  const { tipo_poder, usage_scope, cooldown, custo_mana, affinity_mode, affinity_id, added_affinity_id, tipo_dano } = estadoFinal;
+
+  if (tipo_poder === "Ativo" && ["CHARACTER", "BOTH"].includes(usage_scope)) {
+    if (cooldown == null || !Number.isInteger(cooldown) || cooldown < 1) {
+      throw erro("Power Ativa de personagem (usage_scope CHARACTER/BOTH) precisa de cooldown inteiro >= 1.");
+    }
+  }
+  if (tipo_poder === "Passivo") {
+    if (custo_mana !== 0) throw erro("Power Passiva precisa ter custo_mana = 0.");
+    if (cooldown !== 0) throw erro("Power Passiva precisa ter cooldown = 0.");
+  }
+  if (affinity_mode === "EXPLICIT" && affinity_id == null) {
+    throw erro("affinity_mode EXPLICIT exige affinity_id.");
+  }
+  if (["Nenhum", "Verdadeiro"].includes(tipo_dano) && (affinity_id != null || added_affinity_id != null)) {
+    throw erro(`tipo_dano "${tipo_dano}" não pode ter afinidade ofensiva (affinity_id/added_affinity_id) — ela já é limpa automaticamente ao TROCAR tipo_dano, mas não pode ser definida de volta separadamente.`);
+  }
+}
 
 async function listAdminPowers({ nome, tipo_poder, escala_atributo, usage_scope } = {}) {
   const where = {};
@@ -109,6 +170,25 @@ async function createAdminPower(payload, { idAdmin, req }) {
   if (dados.usage_scope && !USAGE_SCOPES_VALIDOS.includes(dados.usage_scope)) {
     throw erro(`usage_scope precisa ser um de: ${USAGE_SCOPES_VALIDOS.join(", ")}.`);
   }
+  if (dados.acquisition_scope && !ACQUISITION_SCOPES_VALIDOS.includes(dados.acquisition_scope)) {
+    throw erro(`acquisition_scope precisa ser um de: ${ACQUISITION_SCOPES_VALIDOS.join(", ")}.`);
+  }
+  if (dados.tipo_dano && !TIPOS_DANO_VALIDOS.includes(dados.tipo_dano)) {
+    throw erro(`tipo_dano precisa ser um de: ${TIPOS_DANO_VALIDOS.join(", ")}.`);
+  }
+  if (dados.affinity_mode && !AFFINITY_MODES_VALIDOS.includes(dados.affinity_mode)) {
+    throw erro(`affinity_mode precisa ser um de: ${AFFINITY_MODES_VALIDOS.join(", ")}.`);
+  }
+  validarInvariantesDePower({
+    tipo_poder: dados.tipo_poder,
+    usage_scope: dados.usage_scope ?? "CHARACTER",
+    cooldown: dados.cooldown ?? null,
+    custo_mana: dados.custo_mana ?? 0,
+    affinity_mode: dados.affinity_mode,
+    affinity_id: dados.affinity_id ?? null,
+    added_affinity_id: dados.added_affinity_id ?? null,
+    tipo_dano: dados.tipo_dano ?? "Fisico",
+  });
 
   return sequelize.transaction(async (transaction) => {
     const power = await Power.create(dados, { transaction });
@@ -125,15 +205,29 @@ async function updateAdminPower(id, payload, { idAdmin, req }) {
   if (dados.usage_scope && !USAGE_SCOPES_VALIDOS.includes(dados.usage_scope)) {
     throw erro(`usage_scope precisa ser um de: ${USAGE_SCOPES_VALIDOS.join(", ")}.`);
   }
+  if (dados.acquisition_scope && !ACQUISITION_SCOPES_VALIDOS.includes(dados.acquisition_scope)) {
+    throw erro(`acquisition_scope precisa ser um de: ${ACQUISITION_SCOPES_VALIDOS.join(", ")}.`);
+  }
+  if (dados.tipo_dano && !TIPOS_DANO_VALIDOS.includes(dados.tipo_dano)) {
+    throw erro(`tipo_dano precisa ser um de: ${TIPOS_DANO_VALIDOS.join(", ")}.`);
+  }
+  if (dados.affinity_mode && !AFFINITY_MODES_VALIDOS.includes(dados.affinity_mode)) {
+    throw erro(`affinity_mode precisa ser um de: ${AFFINITY_MODES_VALIDOS.join(", ")}.`);
+  }
 
   return sequelize.transaction(async (transaction) => {
     const power = await Power.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
     if (!power) throw erro("Habilidade não encontrada.", 404);
 
+    // Estado final = linha existente + payload mesclados — a regra
+    // precisa ver o resultado completo (ex.: só affinity_id mudando,
+    // com tipo_dano Verdadeiro já salvo de antes, ainda tem que rejeitar).
+    const antes = power.toJSON();
+    validarInvariantesDePower({ ...antes, ...dados });
+
     // Balanceamento de Power é GLOBAL (Especificação §41 "Ciclo de
     // Vida"): qualquer personagem que já tenha essa habilidade passa a
     // usar os novos números na hora — não é opt-in, não versiona.
-    const antes = power.toJSON();
     await power.update(dados, { transaction });
     await registrarAcao({ idAdmin, acao: "editar", entidade: "Power", idEntidade: power.id, dadosAntes: antes, dadosDepois: power.toJSON(), req, transaction });
     return power;
