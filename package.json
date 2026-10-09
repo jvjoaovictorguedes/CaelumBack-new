@@ -18,7 +18,8 @@
     "audit:migrations": "node scripts/audit-migrations.js",
     "migration:new": "node scripts/create-migration.js",
     "migrate:test": "node scripts/migrate-test-database.js",
-    "discord:register": "node scripts/register-discord-commands.js"
+    "discord:register": "node scripts/register-discord-commands.js",
+    "wiki:export": "node scripts/export-wiki-catalog.js"
   },
   "keywords": [],
   "author": "",
