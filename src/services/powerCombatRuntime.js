@@ -199,16 +199,28 @@ function apply(row, source, target, trigger) {
   }
 }
 
+// `sourcePowerId`: null (default) dispara TODAS as linhas registradas
+// sob `trigger` (comportamento de sempre de ON_CAST/ON_HIT/...). Um
+// valor filtra pra só as linhas cujo `row.sourcePowerId` (setado em
+// combatModifierService.resolverGatilhosDoPersonagem, nunca por nome —
+// §27 "sem eval") bate — usado por ON_POWER_CAST/ON_POWER_HIT pra um
+// efeito intrínseco de uma Power nunca reagir ao uso de outra.
 function emit(
   trigger,
   source,
   opponent,
   participants = [source, opponent],
   random = Math.random,
+  sourcePowerId = null,
 ) {
   if (!(source.actor.vida_atual > 0)) return;
   const restoration = new Map();
-  for (const row of source.triggers.get(trigger) ?? []) {
+  const linhasDoGatilho = source.triggers.get(trigger) ?? [];
+  const linhasFiltradas =
+    sourcePowerId == null
+      ? linhasDoGatilho
+      : linhasDoGatilho.filter((row) => row.sourcePowerId === sourcePowerId);
+  for (const row of linhasFiltradas) {
     const targets =
       row.target === "ALL_ALLIES"
         ? participants.filter((p) => p.team === source.team)

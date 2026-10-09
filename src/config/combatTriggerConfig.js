@@ -10,6 +10,16 @@ const TRIGGERS = [
   "COMBAT_START",
   "ON_CAST",
   "ON_HIT",
+  // Rebalanceamento de Powers de personagem — diferente de ON_CAST/
+  // ON_HIT (que disparam pra QUALQUER Power usada enquanto o efeito
+  // estiver no loadout), estes dois só disparam quando a Power DONA do
+  // efeito foi ela mesma a usada/a acertar (filtrado por sourcePowerId
+  // em powerCombatRuntime.emit, nunca por nome — ver Power.id). Pra
+  // efeitos intrínsecos de uma Power (ex.: Fúria de Aço se buffar ao
+  // ser lançada), nunca pra reagir ao uso de QUALQUER OUTRA Power do
+  // loadout, que é o que ON_CAST/ON_HIT fariam.
+  "ON_POWER_CAST",
+  "ON_POWER_HIT",
   "ON_CRIT",
   "ON_DAMAGE_TAKEN",
   "ON_DODGE",
@@ -24,6 +34,8 @@ const DESCRICAO_DO_TRIGGER = {
   COMBAT_START: "No início do combate.",
   ON_CAST: "Ao lançar uma habilidade (qualquer Power ativa).",
   ON_HIT: "Ao acertar um ataque básico ou Power.",
+  ON_POWER_CAST: "Ao lançar ESTA MESMA Power (efeito intrínseco, nunca reage a outra Power do loadout).",
+  ON_POWER_HIT: "Ao ESTA MESMA Power acertar (nunca dodge/miss, nunca outra Power).",
   ON_CRIT: "Ao causar um golpe crítico.",
   ON_DAMAGE_TAKEN: "Ao sofrer dano.",
   ON_DODGE: "Ao esquivar de um ataque.",

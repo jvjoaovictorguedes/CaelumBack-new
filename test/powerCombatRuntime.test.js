@@ -313,3 +313,123 @@ test("turno bloqueado mantém início/fim e não dispara ON_CAST", async () => {
   assert.equal(result.bloqueado, true);
   assert.equal(source.actor.mana_atual, 25);
 });
+
+// Rebalanceamento de Powers de personagem (§6) — ON_POWER_CAST/
+// ON_POWER_HIT só disparam pra efeitos da PRÓPRIA Power usada, nunca
+// pra reagir ao uso de qualquer outra Power do loadout (diferença real
+// de ON_CAST/ON_HIT, que disparam sempre). Filtra por sourcePowerId
+// (Power.id), nunca por nome.
+
+test("ON_POWER_CAST só dispara a linha cuja sourcePowerId bate com a Power usada", () => {
+  const [source, target] = setup("ON_POWER_CAST");
+  source.triggers.set("ON_POWER_CAST", [
+    row("REGEN_MANA_FLAT", 5, { sourcePowerId: 10 }),
+    row("REGEN_MANA_FLAT", 99, { sourcePowerId: 20 }),
+  ]);
+  source.actor.mana_atual = 0;
+  runtime.emit("ON_POWER_CAST", source, target, undefined, Math.random, 10);
+  assert.equal(source.actor.mana_atual, 5, "só a linha da Power 10 deveria ter disparado");
+});
+
+test("ON_POWER_CAST não dispara nenhuma linha quando nenhuma sourcePowerId bate", () => {
+  const [source, target] = setup("ON_POWER_CAST", row("REGEN_MANA_FLAT", 5, { sourcePowerId: 10 }));
+  source.actor.mana_atual = 0;
+  runtime.emit("ON_POWER_CAST", source, target, undefined, Math.random, 999);
+  assert.equal(source.actor.mana_atual, 0);
+});
+
+test("ON_POWER_HIT filtra por sourcePowerId do mesmo jeito que ON_POWER_CAST", () => {
+  const [source, target] = setup("ON_POWER_HIT", row("REGEN_MANA_FLAT", 7, { sourcePowerId: 10 }));
+  source.actor.mana_atual = 0;
+  runtime.emit("ON_POWER_HIT", source, target, undefined, Math.random, 10);
+  assert.equal(source.actor.mana_atual, 7);
+  source.actor.mana_atual = 0;
+  runtime.emit("ON_POWER_HIT", source, target, undefined, Math.random, 20);
+  assert.equal(source.actor.mana_atual, 0);
+});
+
+test("sem sourcePowerId (default null), emit dispara TODAS as linhas do trigger (compat com ON_CAST/ON_HIT)", () => {
+  const [source, target] = setup("ON_POWER_CAST");
+  source.triggers.set("ON_POWER_CAST", [
+    row("REGEN_MANA_FLAT", 3, { sourcePowerId: 10 }),
+    row("REGEN_MANA_FLAT", 4, { sourcePowerId: 20 }),
+  ]);
+  source.actor.mana_atual = 0;
+  runtime.emit("ON_POWER_CAST", source, target);
+  assert.equal(source.actor.mana_atual, 7);
+});
+
+test("Escudo de Mana (ON_POWER_CAST) não dispara ao lançar outra Power (Bola de Fogo) — integração via aplicarAcao", async () => {
+  const atacante = actor(1, { mana_atual: 100, inteligencia: 10 });
+  const defensor = actor(2);
+  const efeitoEscudo = row("GRANT_SHIELD", 18, { sourcePowerId: 1001, duration_turns: 2 });
+  const gatilhosAtacante = new Map([
+    ["ON_POWER_CAST", [efeitoEscudo]],
+    ["ON_POWER_HIT", []],
+  ]);
+  // Lança uma Power DIFERENTE (id 2002, "Bola de Fogo") — Escudo de
+  // Mana (id 1001) está só no loadout, nunca foi usada.
+  await resolverTurnoComStatus({
+    atacante,
+    defensor,
+    acao: { tipo: "power", power: { id: 2002, nome: "Bola de Fogo", custo_mana: 10, dano_base: 5, escala_atributo: "Inteligencia", valor_escala: 1, tipo_dano: "Magico" } },
+    statusAtacante: [],
+    statusDefensor: [],
+    turno: 1,
+    casterActorId: 1,
+    vidaMaxAtacante: 100,
+    manaMaxAtacante: 100,
+    gatilhosAtacante,
+  });
+  assert.equal(atacante.powerCombatState.shield, null, "Escudo de Mana não foi lançada — nenhum escudo deveria existir");
+});
+
+test("Escudo de Mana (ON_POWER_CAST) dispara ao lançar ELA MESMA — integração via aplicarAcao", async () => {
+  const atacante = actor(1, { mana_atual: 100, inteligencia: 10 });
+  const defensor = actor(2);
+  const efeitoEscudo = row("GRANT_SHIELD", 18, { sourcePowerId: 1001, duration_turns: 2 });
+  const gatilhosAtacante = new Map([
+    ["ON_POWER_CAST", [efeitoEscudo]],
+    ["ON_POWER_HIT", []],
+  ]);
+  await resolverTurnoComStatus({
+    atacante,
+    defensor,
+    acao: { tipo: "power", power: { id: 1001, nome: "Escudo de Mana", custo_mana: 18, dano_base: 0, cura_base: 0, escala_atributo: "Inteligencia", valor_escala: 0, tipo_dano: "Nenhum" } },
+    statusAtacante: [],
+    statusDefensor: [],
+    turno: 1,
+    casterActorId: 1,
+    vidaMaxAtacante: 100,
+    manaMaxAtacante: 100,
+    gatilhosAtacante,
+  });
+  assert.equal(atacante.powerCombatState.shield.valor, 18);
+});
+
+test("ON_POWER_HIT de Luz Purificadora não dispara quando outra Power acerta — integração via aplicarAcao", async () => {
+  const atacante = actor(1, { mana_atual: 100, inteligencia: 20 });
+  const defensor = actor(2, { vida_atual: 200 });
+  const efeitoDispel = row("DISPEL_BUFF", 0, { sourcePowerId: 3003, target: "ENEMY" });
+  const gatilhosAtacante = new Map([
+    ["ON_POWER_CAST", []],
+    ["ON_POWER_HIT", [efeitoDispel]],
+  ]);
+  defensor.powerCombatState = { started: false, turn: 0, effects: [{ effect_key: "DAMAGE_DEALT_PCT", magnitude: 10, group: "buff-teste", dispellable: true }] };
+  // Usa uma Power diferente (id 4004) que também causa dano/acerta —
+  // Luz Purificadora (3003) não foi usada, então seu dispel não roda.
+  await resolverTurnoComStatus({
+    atacante,
+    defensor,
+    acao: { tipo: "power", power: { id: 4004, nome: "Outra Power", custo_mana: 5, dano_base: 20, escala_atributo: "Inteligencia", valor_escala: 1, tipo_dano: "Magico" } },
+    statusAtacante: [],
+    statusDefensor: [],
+    turno: 1,
+    casterActorId: 1,
+    vidaMaxAtacante: 100,
+    manaMaxAtacante: 100,
+    defesaDefensor: 0,
+    gatilhosAtacante,
+  });
+  assert.equal(defensor.powerCombatState.effects.length, 1, "dispel de Luz Purificadora não deveria ter disparado");
+});
