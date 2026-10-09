@@ -32,5 +32,9 @@
     "dependsOn": [
       "20270206010005-world-crisis-reconstruction.js"
     ]
+  },
+  "20270213010001-patch-note-public-rollout.js": {
+    "createdAt": "2026-10-09T02:26:19.481Z",
+    "dependsOn": []
   }
 }
