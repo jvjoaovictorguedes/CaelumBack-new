@@ -17,3 +17,7 @@ As receitas físicas devem ser cadastradas no admin de Itens e vinculadas ao apr
 ## Promoção
 
 Preservar o News Caelum e o exportador de catálogo que já existem em main ao integrar dev. As migrações de Templo, Guilda e puzzle devem acompanhar o backend; o comando de início do projeto executa `npm run migrate`. Estas alterações de controle reutilizam GameSetting e não criam migrações adicionais. A comparação/integração no Git não comprova o deploy ativo nem modifica diretamente o banco de produção.
+
+## Patch notes públicos
+
+A migration `20270213010001-patch-note-public-rollout.js` registra, uma única vez, a nota Caelum `2026.10.08` como Publicado no próprio banco de cada deploy. O conteúdo em `docs/releases/2026-10-08-public.md` inclui somente mudanças visíveis. A reversão não apaga o histórico publicado. O worker News Caelum já captura novas notas publicadas se o bot e `auto_patch_notes` estiverem habilitados; não se força nem se altera a configuração atual do Discord.

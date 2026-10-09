@@ -99,6 +99,24 @@
       "20270212010000-event-puzzle-fase9-pistas.js"
     ]
   },
+  "20270213010001-patch-note-public-rollout.js": {
+    "createdAt": "2026-10-09T02:26:19.481Z",
+    "dependsOn": [
+      "20270213010000-event-puzzle-fase10-pioneiros.js"
+    ]
+  },
+  "20270214010001-event-puzzle-fase12-ordem-prerequisito.js": {
+    "createdAt": "2026-10-09T19:37:25.558Z",
+    "dependsOn": [
+      "20270214010000-rebalanceamento-powers-personagem.js"
+    ]
+  },
+  "20270214010002-event-puzzle-fase12-conteudo.js": {
+    "createdAt": "2026-10-09T19:37:29.715Z",
+    "dependsOn": [
+      "20270214010001-event-puzzle-fase12-ordem-prerequisito.js"
+    ]
+  },
   "20270213010002-world-exploration-foundation.js": {
     "createdAt": "2026-10-09T18:13:25.862Z",
     "dependsOn": [

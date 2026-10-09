@@ -406,6 +406,14 @@ const PowerStatusEffect = require("./PowerStatusEffect");
 Power.hasMany(PowerStatusEffect, { foreignKey: "id_power", as: "efeitosDeStatus" });
 PowerStatusEffect.belongsTo(Power, { foreignKey: "id_power", as: "power" });
 
+// Rebalanceamento de Powers §30 — Player UI precisa mostrar o NOME da
+// afinidade (ex.: "Fogo"), nunca só o id numérico. affinity_id/
+// added_affinity_id nunca tiveram association nenhuma até aqui (ver
+// powerDisplayService.js, o único consumidor hoje).
+const { DamageAffinityType } = require("./combatTypingModels");
+Power.belongsTo(DamageAffinityType, { foreignKey: "affinity_id", as: "afinidadePrincipal" });
+Power.belongsTo(DamageAffinityType, { foreignKey: "added_affinity_id", as: "afinidadeAdicional" });
+
 // Perfil de Jogador (Especificação Perfil de Jogador Caelum) — conquistas
 // e títulos são catálogos globais; CharacterAchievement/CharacterTitle
 // são o que cada personagem desbloqueou; CharacterProfile é a

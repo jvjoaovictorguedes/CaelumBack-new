@@ -90,6 +90,14 @@ function gerarSeed() {
   return crypto.randomBytes(32).toString("hex");
 }
 
+// Fase 12 — nenhum tempo-limite configurável por blueprint ainda
+// (ficaria em config/Admin, Fase 15); uma janela fixa generosa é
+// melhor que NENHUMA expiração (achado da auditoria pré-Fase-12:
+// "expires_at nunca é setado por nenhum código") — instância parada
+// demais não fica "Ativa" pra sempre ocupando o slot de idempotência
+// do personagem.
+const JANELA_EXPIRACAO_MS = 2 * 60 * 60 * 1000; // 2 horas
+
 // Idempotência (seção 13 da encomenda): se o personagem já tem uma
 // PuzzleInstance CREATED/ACTIVE desse blueprint (qualquer versão)
 // dentro dessa edição, devolve ela em vez de criar outra. NÃO existe
@@ -156,6 +164,26 @@ async function criarOuObterInstancia(idEventEdition, idBlueprint, personagem, tr
     const blueprint = await PuzzleBlueprint.findByPk(idBlueprint, { transaction: t, lock: t.LOCK.UPDATE });
     if (!blueprint) throw erro("Blueprint não encontrado.", 404);
 
+    // Fase 12 — progressão linear: nunca permite nascer uma Instance
+    // pra um blueprint com pré-requisito enquanto o personagem não
+    // tiver uma Instance COMPLETED do pré-requisito NESSA MESMA edição.
+    // Enforcement real aqui (não só filtro de listagem/UI, ver
+    // puzzleBlueprintService.listarPublicosPorEdicao, que só decide
+    // `bloqueado` pra exibição) — um cliente que descobrisse o
+    // idBlueprint de uma sala trancada e chamasse a rota direto ainda
+    // seria rejeitado.
+    if (blueprint.id_blueprint_prerequisito) {
+      const completou = await puzzleBlueprintService.personagemCompletouBlueprint(
+        personagem.id,
+        idEventEdition,
+        blueprint.id_blueprint_prerequisito,
+        t,
+      );
+      if (!completou) {
+        throw erro("Resolva a sala anterior antes de entrar nesta.", 409, "PRE_REQUISITO_PENDENTE");
+      }
+    }
+
     // obterUltimaPublicada já filtra status=PUBLISHED — combinado com o
     // LOCK 3 acima, a versão selecionada nunca pode ser arquivada por
     // baixo dos nossos pés entre esta leitura e o INSERT da Instance.
@@ -202,7 +230,22 @@ async function criarOuObterInstancia(idEventEdition, idBlueprint, personagem, tr
       ],
       transaction: t,
     });
-    if (existente) return { instancia: existente.instancia, criada: false };
+    // Fase 12 — uma "existente" vencida pela própria janela
+    // (expires_at no passado) nunca é devolvida como idempotência de
+    // verdade: expira ela agora (mesma transaction/lock já seguro) e
+    // cai pro fluxo normal de criar uma nova abaixo — nunca trava o
+    // personagem numa instância morta sem nenhum jeito de progredir.
+    if (existente) {
+      const instanciaExistente = existente.instancia;
+      if (instanciaExistente.expires_at && instanciaExistente.expires_at.getTime() <= Date.now()) {
+        await PuzzleInstance.update(
+          { status: "EXPIRED", completed_at: new Date(), state_version: sequelize.literal("state_version + 1") },
+          { where: { id: instanciaExistente.id }, transaction: t },
+        );
+      } else {
+        return { instancia: instanciaExistente, criada: false };
+      }
+    }
 
     // Fase 8: quando o config já declara `dominio` (mecânico/óptico/
     // hidráulico/convergência — Fase 3/5/6/7), o state inicial nasce
@@ -226,6 +269,7 @@ async function criarOuObterInstancia(idEventEdition, idBlueprint, personagem, tr
         id_blueprint_version: versaoPublicada.id,
         seed,
         state: estadoInicial,
+        expires_at: new Date(Date.now() + JANELA_EXPIRACAO_MS),
       },
       { transaction: t },
     );
@@ -250,6 +294,25 @@ async function criarOuObterInstancia(idEventEdition, idBlueprint, personagem, tr
   return sequelize.transaction(processar);
 }
 
+// Fase 12 — nenhum scheduler/cron faz isso de fora (achado da auditoria
+// pré-Fase-12: "nenhum código nunca transiciona pra EXPIRED"); em vez
+// disso, QUALQUER leitura pelo dono expira preguiçosamente antes de
+// devolver — nunca deixa uma Instance CREATED/ACTIVE visível além da sua
+// janela. Usa a MESMA aplicarMutacao (UPDATE condicional) de qualquer
+// outra transição — nunca um `.update()` direto. Corrida benigna: duas
+// leituras concorrentes tentando expirar a mesma instância, a segunda
+// recebe CONFLITO_VERSAO e cai no catch (já expirada por quem venceu
+// primeiro — resultado final idêntico).
+async function expirarSeNecessario(instancia) {
+  const ativa = instancia.status === "CREATED" || instancia.status === "ACTIVE";
+  if (!ativa || !instancia.expires_at || instancia.expires_at.getTime() > Date.now()) return instancia;
+  try {
+    return await aplicarMutacao(instancia.id, instancia.state_version, { novoStatus: "EXPIRED" });
+  } catch {
+    return PuzzleInstance.findByPk(instancia.id);
+  }
+}
+
 // Ownership (seção 12 da encomenda): nunca confiar num id enviado pelo
 // cliente pra identidade — personagemId sempre vem de
 // req.personagemAtual.id. Lança 404 (não 403) pra não confirmar pra um
@@ -264,7 +327,23 @@ async function obterParaPersonagem(idInstance, idPersonagem, { comBlueprint = fa
     include: [includeInstancia],
   });
   if (!participante) throw erro("Instância não encontrada.", 404);
-  return participante.instancia;
+  const instanciaFresca = await expirarSeNecessario(participante.instancia);
+  if (comBlueprint && instanciaFresca !== participante.instancia) {
+    instanciaFresca.blueprintVersion = participante.instancia.blueprintVersion;
+  }
+  return instanciaFresca;
+}
+
+// Fase 12 — dono abandonando voluntariamente (nunca outro status
+// terminal direto do cliente: só ABANDONED é alcançável por ação
+// explícita do jogador; COMPLETED/FAILED continuam só-engine, EXPIRED
+// só-preguiçoso acima). Ownership pelo mesmo obterParaPersonagem.
+async function abandonar(idInstance, idPersonagem, expectedVersion) {
+  const instancia = await obterParaPersonagem(idInstance, idPersonagem);
+  if (!(instancia.status === "CREATED" || instancia.status === "ACTIVE")) {
+    throw erro(`Esta instância já está em um estado terminal (${instancia.status}).`, 409, "INSTANCIA_FINALIZADA");
+  }
+  return aplicarMutacao(idInstance, expectedVersion, { novoStatus: "ABANDONED" });
 }
 
 // ÚNICA porta de entrada pra mutação de estado/status de uma
@@ -373,6 +452,8 @@ module.exports = {
   criarOuObterInstancia,
   obterParaPersonagem,
   aplicarMutacao,
+  abandonar,
   todosObjetivosConcluidos,
   dtoRuntime,
+  JANELA_EXPIRACAO_MS,
 };

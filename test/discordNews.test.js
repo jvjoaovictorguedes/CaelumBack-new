@@ -106,6 +106,7 @@ test("Discord news transaction, approval, publication, queries and authenticated
     escala_atributo: "Forca",
     dano_base: 100,
     custo_mana: 5,
+    cooldown: 1,
     valor_escala: 0.5,
   });
   const privatePower = await Power.create({

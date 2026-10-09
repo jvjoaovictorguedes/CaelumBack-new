@@ -4,8 +4,9 @@
 // revisada item 2). PuzzleInstance sempre referencia a VERSION exata —
 // editar um draft depois de publicado NUNCA muda uma instância já
 // criada, porque a instância nunca aponta pra "versão atual".
+const { Op } = require("sequelize");
 const { sequelize } = require("../config/database");
-const { PuzzleBlueprint, PuzzleBlueprintVersion } = require("../models/eventPuzzleModels");
+const { PuzzleBlueprint, PuzzleBlueprintVersion, PuzzleInstance, PuzzleParticipant } = require("../models/eventPuzzleModels");
 const eventDefinitionService = require("./eventDefinitionService");
 
 function erro(mensagem, statusCode = 400, code) {
@@ -49,7 +50,7 @@ function transicaoValida(atual, novo) {
 // cria o blueprint mesmo assim). Preserva o invariante já existente
 // (nunca um PuzzleBlueprint sem sua version 1, por falha parcial) —
 // os dois creates continuam na MESMA transaction.
-async function criarBlueprint(idEventDefinition, { key, nome, descricao } = {}, transaction) {
+async function criarBlueprint(idEventDefinition, { key, nome, descricao, ordem, id_blueprint_prerequisito } = {}, transaction) {
   async function aplicar(t) {
     // LOCK 1 (ordem do domínio: Definition) — ver comentário central em
     // eventDefinitionService.js.
@@ -63,10 +64,25 @@ async function criarBlueprint(idEventDefinition, { key, nome, descricao } = {}, 
     if (typeof nome !== "string" || nome.trim().length < 3 || nome.length > 160) {
       throw erro("Nome inválido.", 400);
     }
+    // Fase 12 — pré-requisito, quando informado, precisa pertencer ao
+    // MESMO evento (nunca uma corrente entre eventos diferentes).
+    if (id_blueprint_prerequisito != null) {
+      const prerequisito = await PuzzleBlueprint.findByPk(id_blueprint_prerequisito, { transaction: t });
+      if (!prerequisito || prerequisito.id_event_definition !== Number(idEventDefinition)) {
+        throw erro("id_blueprint_prerequisito precisa ser um blueprint existente do mesmo evento.", 400);
+      }
+    }
     let blueprint;
     try {
       blueprint = await PuzzleBlueprint.create(
-        { id_event_definition: idEventDefinition, key, nome: nome.trim(), descricao: descricao ?? null },
+        {
+          id_event_definition: idEventDefinition,
+          key,
+          nome: nome.trim(),
+          descricao: descricao ?? null,
+          ordem: Number.isInteger(ordem) ? ordem : 0,
+          id_blueprint_prerequisito: id_blueprint_prerequisito ?? null,
+        },
         { transaction: t },
       );
     } catch (e) {
@@ -315,6 +331,88 @@ function dtoPublicoVersao(versao, blueprint) {
   };
 }
 
+// DTO Público de LAYOUT (Fase 12) — o jogador precisa ver a topologia
+// pra poder jogar (componentes, conexões, posição de layout), mas NUNCA
+// a `condicao` de um objective (isso é a fórmula, não o enunciado) nem
+// qualquer chave fora do allowlist abaixo. Diferente de
+// dtoPublicoVersao (metadados de listagem): isto é o que a cena
+// (MechanicalPuzzleScene/OpticalPuzzleScene/HydraulicPuzzleScene,
+// frontend) recebe pra desenhar e deixar o jogador agir.
+function dtoPublicoLayout(versao) {
+  const config = versao.config || {};
+  return {
+    dominio: typeof config.dominio === "string" ? config.dominio : null,
+    components: Array.isArray(config.components)
+      ? config.components.map((c) => ({ id: c.id, type: c.type, props: c.props ?? {}, position: c.position ?? null }))
+      : [],
+    connections: Array.isArray(config.connections)
+      ? config.connections.map((c) => ({ id: c.id, from: c.from, to: c.to }))
+      : [],
+    objectives: Array.isArray(config.objectives)
+      ? config.objectives.map((o) => ({ id: o.id, descricao: o.descricao ?? null }))
+      : [],
+  };
+}
+
+// Fase 12 — true se `personagem` já tem uma PuzzleInstance COMPLETED
+// desse blueprint (qualquer version) dentro dessa edição. Usado só pra
+// decidir `bloqueado` na listagem pública — nunca pra decidir sozinho
+// se uma Instance pode nascer (isso é enforcement real em
+// puzzleInstanceService.criarOuObterInstancia, que roda sob os MESMOS
+// locks do domínio; esta função aqui é só leitura pra listagem).
+async function personagemCompletouBlueprint(idPersonagem, idEventEdition, idBlueprint, transaction) {
+  const participante = await PuzzleParticipant.findOne({
+    where: { id_personagem: idPersonagem },
+    include: [
+      {
+        model: PuzzleInstance,
+        as: "instancia",
+        where: { id_event_edition: idEventEdition, status: "COMPLETED" },
+        include: [
+          { model: PuzzleBlueprintVersion, as: "blueprintVersion", where: { id_blueprint: idBlueprint } },
+        ],
+      },
+    ],
+    transaction,
+  });
+  return Boolean(participante);
+}
+
+// Listagem pública (Fase 12) — as salas de UMA edição, na ORDEM
+// declarada, com `bloqueado` calculado pro personagem que está
+// pedindo. Salas bloqueadas NUNCA mandam `layout` (mesmo princípio de
+// puzzleClueService.obterCaderno pra pistas bloqueadas: omite o campo
+// inteiro, não só mascara) — só título/descrição/dificuldade como
+// teaser.
+async function listarPublicosPorEdicao(idEventDefinition, idEventEdition, idPersonagem) {
+  const blueprints = await PuzzleBlueprint.findAll({
+    where: { id_event_definition: idEventDefinition },
+    order: [["ordem", "ASC"], ["id", "ASC"]],
+  });
+
+  const resultado = [];
+  for (const blueprint of blueprints) {
+    const versao = await PuzzleBlueprintVersion.findOne({
+      where: { id_blueprint: blueprint.id, status: "PUBLISHED" },
+      order: [["version", "DESC"]],
+    });
+    if (!versao) continue; // sala ainda sem nenhuma revisão publicada — nunca aparece pro jogador.
+
+    const bloqueado = blueprint.id_blueprint_prerequisito
+      ? !(await personagemCompletouBlueprint(idPersonagem, idEventEdition, blueprint.id_blueprint_prerequisito))
+      : false;
+
+    const base = dtoPublicoVersao(versao, blueprint);
+    resultado.push({
+      ...base,
+      ordem: blueprint.ordem,
+      bloqueado,
+      ...(bloqueado ? {} : { layout: dtoPublicoLayout(versao) }),
+    });
+  }
+  return resultado;
+}
+
 module.exports = {
   MAX_CONFIG_BYTES,
   TRANSICOES_VALIDAS,
@@ -329,4 +427,7 @@ module.exports = {
   obterUltimaPublicada,
   dtoAdminVersao,
   dtoPublicoVersao,
+  dtoPublicoLayout,
+  listarPublicosPorEdicao,
+  personagemCompletouBlueprint,
 };

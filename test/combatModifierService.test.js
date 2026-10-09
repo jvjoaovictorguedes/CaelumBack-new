@@ -244,7 +244,7 @@ testeComBanco("catálogo reativo carrega todos os eventos, condições e alvos; 
   }
   await PowerCombatEffect.create({ id_power: power.id, trigger: "ON_CAST", effect_key: "REGEN_HP_FLAT", ativo: false });
   const map = await combatModifierService.resolverGatilhosDoPersonagem(personagem, "PVE");
-  assert.equal(map.size, 10);
+  assert.equal(map.size, combatModifierService.TRIGGERS_REATIVOS_SUPORTADOS.length);
   for (const rows of map.values()) {
     assert.equal(rows.length, 1);
     assert.equal(rows[0].target, "ENEMY");

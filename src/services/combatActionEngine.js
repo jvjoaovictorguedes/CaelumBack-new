@@ -121,6 +121,11 @@ function aplicarAcao({
       combatModifierService.multiplicadorCustoMana(powerRuntime.effective(source)));
     atacante.mana_atual = Math.max(0, atacante.mana_atual - custo);
     powerRuntime.emit("ON_CAST", source, target, runtime);
+    // Rebalanceamento de Powers: efeito intrínseco da PRÓPRIA Power
+    // usada (ex.: Fúria de Aço se buffando ao ser lançada) — depois de
+    // Mana já descontada, antes do cálculo principal (calcularEfeitoPoder
+    // mais abaixo), pra valer na própria ação quando o efeito precisar.
+    powerRuntime.emit("ON_POWER_CAST", source, target, runtime, Math.random, acao.power.id);
   }
   const beforeModifiers = combatModifierService.multiplicadorDanoSaida(modificadoresAtacante);
   modificadoresAtacante = powerRuntime.effective(source);
@@ -322,6 +327,11 @@ function aplicarAcao({
   target.shield = novoEscudoDefensor;
   if (!esquivou && (dano > 0 || acao.tipo === "attack")) {
     powerRuntime.emit("ON_HIT", source, target, runtime);
+    // Só a PRÓPRIA Power usada (nunca ataque básico, nunca outra Power
+    // do loadout) — já exclui dodge/miss (dentro do mesmo `!esquivou`).
+    if (acao.tipo === "power" && acao.power) {
+      powerRuntime.emit("ON_POWER_HIT", source, target, runtime, Math.random, acao.power.id);
+    }
     if (critico) powerRuntime.emit("ON_CRIT", source, target, runtime);
   }
   if (danoEfetivoNaVida > 0) powerRuntime.emit("ON_DAMAGE_TAKEN", target, source, runtime);
