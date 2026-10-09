@@ -25,9 +25,20 @@ const TempleEvent = require("../src/models/TempleEvent");
 const CharacterTempleProgress = require("../src/models/CharacterTempleProgress");
 const TempleBossAttempt = require("../src/models/TempleBossAttempt");
 const TempleBossConfig = require("../src/models/TempleBossConfig");
+const GameSetting = require("../src/models/GameSetting");
 const registerTempleBossHandlers = require("../src/socket/templeBossSocket");
 const SOCKET_EVENTS = require("../src/contracts/socketEvents");
 const { EVENT_STATUS } = require("../src/config/templeConfig");
+
+// templeReleaseService.requireEnabled() (gate adicionado em paralelo
+// a esta correção — docs/production-release-controls.md) roda ANTES
+// de qualquer outra checagem de entrarOuRetomar; os testes abaixo que
+// exercitam essas outras checagens precisam liberar o Templo primeiro
+// (mesmo padrão de mock de test/templeRelease.test.js: mocka
+// GameSetting.findByPk, nunca a lógica interna do service).
+function liberarTemplo() {
+  return test.mock.method(GameSetting, "findByPk", async () => ({ valor: true }));
+}
 
 let temBanco = false;
 test.before(async () => {
@@ -146,6 +157,7 @@ async function desbloquearBoss(idEvent, characterId) {
 }
 
 test.afterEach(async () => {
+  test.mock.restoreAll();
   if (!temBanco) return;
   if (eventosCriados.length > 0) {
     await TempleBossAttempt.destroy({ where: { id_event: eventosCriados } });
@@ -235,7 +247,25 @@ testeComBanco("socket: templeboss:entrar sem se identificar antes é sempre reje
   assert.match(resposta.payload.mensagem, /identifique/i);
 });
 
+testeComBanco("socket: templeboss:entrar com o Templo desativado (kill-switch do GameSetting) rejeita antes de qualquer outra checagem", async () => {
+  const { evento } = await criarEventoComBoss();
+  const { personagem } = await criarPersonagem({ nivel: 10 });
+  await desbloquearBoss(evento.id, personagem.id);
+  test.mock.method(GameSetting, "findByPk", async () => ({ valor: false }));
+
+  const { io, conectar } = criarIoFake();
+  registerTempleBossHandlers(io);
+  const socket = criarSocketFake();
+  conectar(socket);
+  socket.characterId = String(personagem.id);
+
+  const resposta = await dispararEAguardarRespostaDoGuardiao(socket, SOCKET_EVENTS.TEMPLEBOSS.ENTRAR);
+  assert.equal(resposta.tipo, "erro");
+  assert.match(resposta.payload.mensagem, /indisponível/i);
+});
+
 testeComBanco("socket: templeboss:entrar identificado (socket.characterId já setado) devolve templeboss:estado", async () => {
+  liberarTemplo();
   const { evento } = await criarEventoComBoss();
   const { personagem } = await criarPersonagem({ nivel: 10 });
   await desbloquearBoss(evento.id, personagem.id);
@@ -256,6 +286,7 @@ testeComBanco("socket: templeboss:entrar identificado (socket.characterId já se
 });
 
 testeComBanco("socket: templeboss:entrar com tentativa Ativa existente faz RESYNC — nunca cria uma segunda tentativa", async () => {
+  liberarTemplo();
   const { evento } = await criarEventoComBoss();
   const { personagem } = await criarPersonagem({ nivel: 10 });
   await desbloquearBoss(evento.id, personagem.id);
@@ -283,6 +314,7 @@ testeComBanco("socket: templeboss:entrar com tentativa Ativa existente faz RESYN
 });
 
 testeComBanco("socket: templeboss:entrar sem boss_unlocked_at rejeita com mensagem clara", async () => {
+  liberarTemplo();
   const { evento } = await criarEventoComBoss();
   const { personagem } = await criarPersonagem({ nivel: 10 });
   // nunca chama desbloquearBoss — personagem não tem o Guardião liberado.
@@ -299,11 +331,13 @@ testeComBanco("socket: templeboss:entrar sem boss_unlocked_at rejeita com mensag
   void evento;
 });
 
-testeComBanco("socket: templeboss:entrar sem nenhuma Convergência ativa (release desligado) rejeita com mensagem clara", async () => {
+testeComBanco("socket: templeboss:entrar sem nenhuma Convergência ativa rejeita com mensagem clara", async () => {
+  liberarTemplo();
   const { personagem } = await criarPersonagem({ nivel: 10 });
   // nenhum criarEventoComBoss() chamado — não existe TempleEvent
-  // ACTIVE/RELICARY_ONLY nenhum (é isso que faz o papel de "release
-  // gate" no backend real — ver templeBossAttemptService.
+  // ACTIVE/RELICARY_ONLY nenhum. Gate diferente do kill-switch de
+  // templeReleaseService (liberado aqui): este é o "não há nenhuma
+  // Convergência rodando agora" (ver templeBossAttemptService.
   // obterEventoComGuardiao/EVENT_STATUS_ABERTOS).
 
   const { io, conectar } = criarIoFake();
@@ -318,6 +352,7 @@ testeComBanco("socket: templeboss:entrar sem nenhuma Convergência ativa (releas
 });
 
 testeComBanco("socket: templeboss:entrar com Convergência sem Guardião configurado rejeita com mensagem clara", async () => {
+  liberarTemplo();
   await criarEventoComBoss({ semBoss: true });
   const { personagem } = await criarPersonagem({ nivel: 10 });
 
