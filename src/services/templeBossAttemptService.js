@@ -252,11 +252,28 @@ async function finalizarVitoria(attempt, transaction) {
   return { sigilosGanhos: sigilos, idempotente: false, itensGanhos };
 }
 
-// §10.2/§10.3 — loot exclusivo do primeiro clear. Reward band por
-// nível: entries fora da faixa do personagem saem do sorteio (nunca
-// dão endgame gear a quem está começando). Sem nenhuma entry elegível,
-// o clear ainda paga Sigilos normalmente — loot é um bônus, não uma
-// obrigação de configuração.
+async function concederEntrada(character, entrada, transaction) {
+  if (entrada.reward_kind === "EQUIPMENT") {
+    await equipmentInstanceService.create(
+      { idPersonagem: character.id, idItem: entrada.id_item, raridade: entrada.raridade_instancia },
+      transaction,
+    );
+  } else {
+    await inventoryService.addStack(character.id, entrada.id_item, entrada.quantidade, transaction);
+  }
+  const item = await Item.findByPk(entrada.id_item, { transaction });
+  return { id_item: entrada.id_item, nome: item?.nome, quantidade: entrada.quantidade, reward_kind: entrada.reward_kind };
+}
+
+// §10.1/§10.2/§10.3 — loot exclusivo do primeiro clear tem duas partes
+// independentes: (1) todo entry garantido=true elegível é SEMPRE
+// concedido ("grant garantido de conclusão" — Baú/Fragmento/Item de
+// evento); (2) as entries não-garantidas concorrem por um único roll
+// ponderado ("Roll no loot exclusivo do Guardião"). Reward band por
+// nível em ambas: fora da faixa do personagem sai da lista (nunca dá
+// endgame gear a quem está começando). Sem nenhuma entry elegível em
+// nenhuma das duas partes, o clear ainda paga Sigilos normalmente —
+// loot é um bônus, não uma obrigação de configuração.
 async function rolarLootDoGuardiao(attempt, transaction) {
   const character = await Character.findByPk(attempt.character_id, { transaction });
   const entradas = await TempleBossRewardEntry.findAll({
@@ -264,38 +281,38 @@ async function rolarLootDoGuardiao(attempt, transaction) {
     transaction,
   });
   // boss_config_id só existe se foi incluído no snapshot — ver nota no
-  // caller; quando ausente, não há catálogo de loot pra rolar.
+  // caller; quando ausente, não há catálogo de loot pra conceder/rolar.
   const elegiveis = entradas.filter((e) => {
     if (!e.ativo) return false;
     if (e.nivel_minimo != null && character.nivel < e.nivel_minimo) return false;
     if (e.nivel_maximo != null && character.nivel > e.nivel_maximo) return false;
     return true;
   });
-  if (elegiveis.length === 0) return [];
 
-  const crypto = require("crypto");
-  const pesoTotal = elegiveis.reduce((soma, e) => soma + e.weight, 0);
-  if (!(pesoTotal > 0)) return [];
-  let alvo = crypto.randomInt(0, pesoTotal);
-  let escolhida = elegiveis[elegiveis.length - 1];
-  for (const entrada of elegiveis) {
-    if (alvo < entrada.weight) {
-      escolhida = entrada;
-      break;
+  const itensGanhos = [];
+
+  const garantidas = elegiveis.filter((e) => e.garantido);
+  for (const entrada of garantidas) {
+    itensGanhos.push(await concederEntrada(character, entrada, transaction));
+  }
+
+  const sorteaveis = elegiveis.filter((e) => !e.garantido);
+  const pesoTotal = sorteaveis.reduce((soma, e) => soma + e.weight, 0);
+  if (sorteaveis.length > 0 && pesoTotal > 0) {
+    const crypto = require("crypto");
+    let alvo = crypto.randomInt(0, pesoTotal);
+    let escolhida = sorteaveis[sorteaveis.length - 1];
+    for (const entrada of sorteaveis) {
+      if (alvo < entrada.weight) {
+        escolhida = entrada;
+        break;
+      }
+      alvo -= entrada.weight;
     }
-    alvo -= entrada.weight;
+    itensGanhos.push(await concederEntrada(character, escolhida, transaction));
   }
 
-  if (escolhida.reward_kind === "EQUIPMENT") {
-    await equipmentInstanceService.create(
-      { idPersonagem: character.id, idItem: escolhida.id_item, raridade: escolhida.raridade_instancia },
-      transaction,
-    );
-  } else {
-    await inventoryService.addStack(character.id, escolhida.id_item, escolhida.quantidade, transaction);
-  }
-  const item = await Item.findByPk(escolhida.id_item, { transaction });
-  return [{ id_item: escolhida.id_item, nome: item?.nome, quantidade: escolhida.quantidade, reward_kind: escolhida.reward_kind }];
+  return itensGanhos;
 }
 
 async function finalizarDerrota(attempt, transaction) {

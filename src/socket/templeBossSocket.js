@@ -44,6 +44,8 @@ function montarPayloadEstado(attempt) {
     faseAtual: fase?.nome_exibicao ?? null,
     statusJogador: runtime.status_jogador,
     statusBoss: runtime.status_boss,
+    buffsJogador: runtime.buffs_jogador,
+    buffsBoss: runtime.buffs_boss,
     cooldownsJogador: runtime.cooldowns_jogador,
     poderes: (attempt.player_snapshot.poderes ?? []).map((p) => ({
       id: p.id,

@@ -12,8 +12,12 @@ const AdventureMonster = require("../src/models/AdventureMonster");
 const TempleEvent = require("../src/models/TempleEvent");
 const CharacterTempleProgress = require("../src/models/CharacterTempleProgress");
 const TempleBossAttempt = require("../src/models/TempleBossAttempt");
+const TempleBossConfig = require("../src/models/TempleBossConfig");
 const TempleBossRewardGrant = require("../src/models/TempleBossRewardGrant");
+const TempleBossRewardEntry = require("../src/models/TempleBossRewardEntry");
 const CharacterInventory = require("../src/models/CharacterInventory");
+const CharacterEquipmentInstance = require("../src/models/CharacterEquipmentInstance");
+const WeaponProperties = require("../src/models/WeaponProperties");
 const templeBossAttemptService = require("../src/services/templeBossAttemptService");
 const templeBossCombatService = require("../src/services/templeBossCombatService");
 const { EVENT_STATUS } = require("../src/config/templeConfig");
@@ -69,6 +73,8 @@ async function criarMonstroBase(overrides = {}) {
 // bossOverrides.stats sobrescreve os stats escalados (pra testes
 // determinísticos de vitória/derrota, sem depender da fórmula de
 // scaling real) — mesmo formato que templeBossAttemptService monta.
+// bossConfigId é único por chamada (nunca hardcoded) pra testes que
+// cadastram TempleBossRewardEntry não vazarem loot entre si.
 async function criarEventoComBoss({ monstro, rewardSigilos = 10, statsOverride, phases = [] } = {}) {
   const itemSigilo = await criarItemSigilo();
   const monstroBase = monstro ?? (await criarMonstroBase());
@@ -83,37 +89,56 @@ async function criarEventoComBoss({ monstro, rewardSigilos = 10, statsOverride, 
       id_currency_item: itemSigilo.id,
       missions: [],
       relicary: null,
-      boss: {
-        boss_config_id: 1,
-        id_monstro_base: monstroBase.id,
-        nome_exibicao: "O Guardião",
-        lore: "Lore de teste",
-        imagem_url: null,
-        ai_profile: monstroBase.ai_profile,
-        base: {
-          vida_maxima: monstroBase.vida_maxima,
-          dano_min: monstroBase.dano_min,
-          dano_max: monstroBase.dano_max,
-          defesa: monstroBase.defesa,
-          agilidade: 0,
-          velocidade: 0,
-        },
-        scaling: {
-          target_turns_to_kill: 8,
-          target_boss_actions_survivable: 6,
-          scaling_min_multiplier: 0.5,
-          scaling_max_multiplier: 3,
-        },
-        reward_sigils_primeira_vitoria: rewardSigilos,
-        phases,
-        status_resistances: [],
-        abilities: [],
-      },
+      boss: null,
     },
   });
   eventosCriados.push(evento.id);
+
+  // id_boss_config tem FK real pra temple_boss_configs — precisa de uma
+  // linha de verdade (não um número arbitrário) pra TempleBossRewardEntry
+  // poder referenciá-lo nos testes de loot (Fase 6).
+  // TempleEvent.id_event é FK ON DELETE CASCADE (e TempleBossRewardEntry
+  // encadeia a mesma cascata a partir daqui) — destruir o evento em
+  // afterEach já limpa esta linha e qualquer reward entry pendurada nela.
+  const bossConfig = await TempleBossConfig.create({
+    id_event: evento.id,
+    id_monstro_base: monstroBase.id,
+    nome_exibicao: "O Guardião",
+    reward_sigils_primeira_vitoria: rewardSigilos,
+  });
+
+  evento.config_snapshot = {
+    ...evento.config_snapshot,
+    boss: {
+      boss_config_id: bossConfig.id,
+      id_monstro_base: monstroBase.id,
+      nome_exibicao: "O Guardião",
+      lore: "Lore de teste",
+      imagem_url: null,
+      ai_profile: monstroBase.ai_profile,
+      base: {
+        vida_maxima: monstroBase.vida_maxima,
+        dano_min: monstroBase.dano_min,
+        dano_max: monstroBase.dano_max,
+        defesa: monstroBase.defesa,
+        agilidade: 0,
+        velocidade: 0,
+      },
+      scaling: {
+        target_turns_to_kill: 8,
+        target_boss_actions_survivable: 6,
+        scaling_min_multiplier: 0.5,
+        scaling_max_multiplier: 3,
+      },
+      reward_sigils_primeira_vitoria: rewardSigilos,
+      phases,
+      status_resistances: [],
+      abilities: [],
+    },
+  };
   if (statsOverride) evento.config_snapshot.boss.statsOverride = statsOverride;
-  return { evento, itemSigilo, monstroBase };
+  await evento.save();
+  return { evento, itemSigilo, monstroBase, idBossConfig: bossConfig.id };
 }
 
 async function desbloquearBoss(idEvent, characterId) {
@@ -124,8 +149,85 @@ async function desbloquearBoss(idEvent, characterId) {
   });
 }
 
+// Força o boss a 1 de vida e tenta um ataque básico; esquiva tem piso
+// de 5%, então repete em attempts frescos (destrói a anterior pra não
+// colidir com o índice único de "uma Ativa por personagem") até vencer
+// ou esgotar as tentativas. Mesmo padrão usado por todos os testes de
+// primeira vitória deste arquivo.
+async function venceBossComUmGolpe(characterId) {
+  for (let tentativa = 0; tentativa < 15; tentativa++) {
+    const { attempt } = await sequelize.transaction((t) => templeBossAttemptService.entrarOuRetomar(characterId, t));
+    attempt.runtime_state.vida_atual_boss = 1;
+    await attempt.save();
+    const resultado = await templeBossCombatService.resolverTurno(attempt, { tipo: "attack" });
+    if (resultado.concluido === "Vitoria") return { attempt, resultado };
+    await attempt.destroy();
+  }
+  throw new Error("não venceu em 15 tentativas (piso de esquiva é só 5%)");
+}
+
+const bossConfigIdsComReward = [];
+
+async function criarRewardEntry(idBossConfig, overrides = {}) {
+  const item = await Item.create({
+    nome: `Espólio do Guardião ${sufixo()}`,
+    descricao: "Loot de teste",
+    tipo_item: "Material",
+    raridade: "Raro",
+    disponivel_loja: false,
+    negociavel_mercado: false,
+  });
+  itensCriados.push(item.id);
+  const entry = await TempleBossRewardEntry.create({
+    id_boss_config: idBossConfig,
+    reward_kind: "STACKABLE_ITEM",
+    id_item: item.id,
+    quantidade: 1,
+    weight: 1,
+    nome_exibicao: item.nome,
+    ...overrides,
+  });
+  if (!bossConfigIdsComReward.includes(idBossConfig)) bossConfigIdsComReward.push(idBossConfig);
+  return { item, entry };
+}
+
+async function criarRewardEntryEquipamento(idBossConfig, overrides = {}) {
+  const item = await Item.create({
+    nome: `Lâmina do Guardião ${sufixo()}`,
+    descricao: "Equipamento de teste",
+    tipo_item: "Arma",
+    raridade: "Epico",
+    negociavel_mercado: false,
+  });
+  itensCriados.push(item.id);
+  await WeaponProperties.create({
+    id_item: item.id,
+    dano_min: 10,
+    dano_max: 20,
+    tipo_dano: "Fisico",
+    tipo_arma: "Espada",
+    bonus_atributo: "Forca",
+    valor_bonus_atributo: 5,
+  });
+  const entry = await TempleBossRewardEntry.create({
+    id_boss_config: idBossConfig,
+    reward_kind: "EQUIPMENT",
+    id_item: item.id,
+    raridade_instancia: "Epico",
+    weight: 1,
+    nome_exibicao: item.nome,
+    ...overrides,
+  });
+  if (!bossConfigIdsComReward.includes(idBossConfig)) bossConfigIdsComReward.push(idBossConfig);
+  return { item, entry };
+}
+
 test.afterEach(async () => {
   if (!temBanco) return;
+  if (bossConfigIdsComReward.length > 0) {
+    await TempleBossRewardEntry.destroy({ where: { id_boss_config: bossConfigIdsComReward } });
+    bossConfigIdsComReward.length = 0;
+  }
   if (eventosCriados.length > 0) {
     await TempleBossRewardGrant.destroy({ where: { id_event: eventosCriados } });
     await TempleBossAttempt.destroy({ where: { id_event: eventosCriados } });
@@ -138,7 +240,9 @@ test.afterEach(async () => {
     monstrosCriados.length = 0;
   }
   if (itensCriados.length > 0) {
+    await CharacterEquipmentInstance.destroy({ where: { id_item: itensCriados } });
     await CharacterInventory.destroy({ where: { id_item: itensCriados } });
+    await WeaponProperties.destroy({ where: { id_item: itensCriados } });
     await Item.destroy({ where: { id: itensCriados } });
     itensCriados.length = 0;
   }
@@ -311,3 +415,122 @@ testeComBanco("finalizarDerrota: marca Derrota e nunca concede recompensa", asyn
   const saldo = await CharacterInventory.findOne({ where: { id_personagem: personagem.id, id_item: itemSigilo.id } });
   assert.equal(saldo, null);
 });
+
+// Fase 6 (§10.1/§10.2/§10.3) — drops/reward bands/grants auditáveis.
+
+testeComBanco(
+  "primeira vitória: entry garantida é SEMPRE concedida, fora do roll ponderado (§10.1)",
+  async () => {
+    const { personagem } = await criarPersonagem({ nivel: 50 });
+    const { evento, idBossConfig } = await criarEventoComBoss({ rewardSigilos: 0 });
+    await desbloquearBoss(evento.id, personagem.id);
+    const { item: itemGarantido } = await criarRewardEntry(idBossConfig, { garantido: true, quantidade: 3 });
+    // Entry não-garantida com peso 0 nunca é escolhida no roll — isola o
+    // teste no comportamento do grant garantido, sem depender de RNG.
+    await criarRewardEntry(idBossConfig, { garantido: false, weight: 0 });
+
+    const { attempt, resultado } = await venceBossComUmGolpe(personagem.id);
+
+    const recompensa = await sequelize.transaction((t) => {
+      attempt.runtime_state = resultado.runtime;
+      return templeBossAttemptService.finalizarVitoria(attempt, t);
+    });
+    assert.equal(recompensa.itensGanhos.length, 1, "só a entry garantida — a sorteável tem peso 0");
+    assert.equal(recompensa.itensGanhos[0].id_item, itemGarantido.id);
+
+    const saldo = await CharacterInventory.findOne({ where: { id_personagem: personagem.id, id_item: itemGarantido.id } });
+    assert.equal(saldo.quantidade, 3);
+  },
+);
+
+testeComBanco(
+  "primeira vitória: equipamento de reward usa equipmentInstanceService e respeita reward band de nível (§10.2/§10.3)",
+  async () => {
+    const { personagem: baixoNivel } = await criarPersonagem({ nivel: 5 });
+    const { evento, idBossConfig } = await criarEventoComBoss({ rewardSigilos: 0 });
+    await desbloquearBoss(evento.id, baixoNivel.id);
+    const { item: itemEquip } = await criarRewardEntryEquipamento(idBossConfig, {
+      garantido: true,
+      nivel_minimo: 40,
+    });
+
+    const { attempt, resultado } = await venceBossComUmGolpe(baixoNivel.id);
+
+    const recompensaBaixoNivel = await sequelize.transaction((t) => {
+      attempt.runtime_state = resultado.runtime;
+      return templeBossAttemptService.finalizarVitoria(attempt, t);
+    });
+    assert.equal(recompensaBaixoNivel.itensGanhos.length, 0, "fora da reward band — não ganha o equipamento");
+
+    const { personagem: altoNivel } = await criarPersonagem({ nivel: 50 });
+    await desbloquearBoss(evento.id, altoNivel.id);
+    const { attempt: attemptAlto, resultado: resultadoAlto } = await venceBossComUmGolpe(altoNivel.id);
+
+    const recompensaAltoNivel = await sequelize.transaction((t) => {
+      attemptAlto.runtime_state = resultadoAlto.runtime;
+      return templeBossAttemptService.finalizarVitoria(attemptAlto, t);
+    });
+    assert.equal(recompensaAltoNivel.itensGanhos.length, 1, "dentro da reward band — ganha o equipamento");
+    assert.equal(recompensaAltoNivel.itensGanhos[0].reward_kind, "EQUIPMENT");
+
+    const instancia = await CharacterEquipmentInstance.findOne({
+      where: { id_personagem: altoNivel.id, id_item: itemEquip.id },
+    });
+    assert.ok(instancia, "equipmentInstanceService.create deveria ter criado a instância");
+    assert.equal(instancia.raridade, "Epico");
+    assert.equal(instancia.estado, "Inventario");
+  },
+);
+
+testeComBanco(
+  "trocar Powers/equipamento depois de iniciar a attempt não altera player_snapshot/boss_snapshot congelados (§9.3/§14.2)",
+  async () => {
+    const { personagem } = await criarPersonagem({ nivel: 25 });
+    const { evento } = await criarEventoComBoss();
+    await desbloquearBoss(evento.id, personagem.id);
+
+    const { attempt } = await sequelize.transaction((t) => templeBossAttemptService.entrarOuRetomar(personagem.id, t));
+    const playerSnapshotOriginal = JSON.stringify(attempt.player_snapshot);
+    const bossSnapshotOriginal = JSON.stringify(attempt.boss_snapshot);
+
+    // Simula troca de build fora da luta (nível/atributos mudam).
+    personagem.nivel = 99;
+    await personagem.save();
+
+    const { attempt: retomada, retomada: foiRetomada } = await sequelize.transaction((t) =>
+      templeBossAttemptService.entrarOuRetomar(personagem.id, t),
+    );
+    assert.equal(foiRetomada, true, "mesma attempt Ativa — nunca remonta snapshot no meio da luta");
+    assert.equal(JSON.stringify(retomada.player_snapshot), playerSnapshotOriginal);
+    assert.equal(JSON.stringify(retomada.boss_snapshot), bossSnapshotOriginal);
+  },
+);
+
+testeComBanco(
+  "nova tentativa (após derrota) recalcula Combat Power e reinicia o Boss em 100% HP (§9.3/§14.2)",
+  async () => {
+    const { personagem } = await criarPersonagem({ nivel: 10 });
+    const { evento } = await criarEventoComBoss();
+    await desbloquearBoss(evento.id, personagem.id);
+
+    const { attempt: primeira } = await sequelize.transaction((t) => templeBossAttemptService.entrarOuRetomar(personagem.id, t));
+    const vidaMaximaOriginal = primeira.boss_snapshot.stats.vida_maxima;
+    primeira.runtime_state.vida_atual_boss = 1;
+    await primeira.save();
+    await sequelize.transaction((t) => templeBossAttemptService.finalizarDerrota(primeira, t));
+
+    personagem.nivel = 60;
+    await personagem.save();
+
+    const { attempt: segunda, retomada } = await sequelize.transaction((t) =>
+      templeBossAttemptService.entrarOuRetomar(personagem.id, t),
+    );
+    assert.equal(retomada, false, "derrota encerrou a attempt — a próxima é uma linha nova");
+    assert.equal(segunda.runtime_state.vida_atual_boss, segunda.boss_snapshot.stats.vida_maxima, "Boss reinicia em 100% HP");
+    assert.notEqual(
+      segunda.boss_snapshot.stats.vida_maxima,
+      vidaMaximaOriginal,
+      "Combat Power foi recalculado com o personagem mais forte — o novo boss_snapshot reflete isso",
+    );
+  },
+);

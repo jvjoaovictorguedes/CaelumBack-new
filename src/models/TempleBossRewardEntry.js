@@ -16,6 +16,10 @@ const TempleBossRewardEntry = sequelize.define(
     nivel_minimo: { type: DataTypes.INTEGER, allowNull: true },
     nivel_maximo: { type: DataTypes.INTEGER, allowNull: true },
     nome_exibicao: { type: DataTypes.STRING(150), allowNull: false },
+    // §10.1 — true: grant garantido de conclusão, sempre concedido (fora
+    // do roll ponderado). false (default): concorre pelo único roll do
+    // loot exclusivo (§10.2), junto das demais entries não-garantidas.
+    garantido: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     ativo: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
   },
   { tableName: "temple_boss_reward_entries" },
