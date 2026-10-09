@@ -32,5 +32,78 @@
     "dependsOn": [
       "20270206010005-world-crisis-reconstruction.js"
     ]
+  },
+  "20270207010000-guild-treasury-v2-fundacao.js": {
+    "createdAt": "2026-10-08T16:37:05Z",
+    "dependsOn": [
+      "20270206010006-discord-news.js"
+    ]
+  },
+  "20270207020000-guild-contribution-event.js": {
+    "createdAt": "2026-10-08T16:37:05Z",
+    "dependsOn": [
+      "20270207010000-guild-treasury-v2-fundacao.js"
+    ]
+  },
+  "20270208010000-temple-fase1-fundacao.js": {
+    "createdAt": "2026-10-08T18:53:25Z",
+    "dependsOn": [
+      "20270207020000-guild-contribution-event.js"
+    ]
+  },
+  "20270209010000-temple-fase4-relicario.js": {
+    "createdAt": "2026-10-08T19:52:29Z",
+    "dependsOn": [
+      "20270208010000-temple-fase1-fundacao.js"
+    ]
+  },
+  "20270210010000-event-puzzle-fase1-permissoes.js": {
+    "createdAt": "2026-10-08T19:54:53Z",
+    "dependsOn": [
+      "20270209010000-temple-fase4-relicario.js"
+    ]
+  },
+  "20270210020000-event-puzzle-fase1-fundacao.js": {
+    "createdAt": "2026-10-08T19:54:53Z",
+    "dependsOn": [
+      "20270210010000-event-puzzle-fase1-permissoes.js"
+    ]
+  },
+  "20270210030000-temple-fase5-guardiao.js": {
+    "createdAt": "2026-10-08T23:54:03Z",
+    "dependsOn": [
+      "20270210020000-event-puzzle-fase1-fundacao.js"
+    ]
+  },
+  "20270210040000-temple-boss-unique-power-effect-column.js": {
+    "createdAt": "2026-10-08T23:54:03Z",
+    "dependsOn": [
+      "20270210030000-temple-fase5-guardiao.js"
+    ]
+  },
+  "20270211010000-temple-fase6-reward-garantido.js": {
+    "createdAt": "2026-10-09T00:26:22Z",
+    "dependsOn": [
+      "20270210040000-temple-boss-unique-power-effect-column.js"
+    ]
+  },
+  "20270212010000-event-puzzle-fase9-pistas.js": {
+    "createdAt": "2026-10-09T01:58:29Z",
+    "dependsOn": [
+      "20270211010000-temple-fase6-reward-garantido.js"
+    ]
+  },
+  "20270213010000-event-puzzle-fase10-pioneiros.js": {
+    "createdAt": "2026-10-09T02:04:06Z",
+    "dependsOn": [
+      "20270212010000-event-puzzle-fase9-pistas.js"
+    ]
+  },
+  "20270213010002-world-exploration-foundation.js": {
+    "createdAt": "2026-10-09T18:13:25.862Z",
+    "dependsOn": [
+      "20261026150000-world-map-schema.js",
+      "20261029010000-admin-panel-fundacao.js"
+    ]
   }
 }

@@ -26,6 +26,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@caelum/world-contracts": "file:packages/world-contracts",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
