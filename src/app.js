@@ -16,6 +16,7 @@ const registerWorldBossHandlers = require("./socket/worldBossSocket");
 const registerTempleBossHandlers = require("./socket/templeBossSocket");
 const registerUniqueFeatHandlers = require("./socket/uniqueFeatSocket");
 const registerGlobalChatHandlers = require("./socket/globalChatSocket");
+const registerEventPuzzleHandlers = require("./socket/eventPuzzleSocket");
 
 // Importa TODOS os modelos primeiro.
 // A ordem de importação dos modelos aqui geralmente não importa,
@@ -411,6 +412,7 @@ registerWorldBossHandlers(io);
 registerTempleBossHandlers(io);
 registerUniqueFeatHandlers(io);
 registerGlobalChatHandlers(io);
+registerEventPuzzleHandlers(io);
 require("./services/worldBossScheduler").iniciar();
 require("./services/templeScheduler").iniciar();
 // Ideia #1 da fila de melhorias — Torneio da Pesca fecha sozinho

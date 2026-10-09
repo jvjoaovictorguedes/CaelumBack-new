@@ -41,6 +41,8 @@ const {
 const Character = require("../models/Character");
 const eventDefinitionService = require("./eventDefinitionService");
 const puzzleBlueprintService = require("./puzzleBlueprintService");
+const engine = require("./puzzleEngineCore");
+const { resolverContexto } = require("./puzzleDomainRegistry");
 const { assertVersion } = require("../antiAutomation/actionGuardService");
 
 function erro(mensagem, statusCode = 400, code) {
@@ -202,12 +204,28 @@ async function criarOuObterInstancia(idEventEdition, idBlueprint, personagem, tr
     });
     if (existente) return { instancia: existente.instancia, criada: false };
 
+    // Fase 8: quando o config já declara `dominio` (mecânico/óptico/
+    // hidráulico/convergência — Fase 3/5/6/7), o state inicial nasce
+    // como o engine da Fase 2 realmente produziria pra esse config+seed
+    // — nunca `{}` esperando a primeira ação pra inicializar.
+    // `resolverContexto` também valida topologia/registry aqui, então
+    // um Blueprint com config malformado nunca consegue nascer uma
+    // Instance (falha cedo, na criação, não na primeira ação de um
+    // jogador real). Configs SEM `dominio` (placeholders anteriores à
+    // Fase 8 — ex.: os usados pelos testes de lifecycle puro da Fase 1,
+    // que nunca pretenderam rodar engine nenhum) continuam caindo no
+    // `state: {}` de sempre — nunca quebram, só não ganham engine.
+    const seed = gerarSeed();
+    const estadoInicial = versaoPublicada.config?.dominio
+      ? engine.construirEstadoInicial(resolverContexto(versaoPublicada.config, seed))
+      : {};
+
     const instancia = await PuzzleInstance.create(
       {
         id_event_edition: idEventEdition,
         id_blueprint_version: versaoPublicada.id,
-        seed: gerarSeed(),
-        state: {},
+        seed,
+        state: estadoInicial,
       },
       { transaction: t },
     );
@@ -236,10 +254,14 @@ async function criarOuObterInstancia(idEventEdition, idBlueprint, personagem, tr
 // cliente pra identidade — personagemId sempre vem de
 // req.personagemAtual.id. Lança 404 (não 403) pra não confirmar pra um
 // atacante que a instância existe mas é de outra pessoa.
-async function obterParaPersonagem(idInstance, idPersonagem) {
+async function obterParaPersonagem(idInstance, idPersonagem, { comBlueprint = false } = {}) {
+  const includeInstancia = { model: PuzzleInstance, as: "instancia" };
+  if (comBlueprint) {
+    includeInstancia.include = [{ model: PuzzleBlueprintVersion, as: "blueprintVersion" }];
+  }
   const participante = await PuzzleParticipant.findOne({
     where: { id_instance: idInstance, id_personagem: idPersonagem },
-    include: [{ model: PuzzleInstance, as: "instancia" }],
+    include: [includeInstancia],
   });
   if (!participante) throw erro("Instância não encontrada.", 404);
   return participante.instancia;
@@ -313,6 +335,20 @@ async function aplicarMutacao(idInstance, expectedVersion, { novoStatus, novoSta
   return PuzzleInstance.findByPk(idInstance);
 }
 
+// Usado por puzzleActionService (Fase 8) pra decidir se uma ação acaba
+// de RESOLVER o puzzle inteiro — nunca aceita isso do cliente (seção
+// 7 da encomenda: "nunca aceitar completed=true/success=true"), só
+// confere se TODOS os objectives declarados no config já estão na
+// lista (sticky) de objetivosConcluidos que o próprio engine calculou.
+// Puzzle sem nenhum objective declarado nunca "completa" sozinho —
+// alguém (Admin/Blueprint) precisa ter definido pelo menos um.
+function todosObjetivosConcluidos(config, estado) {
+  const objetivos = config?.objectives ?? [];
+  if (objetivos.length === 0) return false;
+  const concluidos = new Set(estado.objetivosConcluidos ?? []);
+  return objetivos.every((o) => concluidos.has(o.id));
+}
+
 // DTO de Runtime — convenção reservada: só o subárvore `state.public`
 // sai aqui. Qualquer outra chave em `state` (ou em
 // blueprintVersion.config) é só-servidor e nunca atravessa esta função
@@ -337,5 +373,6 @@ module.exports = {
   criarOuObterInstancia,
   obterParaPersonagem,
   aplicarMutacao,
+  todosObjetivosConcluidos,
   dtoRuntime,
 };
