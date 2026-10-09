@@ -15,6 +15,10 @@ router.get("/active", authMiddleware, carregarPersonagemAtual, controller.listar
 // Fase 9 — Caderno de Investigação (leitura; nunca cria/desbloqueia
 // nada — isso só acontece dentro do pipeline de ações, Fase 8).
 router.get("/:editionId/clues", authMiddleware, carregarPersonagemAtual, controller.obterCaderno);
+// Fase 11 — Hall das Lendas (leitura pública do evento, nunca gated por
+// personagem — mesma proteção de auth básica das outras rotas, mas o
+// conteúdo em si não depende de quem está logado).
+router.get("/:editionId/legends", authMiddleware, carregarPersonagemAtual, controller.obterHallDasLendas);
 router.post(
   "/:editionId/instances",
   authMiddleware,
