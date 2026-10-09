@@ -81,5 +81,5 @@ async function buildEncyclopedia(characterId, models) {
   }
   return articles;
 }
-async function getEncyclopedia(characterId){const models=Object.fromEntries(Object.entries(modelNames).map(([key,name])=>[key,require(`../models/${name}`)]));models.typing=require("./combatTypingService");await models.typing.catalog();return buildEncyclopedia(characterId,models);}
+async function getEncyclopedia(characterId){const models=Object.fromEntries(Object.entries(modelNames).map(([key,name])=>[key,require(`../models/${name}`)]));models.typing=require("./combatTypingService");await models.typing.catalog();const entries=await buildEncyclopedia(characterId,models);return [...entries,...await require("./wikiLibraryService").getLibrary(characterId,entries,models.typing)];}
 module.exports={getEncyclopedia,buildEncyclopedia,creatureArticle};

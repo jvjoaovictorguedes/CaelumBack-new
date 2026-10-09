@@ -41,3 +41,13 @@ Cada ficha reúne descrição, tipo, natureza do dano, dano/cura base, escalamen
 A curva de evolução e os custos usam diretamente `abilityLevelService`, incluindo o nome atual do Fragmento de Alma. A interface permite filtrar habilidades ativas, passivas e aprendidas. Mostra inicialmente até 12 cartões por filtro, com opção de abrir os demais. A tipografia de todas as tabelas da Wiki foi ampliada para 18px, com mais espaço nas células e rolagem horizontal em telas estreitas.
 
 As novas seções continuam usando exclusivamente o banco do ambiente do backend: nenhum catálogo de produção é importado no banco dev. A exportação fornecida é referência de análise, não um snapshot servido ao jogador.
+
+## Biblioteca complementar
+
+A enciclopédia inclui guias de progressão, equipamentos, fabricação, combate e afinidades, expedição, pesca, economia, guildas, PvP, Templo e ameaça mundial/reconstrução. Exemplos de mitigação e crítico usam `combatFormulas`; prévias de equipamento usam `equipmentRarityService`, inclusive overrides, sem reaplicar tier ou refinamento.
+
+Receitas são lidas pelos catálogos de Forja e Alquimia. Fórmulas com resultado oculto e modelos por Receita ainda não aprendidos não aparecem. Receitas fixas que produzam um resultado de blueprint secreto também são omitidas. A consulta lê o progresso de Alquimia diretamente: não chama o fluxo que cria progresso ao abrir o Caldeirão.
+
+Itens são publicados somente quando há uma fonte conhecida: posse do próprio personagem, loja ativa, receita visível ou espólio de criatura já revelada. Ingredientes são identificados como materiais usados numa receita, sem inventar locais de obtenção. O catálogo completo de itens e os monstros desconhecidos não são expostos. Eventos usam exclusivamente o status público do boss e a crise atual; o prazo é o da aparição, em horário de Brasília.
+
+A interface oferece seções, busca, expansão dos catálogos e atualização dos registros, preservando artigos administrativos e tabelas de 18px. Nenhuma migração, importação de produção ou mudança de gameplay é necessária. `test/wikiLibrary.test.js` cobre sigilo de receitas, prévias por raridade, efeitos ativos e matemática dos guias.
