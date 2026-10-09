@@ -31,6 +31,7 @@
 // atual de ligado/engatada de cada nó, nunca de "quanto tempo passou"
 // ou de ordem de chamadas anteriores.
 const { criarRegistryDeComponentes } = require("./puzzleComponentRegistry");
+const { validarSemCiclos } = require("./puzzleEngineCore");
 
 function erro(mensagem, statusCode = 400, code) {
   return Object.assign(new Error(mensagem), { statusCode, code });
@@ -67,38 +68,13 @@ function estadoRotacionalEmRepouso() {
 // ---------------------------------------------------------------------------
 // Validação de topologia — estrutural, independente do estado runtime
 // (ligado/engatada). Detecta ciclo via union-find sobre o grafo NÃO
-// direcionado formado só pelas conexões entre nós rotacionais. Chamada
-// uma vez na criação do contexto mecânico (fail-fast) e reaproveitada
-// pelo validador de solvabilidade do Admin na Fase 15 antes de publicar
-// um Blueprint.
+// direcionado formado só pelas conexões entre nós rotacionais
+// (puzzleEngineCore.validarSemCiclos — compartilhado com os outros
+// domínios de grafo, Fases 5/6). Chamada uma vez na criação do
+// contexto mecânico (fail-fast) e reaproveitada pelo validador de
+// solvabilidade do Admin na Fase 15 antes de publicar um Blueprint.
 function validarTopologia(config) {
-  const tipoPorId = new Map(config.components.map((c) => [c.id, c.type]));
-  const pai = new Map();
-  function raiz(id) {
-    if (!pai.has(id)) pai.set(id, id);
-    let atual = id;
-    while (pai.get(atual) !== atual) atual = pai.get(atual);
-    pai.set(id, atual);
-    return atual;
-  }
-  for (const conn of config.connections || []) {
-    const origemId = conn.from.componentId;
-    const destinoId = conn.to.componentId;
-    const origemTipo = tipoPorId.get(origemId);
-    const destinoTipo = tipoPorId.get(destinoId);
-    if (!TIPOS_ROTACIONAIS.has(origemTipo) || !TIPOS_ROTACIONAIS.has(destinoTipo)) continue;
-    const raizOrigem = raiz(origemId);
-    const raizDestino = raiz(destinoId);
-    if (raizOrigem === raizDestino) {
-      throw erro(
-        `Topologia mecânica inválida: ciclo detectado envolvendo '${origemId}' e '${destinoId}'.`,
-        400,
-        "TOPOLOGIA_CICLO",
-      );
-    }
-    pai.set(raizOrigem, raizDestino);
-  }
-  return true;
+  return validarSemCiclos(config, TIPOS_ROTACIONAIS, { codigoErro: "TOPOLOGIA_CICLO" });
 }
 
 // ---------------------------------------------------------------------------

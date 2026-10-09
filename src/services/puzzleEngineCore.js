@@ -381,6 +381,40 @@ function assinarConfig(config) {
   return crypto.createHash("sha256").update(JSON.stringify(config)).digest("hex");
 }
 
+// Validação ESTRUTURAL de ciclo via union-find sobre o grafo não-
+// direcionado formado pelas conexões entre componentes de
+// `tiposParticipantes` — compartilhada entre domínios com grafo de
+// propagação (mecânico na Fase 3, óptico na Fase 5, hidráulico na
+// Fase 6), cada um decidindo seu próprio conjunto de tipos
+// participantes (ex.: LEVER nunca participa do grafo mecânico).
+// Independente de qualquer estado runtime (ligado/engatada/etc.) —
+// roda uma vez, fail-fast, na criação do contexto de simulação.
+function validarSemCiclos(config, tiposParticipantes, { codigoErro = "TOPOLOGIA_CICLO" } = {}) {
+  const tipoPorId = new Map(config.components.map((c) => [c.id, c.type]));
+  const pai = new Map();
+  function raiz(id) {
+    if (!pai.has(id)) pai.set(id, id);
+    let atual = id;
+    while (pai.get(atual) !== atual) atual = pai.get(atual);
+    pai.set(id, atual);
+    return atual;
+  }
+  for (const conn of config.connections || []) {
+    const origemId = conn.from.componentId;
+    const destinoId = conn.to.componentId;
+    const origemTipo = tipoPorId.get(origemId);
+    const destinoTipo = tipoPorId.get(destinoId);
+    if (!tiposParticipantes.has(origemTipo) || !tiposParticipantes.has(destinoTipo)) continue;
+    const raizOrigem = raiz(origemId);
+    const raizDestino = raiz(destinoId);
+    if (raizOrigem === raizDestino) {
+      throw erro(`Topologia inválida: ciclo detectado envolvendo '${origemId}' e '${destinoId}'.`, 400, codigoErro);
+    }
+    pai.set(raizOrigem, raizDestino);
+  }
+  return true;
+}
+
 module.exports = {
   criarRng,
   validarConfig,
@@ -395,5 +429,6 @@ module.exports = {
   construirFeedbackPublico,
   executarAcao,
   assinarConfig,
+  validarSemCiclos,
   OPERADORES_DE_CONDICAO,
 };
