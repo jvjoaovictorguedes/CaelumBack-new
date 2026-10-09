@@ -8,7 +8,7 @@ function fixtures(){const calls=[];const rows={
  Zone:[{id:1,nome:'Bosque',ativa:true,nivel_jogador_minimo:6}],
  Link:[{id:1,id_area:1,id_monstro:1,ativo:true,tipo_aparicao:'Raro',nivel_jogador_minimo:8},{id:2,id_area:1,id_monstro:2,ativo:true},{id:3,id_area:1,id_monstro:3,ativo:true}],
  Loot:[{id:1,id_monstro:1,id_item:1,ativo:true,chance_ppm:1,quantidade_min:1,quantidade_max:1},{id:2,id_monstro:1,id_item:2,ativo:true,chance_ppm:1000}],
- Item:[{id:1,nome:'Gema',tipo_item:'Material'},{id:2,nome:'Receita secreta',tipo_item:'Receita'}],Ability:[],Power:[],Class:[],Race:[]};
+ Item:[{id:1,nome:'Gema',tipo_item:'Material'},{id:2,nome:'Receita secreta',tipo_item:'Receita'}],Ability:[],Power:[],Class:[],Race:[],EvolutionPath:[],EvolutionRequirement:[],EvolutionAbility:[]};
  const matches=(row,where)=>Object.entries(where||{}).every(([k,v])=>typeof v==='object'&&v!==null?(v[Op.in]?v[Op.in].includes(row[k]):row[k]!==v[Op.ne]):row[k]===v);
  const models=Object.fromEntries(Object.entries(rows).map(([name,data])=>[name,{findAll:async options=>{calls.push({name,options});return data.filter(row=>matches(row,options.where));}}]));return {rows,models,calls};}
 test('Only this character first victories reveal active creatures; no recipes or secret totals',async()=>{const {models}=fixtures();const result=await buildEncyclopedia(7,models);const monsters=result.filter(a=>a.kind==='monster');assert.equal(monsters.length,1);assert.equal(monsters[0].titulo,'Lobo');assert.match(monsters[0].conteudo,/0,0001%/);assert.match(monsters[0].conteudo,/170/);assert.match(monsters[0].conteudo,/Gema/);assert.doesNotMatch(JSON.stringify(result),/Receita secreta|Ainda oculto|Segredo/);});

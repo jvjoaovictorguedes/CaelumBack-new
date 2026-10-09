@@ -23,3 +23,11 @@ Página inicial da Wiki: manual e cartões das criaturas descobertas, busca sem 
 ## Validação
 
 Testes cobrem isolamento por personagem, primeira vitória, zonas desativadas, ausência de descobertas, precisão de drops, receitas ocultas, alterações refletidas na consulta seguinte e overrides zero. Suíte anterior de artigos também validada. Exportação de produção exercitada em memória com descobertas simuladas para validar as 80 fichas; essa simulação não é comportamento de runtime. Nenhum dado de produção foi alterado.
+
+## Classes e evoluções
+
+A enciclopédia também retorna cartões `kind: class`, um por classe ativa. As fichas apresentam papel, atributos principais, multiplicadores, árvore de estágios, origem de cada evolução, requisitos atuais, bônus de atributos e habilidades vinculadas, com custo, recarga, dano/cura base e escalamento. A descrição e os valores são lidos do cadastro do ambiente.
+
+Os requisitos vêm exclusivamente de `class_evolution_requirements`, como na validação do motor. As colunas legadas de nível/item/gold/caça em `class_evolution_paths` não são usadas: a exportação de produção mostrou níveis legados 40 com requisitos V2 50. Gold e itens são descritos como consumidos, e requisitos não implementados não são prometidos como funcionais. A Wiki não afirma que o personagem já atende aos requisitos; o progresso e a ação de evoluir continuam na tela de evolução.
+
+Evoluções desativadas, órfãs ou descendentes de pais desativados/incompatíveis não entram na ficha. Nomes de alvos de caça não descobertos são ocultados. Habilidades exclusivas de monstros ou de proezas únicas não são anunciadas como desbloqueios da evolução. A ficha distingue concessão automática e ativação dependente de slot livre. Nenhuma migração ou concessão de habilidade é executada.
