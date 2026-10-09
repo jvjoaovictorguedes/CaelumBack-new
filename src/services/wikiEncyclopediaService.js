@@ -4,6 +4,8 @@ const modelNames = {
   Monster:'AdventureMonster', Zone:'AdventureZone', Link:'AdventureZoneMonster',
   Kill:'CharacterMonsterKill', Loot:'AdventureMonsterLoot', Item:'Item',
   Ability:'MonsterAbility', Power:'Power', Class:'Class', Race:'Race',
+  LearnedAbility:'CharacterAbilities', ClassAbility:'ClassAbilities', RaceAbility:'RaceAbilities',
+  NatureAbility:'NatureAbilities', MagicEvolution:'Evolution', PowerBook:'PowerBook', StatusEffect:'PowerStatusEffect', CombatEffect:'PowerCombatEffect',
   EvolutionPath:'ClassEvolutionPath', EvolutionRequirement:'ClassEvolutionRequirement', EvolutionAbility:'ClassEvolutionAbility',
 };
 const text = value => String(value ?? '').replace(/[|\r\n]/g, ' ').replace(/[<>]/g, '');
@@ -55,6 +57,7 @@ async function buildEncyclopedia(characterId, models) {
     '## Espólios e progressão\nXP e gold apresentados na ficha são valores base. Os drops são sorteados individualmente e podem não ocorrer, ou ocorrer juntos. Bônus, maestria e penalidades globais podem alterar recompensas. Use os materiais na Forja, negocie no Mercado Negro e consulte os artigos publicados para aprender os demais sistemas.',
   ].join('\n\n'),{kind:'guide'})];
   articles.push(...await require("./wikiClassService").getClassArticles(classes, kills, models));
+  articles.push(...await require("./wikiPowerService").getPowerArticles(characterId, classes, races, models));
   if(!kills.length)return articles;
   const monsters=await models.Monster.findAll({where:{ativo:true,nome:{[Op.in]:kills.map(k=>k.nome_monstro)}},order:[['nivel','ASC'],['nome','ASC']],raw:true});
   if(!monsters.length||!zones.length)return articles;
