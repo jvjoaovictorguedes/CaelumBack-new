@@ -12,6 +12,9 @@ const automation = require("../antiAutomation/httpMiddleware").protect("eventPuz
 const router = express.Router();
 
 router.get("/active", authMiddleware, carregarPersonagemAtual, controller.listarEdicoesAtivas);
+// Fase 12 — salas (blueprints) públicas de uma edição, com layout
+// pras desbloqueadas (nunca a golden solution, ver dtoPublicoLayout).
+router.get("/:editionId/blueprints", authMiddleware, carregarPersonagemAtual, controller.listarBlueprintsPublicos);
 // Fase 9 — Caderno de Investigação (leitura; nunca cria/desbloqueia
 // nada — isso só acontece dentro do pipeline de ações, Fase 8).
 router.get("/:editionId/clues", authMiddleware, carregarPersonagemAtual, controller.obterCaderno);
@@ -42,6 +45,15 @@ router.post(
   carregarPersonagemAtual,
   automation,
   controller.executarAcao,
+);
+// Fase 12 — abandono voluntário; mesma proteção Anti-Automação das
+// outras mutações desta API.
+router.post(
+  "/puzzle-instances/:id/abandon",
+  authMiddleware,
+  carregarPersonagemAtual,
+  automation,
+  controller.abandonarInstancia,
 );
 
 module.exports = router;

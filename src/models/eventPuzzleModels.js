@@ -64,6 +64,17 @@ const PuzzleBlueprint = sequelize.define(
     key: { type: D.STRING(60), allowNull: false },
     nome: { type: D.STRING(160), allowNull: false },
     descricao: { type: D.TEXT, allowNull: true },
+    // Fase 12 — posição na progressão linear do evento (menor primeiro).
+    ordem: { type: D.INTEGER, allowNull: false, defaultValue: 0 },
+    // Fase 12 — cadeia linear simples (um único pré-requisito, nunca um
+    // DAG geral). null = sala inicial, sempre desbloqueada. Ver
+    // puzzleInstanceService.criarOuObterInstancia pro enforcement real
+    // (nunca só um filtro de UI).
+    id_blueprint_prerequisito: {
+      type: D.INTEGER,
+      allowNull: true,
+      references: { model: "puzzle_blueprints", key: "id" },
+    },
   },
   { tableName: "puzzle_blueprints", ...timestamps },
 );

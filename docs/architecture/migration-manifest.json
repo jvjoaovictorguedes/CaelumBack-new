@@ -104,5 +104,17 @@
     "dependsOn": [
       "20270213010000-event-puzzle-fase10-pioneiros.js"
     ]
+  },
+  "20270214010001-event-puzzle-fase12-ordem-prerequisito.js": {
+    "createdAt": "2026-10-09T19:37:25.558Z",
+    "dependsOn": [
+      "20270214010000-rebalanceamento-powers-personagem.js"
+    ]
+  },
+  "20270214010002-event-puzzle-fase12-conteudo.js": {
+    "createdAt": "2026-10-09T19:37:29.715Z",
+    "dependsOn": [
+      "20270214010001-event-puzzle-fase12-ordem-prerequisito.js"
+    ]
   }
 }

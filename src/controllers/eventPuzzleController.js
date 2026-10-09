@@ -5,6 +5,7 @@
 // isso é Fase 2+. Identidade sempre de req.personagemAtual (nunca de
 // characterId/participantId enviado pelo cliente — seção 12).
 const eventEditionService = require("../services/eventEditionService");
+const puzzleBlueprintService = require("../services/puzzleBlueprintService");
 const puzzleInstanceService = require("../services/puzzleInstanceService");
 const puzzleActionService = require("../services/puzzleActionService");
 const puzzleClueService = require("../services/puzzleClueService");
@@ -26,6 +27,26 @@ exports.listarEdicoesAtivas = async (req, res) => {
     return res.json({ status: "success", data: edicoes });
   } catch (error) {
     tratarErro(res, error, "Erro ao listar edições ativas de evento:");
+  }
+};
+
+// Fase 12 — lista as salas (blueprints) de UMA edição, na ordem da
+// progressão, com `bloqueado` calculado pro personagem logado e
+// `layout` (topologia pra desenhar a cena) só nas desbloqueadas. Até
+// aqui o jogador não tinha NENHUM jeito de descobrir idBlueprint nem a
+// topologia pra jogar — só via endpoint Admin (achado da auditoria
+// pré-Fase-12).
+exports.listarBlueprintsPublicos = async (req, res) => {
+  try {
+    const edicao = await eventEditionService.obterPorId(req.params.editionId);
+    const blueprints = await puzzleBlueprintService.listarPublicosPorEdicao(
+      edicao.id_event_definition,
+      edicao.id,
+      req.personagemAtual.id,
+    );
+    return res.json({ status: "success", data: blueprints });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao listar salas públicas da edição:");
   }
 };
 
@@ -104,6 +125,22 @@ exports.executarAcao = async (req, res) => {
     });
   } catch (error) {
     tratarErro(res, error, "Erro ao executar ação de puzzle:");
+  }
+};
+
+// Fase 12 — abandono voluntário (achado da auditoria pré-Fase-12:
+// "nenhum endpoint existe pra isso"). Mesmo corpo da ação normal
+// (stateVersion), nunca aceita status/completed/reward do cliente.
+exports.abandonarInstancia = async (req, res) => {
+  try {
+    const instancia = await puzzleInstanceService.abandonar(
+      req.params.id,
+      req.personagemAtual.id,
+      req.body.stateVersion,
+    );
+    return res.json({ status: "success", data: puzzleInstanceService.dtoRuntime(instancia) });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao abandonar PuzzleInstance:");
   }
 };
 
