@@ -8,6 +8,7 @@ const eventEditionService = require("../services/eventEditionService");
 const puzzleInstanceService = require("../services/puzzleInstanceService");
 const puzzleActionService = require("../services/puzzleActionService");
 const puzzleClueService = require("../services/puzzleClueService");
+const puzzlePioneerService = require("../services/puzzlePioneerService");
 const { emitirAtualizacaoDeInstancia } = require("../socket/eventPuzzleSocket");
 
 function tratarErro(res, error, mensagemLog) {
@@ -117,5 +118,22 @@ exports.obterCaderno = async (req, res) => {
     return res.json({ status: "success", data: caderno });
   } catch (error) {
     tratarErro(res, error, "Erro ao obter Caderno de Investigação:");
+  }
+};
+
+// Fase 11 — Hall das Lendas. Diferente do Caderno: nunca gated por
+// personagem (nenhum "bloqueada": título/descrição de marco e as
+// conquistas em si são sempre públicos, ver puzzlePioneerService).
+// `quadro` = agrupado por marco; `feed` = cronológico cross-marco.
+exports.obterHallDasLendas = async (req, res) => {
+  try {
+    const edicao = await eventEditionService.obterPorId(req.params.editionId);
+    const [quadro, feed] = await Promise.all([
+      puzzlePioneerService.obterQuadroDeHonra(edicao.id_event_definition),
+      puzzlePioneerService.obterFeedDeDescobertas(edicao.id_event_definition),
+    ]);
+    return res.json({ status: "success", data: { quadro, feed } });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao obter Hall das Lendas:");
   }
 };

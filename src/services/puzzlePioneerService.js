@@ -206,10 +206,46 @@ async function obterQuadroDeHonra(idEventDefinition) {
   }));
 }
 
+// Fase 11 — Hall das Lendas. Diferente de obterQuadroDeHonra (agrupado
+// POR MARCO, pensado pra "quem é o pioneiro de X"), isto é um feed
+// CRONOLÓGICO cruzando todos os marcos do evento — "o que acabou de
+// acontecer", mais recente primeiro. Mesma tabela, leitura diferente;
+// nenhum dado novo precisa ser persistido pra isso.
+async function obterFeedDeDescobertas(idEventDefinition, { limite = 20 } = {}) {
+  const limiteValido = Number.isInteger(limite) && limite > 0 ? Math.min(limite, 100) : 20;
+  const claims = await PuzzlePioneerClaim.findAll({
+    include: [
+      {
+        model: PuzzlePioneerMilestone,
+        as: "marco",
+        required: true,
+        include: [
+          {
+            model: PuzzleBlueprint,
+            as: "blueprint",
+            where: { id_event_definition: idEventDefinition },
+            attributes: [],
+          },
+        ],
+      },
+    ],
+    order: [["claimed_at", "DESC"]],
+    limit: limiteValido,
+  });
+
+  return claims.map((c) => ({
+    nome: c.personagem_nome_snapshot,
+    posicao: c.posicao,
+    titulo: c.marco.titulo,
+    claimedAt: c.claimed_at,
+  }));
+}
+
 module.exports = {
   criarMilestone,
   listarMilestonesAdmin,
   dtoAdmin,
   sincronizarConquistas,
   obterQuadroDeHonra,
+  obterFeedDeDescobertas,
 };
