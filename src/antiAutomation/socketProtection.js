@@ -13,12 +13,21 @@ const events = new Set([
   "guildboss:entrar",
   "worldboss:acao",
   "worldboss:entrar-combate",
+  "templeboss:entrar",
+  "templeboss:acao",
 ]);
 const safePoints = new Set([
   "pvp:desafiar",
   "party:iniciar",
   "guildboss:entrar",
   "worldboss:entrar-combate",
+  // templeboss:entrar é ponto seguro (mesmo critério de guildboss:entrar/
+  // worldboss:entrar-combate acima): resume um attempt já existente ou
+  // cria um novo gated por boss_unlocked_at no próprio service, nunca
+  // uma ação que move dano/recompensa sozinha. templeboss:acao fica de
+  // fora — passa só por rate-limit/exclusive (cada ação resolve dano
+  // real), nunca pelo gate de desafio automation.
+  "templeboss:entrar",
 ]);
 function install(socket) {
   const original = socket.on.bind(socket);
