@@ -116,5 +116,18 @@
     "dependsOn": [
       "20270214010001-event-puzzle-fase12-ordem-prerequisito.js"
     ]
+  },
+  "20270213010002-world-exploration-foundation.js": {
+    "createdAt": "2026-10-09T18:13:25.862Z",
+    "dependsOn": [
+      "20261026150000-world-map-schema.js",
+      "20261029010000-admin-panel-fundacao.js"
+    ]
+  },
+  "20270214010000-rebalanceamento-powers-personagem.js": {
+    "createdAt": "2026-10-09T18:43:57Z",
+    "dependsOn": [
+      "20270206010004-combat-typing-initial-content.js"
+    ]
   }
 }

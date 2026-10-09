@@ -299,6 +299,8 @@ app.use("/api/adventure", adventureRoutes);
 app.use("/api/bestiary", bestiaryRoutes);
 app.use("/api/ranking", rankingRoutes);
 app.use("/api/unique-feats", uniqueFeatRoutes);
+app.use("/api/world/exploration", require("./world/routes"));
+app.use("/api/admin/world/exploration", require("./world/adminRoutes"));
 app.use("/api/world", worldRoutes);
 app.use("/api/adventure-guild", adventureGuildRoutes);
 app.use("/api/onboarding", onboardingRoutes);
