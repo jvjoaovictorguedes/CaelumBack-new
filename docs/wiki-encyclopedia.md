@@ -31,3 +31,13 @@ A enciclopédia também retorna cartões `kind: class`, um por classe ativa. As 
 Os requisitos vêm exclusivamente de `class_evolution_requirements`, como na validação do motor. As colunas legadas de nível/item/gold/caça em `class_evolution_paths` não são usadas: a exportação de produção mostrou níveis legados 40 com requisitos V2 50. Gold e itens são descritos como consumidos, e requisitos não implementados não são prometidos como funcionais. A Wiki não afirma que o personagem já atende aos requisitos; o progresso e a ação de evoluir continuam na tela de evolução.
 
 Evoluções desativadas, órfãs ou descendentes de pais desativados/incompatíveis não entram na ficha. Nomes de alvos de caça não descobertos são ocultados. Habilidades exclusivas de monstros ou de proezas únicas não são anunciadas como desbloqueios da evolução. A ficha distingue concessão automática e ativação dependente de slot livre. Nenhuma migração ou concessão de habilidade é executada.
+
+## Habilidades
+
+Cartões `kind: skill` apresentam um manual de aprendizado/evolução e fichas de habilidades. O catálogo inclui habilidades públicas vinculadas a classes ativas, raças, evoluções ativas com linhagem válida, naturezas/árvores mágicas ou livros ativos válidos, além das habilidades já aprendidas pelo personagem autenticado. Poderes exclusivos de monstros nunca entram nessa seção; poderes `UNIQUE_FEAT` só aparecem para quem já os aprendeu. Poderes sem origem pública e ainda não aprendidos ficam ocultos.
+
+Cada ficha reúne descrição, tipo, natureza do dano, dano/cura base, escalamento, mana e recarga; caminhos de aquisição, nível de aprendizado, compra, requisitos de livros e evolução mágica; estado de aprendizado do próprio personagem; status ativos e modificadores ativos com unidades, chance ppm, condição, gatilho, alvo, duração, reaplicação e contextos permitidos. Referências a habilidades prévias ainda não públicas não revelam seus nomes. A Wiki não promete que o jogador está elegível nem concede habilidades.
+
+A curva de evolução e os custos usam diretamente `abilityLevelService`, incluindo o nome atual do Fragmento de Alma. A interface permite filtrar habilidades ativas, passivas e aprendidas. Mostra inicialmente até 12 cartões por filtro, com opção de abrir os demais. A tipografia de todas as tabelas da Wiki foi ampliada para 18px, com mais espaço nas células e rolagem horizontal em telas estreitas.
+
+As novas seções continuam usando exclusivamente o banco do ambiente do backend: nenhum catálogo de produção é importado no banco dev. A exportação fornecida é referência de análise, não um snapshot servido ao jogador.
