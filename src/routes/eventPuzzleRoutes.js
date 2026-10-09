@@ -25,5 +25,16 @@ router.get(
   carregarPersonagemAtual,
   controller.obterInstancia,
 );
+// Fase 8 — mesma proteção da criação (mesmo `automation`/tag
+// "eventPuzzle", nunca um segundo Action Guard); o actionType derivado
+// pelo middleware já difere por rota (path entra na chave), então esta
+// rota tem seu próprio rate-limit/challenge independente da de criação.
+router.post(
+  "/puzzle-instances/:id/actions",
+  authMiddleware,
+  carregarPersonagemAtual,
+  automation,
+  controller.executarAcao,
+);
 
 module.exports = router;

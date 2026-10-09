@@ -21,6 +21,7 @@ const rankedSeasonService = require("../src/services/rankedSeasonService");
 const rankedRatingService = require("../src/services/rankedRatingService");
 const rankedDailyLimitService = require("../src/services/rankedDailyLimitService");
 const rankingService = require("../src/services/rankingService");
+const rankedTierService = require("../src/services/rankedTierService");
 const CharacterPvpSeason = require("../src/models/CharacterPvpSeason");
 const RankedMatch = require("../src/models/RankedMatch");
 
@@ -146,11 +147,24 @@ testeComBanco("fluxo real ponta a ponta: iniciar partida -> combate via executar
   assert.equal(posicao.vitorias, 1);
   assert.equal(posicao.combates, 1);
   assert.equal(posicao.pontuacao, participacaoDepois.rating);
+  // Bug real corrigido nesta suíte: posicaoPvp não incluía tier/divisao
+  // (rankedTierService nunca era chamado aqui), então "sua posição" no
+  // ranking global mostrava "Sem classificação" mesmo pra quem tinha
+  // tier de verdade (o mesmo tier que a própria página de perfil/status
+  // já calculava corretamente via rankedTierService.resumoTier).
+  const tierEsperado = rankedTierService.tierDivisaoParaRating(participacaoDepois.rating);
+  assert.equal(posicao.tier, tierEsperado.tier);
+  assert.equal(posicao.divisao, tierEsperado.divisao);
+  assert.equal(posicao.tierLabel, tierEsperado.label);
+  assert.ok(posicao.tierAsset);
 
   const pagina1 = await rankingService.rankingPvp(1);
   const encontrado = pagina1.itens.find((item) => item.id === desafiante.id);
   assert.ok(encontrado, "desafiante devia aparecer na primeira página do ranking PvP");
   assert.equal(encontrado.vitorias, 1);
+  assert.equal(encontrado.tier, tierEsperado.tier, "mesma falha do posicaoPvp, mas na listagem completa do ranking");
+  assert.equal(encontrado.divisao, tierEsperado.divisao);
+  assert.equal(encontrado.rating, participacaoDepois.rating, "rankedTierService.resumoTier também traz `rating`, além de pontuacao");
 });
 
 testeComBanco("Teste 2 — derrota: RankedMatch Finalizada, jogos=1/vitorias=0/derrotas=1, rating atualizado, ranking reflete", async () => {

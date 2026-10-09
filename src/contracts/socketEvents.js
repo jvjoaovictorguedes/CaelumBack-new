@@ -96,6 +96,13 @@ const SOCKET_EVENTS = {
     "FIM": "templeboss:fim",
     "ERRO": "templeboss:erro",
     "SAIR": "templeboss:sair"
+  },
+  "EVENTPUZZLE": {
+    "IDENTIFICAR": "eventpuzzle:identificar",
+    "ENTRAR": "eventpuzzle:entrar",
+    "ESTADO": "eventpuzzle:estado",
+    "ERRO": "eventpuzzle:erro",
+    "SAIR": "eventpuzzle:sair"
   }
 };
 for (const domain of Object.values(SOCKET_EVENTS)) Object.freeze(domain);
