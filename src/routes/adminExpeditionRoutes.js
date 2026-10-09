@@ -29,4 +29,6 @@ router.patch(
   adminExpeditionController.atualizarPesoNaRegiao,
 );
 
+router.get('/recipes',podeBalancear,async(req,res,next)=>{try{res.json({data:await require('../services/expeditionRecipeFindService').catalog()});}catch(e){next(e);}});
+router.put('/recipes',podeBalancear,async(req,res,next)=>{try{res.json({data:await require('../services/expeditionRecipeFindService').save(req.body,{idAdmin:req.user.id,req})});}catch(e){if(e.statusCode)return res.status(e.statusCode).json({message:e.message});next(e);}});
 module.exports = router;

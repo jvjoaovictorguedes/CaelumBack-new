@@ -69,6 +69,7 @@ module.exports = function registerTempleBossHandlers(io) {
         return socket.emit(SOCKET_EVENTS.TEMPLEBOSS.ERRO, { mensagem: "Identifique seu personagem antes de entrar." });
       }
       try {
+        await require("../services/templeReleaseService").requireEnabled();
         const { attempt } = await sequelize.transaction((transaction) =>
           templeBossAttemptService.entrarOuRetomar(characterId, transaction),
         );
@@ -105,6 +106,7 @@ module.exports = function registerTempleBossHandlers(io) {
       }
 
       try {
+        await require("../services/templeReleaseService").requireEnabled();
         const resultado = await sequelize.transaction(async (transaction) => {
           const attempt = await TempleBossAttempt.findOne({
             where: { character_id: characterId, status: "Ativa" },

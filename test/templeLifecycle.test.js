@@ -230,7 +230,8 @@ testeComBanco(
   },
 );
 
-testeComBanco("templeScheduler.tick roda sem erro e é idempotente", async () => {
+testeComBanco("templeScheduler.tick roda sem erro e é idempotente", async (t) => {
+  t.mock.method(require("../src/services/templeReleaseService"), "backgroundEnabled", async()=>true);
   const evento = await criarEvento({ starts_at: new Date(Date.now() - 1000) });
 
   await templeScheduler.tick();

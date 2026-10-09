@@ -19,6 +19,7 @@ const { EVENT_STATUS, MISSION_CATEGORY, OBJECTIVE_TYPE } = require("../src/confi
 let temBanco = false;
 test.before(async () => {
   temBanco = await bancoDisponivel();
+  test.mock.method(require("../src/services/templeReleaseService"), "backgroundEnabled", async()=>true);
 });
 
 function testeComBanco(nome, fn) {

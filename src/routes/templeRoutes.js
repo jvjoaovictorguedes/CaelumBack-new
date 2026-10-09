@@ -6,7 +6,9 @@ const { carregarPersonagemAtual } = require("../middlewares/currentCharacterMidd
 const automation = require("../antiAutomation/httpMiddleware").protect("temple");
 
 const router = express.Router();
+router.get('/availability', async(req,res,next)=>{try{res.set('Cache-Control','no-store');res.json({enabled:await require('../services/templeReleaseService').enabled()});}catch(e){next(e);}});
 router.use(authMiddleware, carregarPersonagemAtual);
+router.use(async(req,res,next)=>{try{await require('../services/templeReleaseService').requireEnabled();next();}catch(e){res.status(e.statusCode||503).json({message:'O Templo está indisponível.'});}});
 
 router.get("/status", templeController.obterStatus);
 router.get("/missions", templeController.listarMissoes);

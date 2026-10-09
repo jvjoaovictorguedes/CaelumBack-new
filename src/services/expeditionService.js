@@ -15,9 +15,6 @@ const ExpeditionResource = require("../models/ExpeditionResource");
 const ExpeditionResourceItem = require("../models/ExpeditionResourceItem");
 const CharacterInventory = require("../models/CharacterInventory");
 const Item = require("../models/Item");
-const ForgeRecipe = require("../models/ForgeRecipe");
-const AlchemyRecipe = require("../models/AlchemyRecipe");
-const { Op } = require("sequelize");
 const expeditionConfig = require("../config/expeditionConfig");
 const {
   CHANCE_POR_NIVEL_PPM,
@@ -114,25 +111,10 @@ function chancesDeQualidadePorNivel(nivel) {
 // já usado pelos itens de Receita em forgeRecipeService.aprenderReceita).
 // Sem peso: escolherAleatorio trata todo item de Receita ativo com a
 // mesma chance.
-async function buscarItemDeReceitaAleatorio(transaction) {
-  const [receitasForja, receitasAlquimia] = await Promise.all([
-    ForgeRecipe.findAll({ where: { ativo: true }, attributes: ["id_item"], transaction }),
-    AlchemyRecipe.findAll({
-      where: { ativo: true, modo_desbloqueio: "DESCOBERTA", id_item_receita: { [Op.ne]: null } },
-      attributes: ["id_item_receita"],
-      transaction,
-    }),
-  ]);
-  const idsItens = [
-    ...receitasForja.map((r) => r.id_item),
-    ...receitasAlquimia.map((r) => r.id_item_receita),
-  ];
-  const idItemEscolhido = escolherAleatorio(idsItens);
-  if (!idItemEscolhido) return null;
-
-  const item = await Item.findByPk(idItemEscolhido, { transaction });
-  if (!item) return null;
-  return { id: item.id, nome: item.nome, raridade: item.raridade, imagem_url: item.imagem_url };
+async function buscarItemDeReceitaAleatorio(transaction, value) {
+  const recipes=require('./expeditionRecipeFindService');
+  const items=await recipes.candidates(value,transaction);
+  return escolherAleatorio(items) || null;
 }
 
 async function listarRegioes(id_personagem, profissaoFiltro) {
@@ -438,8 +420,9 @@ async function coletar(id_personagem, id_regiao) {
     // material E receita na mesma coleta, ou só receita mesmo com
     // resultado "Nada"), igual pedido: em qualquer lugar da Expedição.
     let receitaEncontrada = null;
-    if (sortearAchadoDeReceita()) {
-      receitaEncontrada = await buscarItemDeReceitaAleatorio(transaction);
+    const recipeFind=await require('./expeditionRecipeFindService').config(transaction);
+    if (sortearAchadoDeReceita(recipeFind.chance_ppm)) {
+      receitaEncontrada = await buscarItemDeReceitaAleatorio(transaction, recipeFind);
       if (receitaEncontrada) {
         await addStack(id_personagem, receitaEncontrada.id, 1, transaction);
       }

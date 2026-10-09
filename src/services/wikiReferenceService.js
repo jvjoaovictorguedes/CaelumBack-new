@@ -2,14 +2,14 @@ const { number: n, table, article } = require("./wikiContent");
 const combat = require("./combatFormulas");
 const { STATUS } = require("../config/statusEffectConfig");
 const tierConfig = require("../config/equipmentTierConfig");
-function buildReferenceArticles({ catalog, typingConfig, regions, fishingZones, boss, crisis }) {
+function buildReferenceArticles({ catalog, typingConfig, regions, fishingZones, boss, crisis, templeEnabled = false }) {
   const result = [article("referencia-progressao", "Sua jornada em Caelum", "guide", "Guia de progressão", [
     "As escolhas do aventureiro conectam combate, profissões, economia e eventos. Use este roteiro como orientação; cada ficha e cada atividade mostram os requisitos reais do jogo.",
     "## Primeiros passos\n1. Confira sua raça, classe e atributos em [Meu personagem](/dashboard/character).\n2. Aprenda as habilidades disponíveis e organize os slots de combate.\n3. Equipe suas armas e proteções no [Inventário](/dashboard/inventory).\n4. Entre na [Aventura](/dashboard/adventure) em uma região adequada ao seu nível.\n5. Após vencer, consulte a criatura descoberta no [Bestiário](/dashboard/bestiary) e na Wiki.",
     "## Prepare a próxima melhoria\nCompare os atributos dos equipamentos, a faixa de tier e os requisitos da receita. Na [Expedição](/dashboard/expedition), desenvolva as profissões e colete materiais. Use a [Forja](/dashboard/forge) e o Caldeirão para fabricar; receitas por descoberta precisam ser aprendidas antes.",
     "## Escolha uma build\nCompare o atributo de escalamento dos poderes com seus atributos. Diferencie dano físico, mágico e verdadeiro. Vida, mana, defesa, precisão, esquiva e status também importam: dano base sozinho não descreve uma build.",
     "## Avance sem perder o rumo\nConfira os requisitos da evolução de classe antes de investir recursos: a escolha por estágio é definitiva. Desenvolva as habilidades com os custos mostrados no manual e use a [Guilda dos Aventureiros](/dashboard/quests) para acompanhar contratos e objetivos disponíveis.",
-    "## Participe do mundo\nExplore [Pesca](/dashboard/fishing), [Guildas](/dashboard/guilds), [PvP](/dashboard/pvp) e [Templo](/dashboard/temple) conforme sua preparação. Quando uma ameaça ou crise for anunciada, acompanhe o evento e a [Reconstrução](/dashboard/quests/reconstruction).",
+    "## Participe do mundo\nExplore [Pesca](/dashboard/fishing), [Guildas](/dashboard/guilds) e [PvP](/dashboard/pvp) conforme sua preparação. Quando uma ameaça ou crise for anunciada, acompanhe o evento e a [Reconstrução](/dashboard/quests/reconstruction).",
   ], { resumo: "Do primeiro equipamento às evoluções, profissões e eventos." }),
   article("referencia-equipamentos", "Tier, raridade e refinamento", "guide", "Equipamentos e itens", [
     "Tier representa a faixa de poder do modelo. Raridade representa a qualidade da cópia. Refinamento é uma melhoria da instância de equipamento: dois exemplares do mesmo modelo podem ter números diferentes.",
@@ -55,11 +55,11 @@ function buildReferenceArticles({ catalog, typingConfig, regions, fishingZones, 
     ...fishingZones.map(z => `## ${z.nome}\n${z.descricao || ""}`),
     "Capture uma espécie para revelar seus registros no Almanaque Marinho. Esta seção não lista espécies ainda desconhecidas. A captura é validada pelo jogo; a aparência do peixe ou um clique isolado não determina o resultado. Abra a [Pesca](/dashboard/fishing) para escolher o local e participar de torneios quando estiverem disponíveis.",
   ], { resumo: "Equipamento, zonas, requisitos de acesso e descoberta de espécies." }));
-  result.push(article("referencia-vida-social", "Economia, guildas, PvP e Templo", "activity", "Atividades e eventos", [
+  result.push(article("referencia-vida-social", templeEnabled ? "Economia, guildas, PvP e Templo" : "Economia, guildas e PvP", "activity", "Atividades e eventos", [
     "## Comércio\nUse o [Mercado Negro](/dashboard/market) para negociar itens permitidos. Preço de anúncio é definido pelo vendedor e não é o mesmo que o valor cadastrado de venda. Verifique quantidade, raridade da cópia, refinamento e eventuais taxas antes de confirmar.",
     "## Guildas\nAs [Guildas](/dashboard/guilds) conectam cooperação, missões, recursos e atividades coletivas. A Guilda dos Aventureiros é outro sistema: em [Contratos](/dashboard/quests), acompanhe rank, reputação e objetivos disponíveis para o personagem.",
     "## PvP\nOs modos de [PvP](/dashboard/pvp) têm regras próprias de fila, participação e recompensas. Uma build eficaz na Aventura pode se comportar de outra forma contra jogadores. Veja quais efeitos estão permitidos no modo e confirme as regras exibidas antes de entrar.",
-    "## Templo\nO [Templo](/dashboard/temple) reúne progressão e desafios próprios. Confira os requisitos de entrada, a etapa liberada e os recursos envolvidos antes de confirmar uma atividade. Desbloqueios e recompensas são verificados pelo jogo; a Wiki não libera etapas.",
+    templeEnabled && "## Templo\nO [Templo](/dashboard/temple) reúne progressão e desafios próprios. Confira os requisitos de entrada, a etapa liberada e os recursos envolvidos antes de confirmar uma atividade. Desbloqueios e recompensas são verificados pelo jogo; a Wiki não libera etapas.",
   ], { resumo: "Como os sistemas sociais e modos de progressão se conectam." }));
   const deadline = boss.combat_expires_at ? new Date(boss.combat_expires_at).toLocaleString("pt-BR", {timeZone:"America/Sao_Paulo"}) : null;
   result.push(article("referencia-ameaca", "Ameaça mundial e reconstrução", "activity", "Atividades e eventos", [
