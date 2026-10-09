@@ -13,6 +13,7 @@
 // num restart (§11.3 "persistir attempt/runtime suficiente pra resync
 // sem duplicar recompensa").
 const SOCKET_EVENTS = require("../contracts/socketEvents");
+const { poderesPublicos } = require("../contracts/pvpPayloads");
 const { sequelize } = require("../config/database");
 const TempleBossAttempt = require("../models/TempleBossAttempt");
 const templeBossAttemptService = require("../services/templeBossAttemptService");
@@ -47,11 +48,14 @@ function montarPayloadEstado(attempt) {
     buffsJogador: runtime.buffs_jogador,
     buffsBoss: runtime.buffs_boss,
     cooldownsJogador: runtime.cooldowns_jogador,
-    poderes: (attempt.player_snapshot.poderes ?? []).map((p) => ({
-      id: p.id,
-      nome: p.nome,
-      custo_mana: p.custo_mana,
-      cooldown: p.cooldown,
+    // §9.1 — mesma projeção pública de Powers usada pelo Duelo/Grupo/
+    // Guild Boss (custo de mana já passado por custoManaEfetivo), com o
+    // cooldown MÁXIMO da habilidade anexado (poderesPublicos não inclui
+    // isso — só o front precisa pra exibir junto do remanescente em
+    // cooldownsJogador).
+    poderes: poderesPublicos(attempt.player_snapshot.poderes ?? []).map((p, indice) => ({
+      ...p,
+      cooldown: attempt.player_snapshot.poderes[indice]?.cooldown ?? 0,
     })),
     turno: runtime.combat_turn,
   };
