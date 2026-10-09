@@ -123,5 +123,11 @@
       "20261026150000-world-map-schema.js",
       "20261029010000-admin-panel-fundacao.js"
     ]
+  },
+  "20270214010000-rebalanceamento-powers-personagem.js": {
+    "createdAt": "2026-10-09T18:43:57Z",
+    "dependsOn": [
+      "20270206010004-combat-typing-initial-content.js"
+    ]
   }
 }
