@@ -7,6 +7,7 @@
 const eventEditionService = require("../services/eventEditionService");
 const puzzleInstanceService = require("../services/puzzleInstanceService");
 const puzzleActionService = require("../services/puzzleActionService");
+const puzzleClueService = require("../services/puzzleClueService");
 const { emitirAtualizacaoDeInstancia } = require("../socket/eventPuzzleSocket");
 
 function tratarErro(res, error, mensagemLog) {
@@ -72,19 +73,40 @@ exports.executarAcao = async (req, res) => {
       ...(req.body.componentId !== undefined ? { componentId: req.body.componentId } : {}),
       ...(req.body.payload !== undefined ? { payload: req.body.payload } : {}),
     };
-    const { instancia, resultado } = await puzzleActionService.executarAcao(
+    const { instancia, resultado, pistasDesbloqueadas } = await puzzleActionService.executarAcao(
       req.params.id,
       req.personagemAtual.id,
       acao,
       req.body.stateVersion,
     );
     const dto = puzzleInstanceService.dtoRuntime(instancia);
+    // Fase 9 — só os campos públicos da pista (nunca objective_id/
+    // trigger_type, que são detalhe interno de catálogo, não conteúdo
+    // pro jogador).
+    const pistasDto = pistasDesbloqueadas.map((p) => ({ id: p.id, titulo: p.titulo, texto: p.texto }));
     // Socket.IO só como transporte/feedback pra quem mais estiver
     // olhando essa instância — nunca a autoridade (já persistido acima
     // via aplicarMutacao antes desta linha rodar).
-    emitirAtualizacaoDeInstancia(instancia.id, dto, resultado.eventos);
-    return res.json({ status: "success", data: { instancia: dto, eventos: resultado.eventos } });
+    emitirAtualizacaoDeInstancia(instancia.id, dto, resultado.eventos, pistasDto);
+    return res.json({
+      status: "success",
+      data: { instancia: dto, eventos: resultado.eventos, pistasDesbloqueadas: pistasDto },
+    });
   } catch (error) {
     tratarErro(res, error, "Erro ao executar ação de puzzle:");
+  }
+};
+
+// Fase 9 — Caderno de Investigação do próprio personagem. Pistas
+// bloqueadas vêm só com `{id, bloqueada:true}` (ver puzzleClueService.
+// obterCaderno) — nunca título/texto/condição de desbloqueio antes da
+// hora.
+exports.obterCaderno = async (req, res) => {
+  try {
+    const edicao = await eventEditionService.obterPorId(req.params.editionId);
+    const caderno = await puzzleClueService.obterCaderno(req.personagemAtual.id, edicao.id_event_definition);
+    return res.json({ status: "success", data: caderno });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao obter Caderno de Investigação:");
   }
 };

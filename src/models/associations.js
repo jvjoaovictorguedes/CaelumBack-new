@@ -861,6 +861,8 @@ const {
   PuzzleBlueprintVersion,
   PuzzleInstance,
   PuzzleParticipant,
+  PuzzleClueDefinition,
+  CharacterClueUnlock,
 } = require("./eventPuzzleModels");
 
 EventDefinition.hasMany(EventEdition, { foreignKey: "id_event_definition", as: "edicoes" });
@@ -881,6 +883,16 @@ PuzzleInstance.belongsTo(PuzzleBlueprintVersion, { foreignKey: "id_blueprint_ver
 PuzzleInstance.hasMany(PuzzleParticipant, { foreignKey: "id_instance", as: "participantes" });
 PuzzleParticipant.belongsTo(PuzzleInstance, { foreignKey: "id_instance", as: "instancia" });
 PuzzleParticipant.belongsTo(Character, { foreignKey: "id_personagem", as: "personagem" });
+
+// Fase 9 — Sistema de pistas. Pista pertence à IDENTIDADE do Blueprint
+// (nunca a uma Version específica — ver eventPuzzleModels.js). Histórico
+// de desbloqueio por personagem é nullable + SET NULL, mesma política
+// de PuzzleParticipant.
+PuzzleBlueprint.hasMany(PuzzleClueDefinition, { foreignKey: "id_blueprint", as: "pistas" });
+PuzzleClueDefinition.belongsTo(PuzzleBlueprint, { foreignKey: "id_blueprint", as: "blueprint" });
+PuzzleClueDefinition.hasMany(CharacterClueUnlock, { foreignKey: "id_clue_definition", as: "desbloqueios" });
+CharacterClueUnlock.belongsTo(PuzzleClueDefinition, { foreignKey: "id_clue_definition", as: "pista" });
+CharacterClueUnlock.belongsTo(Character, { foreignKey: "id_personagem", as: "personagem" });
 
 // Anti-automação — o painel admin precisa identificar QUEM é o
 // personagem por trás de um id_personagem (nome, não só o número) sem

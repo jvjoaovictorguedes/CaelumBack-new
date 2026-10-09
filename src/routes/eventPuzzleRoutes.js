@@ -12,6 +12,9 @@ const automation = require("../antiAutomation/httpMiddleware").protect("eventPuz
 const router = express.Router();
 
 router.get("/active", authMiddleware, carregarPersonagemAtual, controller.listarEdicoesAtivas);
+// Fase 9 — Caderno de Investigação (leitura; nunca cria/desbloqueia
+// nada — isso só acontece dentro do pipeline de ações, Fase 8).
+router.get("/:editionId/clues", authMiddleware, carregarPersonagemAtual, controller.obterCaderno);
 router.post(
   "/:editionId/instances",
   authMiddleware,

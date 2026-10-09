@@ -65,4 +65,9 @@ router.patch(
   controller.transicionarVersao,
 );
 
+// Fase 9 — Catálogo de pistas (uma por Blueprint, nunca por Version —
+// ver eventPuzzleModels.js). Mesma permissão do resto do domínio.
+router.get("/blueprints/:id/clues", requireAdminPermission("event_puzzle.view"), controller.listarPistas);
+router.post("/blueprints/:id/clues", requireAdminPermission("event_puzzle.manage"), controller.criarPista);
+
 module.exports = router;

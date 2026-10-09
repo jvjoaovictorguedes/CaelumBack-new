@@ -6,6 +6,7 @@ const { sequelize } = require("../config/database");
 const eventDefinitionService = require("../services/eventDefinitionService");
 const eventEditionService = require("../services/eventEditionService");
 const puzzleBlueprintService = require("../services/puzzleBlueprintService");
+const puzzleClueService = require("../services/puzzleClueService");
 const { registrarAcao } = require("../services/adminAuditService");
 
 function tratarErro(res, error, mensagemLog) {
@@ -209,6 +210,37 @@ exports.atualizarVersao = async (req, res) => {
     return res.json({ status: "success", data: puzzleBlueprintService.dtoAdminVersao(resultado) });
   } catch (error) {
     tratarErro(res, error, "Erro ao editar PuzzleBlueprintVersion:");
+  }
+};
+
+// --------------------------------------------- PuzzleClueDefinition (Fase 9)
+exports.listarPistas = async (req, res) => {
+  try {
+    const pistas = await puzzleClueService.listarDefinicoesAdmin(req.params.id);
+    return res.json({ status: "success", data: pistas.map(puzzleClueService.dtoAdmin) });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao listar pistas:");
+  }
+};
+
+exports.criarPista = async (req, res) => {
+  try {
+    const resultado = await sequelize.transaction(async (transaction) => {
+      const pista = await puzzleClueService.criarDefinicao(req.params.id, req.body, transaction);
+      await registrarAcao({
+        idAdmin: req.user.id,
+        acao: "criar",
+        entidade: "PuzzleClueDefinition",
+        idEntidade: pista.id,
+        dadosDepois: pista.toJSON(),
+        req,
+        transaction,
+      });
+      return pista;
+    });
+    return res.status(201).json({ status: "success", data: puzzleClueService.dtoAdmin(resultado) });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao criar pista:");
   }
 };
 

@@ -158,6 +158,55 @@ const PuzzleParticipant = sequelize.define(
   { tableName: "puzzle_participants", ...timestamps },
 );
 
+// Fase 9 — Sistema de pistas e Caderno de Investigação. Catálogo ADMIN
+// (PuzzleClueDefinition, uma pista por Blueprint com seu próprio
+// gatilho) + histórico idempotente por personagem (CharacterClueUnlock,
+// UNIQUE(id_personagem, id_clue_definition) é a garantia real contra
+// desbloqueio duplicado — ver puzzleClueService.sincronizarDesbloqueios).
+const PuzzleClueDefinition = sequelize.define(
+  "PuzzleClueDefinition",
+  {
+    id: { type: D.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
+    id_blueprint: {
+      type: D.INTEGER,
+      allowNull: false,
+      references: { model: "puzzle_blueprints", key: "id" },
+    },
+    key: { type: D.STRING(60), allowNull: false },
+    titulo: { type: D.STRING(160), allowNull: false },
+    // Nunca exposto antes do desbloqueio — ver
+    // puzzleClueService.obterCaderno (omite o campo inteiro, não só
+    // mascara, pra pistas bloqueadas).
+    texto: { type: D.TEXT, allowNull: false },
+    trigger_type: {
+      type: D.ENUM("OBJECTIVE_COMPLETED", "INSTANCE_COMPLETED"),
+      allowNull: false,
+    },
+    objective_id: { type: D.STRING(60), allowNull: true },
+    ordem: { type: D.INTEGER, allowNull: false, defaultValue: 0 },
+  },
+  { tableName: "puzzle_clue_definitions", ...timestamps },
+);
+
+const CharacterClueUnlock = sequelize.define(
+  "CharacterClueUnlock",
+  {
+    id: { type: D.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false },
+    id_personagem: {
+      type: D.INTEGER,
+      allowNull: true,
+      references: { model: "Characters", key: "id" },
+    },
+    id_clue_definition: {
+      type: D.INTEGER,
+      allowNull: false,
+      references: { model: "puzzle_clue_definitions", key: "id" },
+    },
+    unlocked_at: { type: D.DATE, allowNull: false, defaultValue: D.NOW },
+  },
+  { tableName: "character_clue_unlocks", ...timestamps },
+);
+
 module.exports = {
   EventDefinition,
   EventEdition,
@@ -165,4 +214,6 @@ module.exports = {
   PuzzleBlueprintVersion,
   PuzzleInstance,
   PuzzleParticipant,
+  PuzzleClueDefinition,
+  CharacterClueUnlock,
 };

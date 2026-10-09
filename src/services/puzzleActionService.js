@@ -15,6 +15,7 @@
 const engine = require("./puzzleEngineCore");
 const { resolverContexto } = require("./puzzleDomainRegistry");
 const puzzleInstanceService = require("./puzzleInstanceService");
+const puzzleClueService = require("./puzzleClueService");
 
 function erro(mensagem, statusCode = 400, code) {
   return Object.assign(new Error(mensagem), { statusCode, code });
@@ -41,6 +42,7 @@ async function executarAcao(idInstance, idPersonagem, acao, expectedStateVersion
   }
 
   const config = instancia.blueprintVersion.config;
+  const idBlueprint = instancia.blueprintVersion.id_blueprint;
   const contexto = resolverContexto(config, instancia.seed);
 
   // Validação de FORMA da ação (componentId existe no config, type é
@@ -78,7 +80,19 @@ async function executarAcao(idInstance, idPersonagem, acao, expectedStateVersion
     });
   }
 
-  return { instancia: instanciaAtualizada, resultado };
+  // Fase 9 — SEMPRE depois da persistência acima, nunca antes: a
+  // sincronização de pistas lê o state/status JÁ gravado (nunca o
+  // `resultado` especulativo, que pode não ter vencido o UPDATE
+  // condicional se outra ação concorrente chegou primeiro — por isso
+  // usa `instanciaAtualizada.state`, não `resultado.state`).
+  const pistasDesbloqueadas = await puzzleClueService.sincronizarDesbloqueios({
+    idPersonagem,
+    idBlueprint,
+    objetivosConcluidos: instanciaAtualizada.state.objetivosConcluidos,
+    completou: instanciaAtualizada.status === "COMPLETED",
+  });
+
+  return { instancia: instanciaAtualizada, resultado, pistasDesbloqueadas };
 }
 
 module.exports = { executarAcao };
