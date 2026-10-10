@@ -15,6 +15,9 @@ router.get("/active", authMiddleware, carregarPersonagemAtual, controller.listar
 // Fase 12 — salas (blueprints) públicas de uma edição, com layout
 // pras desbloqueadas (nunca a golden solution, ver dtoPublicoLayout).
 router.get("/:editionId/blueprints", authMiddleware, carregarPersonagemAtual, controller.listarBlueprintsPublicos);
+// Fase 13 — status público do Custódio do Meridiano (lore/desbloqueio/
+// Poder atual); a luta em si só começa pelo socket eventpuzzleboss:entrar.
+router.get("/:editionId/boss", authMiddleware, carregarPersonagemAtual, controller.obterStatusDoBoss);
 // Fase 9 — Caderno de Investigação (leitura; nunca cria/desbloqueia
 // nada — isso só acontece dentro do pipeline de ações, Fase 8).
 router.get("/:editionId/clues", authMiddleware, carregarPersonagemAtual, controller.obterCaderno);

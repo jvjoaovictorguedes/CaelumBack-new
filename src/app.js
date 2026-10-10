@@ -17,6 +17,7 @@ const registerTempleBossHandlers = require("./socket/templeBossSocket");
 const registerUniqueFeatHandlers = require("./socket/uniqueFeatSocket");
 const registerGlobalChatHandlers = require("./socket/globalChatSocket");
 const registerEventPuzzleHandlers = require("./socket/eventPuzzleSocket");
+const registerEventPuzzleBossHandlers = require("./socket/eventPuzzleBossSocket");
 
 // Importa TODOS os modelos primeiro.
 // A ordem de importação dos modelos aqui geralmente não importa,
@@ -419,6 +420,7 @@ registerTempleBossHandlers(io);
 registerUniqueFeatHandlers(io);
 registerGlobalChatHandlers(io);
 registerEventPuzzleHandlers(io);
+registerEventPuzzleBossHandlers(io);
 require("./services/worldBossScheduler").iniciar();
 require("./services/templeScheduler").iniciar();
 require("./discord/worker").start();

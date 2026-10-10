@@ -15,6 +15,8 @@ const events = new Set([
   "worldboss:entrar-combate",
   "templeboss:entrar",
   "templeboss:acao",
+  "eventpuzzleboss:entrar",
+  "eventpuzzleboss:acao",
 ]);
 const safePoints = new Set([
   "pvp:desafiar",
@@ -28,6 +30,12 @@ const safePoints = new Set([
   // fora — passa só por rate-limit/exclusive (cada ação resolve dano
   // real), nunca pelo gate de desafio automation.
   "templeboss:entrar",
+  // eventpuzzleboss:entrar é o mesmo ponto seguro — resume um attempt já
+  // existente ou cria um novo gated por personagemCompletouBlueprint no
+  // próprio service (ver eventPuzzleBossAttemptService.entrarOuRetomar),
+  // nunca move dano/recompensa sozinho. eventpuzzleboss:acao fica de
+  // fora pela mesma razão de templeboss:acao acima.
+  "eventpuzzleboss:entrar",
 ]);
 function install(socket) {
   const original = socket.on.bind(socket);

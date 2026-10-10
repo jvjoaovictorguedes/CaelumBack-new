@@ -10,6 +10,7 @@ const puzzleInstanceService = require("../services/puzzleInstanceService");
 const puzzleActionService = require("../services/puzzleActionService");
 const puzzleClueService = require("../services/puzzleClueService");
 const puzzlePioneerService = require("../services/puzzlePioneerService");
+const eventPuzzleBossAttemptService = require("../services/eventPuzzleBossAttemptService");
 const { emitirAtualizacaoDeInstancia } = require("../socket/eventPuzzleSocket");
 
 function tratarErro(res, error, mensagemLog) {
@@ -141,6 +142,18 @@ exports.abandonarInstancia = async (req, res) => {
     return res.json({ status: "success", data: puzzleInstanceService.dtoRuntime(instancia) });
   } catch (error) {
     tratarErro(res, error, "Erro ao abandonar PuzzleInstance:");
+  }
+};
+
+// Fase 13 — status público do Custódio do Meridiano (lore, desbloqueio,
+// Poder atual do personagem). Nunca cria tentativa — a luta em si só
+// começa pelo socket eventpuzzleboss:entrar (ver eventPuzzleBossSocket.js).
+exports.obterStatusDoBoss = async (req, res) => {
+  try {
+    const status = await eventPuzzleBossAttemptService.obterStatusPublico(req.personagemAtual.id, req.params.editionId);
+    return res.json({ status: "success", data: status });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao obter status do Custódio do Meridiano:");
   }
 };
 

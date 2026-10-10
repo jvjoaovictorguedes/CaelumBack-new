@@ -912,6 +912,33 @@ PuzzlePioneerMilestone.hasMany(PuzzlePioneerClaim, { foreignKey: "id_milestone",
 PuzzlePioneerClaim.belongsTo(PuzzlePioneerMilestone, { foreignKey: "id_milestone", as: "marco" });
 PuzzlePioneerClaim.belongsTo(Character, { foreignKey: "id_personagem", as: "personagem" });
 
+// Fase 13 — Boss Custódio do Meridiano. Clone estrutural das associações
+// do Guardião do Templo acima (TempleBossConfig/Phase/StatusResistance/
+// Attempt/RewardGrant) — mesmo raciocínio, ver eventPuzzleBossModels.js.
+const {
+  EventPuzzleBossConfig,
+  EventPuzzleBossPhase,
+  EventPuzzleBossStatusResistance,
+  EventPuzzleBossAttempt,
+  EventPuzzleBossRewardGrant,
+} = require("./eventPuzzleBossModels");
+
+EventDefinition.hasOne(EventPuzzleBossConfig, { foreignKey: "id_event_definition", as: "bossConfig" });
+EventPuzzleBossConfig.belongsTo(EventDefinition, { foreignKey: "id_event_definition", as: "definicao" });
+EventPuzzleBossConfig.belongsTo(AdventureMonster, { foreignKey: "id_monstro_base", as: "monstroBase" });
+EventPuzzleBossConfig.belongsTo(PuzzleBlueprint, { foreignKey: "id_blueprint_gatilho", as: "blueprintGatilho" });
+EventPuzzleBossConfig.hasMany(EventPuzzleBossPhase, { foreignKey: "id_boss_config", as: "fases" });
+EventPuzzleBossPhase.belongsTo(EventPuzzleBossConfig, { foreignKey: "id_boss_config" });
+EventPuzzleBossConfig.hasMany(EventPuzzleBossStatusResistance, { foreignKey: "id_boss_config", as: "resistencias" });
+EventPuzzleBossStatusResistance.belongsTo(EventPuzzleBossConfig, { foreignKey: "id_boss_config" });
+
+EventEdition.hasMany(EventPuzzleBossAttempt, { foreignKey: "id_event_edition", as: "tentativasBoss" });
+EventPuzzleBossAttempt.belongsTo(EventEdition, { foreignKey: "id_event_edition", as: "edicao" });
+Character.hasMany(EventPuzzleBossAttempt, { foreignKey: "character_id" });
+EventPuzzleBossAttempt.belongsTo(Character, { foreignKey: "character_id" });
+EventPuzzleBossAttempt.hasOne(EventPuzzleBossRewardGrant, { foreignKey: "id_attempt" });
+EventPuzzleBossRewardGrant.belongsTo(EventPuzzleBossAttempt, { foreignKey: "id_attempt" });
+
 // Anti-automação — o painel admin precisa identificar QUEM é o
 // personagem por trás de um id_personagem (nome, não só o número) sem
 // forçar quem lê AutomationRiskState/Event/Challenge a saber disso.
