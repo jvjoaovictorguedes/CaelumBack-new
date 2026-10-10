@@ -17,6 +17,7 @@ const { resolverContexto } = require("./puzzleDomainRegistry");
 const puzzleInstanceService = require("./puzzleInstanceService");
 const puzzleClueService = require("./puzzleClueService");
 const puzzlePioneerService = require("./puzzlePioneerService");
+const puzzleRewardService = require("./puzzleRewardService");
 
 function erro(mensagem, statusCode = 400, code) {
   return Object.assign(new Error(mensagem), { statusCode, code });
@@ -105,7 +106,18 @@ async function executarAcao(idInstance, idPersonagem, acao, expectedStateVersion
     completou: instanciaAtualizada.status === "COMPLETED",
   });
 
-  return { instancia: instanciaAtualizada, resultado, pistasDesbloqueadas, conquistasPioneiras };
+  // Fase 14 — mesmo contrato de entrada/timing das duas sincronizações
+  // acima (sempre depois da persistência, nunca antes). Sistema
+  // independente reagindo ao MESMO state persistido — uma falha aqui
+  // nunca impede pista/pioneiro, e vice-versa.
+  const recompensasConcedidas = await puzzleRewardService.sincronizarRecompensas({
+    idPersonagem,
+    idBlueprint,
+    objetivosConcluidos: instanciaAtualizada.state.objetivosConcluidos,
+    completou: instanciaAtualizada.status === "COMPLETED",
+  });
+
+  return { instancia: instanciaAtualizada, resultado, pistasDesbloqueadas, conquistasPioneiras, recompensasConcedidas };
 }
 
 module.exports = { executarAcao };

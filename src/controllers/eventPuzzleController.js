@@ -96,7 +96,7 @@ exports.executarAcao = async (req, res) => {
       ...(req.body.componentId !== undefined ? { componentId: req.body.componentId } : {}),
       ...(req.body.payload !== undefined ? { payload: req.body.payload } : {}),
     };
-    const { instancia, resultado, pistasDesbloqueadas, conquistasPioneiras } = await puzzleActionService.executarAcao(
+    const { instancia, resultado, pistasDesbloqueadas, conquistasPioneiras, recompensasConcedidas } = await puzzleActionService.executarAcao(
       req.params.id,
       req.personagemAtual.id,
       acao,
@@ -116,13 +116,32 @@ exports.executarAcao = async (req, res) => {
       titulo: c.marco.titulo,
       descricao: c.marco.descricao,
     }));
+    // Fase 14 — feedback de "você acabou de ganhar X" (ouro/xp/item/
+    // conquista); `.definicao`/`.conquista` foram anexados por
+    // puzzleRewardService.sincronizarRecompensas só pra isto, nunca
+    // persistidos na linha do grant (que é só a chave de idempotência).
+    const recompensasDto = recompensasConcedidas.map((r) => ({
+      titulo: r.definicao.titulo_exibicao,
+      descricao: r.definicao.descricao_exibicao,
+      ouro: r.definicao.reward_ouro,
+      xp: r.definicao.reward_xp,
+      idItem: r.definicao.id_item,
+      itemQuantidade: r.definicao.item_quantidade,
+      conquista: r.conquista ? { nome: r.conquista.achievement.nome, descricao: r.conquista.achievement.descricao } : null,
+    }));
     // Socket.IO só como transporte/feedback pra quem mais estiver
     // olhando essa instância — nunca a autoridade (já persistido acima
     // via aplicarMutacao antes desta linha rodar).
-    emitirAtualizacaoDeInstancia(instancia.id, dto, resultado.eventos, pistasDto, conquistasDto);
+    emitirAtualizacaoDeInstancia(instancia.id, dto, resultado.eventos, pistasDto, conquistasDto, recompensasDto);
     return res.json({
       status: "success",
-      data: { instancia: dto, eventos: resultado.eventos, pistasDesbloqueadas: pistasDto, conquistasPioneiras: conquistasDto },
+      data: {
+        instancia: dto,
+        eventos: resultado.eventos,
+        pistasDesbloqueadas: pistasDto,
+        conquistasPioneiras: conquistasDto,
+        recompensasConcedidas: recompensasDto,
+      },
     });
   } catch (error) {
     tratarErro(res, error, "Erro ao executar ação de puzzle:");

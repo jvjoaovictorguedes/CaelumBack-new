@@ -141,5 +141,17 @@
     "dependsOn": [
       "20270214010003-event-puzzle-fase13-boss-schema.js"
     ]
+  },
+  "20270214010005-event-puzzle-fase14-recompensas-schema.js": {
+    "createdAt": "2026-10-10T01:36:36.637Z",
+    "dependsOn": [
+      "20270214010004-event-puzzle-fase13-boss-conteudo.js"
+    ]
+  },
+  "20270214010006-event-puzzle-fase14-recompensas-conteudo.js": {
+    "createdAt": "2026-10-10T01:39:45.401Z",
+    "dependsOn": [
+      "20270214010005-event-puzzle-fase14-recompensas-schema.js"
+    ]
   }
 }

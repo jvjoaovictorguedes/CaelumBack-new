@@ -939,6 +939,16 @@ EventPuzzleBossAttempt.belongsTo(Character, { foreignKey: "character_id" });
 EventPuzzleBossAttempt.hasOne(EventPuzzleBossRewardGrant, { foreignKey: "id_attempt" });
 EventPuzzleBossRewardGrant.belongsTo(EventPuzzleBossAttempt, { foreignKey: "id_attempt" });
 
+// Fase 14 — Recompensas temáticas do evento. Mesmo par catálogo/
+// histórico das Fases 9/10 (pistas/pioneiros) — ver eventPuzzleRewardModels.js.
+const { PuzzleRewardDefinition, CharacterPuzzleRewardGrant } = require("./eventPuzzleRewardModels");
+PuzzleBlueprint.hasMany(PuzzleRewardDefinition, { foreignKey: "id_blueprint", as: "recompensas" });
+PuzzleRewardDefinition.belongsTo(PuzzleBlueprint, { foreignKey: "id_blueprint", as: "blueprint" });
+PuzzleRewardDefinition.belongsTo(Item, { foreignKey: "id_item", as: "item" });
+PuzzleRewardDefinition.hasMany(CharacterPuzzleRewardGrant, { foreignKey: "id_reward_definition", as: "concessoes" });
+CharacterPuzzleRewardGrant.belongsTo(PuzzleRewardDefinition, { foreignKey: "id_reward_definition", as: "definicao" });
+CharacterPuzzleRewardGrant.belongsTo(Character, { foreignKey: "id_personagem", as: "personagem" });
+
 // Anti-automação — o painel admin precisa identificar QUEM é o
 // personagem por trás de um id_personagem (nome, não só o número) sem
 // forçar quem lê AutomationRiskState/Event/Challenge a saber disso.
