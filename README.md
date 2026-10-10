@@ -127,3 +127,7 @@ alvo de deploy — `DATABASE_URL` é fornecida automaticamente por lá.
 deploy não precisa de passo manual extra além de configurar as
 variáveis de ambiente de produção (principalmente `JWT_SECRET`,
 `CORS_ORIGIN` e `DATABASE_URL`).
+
+## Mundo explorável (experimental)
+
+A fundação da rota `/dashboard/mundo` é liberada individualmente e permanece desativada por padrão. Veja [Fase 0 do mundo](docs/world/fase-0.md) para acesso, contratos, mapas e limites desta entrega.
