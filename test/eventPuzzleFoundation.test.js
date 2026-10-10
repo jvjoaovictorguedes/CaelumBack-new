@@ -246,18 +246,31 @@ testeComBanco("PuzzleInstance: CREATED→ACTIVE→COMPLETED válido; COMPLETED�
 });
 
 // ---------------------------------------------------------------------
-// 3. Blueprint publicado é IMUTÁVEL + criação de nova revisão
+// 3. Blueprint publicado é editável (balanceamento ao vivo) + criação
+//    de nova revisão — só ARCHIVED é de verdade imutável.
 // ---------------------------------------------------------------------
 
-testeComBanco("editar config de uma revisão PUBLISHED é rejeitado (imutabilidade)", async () => {
+testeComBanco("editar config de uma revisão PUBLISHED é permitido (balanceamento ao vivo) e zera a assinatura de solvabilidade antiga", async () => {
   const { versao } = await sequelize.transaction((t) => criarFundacaoCompleta(t));
+  versao.solvability_signature = "assinatura-antiga-pre-edicao";
+  versao.solvability_validated_at = new Date();
+  await versao.save();
+
+  const editada = await puzzleBlueprintService.atualizarDraft(versao.id, { config: { outraCoisa: true } });
+  assert.deepEqual(editada.config, { outraCoisa: true });
+  // a assinatura antiga não pode sobreviver — ela provava a config
+  // VELHA, nunca a nova; manter o selo seria um "validado" falso.
+  assert.equal(editada.solvability_signature, null);
+  assert.equal(editada.solvability_validated_at, null);
+});
+
+testeComBanco("editar config de uma revisão ARCHIVED é rejeitado (essa sim é terminal/imutável)", async () => {
+  const { versao } = await sequelize.transaction((t) => criarFundacaoCompleta(t));
+  await puzzleBlueprintService.transicionar(versao.id, "ARCHIVED", {});
   await assert.rejects(
     () => puzzleBlueprintService.atualizarDraft(versao.id, { config: { outraCoisa: true } }),
-    (e) => e.statusCode === 409 && e.code === "DRAFT_IMUTAVEL",
+    (e) => e.statusCode === 409 && e.code === "VERSAO_ARQUIVADA",
   );
-  // a config original continua intocada
-  const recarregada = await PuzzleBlueprintVersion.findByPk(versao.id);
-  assert.deepEqual(recarregada.config, { titulo_publico: "Puzzle de teste" });
 });
 
 testeComBanco("nova revisão nasce DRAFT com version = anterior + 1, nunca reaproveita número", async () => {

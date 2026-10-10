@@ -34,8 +34,11 @@ function validarConfig(config) {
 }
 
 // DRAFT → PUBLISHED → ARCHIVED, ou DRAFT → ARCHIVED (abandonar sem
-// publicar). PUBLISHED é IMUTÁVEL: nenhuma transição de volta, e
-// `config` só pode mudar enquanto DRAFT (ver atualizarDraft).
+// publicar). Nenhuma transição de volta (ARCHIVED é terminal).
+// `config` pode ser editado em DRAFT ou PUBLISHED (ver atualizarDraft —
+// balanceamento/dificuldade precisa ser ajustável numa sala já ao vivo,
+// sem exigir criar+revalidar+republicar uma Version nova só pra mexer
+// num número); só ARCHIVED é de verdade imutável.
 const TRANSICOES_VALIDAS = {
   DRAFT: ["PUBLISHED", "ARCHIVED"],
   PUBLISHED: ["ARCHIVED"],
@@ -184,16 +187,34 @@ async function criarNovaVersao(idBlueprint, { config } = {}, transaction) {
 // Editar `config` só é permitido enquanto DRAFT — essa é a garantia de
 // imutabilidade pós-publicação (nenhum trigger de banco; invariante de
 // service, testado explicitamente).
+// Editável em DRAFT ou PUBLISHED (só ARCHIVED bloqueia) — o Admin
+// precisa poder ajustar dificuldade/recompensa-em-config de uma sala
+// que já está ao vivo, sem o ciclo pesado de nova Version+revalidar+
+// republicar só pra mudar um número de tolerância. ACEITA
+// DELIBERADAMENTE o risco de mudar o config debaixo de uma
+// PuzzleInstance em andamento: instância nunca congela uma cópia do
+// config (lê sempre a Version atual via FK, ver puzzleActionService.
+// executarAcao), então uma ação em voo pode ver a config nova na
+// resposta seguinte — mesma troca que qualquer live-balance teria.
+// Editar invalida a prova de solvabilidade anterior (ela é uma
+// assinatura do config exato que foi validado — ver puzzleEngineCore.
+// assinarConfig), então zera os dois campos pra nunca mostrar um selo
+// "validado" que não corresponde mais ao config salvo; o Admin precisa
+// rodar validarSolvabilidade de novo se quiser a confiança de volta.
 async function atualizarDraft(idVersion, { config, nome } = {}, transaction) {
   const versao = await PuzzleBlueprintVersion.findByPk(idVersion, {
     transaction,
     lock: transaction?.LOCK?.UPDATE,
   });
   if (!versao) throw erro("Revisão não encontrada.", 404);
-  if (versao.status !== "DRAFT") {
-    throw erro("Só é possível editar uma revisão em DRAFT — publicada é imutável.", 409, "DRAFT_IMUTAVEL");
+  if (versao.status === "ARCHIVED") {
+    throw erro("Revisão arquivada é imutável.", 409, "VERSAO_ARQUIVADA");
   }
-  if (config !== undefined) versao.config = validarConfig(config);
+  if (config !== undefined) {
+    versao.config = validarConfig(config);
+    versao.solvability_signature = null;
+    versao.solvability_validated_at = null;
+  }
   await versao.save({ transaction });
   return versao;
 }
