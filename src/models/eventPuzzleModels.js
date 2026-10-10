@@ -108,6 +108,11 @@ const PuzzleBlueprintVersion = sequelize.define(
       allowNull: true,
       references: { model: "users", key: "id" },
     },
+    // Fase 15 — carimbo de "uma sequência de ações simulou e resolveu
+    // este EXATO config" (ver puzzleBlueprintService.validarSolvabilidade).
+    // Nunca lido pelo runtime do jogador, só exibição no Admin.
+    solvability_signature: { type: D.STRING(64), allowNull: true },
+    solvability_validated_at: { type: D.DATE, allowNull: true },
   },
   { tableName: "puzzle_blueprint_versions", ...timestamps },
 );

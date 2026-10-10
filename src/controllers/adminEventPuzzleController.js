@@ -8,6 +8,8 @@ const eventEditionService = require("../services/eventEditionService");
 const puzzleBlueprintService = require("../services/puzzleBlueprintService");
 const puzzleClueService = require("../services/puzzleClueService");
 const puzzlePioneerService = require("../services/puzzlePioneerService");
+const puzzleRewardService = require("../services/puzzleRewardService");
+const eventPuzzleBossAdminService = require("../services/eventPuzzleBossAdminService");
 const { registrarAcao } = require("../services/adminAuditService");
 
 function tratarErro(res, error, mensagemLog) {
@@ -276,6 +278,34 @@ exports.criarMarco = async (req, res) => {
   }
 };
 
+// Fase 15 — editar nome/descrição/ordem/pré-requisito da identidade do
+// Blueprint (nunca o config, que é por Version — ver atualizarVersao).
+exports.atualizarBlueprint = async (req, res) => {
+  try {
+    const { PuzzleBlueprint } = require("../models/eventPuzzleModels");
+    const resultado = await sequelize.transaction(async (transaction) => {
+      const antes = await PuzzleBlueprint.findByPk(req.params.id, { transaction });
+      if (!antes) throw Object.assign(new Error("Blueprint não encontrado."), { statusCode: 404 });
+      const dadosAntes = antes.toJSON();
+      const blueprint = await puzzleBlueprintService.atualizarBlueprint(req.params.id, req.body, transaction);
+      await registrarAcao({
+        idAdmin: req.user.id,
+        acao: "editar",
+        entidade: "PuzzleBlueprint",
+        idEntidade: blueprint.id,
+        dadosAntes,
+        dadosDepois: blueprint.toJSON(),
+        req,
+        transaction,
+      });
+      return blueprint;
+    });
+    return res.json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao editar PuzzleBlueprint:");
+  }
+};
+
 exports.transicionarVersao = async (req, res) => {
   try {
     const resultado = await sequelize.transaction(async (transaction) => {
@@ -301,5 +331,276 @@ exports.transicionarVersao = async (req, res) => {
     return res.json({ status: "success", data: puzzleBlueprintService.dtoAdminVersao(resultado) });
   } catch (error) {
     tratarErro(res, error, "Erro ao transicionar PuzzleBlueprintVersion:");
+  }
+};
+
+// Fase 15 — dry-run de solvabilidade. Nunca um solver automático: o
+// Admin submete `{ acoes: [...] }` (a golden solution candidata) e a
+// função simula exatamente o que o jogador faria, passo a passo,
+// reportando o ponto exato de falha ou confirmando que resolve.
+exports.validarSolvabilidade = async (req, res) => {
+  try {
+    const resultado = await puzzleBlueprintService.validarSolvabilidade(req.params.versionId, req.body);
+    await registrarAcao({
+      idAdmin: req.user.id,
+      acao: "validar_solvabilidade",
+      entidade: "PuzzleBlueprintVersion",
+      idEntidade: Number(req.params.versionId),
+      dadosDepois: { valido: resultado.valido, etapa: resultado.etapa ?? null },
+      req,
+    });
+    return res.json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao validar solvabilidade:");
+  }
+};
+
+// ----------------------------------------- PuzzleClueDefinition (edição/exclusão)
+exports.atualizarPista = async (req, res) => {
+  try {
+    const { PuzzleClueDefinition } = require("../models/eventPuzzleModels");
+    const resultado = await sequelize.transaction(async (transaction) => {
+      const antes = await PuzzleClueDefinition.findByPk(req.params.id, { transaction });
+      if (!antes) throw Object.assign(new Error("Pista não encontrada."), { statusCode: 404 });
+      const dadosAntes = antes.toJSON();
+      const pista = await puzzleClueService.atualizarDefinicao(req.params.id, req.body, transaction);
+      await registrarAcao({
+        idAdmin: req.user.id,
+        acao: "editar",
+        entidade: "PuzzleClueDefinition",
+        idEntidade: pista.id,
+        dadosAntes,
+        dadosDepois: pista.toJSON(),
+        req,
+        transaction,
+      });
+      return pista;
+    });
+    return res.json({ status: "success", data: puzzleClueService.dtoAdmin(resultado) });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao editar pista:");
+  }
+};
+
+exports.excluirPista = async (req, res) => {
+  try {
+    await sequelize.transaction(async (transaction) => {
+      const { PuzzleClueDefinition } = require("../models/eventPuzzleModels");
+      const antes = await PuzzleClueDefinition.findByPk(req.params.id, { transaction });
+      await puzzleClueService.excluirDefinicao(req.params.id, transaction);
+      await registrarAcao({
+        idAdmin: req.user.id,
+        acao: "excluir",
+        entidade: "PuzzleClueDefinition",
+        idEntidade: Number(req.params.id),
+        dadosAntes: antes ? antes.toJSON() : null,
+        req,
+        transaction,
+      });
+    });
+    return res.json({ status: "success", data: { excluida: true } });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao excluir pista:");
+  }
+};
+
+// ------------------------------------- PuzzlePioneerMilestone (edição/exclusão)
+exports.atualizarMarco = async (req, res) => {
+  try {
+    const { PuzzlePioneerMilestone } = require("../models/eventPuzzleModels");
+    const resultado = await sequelize.transaction(async (transaction) => {
+      const antes = await PuzzlePioneerMilestone.findByPk(req.params.id, { transaction });
+      if (!antes) throw Object.assign(new Error("Marco não encontrado."), { statusCode: 404 });
+      const dadosAntes = antes.toJSON();
+      const marco = await puzzlePioneerService.atualizarMilestone(req.params.id, req.body, transaction);
+      await registrarAcao({
+        idAdmin: req.user.id,
+        acao: "editar",
+        entidade: "PuzzlePioneerMilestone",
+        idEntidade: marco.id,
+        dadosAntes,
+        dadosDepois: marco.toJSON(),
+        req,
+        transaction,
+      });
+      return marco;
+    });
+    return res.json({ status: "success", data: puzzlePioneerService.dtoAdmin(resultado) });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao editar marco Pioneer:");
+  }
+};
+
+exports.excluirMarco = async (req, res) => {
+  try {
+    const { PuzzlePioneerMilestone } = require("../models/eventPuzzleModels");
+    await sequelize.transaction(async (transaction) => {
+      const antes = await PuzzlePioneerMilestone.findByPk(req.params.id, { transaction });
+      await puzzlePioneerService.excluirMilestone(req.params.id, transaction);
+      await registrarAcao({
+        idAdmin: req.user.id,
+        acao: "excluir",
+        entidade: "PuzzlePioneerMilestone",
+        idEntidade: Number(req.params.id),
+        dadosAntes: antes ? antes.toJSON() : null,
+        req,
+        transaction,
+      });
+    });
+    return res.json({ status: "success", data: { excluida: true } });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao excluir marco Pioneer:");
+  }
+};
+
+// ------------------------------------------- PuzzleRewardDefinition (Fase 14)
+exports.listarRecompensas = async (req, res) => {
+  try {
+    const recompensas = await puzzleRewardService.listarDefinicoesAdmin(req.params.id);
+    return res.json({ status: "success", data: recompensas.map(puzzleRewardService.dtoAdmin) });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao listar recompensas:");
+  }
+};
+
+exports.criarRecompensa = async (req, res) => {
+  try {
+    const resultado = await sequelize.transaction(async (transaction) => {
+      const recompensa = await puzzleRewardService.criarDefinicao(req.params.id, req.body, transaction);
+      await registrarAcao({
+        idAdmin: req.user.id,
+        acao: "criar",
+        entidade: "PuzzleRewardDefinition",
+        idEntidade: recompensa.id,
+        dadosDepois: recompensa.toJSON(),
+        req,
+        transaction,
+      });
+      return recompensa;
+    });
+    return res.status(201).json({ status: "success", data: puzzleRewardService.dtoAdmin(resultado) });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao criar recompensa:");
+  }
+};
+
+exports.atualizarRecompensa = async (req, res) => {
+  try {
+    const { PuzzleRewardDefinition } = require("../models/eventPuzzleRewardModels");
+    const resultado = await sequelize.transaction(async (transaction) => {
+      const antes = await PuzzleRewardDefinition.findByPk(req.params.id, { transaction });
+      if (!antes) throw Object.assign(new Error("Recompensa não encontrada."), { statusCode: 404 });
+      const dadosAntes = antes.toJSON();
+      const recompensa = await puzzleRewardService.atualizarDefinicao(req.params.id, req.body, transaction);
+      await registrarAcao({
+        idAdmin: req.user.id,
+        acao: "editar",
+        entidade: "PuzzleRewardDefinition",
+        idEntidade: recompensa.id,
+        dadosAntes,
+        dadosDepois: recompensa.toJSON(),
+        req,
+        transaction,
+      });
+      return recompensa;
+    });
+    return res.json({ status: "success", data: puzzleRewardService.dtoAdmin(resultado) });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao editar recompensa:");
+  }
+};
+
+exports.excluirRecompensa = async (req, res) => {
+  try {
+    const { PuzzleRewardDefinition } = require("../models/eventPuzzleRewardModels");
+    await sequelize.transaction(async (transaction) => {
+      const antes = await PuzzleRewardDefinition.findByPk(req.params.id, { transaction });
+      await puzzleRewardService.excluirDefinicao(req.params.id, transaction);
+      await registrarAcao({
+        idAdmin: req.user.id,
+        acao: "excluir",
+        entidade: "PuzzleRewardDefinition",
+        idEntidade: Number(req.params.id),
+        dadosAntes: antes ? antes.toJSON() : null,
+        req,
+        transaction,
+      });
+    });
+    return res.json({ status: "success", data: { excluida: true } });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao excluir recompensa:");
+  }
+};
+
+// ---------------------------------------------- EventPuzzleBossConfig (Fase 13)
+exports.obterBoss = async (req, res) => {
+  try {
+    const { config, fases, resistencias } = await eventPuzzleBossAdminService.obterConfigAdmin(req.params.id);
+    return res.json({ status: "success", data: { config, fases, resistencias } });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao obter Custódio do Meridiano:");
+  }
+};
+
+exports.salvarBossConfig = async (req, res) => {
+  try {
+    const config = await eventPuzzleBossAdminService.salvarConfig(req.params.id, req.body, { idAdmin: req.user.id, req });
+    return res.json({ status: "success", data: config });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao salvar config do Custódio do Meridiano:");
+  }
+};
+
+exports.criarBossFase = async (req, res) => {
+  try {
+    const fase = await eventPuzzleBossAdminService.criarFase(req.params.id, req.body, { idAdmin: req.user.id, req });
+    return res.status(201).json({ status: "success", data: fase });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao criar fase do Custódio:");
+  }
+};
+
+exports.atualizarBossFase = async (req, res) => {
+  try {
+    const fase = await eventPuzzleBossAdminService.atualizarFase(req.params.id, req.params.idFase, req.body, { idAdmin: req.user.id, req });
+    return res.json({ status: "success", data: fase });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao editar fase do Custódio:");
+  }
+};
+
+exports.excluirBossFase = async (req, res) => {
+  try {
+    const resultado = await eventPuzzleBossAdminService.excluirFase(req.params.id, req.params.idFase, { idAdmin: req.user.id, req });
+    return res.json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao excluir fase do Custódio:");
+  }
+};
+
+exports.criarBossResistencia = async (req, res) => {
+  try {
+    const resistencia = await eventPuzzleBossAdminService.criarResistencia(req.params.id, req.body, { idAdmin: req.user.id, req });
+    return res.status(201).json({ status: "success", data: resistencia });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao criar resistência do Custódio:");
+  }
+};
+
+exports.atualizarBossResistencia = async (req, res) => {
+  try {
+    const resistencia = await eventPuzzleBossAdminService.atualizarResistencia(req.params.id, req.params.idResistencia, req.body, { idAdmin: req.user.id, req });
+    return res.json({ status: "success", data: resistencia });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao editar resistência do Custódio:");
+  }
+};
+
+exports.excluirBossResistencia = async (req, res) => {
+  try {
+    const resultado = await eventPuzzleBossAdminService.excluirResistencia(req.params.id, req.params.idResistencia, { idAdmin: req.user.id, req });
+    return res.json({ status: "success", data: resultado });
+  } catch (error) {
+    tratarErro(res, error, "Erro ao excluir resistência do Custódio:");
   }
 };

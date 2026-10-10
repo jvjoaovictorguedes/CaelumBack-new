@@ -77,6 +77,68 @@ async function criarDefinicao(idBlueprint, { key, titulo, texto, triggerType, ob
   }
 }
 
+// Fase 15 — edição admin da pista. Mesmas validações de criarDefinicao
+// pros campos informados; nunca permite mudar `key` (identidade
+// estável, referenciada por nada externo hoje mas por convenção do
+// domínio — mesmo critério de achievement_key em PuzzleRewardDefinition).
+async function atualizarDefinicao(idClueDefinition, { titulo, texto, triggerType, objectiveId, ordem } = {}, transaction) {
+  const pista = await PuzzleClueDefinition.findByPk(idClueDefinition, { transaction });
+  if (!pista) throw erro("Pista não encontrada.", 404);
+
+  if (titulo !== undefined) {
+    if (typeof titulo !== "string" || titulo.trim().length < 3 || titulo.length > 160) {
+      throw erro("Título inválido (3-160 caracteres).", 400);
+    }
+    pista.titulo = titulo.trim();
+  }
+  if (texto !== undefined) {
+    if (typeof texto !== "string" || texto.trim().length === 0) throw erro("Texto da pista não pode ser vazio.", 400);
+    pista.texto = texto;
+  }
+  const novoTrigger = triggerType ?? pista.trigger_type;
+  if (triggerType !== undefined) {
+    if (!TRIGGERS_VALIDOS.has(triggerType)) {
+      throw erro(`trigger_type inválido: ${triggerType}. Esperado OBJECTIVE_COMPLETED ou INSTANCE_COMPLETED.`, 400);
+    }
+    pista.trigger_type = triggerType;
+  }
+  if (novoTrigger === "OBJECTIVE_COMPLETED") {
+    const efetivo = objectiveId !== undefined ? objectiveId : pista.objective_id;
+    if (typeof efetivo !== "string" || efetivo.trim().length === 0) {
+      throw erro("objectiveId é obrigatório quando trigger_type=OBJECTIVE_COMPLETED.", 400);
+    }
+    pista.objective_id = efetivo;
+  } else if (objectiveId !== undefined && objectiveId !== null) {
+    throw erro("objectiveId não pode ser informado quando trigger_type=INSTANCE_COMPLETED.", 400);
+  } else if (triggerType === "INSTANCE_COMPLETED") {
+    pista.objective_id = null;
+  }
+  if (ordem !== undefined) {
+    if (!Number.isInteger(ordem)) throw erro("ordem precisa ser um inteiro.", 400);
+    pista.ordem = ordem;
+  }
+
+  await pista.save({ transaction });
+  return pista;
+}
+
+// Fase 15 — exclusão admin. Bloqueia se algum personagem já desbloqueou
+// (preserva histórico real do Caderno de Investigação — nunca some uma
+// pista que alguém já leu, mesmo que o Admin queira remover do
+// catálogo; a saída certa pra isso é desativar via Blueprint/Version,
+// nunca apagar histórico do jogador).
+async function excluirDefinicao(idClueDefinition, transaction) {
+  const pista = await PuzzleClueDefinition.findByPk(idClueDefinition, { transaction });
+  if (!pista) throw erro("Pista não encontrada.", 404);
+
+  const totalDesbloqueios = await CharacterClueUnlock.count({ where: { id_clue_definition: idClueDefinition }, transaction });
+  if (totalDesbloqueios > 0) {
+    throw erro("Esta pista já foi desbloqueada por pelo menos um personagem — não pode ser excluída.", 409, "PISTA_JA_DESBLOQUEADA");
+  }
+
+  await pista.destroy({ transaction });
+}
+
 async function listarDefinicoesAdmin(idBlueprint) {
   return PuzzleClueDefinition.findAll({
     where: { id_blueprint: idBlueprint },
@@ -198,6 +260,8 @@ async function obterCaderno(idPersonagem, idEventDefinition) {
 
 module.exports = {
   criarDefinicao,
+  atualizarDefinicao,
+  excluirDefinicao,
   listarDefinicoesAdmin,
   dtoAdmin,
   sincronizarDesbloqueios,

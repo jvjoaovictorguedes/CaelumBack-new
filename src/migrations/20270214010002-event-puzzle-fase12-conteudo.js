@@ -269,6 +269,27 @@ module.exports = {
   },
 
   async down(queryInterface) {
+    // Fases 13/14 (boss/recompensas) nasceram DEPOIS desta migration e
+    // referenciam o mesmo event_definition/blueprints via FK — sem
+    // limpar essas tabelas aqui, o DELETE de puzzle_blueprints/
+    // event_definitions abaixo falha por violação de FK, o erro é
+    // engolido por quem chama down().catch(()=>{}) (ex.: os testes de
+    // ponta a ponta que fazem down()+up() pra resetar o conteúdo), e o
+    // up() seguinte quebra com unique constraint na key duplicada.
+    // `tabelaExiste` protege o ambiente onde as migrations de schema
+    // da Fase 13/14 ainda não foram aplicadas (down() desta migration
+    // sendo chamado isoladamente, sem essas tabelas existirem).
+    async function tabelaExiste(nome) {
+      try {
+        await queryInterface.describeTable(nome);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    const temBoss = await tabelaExiste("event_puzzle_boss_configs");
+    const temRecompensas = await tabelaExiste("puzzle_reward_definitions");
+
     await queryInterface.sequelize.transaction(async (t) => {
       const [definicoes] = await queryInterface.sequelize.query(
         `SELECT id FROM event_definitions WHERE key = 'coracao-da-maquina-celestial';`,
@@ -280,6 +301,82 @@ module.exports = {
           { replacements: { id: definicao.id }, transaction: t },
         );
         const idsBlueprints = blueprints.map((b) => b.id);
+
+        if (temBoss) {
+          const [configs] = await queryInterface.sequelize.query(
+            `SELECT id, id_monstro_base FROM event_puzzle_boss_configs WHERE id_event_definition = :id;`,
+            { replacements: { id: definicao.id }, transaction: t },
+          );
+          const idsConfigs = configs.map((c) => c.id);
+          const idsMonstros = configs.map((c) => c.id_monstro_base).filter(Boolean);
+          if (idsConfigs.length) {
+            await queryInterface.sequelize.query(
+              `DELETE FROM event_puzzle_boss_reward_grants WHERE id_attempt IN (SELECT a.id FROM event_puzzle_boss_attempts a JOIN event_editions e ON e.id = a.id_event_edition WHERE e.id_event_definition = :id);`,
+              { replacements: { id: definicao.id }, transaction: t },
+            );
+            await queryInterface.sequelize.query(
+              `DELETE FROM event_puzzle_boss_attempts WHERE id_event_edition IN (SELECT id FROM event_editions WHERE id_event_definition = :id);`,
+              { replacements: { id: definicao.id }, transaction: t },
+            );
+            await queryInterface.sequelize.query(
+              `DELETE FROM event_puzzle_boss_phases WHERE id_boss_config IN (:ids);`,
+              { replacements: { ids: idsConfigs }, transaction: t },
+            );
+            await queryInterface.sequelize.query(
+              `DELETE FROM event_puzzle_boss_status_resistances WHERE id_boss_config IN (:ids);`,
+              { replacements: { ids: idsConfigs }, transaction: t },
+            );
+            await queryInterface.sequelize.query(
+              `DELETE FROM event_puzzle_boss_configs WHERE id IN (:ids);`,
+              { replacements: { ids: idsConfigs }, transaction: t },
+            );
+            if (idsMonstros.length) {
+              // o monstro-base é criado exclusivamente pela migration
+              // de conteúdo do boss (20270214010004) — nunca
+              // compartilhado com outro sistema, mesmo padrão de
+              // limpeza que o down() dela própria já faz.
+              await queryInterface.sequelize.query(
+                `DELETE FROM "AdventureMonsters" WHERE id IN (:ids);`,
+                { replacements: { ids: idsMonstros }, transaction: t },
+              );
+            }
+          }
+        }
+
+        if (temRecompensas && idsBlueprints.length) {
+          const [definicoesRecompensa] = await queryInterface.sequelize.query(
+            `SELECT id, id_item FROM puzzle_reward_definitions WHERE id_blueprint IN (:ids);`,
+            { replacements: { ids: idsBlueprints }, transaction: t },
+          );
+          const idsItens = definicoesRecompensa.map((d) => d.id_item).filter(Boolean);
+          await queryInterface.sequelize.query(
+            `DELETE FROM character_puzzle_reward_grants WHERE id_reward_definition IN (SELECT id FROM puzzle_reward_definitions WHERE id_blueprint IN (:ids));`,
+            { replacements: { ids: idsBlueprints }, transaction: t },
+          );
+          await queryInterface.sequelize.query(
+            `DELETE FROM puzzle_reward_definitions WHERE id_blueprint IN (:ids);`,
+            { replacements: { ids: idsBlueprints }, transaction: t },
+          );
+          if (idsItens.length) {
+            // mesma limpeza que o down() da própria migration de
+            // conteúdo das recompensas (20270214010006) já faz pro
+            // item-troféu exclusivo de cada definição.
+            await queryInterface.sequelize.query(`DELETE FROM "Items" WHERE id IN (:ids);`, {
+              replacements: { ids: idsItens },
+              transaction: t,
+            });
+          }
+          // achievement/title capstone ("Coração Restaurado"/"Restaurador
+          // do Coração") são globais da Fase 14, não por blueprint — só
+          // faz sentido limpar junto com o resto do conteúdo do evento.
+          await queryInterface.sequelize.query(`DELETE FROM titles WHERE key = 'restaurador-do-coracao';`, {
+            transaction: t,
+          });
+          await queryInterface.sequelize.query(`DELETE FROM achievements WHERE key = 'coracao-restaurado';`, {
+            transaction: t,
+          });
+        }
+
         if (idsBlueprints.length) {
           await queryInterface.sequelize.query(
             `DELETE FROM puzzle_pioneer_claims WHERE id_milestone IN (SELECT id FROM puzzle_pioneer_milestones WHERE id_blueprint IN (:ids));`,

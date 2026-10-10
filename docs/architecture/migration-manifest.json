@@ -153,5 +153,11 @@
     "dependsOn": [
       "20270214010005-event-puzzle-fase14-recompensas-schema.js"
     ]
+  },
+  "20270214010007-event-puzzle-fase15-solvabilidade-schema.js": {
+    "createdAt": "2026-10-10T01:48:07.949Z",
+    "dependsOn": [
+      "20270214010006-event-puzzle-fase14-recompensas-conteudo.js"
+    ]
   }
 }

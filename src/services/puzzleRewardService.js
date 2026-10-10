@@ -118,6 +118,86 @@ async function criarDefinicao(
   }
 }
 
+// Fase 15 — edição admin. Mesmas validações de criarDefinicao pros
+// campos informados.
+async function atualizarDefinicao(
+  idRewardDefinition,
+  { tituloExibicao, descricaoExibicao, rewardOuro, rewardXp, idItem, itemQuantidade, achievementKey, ordem } = {},
+  transaction,
+) {
+  const def = await PuzzleRewardDefinition.findByPk(idRewardDefinition, { transaction });
+  if (!def) throw erro("Recompensa não encontrada.", 404);
+
+  if (tituloExibicao !== undefined) {
+    if (typeof tituloExibicao !== "string" || tituloExibicao.trim().length < 3 || tituloExibicao.length > 160) {
+      throw erro("Título inválido (3-160 caracteres).", 400);
+    }
+    def.titulo_exibicao = tituloExibicao.trim();
+  }
+  if (descricaoExibicao !== undefined) {
+    if (typeof descricaoExibicao !== "string" || descricaoExibicao.trim().length === 0) {
+      throw erro("Descrição não pode ser vazia.", 400);
+    }
+    def.descricao_exibicao = descricaoExibicao;
+  }
+  if (rewardOuro !== undefined) {
+    if (!Number.isInteger(rewardOuro) || rewardOuro < 0) throw erro("rewardOuro precisa ser um inteiro >= 0.", 400);
+    def.reward_ouro = rewardOuro;
+  }
+  if (rewardXp !== undefined) {
+    if (!Number.isInteger(rewardXp) || rewardXp < 0) throw erro("rewardXp precisa ser um inteiro >= 0.", 400);
+    def.reward_xp = rewardXp;
+  }
+  if (idItem !== undefined) {
+    if (idItem === null) {
+      def.id_item = null;
+    } else {
+      const item = await Item.findByPk(idItem, { transaction });
+      if (!item) throw erro("Item da recompensa não encontrado.", 404);
+      def.id_item = item.id;
+    }
+  }
+  if (itemQuantidade !== undefined) {
+    if (!Number.isInteger(itemQuantidade) || itemQuantidade < 1) throw erro("itemQuantidade precisa ser um inteiro >= 1.", 400);
+    def.item_quantidade = itemQuantidade;
+  }
+  if (achievementKey !== undefined) {
+    if (achievementKey === null) {
+      def.achievement_key = null;
+    } else {
+      const achievement = await Achievement.findOne({ where: { key: achievementKey }, transaction });
+      if (!achievement) throw erro(`Achievement com key "${achievementKey}" não existe.`, 404);
+      def.achievement_key = achievementKey;
+    }
+  }
+  if (ordem !== undefined) {
+    if (!Number.isInteger(ordem)) throw erro("ordem precisa ser um inteiro.", 400);
+    def.ordem = ordem;
+  }
+
+  if (def.reward_ouro === 0 && def.reward_xp === 0 && !def.id_item && !def.achievement_key) {
+    throw erro("A recompensa precisa conceder pelo menos um de: ouro, xp, item ou conquista.", 400);
+  }
+
+  await def.save({ transaction });
+  return def;
+}
+
+// Fase 15 — exclusão admin. Bloqueia se algum personagem já recebeu
+// (preserva histórico real — nunca apaga um grant já concedido, mesmo
+// removendo a definição do catálogo).
+async function excluirDefinicao(idRewardDefinition, transaction) {
+  const def = await PuzzleRewardDefinition.findByPk(idRewardDefinition, { transaction });
+  if (!def) throw erro("Recompensa não encontrada.", 404);
+
+  const totalConcessoes = await CharacterPuzzleRewardGrant.count({ where: { id_reward_definition: idRewardDefinition }, transaction });
+  if (totalConcessoes > 0) {
+    throw erro("Esta recompensa já foi concedida a pelo menos um personagem — não pode ser excluída.", 409, "RECOMPENSA_JA_CONCEDIDA");
+  }
+
+  await def.destroy({ transaction });
+}
+
 async function listarDefinicoesAdmin(idBlueprint) {
   return PuzzleRewardDefinition.findAll({
     where: { id_blueprint: idBlueprint },
@@ -263,6 +343,8 @@ async function listarObtidasPorPersonagem(idPersonagem, idBlueprint) {
 
 module.exports = {
   criarDefinicao,
+  atualizarDefinicao,
+  excluirDefinicao,
   listarDefinicoesAdmin,
   dtoAdmin,
   sincronizarRecompensas,

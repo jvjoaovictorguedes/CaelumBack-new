@@ -8,6 +8,8 @@ const { Op } = require("sequelize");
 const { sequelize } = require("../config/database");
 const { PuzzleBlueprint, PuzzleBlueprintVersion, PuzzleInstance, PuzzleParticipant } = require("../models/eventPuzzleModels");
 const eventDefinitionService = require("./eventDefinitionService");
+const engine = require("./puzzleEngineCore");
+const { resolverContexto } = require("./puzzleDomainRegistry");
 
 function erro(mensagem, statusCode = 400, code) {
   return Object.assign(new Error(mensagem), { statusCode, code });
@@ -262,6 +264,120 @@ async function transicionar(idVersion, novoStatus, { idAdmin } = {}, transaction
   return sequelize.transaction(aplicar);
 }
 
+// Fase 15 — editar nome/descrição/ordem/pré-requisito da IDENTIDADE
+// (nunca o `config`, que é por Version e só edita via atualizarDraft).
+// Mesma ordem de locks de criarBlueprint (Definition → Blueprint) —
+// reordenar/trocar pré-requisito é uma mudança estrutural equivalente
+// a criar, nunca menos protegida contra concorrência com um ARCHIVE.
+async function atualizarBlueprint(idBlueprint, { nome, descricao, ordem, id_blueprint_prerequisito } = {}, transaction) {
+  async function aplicar(t) {
+    const blueprintPreview = await PuzzleBlueprint.findByPk(idBlueprint, { transaction: t });
+    if (!blueprintPreview) throw erro("Blueprint não encontrado.", 404);
+
+    const definicao = await eventDefinitionService.obterPorId(blueprintPreview.id_event_definition, t, { lock: true });
+    if (definicao.status === "ARCHIVED") {
+      throw erro("Esse evento foi arquivado — não é possível editar blueprints.", 409);
+    }
+
+    const blueprint = await PuzzleBlueprint.findByPk(idBlueprint, { transaction: t, lock: t.LOCK.UPDATE });
+    if (!blueprint) throw erro("Blueprint não encontrado.", 404);
+
+    if (nome !== undefined) {
+      if (typeof nome !== "string" || nome.trim().length < 3 || nome.length > 160) {
+        throw erro("Nome inválido.", 400);
+      }
+      blueprint.nome = nome.trim();
+    }
+    if (descricao !== undefined) blueprint.descricao = descricao;
+    if (ordem !== undefined) {
+      if (!Number.isInteger(ordem)) throw erro("ordem precisa ser um inteiro.", 400);
+      blueprint.ordem = ordem;
+    }
+    if (id_blueprint_prerequisito !== undefined) {
+      if (id_blueprint_prerequisito === null) {
+        blueprint.id_blueprint_prerequisito = null;
+      } else {
+        if (Number(id_blueprint_prerequisito) === blueprint.id) {
+          throw erro("Um blueprint não pode ser pré-requisito de si mesmo.", 400);
+        }
+        const prerequisito = await PuzzleBlueprint.findByPk(id_blueprint_prerequisito, { transaction: t });
+        if (!prerequisito || prerequisito.id_event_definition !== blueprint.id_event_definition) {
+          throw erro("id_blueprint_prerequisito precisa ser um blueprint existente do mesmo evento.", 400);
+        }
+        blueprint.id_blueprint_prerequisito = prerequisito.id;
+      }
+    }
+    await blueprint.save({ transaction: t });
+    return blueprint;
+  }
+
+  if (transaction) return aplicar(transaction);
+  return sequelize.transaction(aplicar);
+}
+
+// Fase 15 — validador de solvabilidade. NUNCA um solver automático
+// (nenhum motor genérico de busca aqui): o Admin submete uma sequência
+// de ações candidata (a golden solution que ele pretende) e esta
+// função simula exatamente o que puzzleActionService.executarAcao
+// faria pro jogador, passo a passo, a partir de um estado FRESCO —
+// reportando o ponto exato de falha (resolução de domínio inválida,
+// estrutura/topologia inválida, ou uma ação específica da sequência
+// que não faz o esperado) em vez de só "sim/não". Só grava
+// solvability_signature/validated_at quando a sequência realmente
+// resolve TODOS os objetivos — nunca numa falha parcial.
+async function validarSolvabilidade(idVersion, { acoes } = {}, transaction) {
+  const versao = await obterVersaoPorId(idVersion, transaction);
+  if (!Array.isArray(acoes) || acoes.length === 0) {
+    throw erro("Informe `acoes` — a sequência candidata a simular (nunca vazia).", 400);
+  }
+
+  const config = versao.config || {};
+
+  let contexto;
+  try {
+    contexto = resolverContexto(config, "admin-dry-run-fase15");
+  } catch (e) {
+    return { valido: false, etapa: "DOMINIO", erro: e.message };
+  }
+
+  let estado;
+  try {
+    estado = engine.construirEstadoInicial(contexto);
+  } catch (e) {
+    return { valido: false, etapa: "ESTRUTURA_OU_TOPOLOGIA", erro: e.message };
+  }
+
+  const trace = [];
+  for (let indice = 0; indice < acoes.length; indice++) {
+    try {
+      const resultado = engine.executarAcao(contexto, estado, acoes[indice]);
+      estado = resultado.state;
+      trace.push({ indice, acao: acoes[indice], eventos: resultado.eventos });
+    } catch (e) {
+      return { valido: false, etapa: "SIMULACAO", indiceFalha: indice, acao: acoes[indice], erro: e.message, trace };
+    }
+  }
+
+  // Require tardio pra nunca fechar um ciclo de módulo —
+  // puzzleInstanceService.js já requer este arquivo (ver
+  // obterUltimaPublicada/personagemCompletouBlueprint), então um
+  // require no topo deste arquivo apontando de volta pra lá quebraria
+  // a ordem de carregamento do primeiro `require` que rodar.
+  const { todosObjetivosConcluidos } = require("./puzzleInstanceService");
+  const resolvido = todosObjetivosConcluidos(config, estado);
+
+  if (!resolvido) {
+    return { valido: false, etapa: "OBJETIVOS_INCOMPLETOS", trace, objetivosConcluidos: estado.objetivosConcluidos };
+  }
+
+  const assinatura = engine.assinarConfig(config);
+  versao.solvability_signature = assinatura;
+  versao.solvability_validated_at = new Date();
+  await versao.save({ transaction });
+
+  return { valido: true, assinatura, trace, objetivosConcluidos: estado.objetivosConcluidos };
+}
+
 async function listarPorEventDefinition(idEventDefinition) {
   return PuzzleBlueprint.findAll({
     where: { id_event_definition: idEventDefinition },
@@ -306,6 +422,8 @@ function dtoAdminVersao(versao) {
     config: versao.config,
     published_at: versao.published_at,
     published_by_admin_id: versao.published_by_admin_id,
+    solvability_signature: versao.solvability_signature,
+    solvability_validated_at: versao.solvability_validated_at,
     createdAt: versao.createdAt,
     updatedAt: versao.updatedAt,
   };
@@ -418,9 +536,11 @@ module.exports = {
   TRANSICOES_VALIDAS,
   transicaoValida,
   criarBlueprint,
+  atualizarBlueprint,
   criarNovaVersao,
   atualizarDraft,
   transicionar,
+  validarSolvabilidade,
   listarPorEventDefinition,
   listarVersoes,
   obterVersaoPorId,

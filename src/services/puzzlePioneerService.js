@@ -79,6 +79,76 @@ async function criarMilestone(idBlueprint, { key, titulo, descricao, triggerType
   }
 }
 
+// Fase 15 — edição admin do marco. Mesmas validações de criarMilestone
+// pros campos informados; nunca permite diminuir maxClaims pra menos
+// que o total de claims já concedidos (reduzir a vaga abaixo do que já
+// foi dado não desfaz claim nenhum — só impediria nunca mais nenhum
+// outro acontecer de verdade, então a checagem é contra o passado real,
+// não contra uma intenção futura).
+async function atualizarMilestone(idMilestone, { titulo, descricao, triggerType, objectiveId, maxClaims, ordem } = {}, transaction) {
+  const marco = await PuzzlePioneerMilestone.findByPk(idMilestone, { transaction });
+  if (!marco) throw erro("Marco não encontrado.", 404);
+
+  if (titulo !== undefined) {
+    if (typeof titulo !== "string" || titulo.trim().length < 3 || titulo.length > 160) {
+      throw erro("Título inválido (3-160 caracteres).", 400);
+    }
+    marco.titulo = titulo.trim();
+  }
+  if (descricao !== undefined) {
+    if (typeof descricao !== "string" || descricao.trim().length === 0) throw erro("Descrição não pode ser vazia.", 400);
+    marco.descricao = descricao;
+  }
+  const novoTrigger = triggerType ?? marco.trigger_type;
+  if (triggerType !== undefined) {
+    if (!TRIGGERS_VALIDOS.has(triggerType)) {
+      throw erro(`trigger_type inválido: ${triggerType}. Esperado OBJECTIVE_COMPLETED ou INSTANCE_COMPLETED.`, 400);
+    }
+    marco.trigger_type = triggerType;
+  }
+  if (novoTrigger === "OBJECTIVE_COMPLETED") {
+    const efetivo = objectiveId !== undefined ? objectiveId : marco.objective_id;
+    if (typeof efetivo !== "string" || efetivo.trim().length === 0) {
+      throw erro("objectiveId é obrigatório quando trigger_type=OBJECTIVE_COMPLETED.", 400);
+    }
+    marco.objective_id = efetivo;
+  } else if (objectiveId !== undefined && objectiveId !== null) {
+    throw erro("objectiveId não pode ser informado quando trigger_type=INSTANCE_COMPLETED.", 400);
+  } else if (triggerType === "INSTANCE_COMPLETED") {
+    marco.objective_id = null;
+  }
+  if (maxClaims !== undefined) {
+    if (!Number.isInteger(maxClaims) || maxClaims < 1) throw erro("maxClaims precisa ser um inteiro >= 1.", 400);
+    const totalClaims = await PuzzlePioneerClaim.count({ where: { id_milestone: idMilestone }, transaction });
+    if (maxClaims < totalClaims) {
+      throw erro(`maxClaims não pode ser menor que o total já conquistado (${totalClaims}).`, 409);
+    }
+    marco.max_claims = maxClaims;
+  }
+  if (ordem !== undefined) {
+    if (!Number.isInteger(ordem)) throw erro("ordem precisa ser um inteiro.", 400);
+    marco.ordem = ordem;
+  }
+
+  await marco.save({ transaction });
+  return marco;
+}
+
+// Fase 15 — exclusão admin. Bloqueia se já existe qualquer claim
+// (preserva o Hall das Lendas real — nunca apaga quem já conquistou
+// uma posição).
+async function excluirMilestone(idMilestone, transaction) {
+  const marco = await PuzzlePioneerMilestone.findByPk(idMilestone, { transaction });
+  if (!marco) throw erro("Marco não encontrado.", 404);
+
+  const totalClaims = await PuzzlePioneerClaim.count({ where: { id_milestone: idMilestone }, transaction });
+  if (totalClaims > 0) {
+    throw erro("Este marco já tem pelo menos uma conquista registrada — não pode ser excluído.", 409, "MARCO_JA_CONQUISTADO");
+  }
+
+  await marco.destroy({ transaction });
+}
+
 async function listarMilestonesAdmin(idBlueprint) {
   return PuzzlePioneerMilestone.findAll({
     where: { id_blueprint: idBlueprint },
@@ -243,6 +313,8 @@ async function obterFeedDeDescobertas(idEventDefinition, { limite = 20 } = {}) {
 
 module.exports = {
   criarMilestone,
+  atualizarMilestone,
+  excluirMilestone,
   listarMilestonesAdmin,
   dtoAdmin,
   sincronizarConquistas,
