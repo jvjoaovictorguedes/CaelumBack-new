@@ -294,6 +294,130 @@ testeComBanco("eventPuzzleController: abandonarInstancia devolve 200 com status 
   assert.equal(corpo.data.status, "ABANDONED");
 });
 
+// ------------------------- correção de lifecycle/UX (camada HTTP) -------
+
+testeComBanco(
+  "eventPuzzleController: reentrar numa sala já CONCLUÍDA devolve 409 PUZZLE_JA_CONCLUIDO (nunca 500, nunca cria outra)",
+  async () => {
+    const { edicao, blueprint } = await criarFundacao();
+    const { personagem } = await criarPersonagem({});
+
+    const rrCria = reqRes({ personagemAtual: { id: personagem.id, nome: personagem.nome }, params: { editionId: String(edicao.id) }, body: { idBlueprint: blueprint.id } });
+    await eventPuzzleController.criarOuObterInstancia(rrCria.req, rrCria.res);
+    const instanciaCriada = rrCria.resultado().corpo.data;
+
+    const rrAcao = reqRes({
+      personagemAtual: { id: personagem.id, nome: personagem.nome },
+      params: { id: String(instanciaCriada.id) },
+      body: { type: "LIGAR", componentId: "motor1", stateVersion: instanciaCriada.state_version },
+    });
+    await eventPuzzleController.executarAcao(rrAcao.req, rrAcao.res);
+    assert.equal(rrAcao.resultado().corpo.data.instancia.status, "COMPLETED");
+
+    const rrReentrada = reqRes({ personagemAtual: { id: personagem.id, nome: personagem.nome }, params: { editionId: String(edicao.id) }, body: { idBlueprint: blueprint.id } });
+    await eventPuzzleController.criarOuObterInstancia(rrReentrada.req, rrReentrada.res);
+    const { statusCode, corpo } = rrReentrada.resultado();
+    assert.equal(statusCode, 409);
+    assert.equal(corpo.code, "PUZZLE_JA_CONCLUIDO");
+    assert.ok(corpo.message);
+
+    const { PuzzleInstance } = require("../src/models/eventPuzzleModels");
+    const total = await PuzzleInstance.count({ where: { id_event_edition: edicao.id } });
+    assert.equal(total, 1, "nenhuma 2ª instância nasceu através do controller");
+  },
+);
+
+testeComBanco(
+  "eventPuzzleController: criarOuObterInstancia/executarAcao/obterInstancia nunca revelam `descricao` de um objective futuro no envelope HTTP",
+  async () => {
+    const eventDefinitionService = require("../src/services/eventDefinitionService");
+    const eventEditionService = require("../src/services/eventEditionService");
+    const puzzleBlueprintService = require("../src/services/puzzleBlueprintService");
+
+    const chave = slug();
+    const definicao = await eventDefinitionService.criar({ key: `http-evento2-${chave}`, nome: "Evento" });
+    await eventDefinitionService.transicionar(definicao.id, "PUBLISHED");
+    const edicao = await eventEditionService.criar(definicao.id, { key: `http-edicao2-${chave}`, nome: "Edição" });
+    await eventEditionService.transicionar(edicao.id, "ACTIVE");
+    const { blueprint, versao } = await puzzleBlueprintService.criarBlueprint(definicao.id, { key: `http-sala2-${chave}`, nome: "Sala" });
+    await puzzleBlueprintService.atualizarDraft(versao.id, {
+      config: {
+        dominio: "MECANICO",
+        components: [
+          { id: "motor1", type: "MOTOR", props: { rpmNominal: 60, sentido: "CW" }, position: { x: 0, y: 0 } },
+          { id: "output1", type: "OUTPUT", props: { rpmAlvo: 60, sentidoAlvo: "CW", toleranciaRpm: 0 }, position: { x: 1, y: 0 } },
+          { id: "lever1", type: "LEVER", props: {}, position: { x: 2, y: 0 } },
+        ],
+        connections: [{ id: "c1", from: { componentId: "motor1", port: "out" }, to: { componentId: "output1", port: "in" } }],
+        objectives: [
+          { id: "obj1", descricao: "Segredo 1", condicao: { op: "EQUALS", path: "components.output1.atingido", value: true } },
+          { id: "obj2", descricao: "Segredo 2 — NUNCA pode vazar antes da hora", condicao: { op: "EQUALS", path: "components.lever1.acionada", value: true } },
+        ],
+      },
+    });
+    await puzzleBlueprintService.transicionar(versao.id, "PUBLISHED", {});
+    const { personagem } = await criarPersonagem({});
+
+    const rrCria = reqRes({ personagemAtual: { id: personagem.id, nome: personagem.nome }, params: { editionId: String(edicao.id) }, body: { idBlueprint: blueprint.id } });
+    await eventPuzzleController.criarOuObterInstancia(rrCria.req, rrCria.res);
+    const criada = rrCria.resultado().corpo;
+    assert.ok(!JSON.stringify(criada).includes("Segredo 2"), "criarOuObterInstancia nunca vaza descricao de objective futuro");
+    assert.equal(criada.data.objectivesProgressivos[0].atual, true);
+    assert.ok(!("descricao" in criada.data.objectivesProgressivos[1]));
+
+    const rrGet = reqRes({ personagemAtual: { id: personagem.id, nome: personagem.nome }, params: { id: String(criada.data.id) } });
+    await eventPuzzleController.obterInstancia(rrGet.req, rrGet.res);
+    assert.ok(!JSON.stringify(rrGet.resultado().corpo).includes("Segredo 2"), "obterInstancia (resync/F5) nunca vaza descricao de objective futuro");
+
+    const rrAcao = reqRes({
+      personagemAtual: { id: personagem.id, nome: personagem.nome },
+      params: { id: String(criada.data.id) },
+      body: { type: "LIGAR", componentId: "motor1", stateVersion: criada.data.state_version },
+    });
+    await eventPuzzleController.executarAcao(rrAcao.req, rrAcao.res);
+    const depoisDaAcao = rrAcao.resultado().corpo;
+    assert.equal(depoisDaAcao.data.instancia.status, "ACTIVE", "só o 1º objective resolve; o puzzle não completa com 1 ação só");
+    assert.equal(depoisDaAcao.data.instancia.objectivesProgressivos[0].concluido, true);
+    assert.equal(depoisDaAcao.data.instancia.objectivesProgressivos[1].atual, true);
+    assert.equal(depoisDaAcao.data.instancia.objectivesProgressivos[1].descricao, "Segredo 2 — NUNCA pode vazar antes da hora", "depois de concluído o 1º, o 2º (agora atual) revela a própria descrição");
+  },
+);
+
+testeComBanco(
+  "eventPuzzleController: listarBlueprintsPublicos devolve concluido/em_andamento/id_instancia_ativa/replayable coerentes",
+  async () => {
+    const { edicao, blueprint } = await criarFundacao();
+    const { personagem } = await criarPersonagem({});
+
+    const rrAntes = reqRes({ personagemAtual: { id: personagem.id, nome: personagem.nome }, params: { editionId: String(edicao.id) } });
+    await eventPuzzleController.listarBlueprintsPublicos(rrAntes.req, rrAntes.res);
+    const salaAntes = rrAntes.resultado().corpo.data.find((s) => s.id_blueprint === blueprint.id);
+    assert.equal(salaAntes.concluido, false);
+    assert.equal(salaAntes.em_andamento, false);
+    assert.equal(salaAntes.replayable, false);
+
+    const rrCria = reqRes({ personagemAtual: { id: personagem.id, nome: personagem.nome }, params: { editionId: String(edicao.id) }, body: { idBlueprint: blueprint.id } });
+    await eventPuzzleController.criarOuObterInstancia(rrCria.req, rrCria.res);
+    const instanciaCriada = rrCria.resultado().corpo.data;
+
+    const rrAcao = reqRes({
+      personagemAtual: { id: personagem.id, nome: personagem.nome },
+      params: { id: String(instanciaCriada.id) },
+      body: { type: "LIGAR", componentId: "motor1", stateVersion: instanciaCriada.state_version },
+    });
+    await eventPuzzleController.executarAcao(rrAcao.req, rrAcao.res);
+    assert.equal(rrAcao.resultado().corpo.data.instancia.status, "COMPLETED");
+
+    const rrDepois = reqRes({ personagemAtual: { id: personagem.id, nome: personagem.nome }, params: { editionId: String(edicao.id) } });
+    await eventPuzzleController.listarBlueprintsPublicos(rrDepois.req, rrDepois.res);
+    const salaDepois = rrDepois.resultado().corpo.data.find((s) => s.id_blueprint === blueprint.id);
+    assert.equal(salaDepois.concluido, true);
+    assert.ok(salaDepois.completed_at);
+    assert.equal(salaDepois.em_andamento, false);
+    assert.equal(salaDepois.id_instancia_ativa, null);
+  },
+);
+
 testeComBanco("eventPuzzleController: obterStatusDoBoss/obterCaderno/obterHallDasLendas devolvem 200 mesmo sem nenhum conteúdo configurado ainda", async () => {
   const { edicao } = await criarFundacao();
   const { personagem } = await criarPersonagem({});

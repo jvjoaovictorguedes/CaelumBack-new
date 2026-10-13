@@ -53,7 +53,11 @@ exports.listarBlueprintsPublicos = async (req, res) => {
 
 // Idempotente — se o personagem já tem uma PuzzleInstance CREATED/
 // ACTIVE desse blueprint nessa edição, devolve ela (200) em vez de
-// criar outra; só retorna 201 quando cria de verdade.
+// criar outra; só retorna 201 quando cria de verdade. Correção de
+// lifecycle: se já existe COMPLETED e a última version PUBLISHED não
+// declara `config.replayable === true`, o service nunca chega a criar
+// nada — rejeita com 409 PUZZLE_JA_CONCLUIDO (ver
+// puzzleInstanceService.criarOuObterInstancia).
 exports.criarOuObterInstancia = async (req, res) => {
   try {
     const { instancia, criada } = await puzzleInstanceService.criarOuObterInstancia(
@@ -61,9 +65,17 @@ exports.criarOuObterInstancia = async (req, res) => {
       req.body.idBlueprint,
       { id: req.personagemAtual.id, nome: req.personagemAtual.nome },
     );
-    return res
-      .status(criada ? 201 : 200)
-      .json({ status: "success", data: puzzleInstanceService.dtoRuntime(instancia) });
+    // Releitura com blueprintVersion carregada — só pra montar o DTO
+    // progressivo de objectives (nunca pra decidir nada de lifecycle de
+    // novo; `instancia`/`criada` acima já são a decisão final).
+    const instanciaComBlueprint = await puzzleInstanceService.obterParaPersonagem(instancia.id, req.personagemAtual.id, {
+      comBlueprint: true,
+    });
+    const dto = puzzleInstanceService.dtoRuntimeComObjetivos(
+      instanciaComBlueprint,
+      instanciaComBlueprint.blueprintVersion.config?.objectives,
+    );
+    return res.status(criada ? 201 : 200).json({ status: "success", data: dto });
   } catch (error) {
     tratarErro(res, error, "Erro ao criar/obter PuzzleInstance:");
   }
@@ -72,11 +84,16 @@ exports.criarOuObterInstancia = async (req, res) => {
 // Dobra como "resync" — releitura idempotente do estado atual; o
 // cliente SEMPRE pode rechamar isso na reconexão em vez de confiar em
 // qualquer buffer de socket (seção 8 da encomenda: "reconexão deve
-// usar resync pelo estado persistido").
+// usar resync pelo estado persistido"). Também é o caminho de F5/
+// reconexão da correção de lifecycle (seção 23): nunca revela
+// objective futuro de novo, mesma projeção progressiva de sempre.
 exports.obterInstancia = async (req, res) => {
   try {
-    const instancia = await puzzleInstanceService.obterParaPersonagem(req.params.id, req.personagemAtual.id);
-    return res.json({ status: "success", data: puzzleInstanceService.dtoRuntime(instancia) });
+    const instancia = await puzzleInstanceService.obterParaPersonagem(req.params.id, req.personagemAtual.id, {
+      comBlueprint: true,
+    });
+    const dto = puzzleInstanceService.dtoRuntimeComObjetivos(instancia, instancia.blueprintVersion.config?.objectives);
+    return res.json({ status: "success", data: dto });
   } catch (error) {
     tratarErro(res, error, "Erro ao obter PuzzleInstance:");
   }
@@ -96,13 +113,18 @@ exports.executarAcao = async (req, res) => {
       ...(req.body.componentId !== undefined ? { componentId: req.body.componentId } : {}),
       ...(req.body.payload !== undefined ? { payload: req.body.payload } : {}),
     };
-    const { instancia, resultado, pistasDesbloqueadas, conquistasPioneiras, recompensasConcedidas } = await puzzleActionService.executarAcao(
+    const { instancia, resultado, pistasDesbloqueadas, conquistasPioneiras, recompensasConcedidas, config } = await puzzleActionService.executarAcao(
       req.params.id,
       req.personagemAtual.id,
       acao,
       req.body.stateVersion,
     );
-    const dto = puzzleInstanceService.dtoRuntime(instancia);
+    // Feedback imediato de conclusão (seção 9 da correção): o DTO já
+    // sai com `status: "COMPLETED"` + `objectivesProgressivos` 100%
+    // revelado (todos concluídos) na MESMA resposta da ação que
+    // terminou o puzzle — o frontend nunca precisa de F5/resync pra
+    // perceber que a câmara acabou de ser concluída.
+    const dto = puzzleInstanceService.dtoRuntimeComObjetivos(instancia, config?.objectives);
     // Fase 9 — só os campos públicos da pista (nunca objective_id/
     // trigger_type, que são detalhe interno de catálogo, não conteúdo
     // pro jogador).
@@ -158,7 +180,14 @@ exports.abandonarInstancia = async (req, res) => {
       req.personagemAtual.id,
       req.body.stateVersion,
     );
-    return res.json({ status: "success", data: puzzleInstanceService.dtoRuntime(instancia) });
+    const instanciaComBlueprint = await puzzleInstanceService.obterParaPersonagem(instancia.id, req.personagemAtual.id, {
+      comBlueprint: true,
+    });
+    const dto = puzzleInstanceService.dtoRuntimeComObjetivos(
+      instanciaComBlueprint,
+      instanciaComBlueprint.blueprintVersion.config?.objectives,
+    );
+    return res.json({ status: "success", data: dto });
   } catch (error) {
     tratarErro(res, error, "Erro ao abandonar PuzzleInstance:");
   }

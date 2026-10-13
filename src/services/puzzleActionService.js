@@ -117,7 +117,11 @@ async function executarAcao(idInstance, idPersonagem, acao, expectedStateVersion
     completou: instanciaAtualizada.status === "COMPLETED",
   });
 
-  return { instancia: instanciaAtualizada, resultado, pistasDesbloqueadas, conquistasPioneiras, recompensasConcedidas };
+  // `config` devolvido pro controller montar o DTO progressivo de
+  // objectives (dtoRuntimeComObjetivos) sem precisar de um 2º
+  // round-trip pro banco — é o MESMO config já carregado aqui em cima
+  // pra rodar o engine, nunca uma releitura.
+  return { instancia: instanciaAtualizada, resultado, pistasDesbloqueadas, conquistasPioneiras, recompensasConcedidas, config };
 }
 
 module.exports = { executarAcao };

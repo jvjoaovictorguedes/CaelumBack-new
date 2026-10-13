@@ -470,14 +470,59 @@ function dtoPublicoVersao(versao, blueprint) {
   };
 }
 
-// DTO Público de LAYOUT (Fase 12) — o jogador precisa ver a topologia
-// pra poder jogar (componentes, conexões, posição de layout), mas NUNCA
-// a `condicao` de um objective (isso é a fórmula, não o enunciado) nem
-// qualquer chave fora do allowlist abaixo. Diferente de
-// dtoPublicoVersao (metadados de listagem): isto é o que a cena
-// (MechanicalPuzzleScene/OpticalPuzzleScene/HydraulicPuzzleScene,
-// frontend) recebe pra desenhar e deixar o jogador agir.
-function dtoPublicoLayout(versao) {
+// Apresentação PROGRESSIVA dos objectives (correção do bug de UX —
+// "objetivos estão revelando demais"). OBJECTIVE nunca é pista, mas
+// mandar as `descricao` de TODOS de uma vez pro cliente, antes de
+// qualquer progresso, revela a sequência inteira da solução — mandar
+// `display:none`/esconder só no React não resolve nada (qualquer
+// DevTools/Network lê a resposta crua), a projeção pública PRECISA
+// cortar o dado na origem.
+//
+// Regra (pura, sem I/O, puzzleInstanceService também chama isto —
+// nenhum outro sistema de pista nasce aqui, isto é só re-projeção do
+// MESMO array `config.objectives`, nunca `PuzzleClueDefinition`):
+//   - já concluído (está em `objetivosConcluidos`): sai completo
+//     ({ id, descricao, concluido:true }) — um objective resolvido
+//     nunca é escondido de novo, mesmo fora da ordem declarada;
+//   - o PRIMEIRO ainda não concluído na ordem declarada de
+//     `config.objectives` é o "objetivo atual": sai completo
+//     ({ id, descricao, concluido:false, atual:true });
+//   - qualquer objective depois desse (ainda não concluído, ainda não
+//     é o atual): sai só com `{ id, concluido:false, atual:false }` —
+//     SEM a chave `descricao` (omitida, nunca `null`/vazia — mesmo
+//     princípio de puzzleClueService pra pista bloqueada: omite o
+//     campo inteiro, não mascara).
+function projetarObjectivosProgressivos(objectives, objetivosConcluidos) {
+  const concluidos = new Set(Array.isArray(objetivosConcluidos) ? objetivosConcluidos : []);
+  let aindaSemAtual = true;
+  return (Array.isArray(objectives) ? objectives : []).map((o) => {
+    if (concluidos.has(o.id)) {
+      return { id: o.id, descricao: o.descricao ?? null, concluido: true, atual: false };
+    }
+    if (aindaSemAtual) {
+      aindaSemAtual = false;
+      return { id: o.id, descricao: o.descricao ?? null, concluido: false, atual: true };
+    }
+    return { id: o.id, concluido: false, atual: false };
+  });
+}
+
+// DTO Público de LAYOUT (Fase 12, progressivo desde a correção de
+// lifecycle/UX) — o jogador precisa ver a topologia pra poder jogar
+// (componentes, conexões, posição de layout), mas NUNCA a `condicao` de
+// um objective (isso é a fórmula, não o enunciado) nem qualquer chave
+// fora do allowlist abaixo. Diferente de dtoPublicoVersao (metadados de
+// listagem): isto é o que a cena (MechanicalPuzzleScene/
+// OpticalPuzzleScene/HydraulicPuzzleScene, frontend) recebe pra
+// desenhar e deixar o jogador agir.
+//
+// `objetivosConcluidos` (2º parâmetro, opcional — default `[]`, "nada
+// concluído ainda") é SEMPRE o progresso REAL da Instance atual/mais
+// recente do personagem pra este blueprint+edição — nunca inventado
+// pelo cliente. Quem chama sem o 2º argumento (ex.: Admin, preview, ou
+// um objective único de fixture de teste) recebe a projeção como se
+// nada tivesse sido concluído ainda — nunca vaza objective futuro.
+function dtoPublicoLayout(versao, { objetivosConcluidos } = {}) {
   const config = versao.config || {};
   return {
     dominio: typeof config.dominio === "string" ? config.dominio : null,
@@ -487,9 +532,7 @@ function dtoPublicoLayout(versao) {
     connections: Array.isArray(config.connections)
       ? config.connections.map((c) => ({ id: c.id, from: c.from, to: c.to }))
       : [],
-    objectives: Array.isArray(config.objectives)
-      ? config.objectives.map((o) => ({ id: o.id, descricao: o.descricao ?? null }))
-      : [],
+    objectives: projetarObjectivosProgressivos(config.objectives, objetivosConcluidos),
   };
 }
 
@@ -517,36 +560,138 @@ async function personagemCompletouBlueprint(idPersonagem, idEventEdition, idBlue
   return Boolean(participante);
 }
 
-// Listagem pública (Fase 12) — as salas de UMA edição, na ORDEM
-// declarada, com `bloqueado` calculado pro personagem que está
-// pedindo. Salas bloqueadas NUNCA mandam `layout` (mesmo princípio de
-// puzzleClueService.obterCaderno pra pistas bloqueadas: omite o campo
-// inteiro, não só mascara) — só título/descrição/dificuldade como
-// teaser.
+// Listagem pública (correção de lifecycle/UX) — as salas de UMA
+// edição, na ORDEM declarada, com o ESTADO AUTORITATIVO completo pro
+// personagem que está pedindo: `bloqueado`, `concluido`/`completed_at`,
+// `em_andamento`/`id_instancia_ativa` e `replayable`. O frontend NUNCA
+// precisa inferir isso tentando `criarOuObterInstancia` (seção 5 da
+// correção) — o backend é a fonte autoritativa, aqui.
+//
+// N+1 evitado de propósito (seção 5): ANTES disto, `bloqueado` chamava
+// `personagemCompletouBlueprint` (1 query) UMA VEZ POR BLUEPRINT da
+// edição — e decidir `concluido`/`em_andamento` do jeito ingênuo
+// multiplicaria isso por mais 1-2 queries por blueprint. A correção
+// busca span uma ÚNICA VEZ, agregado pra TODA a edição+personagem (1
+// query pras participações/instâncias, independente de quantos
+// blueprints existam) e UMA ÚNICA VEZ as versions PUBLISHED de todos os
+// blueprints (1 query, agrupada em memória pela mais recente por
+// blueprint) — total de 3 queries pra listagem inteira, nunca O(N).
 async function listarPublicosPorEdicao(idEventDefinition, idEventEdition, idPersonagem) {
   const blueprints = await PuzzleBlueprint.findAll({
     where: { id_event_definition: idEventDefinition },
     order: [["ordem", "ASC"], ["id", "ASC"]],
   });
+  if (blueprints.length === 0) return [];
+  const idsBlueprints = blueprints.map((b) => b.id);
+
+  // Query agregada 1/2 — a última PUBLISHED version de CADA blueprint
+  // da edição, numa query só. ORDER BY (id_blueprint ASC, version DESC)
+  // agrupa as linhas por blueprint com a maior version primeiro dentro
+  // de cada grupo — pegar a 1ª ocorrência por id_blueprint já é "a mais
+  // recente publicada", sem window function nenhuma.
+  const versoesPublicadas = await PuzzleBlueprintVersion.findAll({
+    where: { id_blueprint: { [Op.in]: idsBlueprints }, status: "PUBLISHED" },
+    order: [["id_blueprint", "ASC"], ["version", "DESC"]],
+  });
+  const versaoPorBlueprint = new Map();
+  for (const versao of versoesPublicadas) {
+    if (!versaoPorBlueprint.has(versao.id_blueprint)) versaoPorBlueprint.set(versao.id_blueprint, versao);
+  }
+
+  // Query agregada 2/2 — TODAS as PuzzleInstances (qualquer status
+  // terminal/ativo) deste personagem, dentro desta edição, pra
+  // qualquer blueprint da edição — uma query só, nunca 1-por-blueprint.
+  const participacoes = await PuzzleParticipant.findAll({
+    where: { id_personagem: idPersonagem },
+    include: [
+      {
+        model: PuzzleInstance,
+        as: "instancia",
+        where: { id_event_edition: idEventEdition },
+        include: [
+          {
+            model: PuzzleBlueprintVersion,
+            as: "blueprintVersion",
+            where: { id_blueprint: { [Op.in]: idsBlueprints } },
+            attributes: ["id", "id_blueprint"],
+          },
+        ],
+      },
+    ],
+  });
+
+  // Monta o estado de cada blueprint EM MEMÓRIA a partir da query
+  // agregada acima — nenhuma query adicional por blueprint daqui pra
+  // baixo. `concluido` nunca regride (uma COMPLETED é permanente —
+  // seção 2/20 da correção); se por algum motivo existir mais de uma
+  // COMPLETED histórica do mesmo blueprint+edição (replay futuro,
+  // seção 3), guarda a conclusão mais recente pra exibição.
+  const estadoPorBlueprint = new Map();
+  for (const participante of participacoes) {
+    const instancia = participante.instancia;
+    const idBlueprint = instancia.blueprintVersion.id_blueprint;
+    const estado = estadoPorBlueprint.get(idBlueprint) ?? {};
+    if (instancia.status === "COMPLETED") {
+      if (!estado.concluido || estado.completedAt < instancia.completed_at) {
+        estado.concluido = true;
+        estado.completedAt = instancia.completed_at;
+        estado.objetivosConcluidosFinal = instancia.state?.public?.objetivosConcluidos ?? instancia.state?.objetivosConcluidos ?? [];
+      }
+    } else if (instancia.status === "CREATED" || instancia.status === "ACTIVE") {
+      // Expiração preguiçosa (seção 21) é um efeito de LEITURA/mutação
+      // de quem realmente abre a Instance (obterParaPersonagem) — a
+      // listagem é só leitura agregada, nunca grava nada; aqui só
+      // ignora em memória uma "ativa" já vencida pela janela, pra não
+      // mostrar "Continuar" numa instância morta que a próxima leitura
+      // real vai expirar de qualquer jeito.
+      const vencida = instancia.expires_at && instancia.expires_at.getTime() <= Date.now();
+      if (!vencida) {
+        estado.emAndamento = true;
+        estado.idInstanciaAtiva = instancia.id;
+        estado.objetivosConcluidosAtivos = instancia.state?.public?.objetivosConcluidos ?? instancia.state?.objetivosConcluidos ?? [];
+      }
+    }
+    estadoPorBlueprint.set(idBlueprint, estado);
+  }
 
   const resultado = [];
   for (const blueprint of blueprints) {
-    const versao = await PuzzleBlueprintVersion.findOne({
-      where: { id_blueprint: blueprint.id, status: "PUBLISHED" },
-      order: [["version", "DESC"]],
-    });
+    const versao = versaoPorBlueprint.get(blueprint.id);
     if (!versao) continue; // sala ainda sem nenhuma revisão publicada — nunca aparece pro jogador.
 
-    const bloqueado = blueprint.id_blueprint_prerequisito
-      ? !(await personagemCompletouBlueprint(idPersonagem, idEventEdition, blueprint.id_blueprint_prerequisito))
-      : false;
+    const estado = estadoPorBlueprint.get(blueprint.id) ?? {};
+    const estadoPrerequisito = blueprint.id_blueprint_prerequisito
+      ? estadoPorBlueprint.get(blueprint.id_blueprint_prerequisito) ?? {}
+      : null;
+    const bloqueado = blueprint.id_blueprint_prerequisito ? !estadoPrerequisito?.concluido : false;
+
+    const concluido = Boolean(estado.concluido);
+    // Uma sala concluída nunca aparece "em andamento" pro jogador,
+    // mesmo que por algum motivo de borda ainda exista uma Instance
+    // CREATED/ACTIVE residual — a conclusão é o estado final (seção 2).
+    const emAndamento = Boolean(estado.emAndamento) && !concluido;
+    const objetivosParaProjecao = concluido
+      ? estado.objetivosConcluidosFinal ?? []
+      : emAndamento
+        ? estado.objetivosConcluidosAtivos ?? []
+        : [];
 
     const base = dtoPublicoVersao(versao, blueprint);
     resultado.push({
       ...base,
       ordem: blueprint.ordem,
       bloqueado,
-      ...(bloqueado ? {} : { layout: dtoPublicoLayout(versao) }),
+      concluido,
+      completed_at: estado.completedAt ?? null,
+      em_andamento: emAndamento,
+      id_instancia_ativa: emAndamento ? estado.idInstanciaAtiva : null,
+      // Fonte de verdade de `replayable` (seção 4): SEMPRE a última
+      // version PUBLISHED agora (a mesma que seria usada se uma nova
+      // tentativa nascesse), nunca a config antiga de uma Instance já
+      // COMPLETED — publicar uma v2 com `replayable:true` libera replay
+      // imediatamente, mesmo pra quem concluiu a v1 sem essa flag.
+      replayable: versao.config?.replayable === true,
+      ...(bloqueado ? {} : { layout: dtoPublicoLayout(versao, { objetivosConcluidos: objetivosParaProjecao }) }),
     });
   }
   return resultado;
@@ -569,6 +714,7 @@ module.exports = {
   dtoAdminVersao,
   dtoPublicoVersao,
   dtoPublicoLayout,
+  projetarObjectivosProgressivos,
   listarPublicosPorEdicao,
   personagemCompletouBlueprint,
 };

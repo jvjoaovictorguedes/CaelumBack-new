@@ -247,6 +247,45 @@ async function criarOuObterInstancia(idEventEdition, idBlueprint, personagem, tr
       }
     }
 
+    // CORREÇÃO DE LIFECYCLE — "sala concluída recomeça" (achado real de
+    // produção, nunca um filtro de UI): nenhuma CREATED/ACTIVE existe
+    // pra este personagem+blueprint+edição (bloco acima não devolveu
+    // nada) — mas pode existir uma COMPLETED. Por padrão
+    // (`config.replayable` ausente ou != true, sempre false no
+    // servidor) uma sala concluída permanece concluída pra sempre
+    // NESSA EventEdition: nunca cria réplica, nunca reseta, nunca
+    // reaproveita a COMPLETED como se fosse ACTIVE. A fonte de verdade
+    // de `replayable` é SEMPRE a última version PUBLISHED que SERIA
+    // usada agora (`versaoPublicada`, já resolvida acima, sob o MESMO
+    // LOCK 3 do Blueprint) — nunca a config antiga congelada na
+    // Instance COMPLETED: publicar uma v2 com `replayable:true` libera
+    // replay na hora, mesmo pra quem concluiu uma v1 sem essa flag.
+    // Checado DEPOIS do lock do Character (linha acima) — a mesma
+    // garantia de concorrência de sempre: nenhuma 2ª chamada concorrente
+    // consegue ler "ainda não tem COMPLETED" enquanto a 1ª ainda não
+    // commitou a sua.
+    const completada = await PuzzleParticipant.findOne({
+      where: { id_personagem: personagem.id },
+      include: [
+        {
+          model: PuzzleInstance,
+          as: "instancia",
+          where: { id_event_edition: idEventEdition, status: "COMPLETED" },
+          include: [
+            {
+              model: PuzzleBlueprintVersion,
+              as: "blueprintVersion",
+              where: { id_blueprint: idBlueprint },
+            },
+          ],
+        },
+      ],
+      transaction: t,
+    });
+    if (completada && versaoPublicada.config?.replayable !== true) {
+      throw erro("Esta sala já foi concluída.", 409, "PUZZLE_JA_CONCLUIDO");
+    }
+
     // Fase 8: quando o config já declara `dominio` (mecânico/óptico/
     // hidráulico/convergência — Fase 3/5/6/7), o state inicial nasce
     // como o engine da Fase 2 realmente produziria pra esse config+seed
@@ -444,6 +483,25 @@ function dtoRuntime(instancia) {
   };
 }
 
+// DTO de Runtime PROGRESSIVO — mesmo `dtoRuntime` acima, mais
+// `objectivesProgressivos` (correção do bug de UX "objetivos revelando
+// demais", seção 12/13): nunca a `descricao` de um objective futuro,
+// só concluídos + o objetivo atual (ver
+// puzzleBlueprintService.projetarObjectivosProgressivos — mesma
+// projeção pura usada em dtoPublicoLayout, nenhum sistema paralelo).
+// `objectivesConfig` é sempre `blueprintVersion.config.objectives` de
+// quem chama (controller já carregou via `comBlueprint: true`, ou
+// puzzleActionService, que já tinha o config em mãos pra rodar o
+// engine) — nunca um novo round-trip de banco aqui.
+function dtoRuntimeComObjetivos(instancia, objectivesConfig = []) {
+  const base = dtoRuntime(instancia);
+  const objetivosConcluidos = base.state.objetivosConcluidos ?? [];
+  return {
+    ...base,
+    objectivesProgressivos: puzzleBlueprintService.projetarObjectivosProgressivos(objectivesConfig, objetivosConcluidos),
+  };
+}
+
 module.exports = {
   TRANSICOES_VALIDAS,
   MAX_STATE_BYTES,
@@ -455,5 +513,6 @@ module.exports = {
   abandonar,
   todosObjetivosConcluidos,
   dtoRuntime,
+  dtoRuntimeComObjetivos,
   JANELA_EXPIRACAO_MS,
 };

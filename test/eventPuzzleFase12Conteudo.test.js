@@ -156,17 +156,68 @@ testeComBanco("listarPublicosPorEdicao: sala B vem bloqueada (sem layout) até a
   assert.ok(salaBdepois.layout);
 });
 
+// Atualizado pela correção de lifecycle/UX (apresentação progressiva de
+// objectives, seção 12/13): `dtoPublicoLayout` nunca devolve `condicao`
+// (continua verdade), mas agora cada objective também carrega
+// `concluido`/`atual` (projeção progressiva) — objective FUTURO (nem
+// concluído, nem o atual) é que continua sem a chave `descricao`
+// (omitida, nunca vazia/null — ver próximo teste).
 testeComBanco("dtoPublicoLayout nunca expõe `condicao` dos objectives nem chaves fora do allowlist", async () => {
   const { versaoA } = await sequelize.transaction((t) => criarFundacaoComDuasSalas(t));
   const layout = puzzleBlueprintService.dtoPublicoLayout(versaoA);
   assert.equal(layout.dominio, "MECANICO");
   for (const objetivo of layout.objectives) {
-    assert.deepEqual(Object.keys(objetivo).sort(), ["descricao", "id"]);
+    const chaves = Object.keys(objetivo).sort();
+    assert.ok(
+      chaves.join(",") === "atual,concluido,descricao,id" || chaves.join(",") === "atual,concluido,id",
+      `objective só pode ter {id,concluido,atual,descricao?}, nunca condicao: ${chaves.join(",")}`,
+    );
+    assert.ok(!("condicao" in objetivo), "condicao nunca sai no DTO público, nem projetada nem crua");
   }
   for (const componente of layout.components) {
     assert.deepEqual(Object.keys(componente).sort(), ["id", "position", "props", "type"]);
   }
 });
+
+// Prova direta da apresentação progressiva (seção 12/13 da correção):
+// sem nenhum progresso, só o PRIMEIRO objective (o "atual") sai com
+// `descricao`; objectives futuros saem só com {id,concluido,atual} —
+// nunca a `descricao` nem qualquer outra chave que pudesse revelar a
+// solução antes da hora. Depois de concluir o 1º, o 2º (agora atual)
+// revela a própria descrição, e o 1º continua revelado (histórico).
+testeComBanco(
+  "dtoPublicoLayout: apresentação progressiva — objective futuro nunca revela `descricao`; concluído e atual revelam",
+  async () => {
+    const config2Objectives = {
+      dominio: "MECANICO",
+      components: [{ id: "motor1", type: "MOTOR", props: { rpmNominal: 60, sentido: "CW" }, position: { x: 0, y: 0 } }],
+      connections: [],
+      objectives: [
+        { id: "obj1", descricao: "Primeiro objetivo — segredo 1", condicao: { op: "EQUALS", path: "x", value: 1 } },
+        { id: "obj2", descricao: "Segundo objetivo — segredo 2", condicao: { op: "EQUALS", path: "y", value: 1 } },
+      ],
+    };
+    const definicao = await eventDefinitionService.criar({ key: `def-${slug()}`, nome: "Teste" });
+    const { versao: versaoDraft } = await puzzleBlueprintService.criarBlueprint(definicao.id, { key: `bp-${slug()}`, nome: "Teste" });
+    const versao = await puzzleBlueprintService.atualizarDraft(versaoDraft.id, { config: config2Objectives });
+
+    const semProgresso = puzzleBlueprintService.dtoPublicoLayout(versao, { objetivosConcluidos: [] });
+    const [o1semProgresso, o2semProgresso] = semProgresso.objectives;
+    assert.equal(o1semProgresso.atual, true);
+    assert.equal(o1semProgresso.descricao, "Primeiro objetivo — segredo 1");
+    assert.equal(o2semProgresso.atual, false);
+    assert.equal(o2semProgresso.concluido, false);
+    assert.ok(!("descricao" in o2semProgresso), "objective futuro nunca manda a própria descricao ao cliente");
+    assert.ok(!JSON.stringify(semProgresso).includes("segredo 2"), "a string da 2ª descrição nunca atravessa a resposta");
+
+    const comObj1Concluido = puzzleBlueprintService.dtoPublicoLayout(versao, { objetivosConcluidos: ["obj1"] });
+    const [o1depois, o2depois] = comObj1Concluido.objectives;
+    assert.equal(o1depois.concluido, true);
+    assert.equal(o1depois.descricao, "Primeiro objetivo — segredo 1");
+    assert.equal(o2depois.atual, true);
+    assert.equal(o2depois.descricao, "Segundo objetivo — segredo 2");
+  },
+);
 
 // -----------------------------------------------------------------------
 // 3. Expiração preguiçosa — nenhum scheduler, só a leitura pelo dono.
