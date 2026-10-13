@@ -46,7 +46,7 @@ const CombatAffinityProfileEntry = define(
     multiplier: {
       type: D.DECIMAL(10, 4),
       allowNull: false,
-      validate: { min: 0.05, max: 5 },
+      validate: { min: 0, max: 5 },
     },
   },
 );

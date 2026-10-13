@@ -177,7 +177,7 @@ async function saveCatalog(req, kind, key) {
         "id_affinity",
         "multiplier",
         M.DamageAffinityType,
-        0.05,
+        0,
         5,
         transaction,
       );

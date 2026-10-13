@@ -95,6 +95,7 @@ function affinity(id) {
 }
 function classification(multiplier) {
   const c = config();
+  if (multiplier === 0) return "IMUNE";
   return multiplier >= c.effective_min
     ? c.labels.effective
     : multiplier <= c.ineffective_max
@@ -180,6 +181,10 @@ function clamp(v) {
 }
 function defensiveMultiplier(target, id, buffs = []) {
   if (!id) return 1;
+  // Only explicit individual ELEMENTAL entries confer immunity. Family
+  // profiles, equipment, attack affinity and percentage debuffs never do.
+  const entry = target.combatTyping?.overrides?.[id];
+  if (entry != null && number(entry, 1) === 0 && affinity(id)?.categoria === "ELEMENTAL") return 0;
   let m = number(target.combatTyping?.multipliers?.[id], 1);
   const pct = (buffs.length ? buffs : (target.combatAffinityBuffs ?? []))
     .filter(
@@ -321,7 +326,7 @@ function resolveDamage({
             : null,
         familyBonusPct: familyPct,
         source: c.source,
-        finalDamage: Math.max(
+        finalDamage: multiplier === 0 ? 0 : Math.max(
           1,
           Math.round(
             afterDefense * multiplier * (1 + familyPct / 100) * finalMultiplier,
@@ -411,11 +416,16 @@ module.exports = {
   publicDefense,
   summaries,
 };
+function isFullyImmune(resolution) {
+  return Boolean(resolution?.components?.length) && resolution.components.every(c => c.affinityMultiplier === 0);
+}
+module.exports.isFullyImmune = isFullyImmune;
+
 function describe(resolution) {
   return resolution.components
     .map(
       (c) =>
-        `${c.affinity?.nome ?? c.nature}: ${c.finalDamage}${c.effectivenessLabel ? ` (${c.effectivenessLabel}, ${c.affinityMultiplier.toFixed(2)}x)` : ""}${c.familyBonusPct ? ` +${c.familyBonusPct}% contra ${resolution.defenderFamily?.nome ?? "família"}` : ""}`,
+        c.affinityMultiplier === 0 ? `${c.affinity?.nome ?? c.nature}: IMUNE — 0 de dano (0.00x)` : `${c.affinity?.nome ?? c.nature}: ${c.finalDamage}${c.effectivenessLabel ? ` (${c.effectivenessLabel}, ${c.affinityMultiplier.toFixed(2)}x)` : ""}${c.familyBonusPct ? ` +${c.familyBonusPct}% contra ${resolution.defenderFamily?.nome ?? "família"}` : ""}`,
     )
     .join("; ");
 }

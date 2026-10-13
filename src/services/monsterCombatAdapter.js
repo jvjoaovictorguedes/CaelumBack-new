@@ -264,6 +264,7 @@ function executarPoder({
       : personagemAtual;
     const resolution=require("./combatTypingService").resolveDamage({amount:danoComCritico,actor:inimigoAtual,target:defensorComBuffs,power:habilidade.powerTyping,context:"PVE",finalMultiplier:multiplicadorDefesaTaverna*combatModifierService.multiplicadorDanoRecebido(modificadoresJogador),defenderBuffs:combatBuffs.player});
     const danoFinal=resolution.totalDamage;
+    if (resolution.components.some(c => c.affinityMultiplier === 0)) log.push(require("./combatTypingService").describe(resolution));
     log.push(require("./combatTypingService").describe(resolution));
     danoRecebidoContraAtaque = danoFinal;
 
@@ -284,7 +285,7 @@ function executarPoder({
     log.push(`${inimigoAtual.nome} usou ${habilidade.nome}!`);
   }
 
-  if (habilidade.statusEffects.length > 0) {
+  if ((habilidade.danoBase <= 0 || danoRecebidoContraAtaque > 0) && habilidade.statusEffects.length > 0) {
     const novosEfeitos = resolverEfeitosDeMonstroNoHit({ efeitosDeStatus: habilidade.statusEffects, turno: combatTurn });
     for (const efeito of novosEfeitos) {
       const chanceResistencia = Math.min(
@@ -301,7 +302,7 @@ function executarPoder({
     }
   }
 
-  if (habilidade.curaBase > 0) {
+  if (habilidade.curaBase > 0 && (habilidade.danoBase <= 0 || danoRecebidoContraAtaque > 0)) {
     const vidaAntes = inimigoAtual.vida_atual;
     inimigoAtual.vida_atual = Math.min(inimigoAtual.vida_maxima, inimigoAtual.vida_atual + habilidade.curaBase);
     if (inimigoAtual.vida_atual > vidaAntes) {
@@ -325,7 +326,7 @@ function executarPoder({
       const resultado = executarEfeito(efeito.effectKey, { statusEffects: statusEffects.enemy, config: efeito.config });
       if (resultado.aplicado) log.push(`${inimigoAtual.nome} se livrou de um efeito negativo!`);
       statusEffects.enemy = resultado.statusEffects;
-    } else if (efeito.tipo === "DISPEL_TARGET" && combatBuffs.player.length > 0) {
+    } else if (efeito.tipo === "DISPEL_TARGET" && (habilidade.danoBase <= 0 || danoRecebidoContraAtaque > 0) && combatBuffs.player.length > 0) {
       combatBuffs.player = combatBuffs.player.slice(0, -1);
       log.push(`${inimigoAtual.nome} removeu um efeito benéfico seu!`);
     }
@@ -424,6 +425,7 @@ function executarPoderEmGrupo({ habilidade, inimigo, alvoEstado, alvoStatus, alv
     const defensorComBuffs = bonusDefesaTotal ? { ...alvoEstado, defesa: (alvoEstado.defesa || 0) + bonusDefesaTotal } : alvoEstado;
     const resolution=require("./combatTypingService").resolveDamage({amount:danoComCritico,actor:inimigo,target:defensorComBuffs,power:habilidade.powerTyping,context:"PARTY",defenderBuffs:alvoBuffs});
     dano=resolution.totalDamage;
+    if (resolution.components.some(c => c.affinityMultiplier === 0)) log.push(require("./combatTypingService").describe(resolution));
     log.push(require("./combatTypingService").describe(resolution));
 
     alvoEstado.vida_atual = Math.max(0, alvoEstado.vida_atual - dano);
@@ -440,7 +442,7 @@ function executarPoderEmGrupo({ habilidade, inimigo, alvoEstado, alvoStatus, alv
     log.push(`${inimigo.nome} usou ${habilidade.nome}!`);
   }
 
-  if (habilidade.statusEffects.length > 0) {
+  if ((habilidade.danoBase <= 0 || dano > 0) && habilidade.statusEffects.length > 0) {
     const novosEfeitos = resolverEfeitosDeMonstroNoHit({ efeitosDeStatus: habilidade.statusEffects, turno: combatTurn });
     for (const efeito of novosEfeitos) {
       const chanceResistencia = Math.min(
@@ -457,7 +459,7 @@ function executarPoderEmGrupo({ habilidade, inimigo, alvoEstado, alvoStatus, alv
     }
   }
 
-  if (habilidade.curaBase > 0) {
+  if (habilidade.curaBase > 0 && (habilidade.danoBase <= 0 || dano > 0)) {
     const vidaAntes = inimigo.vida_atual;
     inimigo.vida_atual = Math.min(inimigo.vida_maxima, inimigo.vida_atual + habilidade.curaBase);
     if (inimigo.vida_atual > vidaAntes) log.push(`${inimigo.nome} recuperou ${inimigo.vida_atual - vidaAntes} de vida!`);
@@ -469,7 +471,7 @@ function executarPoderEmGrupo({ habilidade, inimigo, alvoEstado, alvoStatus, alv
       const resultado = executarEfeito(efeito.effectKey, { statusEffects: novoStatusAtacante, config: efeito.config });
       if (resultado.aplicado) log.push(`${inimigo.nome} se livrou de um efeito negativo!`);
       novoStatusAtacante = resultado.statusEffects;
-    } else if (efeito.tipo === "DISPEL_TARGET" && (novosBuffsDefensor ?? []).length > 0) {
+    } else if (efeito.tipo === "DISPEL_TARGET" && (habilidade.danoBase <= 0 || dano > 0) && (novosBuffsDefensor ?? []).length > 0) {
       novosBuffsDefensor = novosBuffsDefensor.slice(0, -1);
       log.push(`${inimigo.nome} removeu um efeito benéfico do alvo!`);
     }

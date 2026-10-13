@@ -311,6 +311,7 @@ function aplicarAcao({
   // `esquivou` só fica true quando um golpe COM dano foi de fato
   // resolvido e errou; poder de cura pura (dano === 0) ou item nunca
   // passam pelo bloco de acerto acima, então continuam curando sempre.
+  if (typing.isFullyImmune(damageResolution)) cura = 0;
   if (cura > 0 && !esquivou) {
     const teto = vidaMaxAtacante ?? atacante.vida_atual + cura;
     atacante.vida_atual = Math.min(teto, atacante.vida_atual + cura);
@@ -325,7 +326,7 @@ function aplicarAcao({
   const curouNaAcao = atacante.vida_atual > vidaAtacanteAntes;
   source.shield = novoEscudoAtacante;
   target.shield = novoEscudoDefensor;
-  if (!esquivou && (dano > 0 || acao.tipo === "attack")) {
+  if (!esquivou && !typing.isFullyImmune(damageResolution) && (dano > 0 || acao.tipo === "attack")) {
     powerRuntime.emit("ON_HIT", source, target, runtime);
     // Só a PRÓPRIA Power usada (nunca ataque básico, nunca outra Power
     // do loadout) — já exclui dodge/miss (dentro do mesmo `!esquivou`).

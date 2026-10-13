@@ -1,0 +1,42 @@
+const test=require('node:test');const assert=require('node:assert/strict');const {Client}=require('pg');
+const migration=require('../scripts/manual-migrations/v9-elemental-immunity');
+let client;
+test.before(async()=>{
+ const url=process.env.TEST_DATABASE_URL||process.env.DATABASE_URL;
+ if(url && !['localhost','127.0.0.1'].includes(new URL(url).hostname))throw new Error('Migration tests only accept local Postgres.');
+ client=new Client(url?{connectionString:url}:{host:'127.0.0.1',port:5432,user:'caelum',database:process.env.DB_NAME||'caelum_immunity_test'});await client.connect();
+ await client.query(`CREATE SCHEMA immunity_fixture_${process.pid}`);await client.query(`SET search_path TO immunity_fixture_${process.pid}`);
+ await client.query(`CREATE TABLE "AdventureMonsters"(id integer PRIMARY KEY,nome text,affinity_profile_id integer);
+ CREATE TABLE guild_boss_configs(id integer,affinity_profile_id integer);
+ CREATE TABLE monster_families(id integer,default_affinity_profile_id integer);
+ CREATE TABLE combat_affinity_profiles(id integer PRIMARY KEY,key text);
+ CREATE TABLE damage_affinity_types(id integer PRIMARY KEY,key text,categoria text);
+ CREATE TABLE combat_affinity_profile_entries(id serial PRIMARY KEY,id_profile integer,id_affinity integer,multiplier numeric(10,4));
+ INSERT INTO "AdventureMonsters" VALUES(27,'Elemental de Cinzas',100),(36,'Salamandra de Obsidiana',200),(99,'Outro',300);
+ INSERT INTO monster_families VALUES(1,300);
+ INSERT INTO combat_affinity_profiles VALUES(100,'V9_CINZAS'),(200,'V9_SALAMANDRA'),(300,'FAMILY');
+ INSERT INTO damage_affinity_types VALUES(1,'FIRE','ELEMENTAL'),(2,'ICE','ELEMENTAL'),(3,'WATER','ELEMENTAL'),(4,'WIND','ELEMENTAL');
+ INSERT INTO combat_affinity_profile_entries(id_profile,id_affinity,multiplier) SELECT p,a,m FROM (VALUES(100),(200),(300)) profiles(p) CROSS JOIN (VALUES(1,0.05),(2,1.5),(3,1.5),(4,0.5)) entries(a,m);`);
+});
+test.after(async()=>{if(client){await client.query('SET search_path TO public');await client.query(`DROP SCHEMA immunity_fixture_${process.pid} CASCADE`);await client.end();}});
+test('manual migration: SELECT validates V9, idempotent up, only two FIRE entries, conditional rollback',async()=>{
+ const before=await migration.snapshot(client);const all=await client.query('SELECT * FROM combat_affinity_profile_entries ORDER BY id');
+ assert.deepEqual(await migration.up(client,before),{changed:2});assert.deepEqual(await migration.up(client,before),{changed:0});
+ const changed=(await client.query('SELECT * FROM combat_affinity_profile_entries ORDER BY id')).rows;
+ assert.equal(changed.filter((r,i)=>r.multiplier!==all.rows[i].multiplier).length,2);
+ assert.deepEqual(await migration.down(client),{changed:2});assert.deepEqual(await migration.down(client),{changed:0});
+ assert.deepEqual((await client.query('SELECT * FROM combat_affinity_profile_entries ORDER BY id')).rows,all.rows);
+});
+test('migration aborts stale keys, absent V9, shared profiles and rollback divergence atomically',async()=>{
+ const before=await migration.snapshot(client);
+ const stale=structuredClone(before);stale.profiles[0].profile.key='WRONG';
+ await assert.rejects(migration.up(client,stale),/Snapshot mudou/);assert.deepEqual(await migration.snapshot(client),before);
+ await client.query('UPDATE "AdventureMonsters" SET affinity_profile_id=100 WHERE id=99');
+ await assert.rejects(migration.snapshot(client),/compartilhado/);await client.query('UPDATE "AdventureMonsters" SET affinity_profile_id=300 WHERE id=99');
+ await client.query('INSERT INTO guild_boss_configs VALUES(1,100)');await assert.rejects(migration.snapshot(client),/guild_boss_configs/);await client.query('DELETE FROM guild_boss_configs');
+ await migration.up(client,before);await client.query('UPDATE combat_affinity_profile_entries SET multiplier=1.25 WHERE id_profile=100 AND id_affinity=2');
+ await assert.rejects(migration.down(client),/divergente/);
+ assert.equal(Number((await client.query('SELECT multiplier FROM combat_affinity_profile_entries WHERE id_profile=100 AND id_affinity=1')).rows[0].multiplier),0);
+ await client.query('UPDATE combat_affinity_profile_entries SET multiplier=1.5 WHERE id_profile=100 AND id_affinity=2');await migration.down(client);
+ await client.query('UPDATE "AdventureMonsters" SET affinity_profile_id=NULL WHERE id=27');await assert.rejects(migration.snapshot(client),/V9 ausente/);await client.query('UPDATE "AdventureMonsters" SET affinity_profile_id=100 WHERE id=27');
+});
