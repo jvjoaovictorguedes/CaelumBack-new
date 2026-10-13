@@ -74,20 +74,39 @@ const TIPO_COMBAT_EFFECT_PARA_CAPABILITY = {
   DISPEL_TARGET: "DISPEL_TARGET",
 };
 
+// Bug reportado ("backend precisa identificar qual habilidade disparou
+// um efeito ON_CAST, senão escudo/dispel pode ativar ao usar outra
+// habilidade equipada") — ANTES desta correção, `combatEffectExecutavel`
+// convertia QUALQUER PowerCombatEffect da Power desta MonsterAbility
+// num efeito "executa ao usar esta ação", sem nunca olhar `efeito.
+// trigger`: um efeito cadastrado como PASSIVE/TURN_START/COMBAT_START
+// (pensado pra valer o tempo todo ou uma vez por turno, nunca "toda vez
+// que ESTA ação específica for escolhida") seria executado igual a um
+// ON_POWER_CAST/ON_POWER_HIT de verdade. Mesma convenção já usada pro
+// lado do jogador (combatTriggerConfig.js/powerCombatRuntime.emit):
+// efeito que SÓ deve valer quando ESTA Power é a usada/a que acerta
+// precisa estar em ON_POWER_CAST (efeito em si mesmo) ou ON_POWER_HIT
+// (efeito no alvo) — nunca executado por engano a partir de outro
+// trigger só porque a Power tinha o effect_key certo.
 function combatEffectExecutavel(efeito) {
   if (efeito.effect_key === "GRANT_SHIELD" || efeito.effect_key === "SHIELD_ON_CAST") {
+    if (efeito.trigger !== "ON_POWER_CAST") return null;
     return { tipo: "SHIELD", magnitude: efeito.magnitude_base, durationTurns: efeito.duration_turns ?? 1 };
   }
   if (efeito.effect_key === "REGEN_HP_FLAT" || efeito.effect_key === "REGEN_HP_PERCENT") {
+    if (efeito.trigger !== "ON_POWER_CAST") return null;
     return { tipo: "REGEN_HP", effectKey: efeito.effect_key, magnitude: efeito.magnitude_base, durationTurns: efeito.duration_turns ?? 1 };
   }
   if (efeito.effect_key === "CLEANSE_STATUS" && efeito.target === "SELF") {
+    if (efeito.trigger !== "ON_POWER_CAST") return null;
     return { tipo: "CLEANSE_SELF", effectKey: "CLEANSE_STATUS", config: efeito.config ?? {} };
   }
   if (efeito.effect_key === "CLEANSE_CATEGORY" && efeito.target === "SELF") {
+    if (efeito.trigger !== "ON_POWER_CAST") return null;
     return { tipo: "CLEANSE_SELF", effectKey: "CLEANSE_CATEGORY", config: efeito.config ?? {} };
   }
   if (efeito.effect_key === "DISPEL_BUFF" && (efeito.target === "ENEMY" || efeito.target === "ALL_ENEMIES")) {
+    if (efeito.trigger !== "ON_POWER_HIT") return null;
     return { tipo: "DISPEL_TARGET" };
   }
   return null;

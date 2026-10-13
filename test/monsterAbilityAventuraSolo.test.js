@@ -312,6 +312,86 @@ testeComBanco("construirHabilidadesParaEncontro nunca inclui Power Passivo (§4.
   await monstro.destroy();
 });
 
+// Bug reportado ("backend precisa identificar qual habilidade disparou
+// um efeito ON_CAST, senão escudo/dispel pode ativar ao utilizar outra
+// habilidade equipada") — construirHabilidadesParaEncontro/
+// combatEffectExecutavel converte PowerCombatEffect da Power de uma
+// MonsterAbility em "executa ao escolher esta ação", mas ANTES desta
+// correção nunca olhava `efeito.trigger`: um efeito cadastrado como
+// PASSIVE (pensado pra valer o tempo todo, nunca "só quando esta ação
+// específica é escolhida") virava GRANT_SHIELD executável do mesmo
+// jeito que um ON_POWER_CAST de verdade. Mesma convenção já usada pro
+// lado do jogador (combatTriggerConfig.js) — GRANT_SHIELD/REGEN_HP/
+// CLEANSE_SELF exigem ON_POWER_CAST; DISPEL_TARGET exige ON_POWER_HIT.
+testeComBanco("construirHabilidadesParaEncontro: GRANT_SHIELD com trigger PASSIVE nunca entra como combatEffect executável (precisa ser ON_POWER_CAST)", async () => {
+  const monstro = await AdventureMonster.create({
+    nome: `Monstro Shield Trigger ${sufixo()}`,
+    nivel: 5, vida_maxima: 100, dano_min: 5, dano_max: 10, agilidade: 5, velocidade: 5,
+    xp_recompensa: 10, ouro_recompensa: 10,
+  });
+  const powerComShieldPassivo = await Power.create({
+    nome: `Power Shield Passivo ${sufixo()}`, descricao: "teste", tipo_poder: "Ativo",
+    escala_atributo: "Forca", usage_scope: "MONSTER", dano_base: 10,
+  });
+  await PowerCombatEffect.create({ id_power: powerComShieldPassivo.id, trigger: "PASSIVE", effect_key: "GRANT_SHIELD", magnitude_base: 30, duration_turns: 3 });
+  await MonsterAbility.create({ id_monstro: monstro.id, id_power: powerComShieldPassivo.id, prioridade_base: 10 });
+
+  const habilidades = await construirHabilidadesParaEncontro(monstro.id);
+  assert.equal(habilidades.length, 1, "Power tem DAMAGE executável, deveria virar candidata só por isso");
+  assert.deepEqual(
+    habilidades[0].combatEffectsExecutaveis,
+    [],
+    "GRANT_SHIELD com trigger PASSIVE nunca deveria se tornar um combatEffect executável nesta ação",
+  );
+
+  await MonsterAbility.destroy({ where: { id_monstro: monstro.id } });
+  await powerComShieldPassivo.destroy();
+  await monstro.destroy();
+});
+
+testeComBanco("construirHabilidadesParaEncontro: GRANT_SHIELD com trigger ON_POWER_CAST entra corretamente como combatEffect executável", async () => {
+  const monstro = await AdventureMonster.create({
+    nome: `Monstro Shield OK ${sufixo()}`,
+    nivel: 5, vida_maxima: 100, dano_min: 5, dano_max: 10, agilidade: 5, velocidade: 5,
+    xp_recompensa: 10, ouro_recompensa: 10,
+  });
+  const powerComShieldCorreto = await Power.create({
+    nome: `Power Shield Correto ${sufixo()}`, descricao: "teste", tipo_poder: "Ativo",
+    escala_atributo: "Forca", usage_scope: "MONSTER", dano_base: 10,
+  });
+  await PowerCombatEffect.create({ id_power: powerComShieldCorreto.id, trigger: "ON_POWER_CAST", effect_key: "GRANT_SHIELD", magnitude_base: 30, duration_turns: 3 });
+  await MonsterAbility.create({ id_monstro: monstro.id, id_power: powerComShieldCorreto.id, prioridade_base: 10 });
+
+  const habilidades = await construirHabilidadesParaEncontro(monstro.id);
+  assert.equal(habilidades.length, 1);
+  assert.deepEqual(habilidades[0].combatEffectsExecutaveis, [{ tipo: "SHIELD", magnitude: 30, durationTurns: 3 }]);
+
+  await MonsterAbility.destroy({ where: { id_monstro: monstro.id } });
+  await powerComShieldCorreto.destroy();
+  await monstro.destroy();
+});
+
+testeComBanco("construirHabilidadesParaEncontro: DISPEL_BUFF exige trigger ON_POWER_HIT (PASSIVE/ON_POWER_CAST nunca contam)", async () => {
+  const monstro = await AdventureMonster.create({
+    nome: `Monstro Dispel Trigger ${sufixo()}`,
+    nivel: 5, vida_maxima: 100, dano_min: 5, dano_max: 10, agilidade: 5, velocidade: 5,
+    xp_recompensa: 10, ouro_recompensa: 10,
+  });
+  const powerComDispelErrado = await Power.create({
+    nome: `Power Dispel Errado ${sufixo()}`, descricao: "teste", tipo_poder: "Ativo",
+    escala_atributo: "Forca", usage_scope: "MONSTER", dano_base: 10,
+  });
+  await PowerCombatEffect.create({ id_power: powerComDispelErrado.id, trigger: "ON_POWER_CAST", effect_key: "DISPEL_BUFF", target: "ENEMY", magnitude_base: 0 });
+  await MonsterAbility.create({ id_monstro: monstro.id, id_power: powerComDispelErrado.id, prioridade_base: 10 });
+
+  const habilidades = await construirHabilidadesParaEncontro(monstro.id);
+  assert.deepEqual(habilidades[0].combatEffectsExecutaveis, [], "DISPEL_BUFF em ON_POWER_CAST (errado) nunca deveria ser executável");
+
+  await MonsterAbility.destroy({ where: { id_monstro: monstro.id } });
+  await powerComDispelErrado.destroy();
+  await monstro.destroy();
+});
+
 test.after(async () => {
   if (temBanco) await sequelize.close();
 });

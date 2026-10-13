@@ -556,3 +556,92 @@ testeComBanco("PvE: ON_CAST temporário expira e ação rejeitada não consome e
     assert.equal(personagem.encontro_pve.playerPowerCombatState.effects.length, 0);
   });
 });
+
+// Bug reportado ("backend precisa identificar qual habilidade disparou
+// um efeito ON_CAST, senão escudo/dispel pode ativar ao utilizar outra
+// habilidade equipada") — combatController.js (PvE solo) nunca emitia
+// ON_POWER_CAST/ON_POWER_HIT (só o ON_CAST/ON_HIT genérico, "qualquer
+// Power ativa"), então um efeito intrínseco de UMA Power específica
+// (ex.: escudo só ao lançar "Escudo de Mana") nunca disparava no PvE —
+// e se alguém "corrigisse" isso cadastrando o efeito em ON_CAST (em vez
+// de ON_POWER_CAST) pra fazer funcionar, ele passaria a disparar pra
+// QUALQUER Power do personagem, inclusive uma OUTRA equipada
+// (exatamente o bug relatado). Estes dois testes provam, via o
+// controller REAL (nunca o service isolado), que agora:
+// ON_POWER_CAST/ON_POWER_HIT identificam a Power certa — disparam só
+// quando ELA MESMA é usada/acerta, nunca ao usar outra.
+testeComBanco("PvE: GRANT_SHIELD em ON_POWER_CAST não dispara ao usar OUTRA Power equipada, só a própria", async () => {
+  const { personagem } = await criarPersonagem({ nivel: 5 });
+  const escudoDeMana = await Power.create({ nome: `EscudoDeMana_${sufixo()}`, descricao: "Escudo intrínseco", tipo_poder: "Ativo",
+    custo_mana: 0, dano_base: 0, escala_atributo: "Inteligencia", valor_escala: 0 });
+  const bolaDeFogo = await Power.create({ nome: `BolaDeFogo_${sufixo()}`, descricao: "Dano puro", tipo_poder: "Ativo",
+    custo_mana: 0, dano_base: 5, escala_atributo: "Inteligencia", valor_escala: 0 });
+  powersCriados.push(escudoDeMana.id, bolaDeFogo.id);
+  await PowerCombatEffect.create({ id_power: escudoDeMana.id, trigger: "ON_POWER_CAST", effect_key: "GRANT_SHIELD",
+    magnitude_base: 18, duration_turns: 2 });
+  await CharacterAbilities.create({ id_personagem: personagem.id, id_power: escudoDeMana.id, is_active: true });
+  await CharacterAbilities.create({ id_personagem: personagem.id, id_power: bolaDeFogo.id, is_active: true });
+  await encontroDeTreino(personagem);
+  await comMathRandomFixo(0.99, async () => {
+    const usouOutraPower = await chamarExecutarTurno(personagem.id, { type: "power", powerId: bolaDeFogo.id });
+    assert.equal(usouOutraPower.statusCode, 200);
+    await personagem.reload();
+    assert.equal(personagem.encontro_pve.escudo.player, null, "Bola de Fogo não deveria conceder o escudo de Escudo de Mana");
+
+    const usouAPropriaPower = await chamarExecutarTurno(personagem.id, { type: "power", powerId: escudoDeMana.id });
+    assert.equal(usouAPropriaPower.statusCode, 200);
+    await personagem.reload();
+    // Não compara contra 18 cru: o contra-ataque do Boneco de Treino
+    // acontece no mesmo turno e pode absorver parte do escudo recém-
+    // concedido antes do save — o que importa aqui é que o escudo
+    // EXISTE (Escudo de Mana disparou), não o valor residual exato.
+    assert.ok(personagem.encontro_pve.escudo.player, "Escudo de Mana deveria conceder um escudo ao ser usada");
+    assert.ok(personagem.encontro_pve.escudo.player.valor > 0, "o escudo concedido deveria ter sobrado algum valor");
+  });
+});
+
+testeComBanco("PvE: DISPEL_BUFF em ON_POWER_HIT não dispara quando OUTRA Power acerta, só quando a dela própria acerta", async () => {
+  const { personagem } = await criarPersonagem({ nivel: 5 });
+  const luzPurificadora = await Power.create({ nome: `LuzPurificadora_${sufixo()}`, descricao: "Dispel intrínseco", tipo_poder: "Ativo",
+    custo_mana: 0, dano_base: 5, escala_atributo: "Inteligencia", valor_escala: 0 });
+  const outroGolpe = await Power.create({ nome: `OutroGolpe_${sufixo()}`, descricao: "Dano puro", tipo_poder: "Ativo",
+    custo_mana: 0, dano_base: 5, escala_atributo: "Inteligencia", valor_escala: 0 });
+  powersCriados.push(luzPurificadora.id, outroGolpe.id);
+  await PowerCombatEffect.create({ id_power: luzPurificadora.id, trigger: "ON_POWER_HIT", effect_key: "DISPEL_BUFF", target: "ENEMY", magnitude_base: 0 });
+  await CharacterAbilities.create({ id_personagem: personagem.id, id_power: luzPurificadora.id, is_active: true });
+  await CharacterAbilities.create({ id_personagem: personagem.id, id_power: outroGolpe.id, is_active: true });
+  await encontroDeTreino(personagem, { vida_atual: 1000, vida_maxima: 1000 });
+  // Dá ao inimigo um buff dispelável, da mesma forma que
+  // powerCombatRuntime.participant/apply(DISPEL_BUFF) espera — o
+  // próprio `encontro_pve` É o actor "enemy" do runtime (powerRuntime.
+  // participant(inimigoAtual, ...) muta `powerCombatState` nele direto).
+  // Reatribui `encontro_pve` por completo (nunca só uma propriedade
+  // aninhada) — Sequelize só marca a coluna JSONB como "changed" numa
+  // reatribuição do objeto no nível raiz, nunca numa mutação aninhada
+  // no MESMO objeto (`personagem.encontro_pve.x = y` sozinho não
+  // persiste no save() seguinte).
+  personagem.encontro_pve = {
+    ...personagem.encontro_pve,
+    powerCombatState: { started: false, turn: 0, effects: [{ effect_key: "DAMAGE_DEALT_PCT", magnitude: 10, group: "buff-teste", dispellable: true }] },
+  };
+  await personagem.save();
+  await comMathRandomFixo(0.5, async () => {
+    const outraPowerAcerta = await chamarExecutarTurno(personagem.id, { type: "power", powerId: outroGolpe.id });
+    assert.equal(outraPowerAcerta.statusCode, 200);
+    await personagem.reload();
+    assert.equal(
+      personagem.encontro_pve.powerCombatState.effects.length,
+      1,
+      "Outro Golpe acertar não deveria dispelar o buff do inimigo",
+    );
+
+    const luzAcerta = await chamarExecutarTurno(personagem.id, { type: "power", powerId: luzPurificadora.id });
+    assert.equal(luzAcerta.statusCode, 200);
+    await personagem.reload();
+    assert.equal(
+      personagem.encontro_pve.powerCombatState.effects.length,
+      0,
+      "Luz Purificadora acertar deveria dispelar o buff do inimigo",
+    );
+  });
+});

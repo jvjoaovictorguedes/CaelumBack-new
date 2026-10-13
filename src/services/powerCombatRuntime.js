@@ -85,8 +85,12 @@ function applyModifier(row, source, target, trigger) {
   const group = row.stack_group ?? sourceId;
   const same = (e) => e.effect_key === row.effect_key && e.group === group;
   const existing = state.effects.filter(same);
+  // ON_POWER_CAST é o MESMO instante de ON_CAST (dentro da própria ação
+  // de lançar a Power), só com atribuição por sourcePowerId — nunca
+  // deveria contar duração diferente só por isso (bug encontrado junto
+  // da correção de identificação por Power).
   const duringAction =
-    state.inTurn && ["COMBAT_START", "TURN_START", "ON_CAST"].includes(trigger);
+    state.inTurn && ["COMBAT_START", "TURN_START", "ON_CAST", "ON_POWER_CAST"].includes(trigger);
   const duration = row.duration_turns;
   const entry = {
     ...row,
@@ -167,7 +171,7 @@ function apply(row, source, target, trigger) {
         state.shieldExpiresAfterTurn =
           state.turn +
           (row.duration_turns ?? 1) -
-          (state.inTurn && ["TURN_START", "ON_CAST"].includes(trigger) ? 1 : 0);
+          (state.inTurn && ["TURN_START", "ON_CAST", "ON_POWER_CAST"].includes(trigger) ? 1 : 0);
       }
       break;
     case "CLEANSE_STATUS":

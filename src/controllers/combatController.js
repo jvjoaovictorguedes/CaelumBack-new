@@ -829,10 +829,17 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       modificadoresJogador = powerRuntime.effective(runtimePlayer);
       inimigoAtual.playerPowerCombatState = personagemAtual.powerCombatState;
     }
-    function aplicarProcDoJogador(triggerKey, inimigoFoiDerrotado) {
+    // `sourcePowerId` (bug reportado: "backend precisa identificar qual
+    // habilidade disparou um efeito ON_CAST/ON_HIT, senão escudo/dispel
+    // intrínseco de uma Power pode ativar ao usar OUTRA Power equipada")
+    // — repassado pra powerRuntime.emit SÓ quando o triggerKey é
+    // ON_POWER_CAST/ON_POWER_HIT (ver chamadas abaixo); ON_CAST/ON_HIT
+    // genéricos continuam null (intencionalmente "qualquer Power ativa",
+    // mesmo contrato de combatActionEngine.js/PvP).
+    function aplicarProcDoJogador(triggerKey, inimigoFoiDerrotado, sourcePowerId = null) {
       if (triggerKey === "ON_KILL" && !inimigoFoiDerrotado) return;
       syncRuntime();
-      powerRuntime.emit(triggerKey, runtimePlayer, runtimeEnemy, runtime);
+      powerRuntime.emit(triggerKey, runtimePlayer, runtimeEnemy, runtime, Math.random, sourcePowerId);
       saveRuntime();
     }
     const cooldownsPlayerAplicadosNesteTurno = new Set();
@@ -1066,6 +1073,12 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
       personagemAtual.mana_atual -=
         custoManaComModificadores(poderUsado, nivelHabilidadeUsada, modificadoresJogador);
       aplicarProcDoJogador("ON_CAST", false);
+      // Rebalanceamento de Powers (bug reportado) — efeito intrínseco da
+      // PRÓPRIA Power usada (ex.: escudo ao lançar "Fúria de Aço"),
+      // nunca reage ao uso de outra Power do loadout. Mesmo ponto do
+      // turno que combatActionEngine.aplicarAcao usa pro caminho PvP/
+      // Duelo (mana já descontada, antes do cálculo principal).
+      aplicarProcDoJogador("ON_POWER_CAST", false, poderUsado.id);
 
       // Cooldown só entra AGORA — a habilidade já passou por todas as
       // validações e foi consumida como ação válida (§35). Marcado como
@@ -1171,6 +1184,10 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
             );
           }
           aplicarProcDoJogador("ON_HIT", false);
+          // ON_POWER_HIT (bug reportado) — só a Power usada NESTE golpe
+          // identifica a si mesma, nunca outra Power equipada que
+          // também tenha um efeito ON_POWER_HIT registrado.
+          aplicarProcDoJogador("ON_POWER_HIT", false, poderUsado.id);
           if (criticoJogador) aplicarProcDoJogador("ON_CRIT", false);
           if (inimigoAtual.vida_atual <= 0) aplicarProcDoJogador("ON_KILL", true);
 
