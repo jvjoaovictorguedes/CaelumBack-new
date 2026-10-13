@@ -219,6 +219,50 @@ testeComBanco(
   },
 );
 
+// Evolução "RPM ajustável" (seção 7) — dtoPublicoLayout usa allowlist
+// POR TIPO (puzzleBlueprintService.propsPublicasDoComponente), nunca
+// blacklist: prova direta que MOTOR ajustável expõe só os limites do
+// regulador (nunca mais), MOTOR legado expõe só rpmNominal/sentido, e
+// OUTPUT nunca expõe NADA das próprias props (rpmAlvo/toleranciaRpm/
+// sentidoAlvo) — teste PURO, nem precisa de banco (dtoPublicoLayout só
+// olha `versao.config`).
+test("dtoPublicoLayout (allowlist por tipo): MOTOR ajustável expõe só limites do regulador; OUTPUT nunca expõe suas props cruas", () => {
+  const versaoFalsa = {
+    config: {
+      dominio: "MECANICO",
+      components: [
+        { id: "motor1", type: "MOTOR", props: { ajustavel: true, rpmInicial: 100, rpmMin: 60, rpmMax: 240, rpmStep: 10, sentido: "CW", extraInterno: "nunca deveria sair" }, position: { x: 0, y: 0 } },
+        { id: "output1", type: "OUTPUT", props: { rpmAlvo: 180, toleranciaRpm: 5, sentidoAlvo: "CW" }, position: { x: 1, y: 0 } },
+        { id: "gear1", type: "GEAR", props: { dentes: 20, segredoDoGear: "nunca" }, position: { x: 2, y: 0 } },
+      ],
+      connections: [],
+      objectives: [],
+    },
+  };
+  const layout = puzzleBlueprintService.dtoPublicoLayout(versaoFalsa);
+  const motor = layout.components.find((c) => c.id === "motor1");
+  const output = layout.components.find((c) => c.id === "output1");
+  const gear = layout.components.find((c) => c.id === "gear1");
+
+  assert.deepEqual(motor.props, { ajustavel: true, rpmInicial: 100, rpmMin: 60, rpmMax: 240, rpmStep: 10, sentido: "CW" });
+  assert.ok(!("extraInterno" in motor.props), "allowlist nunca repassa uma prop desconhecida/futura por engano");
+  assert.deepEqual(output.props, {}, "OUTPUT nunca expõe nenhuma prop própria no layout público");
+  assert.deepEqual(gear.props, { dentes: 20 }, "GEAR expõe só `dentes` (allowlist), nunca props desconhecidas");
+});
+
+test("dtoPublicoLayout (allowlist por tipo): MOTOR legado (sem ajustavel) expõe só rpmNominal/sentido", () => {
+  const versaoFalsa = {
+    config: {
+      dominio: "MECANICO",
+      components: [{ id: "motor1", type: "MOTOR", props: { rpmNominal: 120, sentido: "CCW" }, position: { x: 0, y: 0 } }],
+      connections: [],
+      objectives: [],
+    },
+  };
+  const layout = puzzleBlueprintService.dtoPublicoLayout(versaoFalsa);
+  assert.deepEqual(layout.components[0].props, { rpmNominal: 120, sentido: "CCW" });
+});
+
 // -----------------------------------------------------------------------
 // 3. Expiração preguiçosa — nenhum scheduler, só a leitura pelo dono.
 // -----------------------------------------------------------------------

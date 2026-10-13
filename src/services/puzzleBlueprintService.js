@@ -522,12 +522,57 @@ function projetarObjectivosProgressivos(objectives, objetivosConcluidos) {
 // pelo cliente. Quem chama sem o 2º argumento (ex.: Admin, preview, ou
 // um objective único de fixture de teste) recebe a projeção como se
 // nada tivesse sido concluído ainda — nunca vaza objective futuro.
+// Allowlist de props PÚBLICAS por tipo de componente (evolução "RPM
+// ajustável" — seção 7 da encomenda: "esconder targets do jogador").
+// NUNCA blacklist (remover chaves conhecidas de um objeto que passa
+// tudo por padrão) — isso é frágil: um prop novo/renomeado no futuro
+// vazaria por omissão. Aqui é o oposto: só sai o que está
+// explicitamente listado abaixo; qualquer prop não listado (ex.:
+// OUTPUT.rpmAlvo/toleranciaRpm/sentidoAlvo) nunca atravessa esta
+// função, mesmo que seja adicionado ao config sem ninguém lembrar de
+// atualizar este arquivo.
+//
+// Hoje cobre só os tipos do domínio MECANICO (motivo desta correção).
+// RECEIVER (óptico) e TURBINE (hidráulico) têm o MESMO formato de
+// target cru (intensidadeAlvo/corAlvo/toleranciaIntensidade,
+// vazaoAlvo/toleranciaVazao) e portanto o MESMO risco — mas são
+// domínios fora do escopo desta tarefa (só a Oficina dos Eixos); ficam
+// no fallback (props repassadas como hoje) até uma correção própria.
+const PROPS_PUBLICAS_POR_TIPO = {
+  MOTOR: (props) =>
+    props.ajustavel === true
+      ? {
+          ajustavel: true,
+          rpmInicial: props.rpmInicial,
+          rpmMin: props.rpmMin,
+          rpmMax: props.rpmMax,
+          rpmStep: props.rpmStep,
+          sentido: props.sentido,
+        }
+      : { rpmNominal: props.rpmNominal, sentido: props.sentido },
+  SHAFT: () => ({}),
+  GEAR: (props) => ({ dentes: props.dentes }),
+  PULLEY: (props) => ({ raio: props.raio }),
+  LEVER: () => ({}),
+  CLUTCH: () => ({}),
+  // OUTPUT nunca expõe rpmAlvo/toleranciaRpm/sentidoAlvo — a única
+  // informação pública sobre o alvo é a `ressonancia` qualitativa que
+  // já vem no feedbackPublico do RUNTIME (dtoRuntimeComObjetivos), não
+  // no layout estático. Aqui (topologia) não há NADA seguro a mostrar.
+  OUTPUT: () => ({}),
+};
+
+function propsPublicasDoComponente(componente) {
+  const projetor = PROPS_PUBLICAS_POR_TIPO[componente.type];
+  return projetor ? projetor(componente.props ?? {}) : (componente.props ?? {});
+}
+
 function dtoPublicoLayout(versao, { objetivosConcluidos } = {}) {
   const config = versao.config || {};
   return {
     dominio: typeof config.dominio === "string" ? config.dominio : null,
     components: Array.isArray(config.components)
-      ? config.components.map((c) => ({ id: c.id, type: c.type, props: c.props ?? {}, position: c.position ?? null }))
+      ? config.components.map((c) => ({ id: c.id, type: c.type, props: propsPublicasDoComponente(c), position: c.position ?? null }))
       : [],
     connections: Array.isArray(config.connections)
       ? config.connections.map((c) => ({ id: c.id, from: c.from, to: c.to }))
@@ -714,6 +759,7 @@ module.exports = {
   dtoAdminVersao,
   dtoPublicoVersao,
   dtoPublicoLayout,
+  propsPublicasDoComponente,
   projetarObjectivosProgressivos,
   listarPublicosPorEdicao,
   personagemCompletouBlueprint,

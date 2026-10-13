@@ -151,6 +151,53 @@ testeComBanco("validarSolvabilidade: rejeita sem nenhuma ação informada", asyn
   await assert.rejects(() => puzzleBlueprintService.validarSolvabilidade(versao.id, { acoes: [] }), /sequência candidata/);
 });
 
+// Evolução "RPM ajustável" (seção 13 da encomenda) — o dry-run é
+// genérico (engine.executarAcao aceita qualquer `type` registrado pelo
+// domínio), então AJUSTAR_RPM funciona aqui SEM nenhuma mudança em
+// validarSolvabilidade; o que esta prova exercita de verdade é que as
+// DUAS ordens pedidas (LIGAR→AJUSTAR_RPM e AJUSTAR_RPM→LIGAR) resolvem
+// igualmente — nenhuma depende de uma ordem específica.
+function configMotorAjustavelDryRun() {
+  return {
+    dominio: "MECANICO",
+    components: [
+      { id: "motor1", type: "MOTOR", props: { ajustavel: true, rpmInicial: 100, rpmMin: 60, rpmMax: 240, rpmStep: 10, sentido: "CW" }, position: { x: 0, y: 0 } },
+      { id: "output1", type: "OUTPUT", props: { rpmAlvo: 180, sentidoAlvo: "CW", toleranciaRpm: 0 }, position: { x: 1, y: 0 } },
+    ],
+    connections: [{ id: "c1", from: { componentId: "motor1", port: "out" }, to: { componentId: "output1", port: "in" } }],
+    objectives: [{ id: "obj1", descricao: "Acertar a rotação de saída", condicao: { op: "EQUALS", path: "components.output1.atingido", value: true } }],
+  };
+}
+
+testeComBanco("validarSolvabilidade: aceita AJUSTAR_RPM — LIGAR depois AJUSTAR_RPM resolve", async () => {
+  const { versao } = await criarFundacaoComBlueprint({ comVersaoPublicada: false });
+  await puzzleBlueprintService.atualizarDraft(versao.id, { config: configMotorAjustavelDryRun() });
+  const resultado = await puzzleBlueprintService.validarSolvabilidade(versao.id, {
+    acoes: [{ type: "LIGAR", componentId: "motor1" }, { type: "AJUSTAR_RPM", componentId: "motor1", payload: { rpm: 180 } }],
+  });
+  assert.equal(resultado.valido, true, JSON.stringify(resultado));
+});
+
+testeComBanco("validarSolvabilidade: aceita AJUSTAR_RPM — AJUSTAR_RPM antes de LIGAR também resolve (mesma ordem final, outra sequência)", async () => {
+  const { versao } = await criarFundacaoComBlueprint({ comVersaoPublicada: false });
+  await puzzleBlueprintService.atualizarDraft(versao.id, { config: configMotorAjustavelDryRun() });
+  const resultado = await puzzleBlueprintService.validarSolvabilidade(versao.id, {
+    acoes: [{ type: "AJUSTAR_RPM", componentId: "motor1", payload: { rpm: 180 } }, { type: "LIGAR", componentId: "motor1" }],
+  });
+  assert.equal(resultado.valido, true, JSON.stringify(resultado));
+});
+
+testeComBanco("validarSolvabilidade: um AJUSTAR_RPM inválido (fora do passo) falha na etapa SIMULACAO, nunca passa batido", async () => {
+  const { versao } = await criarFundacaoComBlueprint({ comVersaoPublicada: false });
+  await puzzleBlueprintService.atualizarDraft(versao.id, { config: configMotorAjustavelDryRun() });
+  const resultado = await puzzleBlueprintService.validarSolvabilidade(versao.id, {
+    acoes: [{ type: "LIGAR", componentId: "motor1" }, { type: "AJUSTAR_RPM", componentId: "motor1", payload: { rpm: 185 } }],
+  });
+  assert.equal(resultado.valido, false);
+  assert.equal(resultado.etapa, "SIMULACAO");
+  assert.equal(resultado.indiceFalha, 1);
+});
+
 // --------------------------------------------------- PuzzleClueDefinition
 
 testeComBanco("atualizarDefinicao (pista): edita título/texto; excluirDefinicao bloqueia se já desbloqueada", async () => {

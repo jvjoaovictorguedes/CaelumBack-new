@@ -161,6 +161,11 @@ test("registry de convergência: reúne os tipos dos três domínios sem reimple
   }
 });
 
+// Atualizado pela evolução "RPM ajustável": o OUTPUT mecânico trocou
+// `atingido` cru por `ressonancia` qualitativa (ver
+// puzzleMechanicalComponents.js); RECEIVER (óptico) e TURBINE
+// (hidráulico) continuam com `atingido` — domínios fora do escopo
+// dessa correção, residual risk documentado no relatório de entrega.
 test("feedbackPublico da convergência nunca vaza segredo — cada tipo expõe exatamente o mesmo shape do domínio original", () => {
   const { estado } = resolverComGoldenSolution();
   const chavesPermitidas = new Set([
@@ -169,6 +174,7 @@ test("feedbackPublico da convergência nunca vaza segredo — cada tipo expõe e
     "sentido",
     "engatada",
     "atingido",
+    "ressonancia",
     "intensidade",
     "cor",
     "aberto",

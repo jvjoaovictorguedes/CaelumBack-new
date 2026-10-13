@@ -640,3 +640,117 @@ testeComBanco("adminEventPuzzleController: CRUD completo do Custódio do Meridia
   await adminEventPuzzleController.excluirBossResistencia(rrExcluirResist.req, rrExcluirResist.res);
   assert.equal(rrExcluirResist.resultado().statusCode, null);
 });
+
+// ------------------------- evolução "RPM ajustável" (camada HTTP) -------
+// Motor com `ajustavel: true` — mesmo princípio de ponta-a-ponta das
+// seções acima (controller real, nunca service isolado): a action
+// AJUSTAR_RPM chegando pelo MESMO endpoint de executarAcao, e o DTO
+// público (layout + runtime) nunca vazando rpmAlvo/toleranciaRpm/
+// sentidoAlvo do OUTPUT.
+function configMotorAjustavelHttp() {
+  return {
+    dominio: "MECANICO",
+    components: [
+      { id: "motor1", type: "MOTOR", props: { ajustavel: true, rpmInicial: 100, rpmMin: 60, rpmMax: 240, rpmStep: 10, sentido: "CW" }, position: { x: 0, y: 0 } },
+      { id: "output1", type: "OUTPUT", props: { rpmAlvo: 150, sentidoAlvo: "CW", toleranciaRpm: 0 }, position: { x: 1, y: 0 } },
+    ],
+    connections: [{ id: "c1", from: { componentId: "motor1", port: "out" }, to: { componentId: "output1", port: "in" } }],
+    objectives: [{ id: "obj1", descricao: "Acertar a rotação de saída", condicao: { op: "EQUALS", path: "components.output1.atingido", value: true } }],
+  };
+}
+
+async function criarFundacaoComMotorAjustavel() {
+  const eventDefinitionService = require("../src/services/eventDefinitionService");
+  const eventEditionService = require("../src/services/eventEditionService");
+  const puzzleBlueprintService = require("../src/services/puzzleBlueprintService");
+
+  const chave = slug();
+  const definicao = await eventDefinitionService.criar({ key: `http-ajustavel-evento-${chave}`, nome: `HTTP Ajustável ${chave}` });
+  await eventDefinitionService.transicionar(definicao.id, "PUBLISHED");
+  const edicao = await eventEditionService.criar(definicao.id, { key: `http-ajustavel-edicao-${chave}`, nome: `HTTP Ajustável ${chave}` });
+  await eventEditionService.transicionar(edicao.id, "ACTIVE");
+
+  const { blueprint, versao } = await puzzleBlueprintService.criarBlueprint(definicao.id, { key: `http-ajustavel-sala-${chave}`, nome: "HTTP Sala Ajustável", ordem: 1 });
+  await puzzleBlueprintService.atualizarDraft(versao.id, { config: configMotorAjustavelHttp() });
+  const versaoFinal = await puzzleBlueprintService.transicionar(versao.id, "PUBLISHED", {});
+
+  return { definicao, edicao, blueprint, versao: versaoFinal };
+}
+
+testeComBanco(
+  "eventPuzzleController: listarBlueprintsPublicos expõe limites do regulador do MOTOR ajustável, mas NUNCA rpmAlvo/toleranciaRpm/sentidoAlvo do OUTPUT",
+  async () => {
+    const { edicao, blueprint } = await criarFundacaoComMotorAjustavel();
+    const { personagem } = await criarPersonagem({});
+
+    const rr = reqRes({ personagemAtual: { id: personagem.id, nome: personagem.nome }, params: { editionId: String(edicao.id) } });
+    await eventPuzzleController.listarBlueprintsPublicos(rr.req, rr.res);
+    const { corpo } = rr.resultado();
+    const sala = corpo.data.find((b) => b.id_blueprint === blueprint.id);
+    const motorPublico = sala.layout.components.find((c) => c.id === "motor1");
+    const outputPublico = sala.layout.components.find((c) => c.id === "output1");
+
+    assert.deepEqual(motorPublico.props, { ajustavel: true, rpmInicial: 100, rpmMin: 60, rpmMax: 240, rpmStep: 10, sentido: "CW" });
+    assert.deepEqual(outputPublico.props, {}, "OUTPUT nunca expõe nenhuma prop crua no layout público");
+
+    const bruto = JSON.stringify(corpo);
+    assert.ok(!bruto.includes("rpmAlvo"), "rpmAlvo nunca pode atravessar o JSON cru da resposta HTTP");
+    assert.ok(!bruto.includes("toleranciaRpm"), "toleranciaRpm nunca pode atravessar o JSON cru da resposta HTTP");
+    assert.ok(!bruto.includes("sentidoAlvo"), "sentidoAlvo nunca pode atravessar o JSON cru da resposta HTTP");
+  },
+);
+
+testeComBanco(
+  "eventPuzzleController: AJUSTAR_RPM via executarAcao recalcula a transmissão na mesma resposta (ressonancia muda, nunca `atingido` cru)",
+  async () => {
+    const { edicao, blueprint } = await criarFundacaoComMotorAjustavel();
+    const { personagem } = await criarPersonagem({});
+
+    const rrCria = reqRes({ personagemAtual: { id: personagem.id, nome: personagem.nome }, params: { editionId: String(edicao.id) }, body: { idBlueprint: blueprint.id } });
+    await eventPuzzleController.criarOuObterInstancia(rrCria.req, rrCria.res);
+    const instancia0 = rrCria.resultado().corpo.data;
+
+    const rrLigar = reqRes({
+      personagemAtual: { id: personagem.id, nome: personagem.nome },
+      params: { id: String(instancia0.id) },
+      body: { type: "LIGAR", componentId: "motor1", stateVersion: instancia0.state_version },
+    });
+    await eventPuzzleController.executarAcao(rrLigar.req, rrLigar.res);
+    const depoisDeLigar = rrLigar.resultado().corpo.data.instancia;
+    // motor liga em rpmInicial=100; alvo é 150 — bem longe (33%), SEM_RESONANCIA.
+    assert.equal(depoisDeLigar.state.components.output1.ressonancia, "SEM_RESONANCIA");
+    assert.ok(!("atingido" in depoisDeLigar.state.components.output1), "feedback público do OUTPUT nunca inclui `atingido` cru");
+
+    const rrAjustar = reqRes({
+      personagemAtual: { id: personagem.id, nome: personagem.nome },
+      params: { id: String(instancia0.id) },
+      body: { type: "AJUSTAR_RPM", componentId: "motor1", payload: { rpm: 150 }, stateVersion: depoisDeLigar.state_version },
+    });
+    await eventPuzzleController.executarAcao(rrAjustar.req, rrAjustar.res);
+    const { statusCode, corpo } = rrAjustar.resultado();
+    assert.equal(statusCode, null, "res.json sem status() explícito é 200 por padrão no Express real");
+    const depoisDeAjustar = corpo.data.instancia;
+    assert.equal(depoisDeAjustar.state.components.motor1.rpmConfigurado, 150);
+    assert.equal(depoisDeAjustar.state.components.output1.ressonancia, "ESTAVEL", "150 bate exatamente o alvo — recalculado na MESMA ação, sem precisar de outro LIGAR");
+    assert.equal(depoisDeAjustar.status, "COMPLETED");
+  },
+);
+
+testeComBanco("eventPuzzleController: AJUSTAR_RPM fora do passo/limite devolve 400 real via o mesmo pipeline de erro (nunca 500)", async () => {
+  const { edicao, blueprint } = await criarFundacaoComMotorAjustavel();
+  const { personagem } = await criarPersonagem({});
+
+  const rrCria = reqRes({ personagemAtual: { id: personagem.id, nome: personagem.nome }, params: { editionId: String(edicao.id) }, body: { idBlueprint: blueprint.id } });
+  await eventPuzzleController.criarOuObterInstancia(rrCria.req, rrCria.res);
+  const instancia0 = rrCria.resultado().corpo.data;
+
+  const rrForaDoPasso = reqRes({
+    personagemAtual: { id: personagem.id, nome: personagem.nome },
+    params: { id: String(instancia0.id) },
+    body: { type: "AJUSTAR_RPM", componentId: "motor1", payload: { rpm: 155 }, stateVersion: instancia0.state_version },
+  });
+  await eventPuzzleController.executarAcao(rrForaDoPasso.req, rrForaDoPasso.res);
+  const { statusCode, corpo } = rrForaDoPasso.resultado();
+  assert.equal(statusCode, 400);
+  assert.equal(corpo.code, "RPM_FORA_DO_PASSO");
+});

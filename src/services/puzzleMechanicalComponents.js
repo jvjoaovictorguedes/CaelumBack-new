@@ -56,6 +56,76 @@ function numeroNaoNegativo(valor, contexto) {
     throw erro(`${contexto}: precisa ser um número >= 0.`);
   }
 }
+function inteiroPositivo(valor, contexto) {
+  if (!Number.isInteger(valor) || valor <= 0) {
+    throw erro(`${contexto}: precisa ser um número inteiro positivo.`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// MOTOR ajustável (evolução "Regulador do Eixo Mestre") — valida os
+// limites declarados no config (Admin) e, separadamente, o valor que o
+// JOGADOR manda via AJUSTAR_RPM. As duas validações são distintas de
+// propósito: `validarLimitesDoRegulador` roda em validarProps (config
+// do Admin, confia menos — pode estar quebrado); `validarAjusteDeRpm`
+// roda a cada ação do jogador (config já confiável, só o `rpm` do
+// payload precisa de checagem).
+function validarLimitesDoRegulador(props) {
+  inteiroPositivo(props.rpmMin, "MOTOR.rpmMin");
+  inteiroPositivo(props.rpmMax, "MOTOR.rpmMax");
+  inteiroPositivo(props.rpmStep, "MOTOR.rpmStep");
+  inteiroPositivo(props.rpmInicial, "MOTOR.rpmInicial");
+  if (props.rpmMax <= props.rpmMin) throw erro("MOTOR.rpmMax precisa ser maior que rpmMin.");
+  if (props.rpmInicial < props.rpmMin || props.rpmInicial > props.rpmMax) {
+    throw erro("MOTOR.rpmInicial precisa estar entre rpmMin e rpmMax.");
+  }
+  if ((props.rpmInicial - props.rpmMin) % props.rpmStep !== 0) {
+    throw erro("MOTOR.rpmInicial precisa ser alcançável a partir de rpmMin respeitando rpmStep.");
+  }
+}
+
+// Único validador do valor que o CLIENTE manda em AJUSTAR_RPM — nunca
+// confia em nada vindo do payload além de `rpm` (número). Mensagens
+// específicas por regra (não um "inválido" genérico) porque o Admin/QA
+// usa isso pra depurar uma golden solution que não bate.
+function validarAjusteDeRpm(props, payload) {
+  if (props.ajustavel !== true) {
+    throw erro("Este MOTOR não é ajustável — rpm é fixo (rpmNominal do config).", 400, "MOTOR_NAO_AJUSTAVEL");
+  }
+  const rpm = payload?.rpm;
+  if (!Number.isInteger(rpm)) {
+    throw erro("AJUSTAR_RPM: payload.rpm precisa ser um número inteiro.", 400, "RPM_INVALIDO");
+  }
+  if (rpm < props.rpmMin || rpm > props.rpmMax) {
+    throw erro(`AJUSTAR_RPM: rpm precisa estar entre ${props.rpmMin} e ${props.rpmMax}.`, 400, "RPM_FORA_DO_LIMITE");
+  }
+  if ((rpm - props.rpmMin) % props.rpmStep !== 0) {
+    throw erro(`AJUSTAR_RPM: rpm precisa respeitar o passo de ${props.rpmStep} a partir de ${props.rpmMin}.`, 400, "RPM_FORA_DO_PASSO");
+  }
+  return rpm;
+}
+
+// Ressonância qualitativa do OUTPUT (evolução "esconder targets do
+// jogador") — NUNCA revela rpmAlvo/toleranciaRpm/sentidoAlvo, só uma
+// das 4 faixas abaixo. `outputAtingido` (já existente, usado pelos
+// objectives) continua a fonte de verdade BOOLEANA/interna; esta função
+// é só a tradução qualitativa pra feedback público, nunca o contrário.
+// Sentido errado NUNCA pode render ESTAVEL, mesmo com rpm exato (seção
+// 9 da encomenda) — cai pra PROXIMA (fisicamente "quase", mas invertido).
+function classificarRessonancia(props, estado) {
+  const alvo = props.rpmAlvo;
+  const tolerancia = props.toleranciaRpm ?? 0;
+  const distancia = Math.abs(estado.rpm - alvo);
+  const dentroDaTolerancia = distancia <= tolerancia;
+  const sentidoCorreto = props.sentidoAlvo === undefined || estado.sentido === props.sentidoAlvo;
+  if (dentroDaTolerancia && sentidoCorreto) return "ESTAVEL";
+  if (dentroDaTolerancia) return "PROXIMA"; // rpm exato, mas sentido errado — "vibra em oposição"
+  const base = Math.max(Math.abs(alvo), 1); // nunca dividir por zero quando alvo=0
+  const percentual = distancia / base;
+  if (percentual <= 0.1) return "PROXIMA";
+  if (percentual <= 0.25) return "FRACA";
+  return "SEM_RESONANCIA";
+}
 
 // Tipos que participam da transmissão rotacional (grafo de propagação).
 // LEVER fica de fora de propósito — é controle manual, nunca "gira".
@@ -103,7 +173,15 @@ function propagarMecanica({ config, components }) {
     if (comp.type !== "MOTOR") continue;
     const estadoAtual = components[comp.id] || {};
     const ligado = !!estadoAtual.ligado;
-    const rpm = ligado ? comp.props.rpmNominal : 0;
+    // Evolução "Regulador do Eixo Mestre": o rpm NOMINAL do config é só
+    // o comportamento LEGADO (motor fixo). Um motor `ajustavel: true`
+    // usa `estadoAtual.rpmConfigurado` (runtime, mutado só por
+    // LIGAR/AJUSTAR_RPM via o reduzir() abaixo) como fonte — a
+    // propagação roda de novo a cada ação (nunca incremental), então um
+    // AJUSTAR_RPM com o motor já ligado recalcula a transmissão inteira
+    // na MESMA ação, sem precisar de um 2º LIGAR.
+    const rpmEfetivo = comp.props.ajustavel === true ? estadoAtual.rpmConfigurado : comp.props.rpmNominal;
+    const rpm = ligado ? rpmEfetivo : 0;
     const sentido = ligado ? comp.props.sentido : null;
     novoMapa[comp.id] = { ...estadoAtual, ligado, rpm, sentido };
     visitado.add(comp.id);
@@ -195,21 +273,66 @@ function criarRegistryMecanico() {
 
   registry.registrar({
     key: "MOTOR",
+    // Compatibilidade (seção 1 da encomenda): `ajustavel !== true` é o
+    // comportamento LEGADO de sempre — só valida rpmNominal/sentido,
+    // nunca exige rpmMin/rpmMax/rpmStep/rpmInicial. Blueprints antigos
+    // (sem a chave `ajustavel` no config) continuam passando por aqui
+    // inalterados.
     validarProps: (props) => {
-      numeroPositivo(props.rpmNominal, "MOTOR.rpmNominal");
+      if (props.ajustavel === true) {
+        validarLimitesDoRegulador(props);
+      } else {
+        numeroPositivo(props.rpmNominal, "MOTOR.rpmNominal");
+      }
       validarSentido(props.sentido, "MOTOR.sentido");
     },
-    criarEstado: () => ({ ligado: false, rpm: 0, sentido: null }),
+    criarEstado: (props) =>
+      props.ajustavel === true
+        ? { ligado: false, rpmConfigurado: props.rpmInicial, rpm: 0, sentido: null }
+        : { ligado: false, rpm: 0, sentido: null },
     reduzir: ({ state, action, props }) => {
       if (action.type === "LIGAR") {
-        return { state: { ...state, ligado: true, rpm: props.rpmNominal, sentido: props.sentido }, events: [{ tipo: "MOTOR_LIGADO" }] };
+        const rpmEfetivo = props.ajustavel === true ? state.rpmConfigurado : props.rpmNominal;
+        return { state: { ...state, ligado: true, rpm: rpmEfetivo, sentido: props.sentido }, events: [{ tipo: "MOTOR_LIGADO" }] };
       }
       if (action.type === "DESLIGAR") {
+        // `rpmConfigurado` nunca é perdido ao desligar (seção 2 —
+        // "configura 160 → liga → desliga → liga de novo → volta a
+        // 160") — só `rpm`/`sentido` (o EFEITO visível) zera; `...state`
+        // preserva rpmConfigurado pra motores ajustáveis.
         return { state: { ...state, ligado: false, rpm: 0, sentido: null }, events: [{ tipo: "MOTOR_DESLIGADO" }] };
+      }
+      if (action.type === "AJUSTAR_RPM") {
+        const rpm = validarAjusteDeRpm(props, action.payload);
+        // Permitido com o motor ligado (seção 4) — `rpm` efetivo já
+        // muda nesta MESMA ação; propagarMecanica (hook pós-processo,
+        // roda sempre) recalcula a transmissão inteira a partir do
+        // `rpmConfigurado` novo, nunca incrementalmente.
+        return {
+          state: { ...state, rpmConfigurado: rpm, rpm: state.ligado ? rpm : state.rpm },
+          events: [{ tipo: "MOTOR_RPM_AJUSTADO", rpm }],
+        };
       }
       return { state, events: [] };
     },
-    feedbackPublico: (state) => ({ ligado: state.ligado, rpm: state.rpm, sentido: state.sentido }),
+    // Motor ajustável expõe os limites do regulador (nunca segredo —
+    // o jogador PRECISA saber min/max/step pra operar o controle) +
+    // `rpmConfigurado` (o valor "guardado", mesmo desligado). Motor
+    // legado mantém o shape EXATO de sempre (só ligado/rpm/sentido) —
+    // nunca uma chave nova aparece pra quem não optou por `ajustavel`.
+    feedbackPublico: (state, props) =>
+      props.ajustavel === true
+        ? {
+            ligado: state.ligado,
+            rpm: state.rpm,
+            sentido: state.sentido,
+            ajustavel: true,
+            rpmConfigurado: state.rpmConfigurado,
+            rpmMin: props.rpmMin,
+            rpmMax: props.rpmMax,
+            rpmStep: props.rpmStep,
+          }
+        : { ligado: state.ligado, rpm: state.rpm, sentido: state.sentido },
   });
 
   registry.registrar({
@@ -267,7 +390,15 @@ function criarRegistryMecanico() {
     },
     criarEstado: () => ({ ...estadoRotacionalEmRepouso(), atingido: false }),
     reduzir: ({ state }) => ({ state, events: [] }),
-    feedbackPublico: (state) => ({ rpm: state.rpm, sentido: state.sentido, atingido: state.atingido }),
+    // Evolução "esconder targets do jogador" (seção 7/8 da encomenda):
+    // `atingido` (boolean cru "alvo atingido sim/não") NUNCA sai aqui —
+    // só a classificação qualitativa de `classificarRessonancia`, que
+    // não precisa do valor-alvo pra ser calculada no cliente porque ela
+    // já chega PRONTA do servidor. `state.atingido` continua existindo
+    // (`estado.components.outputX.atingido`, nunca em `.public`) só pra
+    // os objectives (avaliarCondicao), que sempre leem o state INTERNO,
+    // nunca o feedbackPublico.
+    feedbackPublico: (state, props) => ({ rpm: state.rpm, sentido: state.sentido, ressonancia: classificarRessonancia(props, state) }),
   });
 
   return registry;
@@ -288,4 +419,6 @@ module.exports = {
   validarTopologia,
   propagarMecanica,
   inverterSentido,
+  validarAjusteDeRpm,
+  classificarRessonancia,
 };
