@@ -1160,6 +1160,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           if (contextoCriticoPoder.critico) criticoJogador = true;
           const damageResolution=require("../services/combatTypingService").resolveDamage({amount:dano,actor:personagemAtual,target:{...inimigoAtual,defesa:(inimigoAtual.defesa??0)+combatModifierService.bonusDefesa(powerRuntime.effective(runtimeEnemy))},power:poderUsado,context:"PVE",finalMultiplier:combatModifierService.multiplicadorDanoRecebido(powerRuntime.effective(runtimeEnemy)),buffs:combatBuffs.player,defenderBuffs:combatBuffs.enemy});
           const danoMitigado=damageResolution.totalDamage;
+          if (require("../services/combatTypingService").isFullyImmune(damageResolution)) curaBloqueadaPorEsquiva = true;
           inimigoAtual.lastDamageResolution=damageResolution;
           log.push(require("../services/combatTypingService").describe(damageResolution));
           danoCausadoNoInimigo = danoMitigado;
@@ -1183,12 +1184,12 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
               personagemAtual.vida_atual + curaPorRouboPoder,
             );
           }
-          aplicarProcDoJogador("ON_HIT", false);
+          if (danoMitigado > 0) aplicarProcDoJogador("ON_HIT", false);
           // ON_POWER_HIT (bug reportado) — só a Power usada NESTE golpe
           // identifica a si mesma, nunca outra Power equipada que
           // também tenha um efeito ON_POWER_HIT registrado.
-          aplicarProcDoJogador("ON_POWER_HIT", false, poderUsado.id);
-          if (criticoJogador) aplicarProcDoJogador("ON_CRIT", false);
+          if (danoMitigado > 0) aplicarProcDoJogador("ON_POWER_HIT", false, poderUsado.id);
+          if (danoMitigado > 0 && criticoJogador) aplicarProcDoJogador("ON_CRIT", false);
           if (inimigoAtual.vida_atual <= 0) aplicarProcDoJogador("ON_KILL", true);
 
           log.push(
@@ -1210,7 +1211,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
           // STATUS_RESISTANCE (spec Caldeirão §13) — ponto central único
           // de tentativa de status: resolve ANTES de aplicar, nunca
           // depois.
-          for (const efeito of efeitosNoInimigo) {
+          for (const efeito of danoMitigado > 0 ? efeitosNoInimigo : []) {
             if (combatBuffService.resolverTentativaDeStatus(combatBuffs.enemy).resistiu) {
               log.push(`${inimigoAtual.nome} resistiu a ${definicaoDoStatus(efeito.key).nomeUi}!`);
               continue;
@@ -1386,8 +1387,8 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
             personagemAtual.vida_atual + curaPorRouboAtaque,
           );
         }
-        aplicarProcDoJogador("ON_HIT", false);
-          if (criticoJogador) aplicarProcDoJogador("ON_CRIT", false);
+        if (dano > 0) aplicarProcDoJogador("ON_HIT", false);
+          if (dano > 0 && criticoJogador) aplicarProcDoJogador("ON_CRIT", false);
         if (inimigoAtual.vida_atual <= 0) aplicarProcDoJogador("ON_KILL", true);
 
         log.push(
@@ -1407,7 +1408,7 @@ async function processarTurno({ req, res, character, inimigoAtual, transaction, 
         // desses caminhos). armaEquipadaEfeitos já veio pré-carregado no
         // início do encontro (zero N+1 por hit).
         const efeitosDaArma = personagemAtual.armaEquipadaEfeitos ?? [];
-        if (efeitosDaArma.length > 0) {
+        if (dano > 0 && efeitosDaArma.length > 0) {
           const novosEfeitosDeArma = resolverEfeitosDeArmaNoHit({
             efeitosDaArma,
             personagemCaster: personagemAtual,

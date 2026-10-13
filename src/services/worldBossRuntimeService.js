@@ -328,7 +328,7 @@ function resolverEfeitoDeHabilidade({
   const damageResolution=typing.resolveDamage({amount:Math.round(efeito.dano * modificadorFase * escalaFuria * combatModifierService.multiplicadorDanoSaida(modificadoresBoss)),actor:atacante,target:{...alvoBase,defesa:alvoDefesa},power:ability.power_snapshot,context:"WORLD_BOSS",finalMultiplier:multiplicadorDanoRecebido});
   const danoFinal=damageResolution.totalDamage;
 
-  return { dano: danoFinal, damageResolution, cura: efeito.cura, esquivou: false, critico: Boolean(contextoCritico.critico) };
+  return { dano: danoFinal, damageResolution, cura: typing.isFullyImmune(damageResolution) ? 0 : efeito.cura, esquivou: false, critico: Boolean(contextoCritico.critico) };
 }
 
 // Cura/buff SELF (§6.4) — o Boss nunca esquiva de si mesmo, e cura
@@ -455,7 +455,7 @@ async function aplicarEfeitoDeHabilidadeEmAlvos({ characterIds, snapshot, fase, 
 
     // Só quem foi de fato atingido (nunca esquivou) recebe o status —
     // mesmo critério do motor existente (proc de arma/poder só no hit).
-    if (!efeito.esquivou && efeitosDeStatusNoInimigo.length > 0 && !derrotado) {
+    if (!efeito.esquivou && !typing.isFullyImmune(efeito.damageResolution) && efeitosDeStatusNoInimigo.length > 0 && !derrotado) {
       const sessaoDoAlvo = await WorldBossCombatSession.findOne({
         where: { event_id: evento.id, character_id: characterId, status: COMBAT_SESSION_STATUS.ATIVO },
         transaction,

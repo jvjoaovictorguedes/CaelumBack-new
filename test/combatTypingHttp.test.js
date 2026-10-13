@@ -92,6 +92,14 @@ test("typing HTTP: permissions, catalog CRUD, atomic profile validation, auditin
     where: { id_admin: admin.usuario.id, entidade: "CombatAffinityProfile" },
   });
   assert.equal(audit.dados_depois.entries.length, 1);
+  const zero = await request("admin/combat-typing/catalog/profiles", "POST", {
+    reason: "Imunidade explícita individual",
+    values: { key: `HTTP_IMMUNITY_${unique}`, nome: "Perfil imune HTTP" },
+    entries: [{ id_affinity: fire.id, multiplier: 0 }],
+  });
+  assert.equal(zero.status, 200);
+  const immuneProfile = (await zero.json()).data;
+  assert.equal(Number(immuneProfile.entries[0].multiplier), 0);
   const Monster = require("../src/models/AdventureMonster");
   const monster = await Monster.create({
     nome: `HTTP Typed ${unique}`,
@@ -123,6 +131,18 @@ test("typing HTTP: permissions, catalog CRUD, atomic profile validation, auditin
   assert.equal(result.totalDamage, 75);
   assert.equal(result.components[0].affinity.nome, "Fogo");
   assert.equal(result.components[0].effectivenessLabel, "ENFRAQUECIDO");
+  await monster.update({ affinity_profile_id: immuneProfile.id });
+  const typingService = require("../src/services/combatTypingService");
+  typingService.invalidate();
+  const immuneResponse = await request("admin/combat-typing/simulate", "POST", { amount: 100, powerId: power.id, targetKind: "monsters", targetId: monster.id });
+  assert.equal(immuneResponse.status, 200);
+  const immunePayload = (await immuneResponse.json()).data;
+  assert.equal(immunePayload.totalDamage, 0);
+  assert.equal(immunePayload.components[0].finalDamage, 0);
+  assert.equal(immunePayload.components[0].effectivenessLabel, "IMUNE");
+  assert.match(typingService.describe(immunePayload), /IMUNE — 0 de dano/);
+  await monster.update({ affinity_profile_id: profile.id });
+  typingService.invalidate();
   assert.equal(
     (
       await request("admin/combat-typing/config", "PUT", {
