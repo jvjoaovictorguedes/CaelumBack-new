@@ -223,7 +223,20 @@ module.exports = function registerPvpLiveHandlers(io) {
       // por JWT), senão qualquer socket conectado conseguia agir como
       // qualquer personagem só informando o ID certo.
       const characterId = await personagemViaTicket(ticket);
-      if (!characterId) return socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Ticket inválido ou expirado." });
+      if (!characterId) {
+        socket.emit(SOCKET_EVENTS.PVP.ERRO, { mensagem: "Ticket inválido ou expirado." });
+        // Bug real reportado ("fica em 'conectando' pra sempre"): o ticket
+        // só vale 30s (socketTicketService) e numa rede lenta (celular,
+        // aba em segundo plano) o tempo entre buscar o ticket e o
+        // servidor processar este evento passa disso. Sem chamar o ack
+        // aqui, o cliente (useCombatTransport.ts) nunca descobria que
+        // falhou — só o evento acima, que ele nem escutava pra esse caso
+        // — e ficava esperando um callback que nunca chegava. Chamando o
+        // ack com um erro, o cliente consegue buscar um ticket novo e
+        // tentar de novo em vez de travar.
+        if (typeof callback === "function") callback({ erro: "TICKET_INVALIDO" });
+        return;
+      }
       const chave = chaveOnline(characterId);
 
       // Se esse characterId já tinha outro socket identificado (aba
