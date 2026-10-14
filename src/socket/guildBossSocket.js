@@ -68,7 +68,7 @@ const { atacarBossAoVivo, expirarSeNecessario, tempoRestanteCooldown } = require
 // e desestruturar um número congela o valor de quando este módulo deu
 // require, ignorando qualquer ajuste feito depois no admin.
 const guildConfig = require("../config/guildConfig");
-const { online, chaveOnline, carregarLutador, poderesPublicos } = require("./pvpLiveSocket");
+const { online, chaveOnline, carregarLutador, poderesPublicos, registrarAoIdentificar } = require("./pvpLiveSocket");
 const monsterCombatAdapter = require("../services/monsterCombatAdapter");
 const { emitParaGuild } = require("./guildSocket");
 
@@ -242,6 +242,30 @@ async function criarBatalha(io, idGuild, tentativa, characterIdInicial, socketIn
 }
 
 module.exports = function registerGuildBossHandlers(io) {
+  // Resync PASSIVO pós F5/reconexão — bug real reportado ("boss ainda
+  // bugado... não é pq ele já tava ativo?"): antes disso, a única forma
+  // de resync era o FRONTEND chamar guildboss:entrar sozinho sempre que
+  // a tentativa da guilda estivesse "Ativo", mesmo pra quem nunca tinha
+  // entrado na luta — e esse evento NÃO é neutro (checa cooldown de
+  // 20min e, se não achar luta, ABRE uma nova sozinho). Resultado: só
+  // de abrir a aba do Boss da Guilda enquanto QUALQUER outro membro
+  // estava lutando, o jogador era silenciosamente colocado na luta (ou
+  // levava um erro de cooldown) sem ter clicado em nada. Mesmo padrão
+  // seguro de partySocket.js: só reage se ESTE personagem já está
+  // numa luta de verdade (`batalhaPorPersonagem`), nunca cria ou entra
+  // em nada por conta própria.
+  registrarAoIdentificar((_io, socket, chave) => {
+    const battleId = batalhaPorPersonagem.get(chave);
+    if (!battleId) return;
+    const batalha = batalhas.get(battleId);
+    if (!batalha) {
+      batalhaPorPersonagem.delete(chave);
+      return;
+    }
+    socket.join(batalha.sala);
+    socket.emit(SOCKET_EVENTS.GUILDBOSS.ESTADO, montarEstadoBatalha(batalha));
+  });
+
   io.on("connection", (socket) => {
     // Sem sala de espera (pedido do jogador: "entrar tipo aventura") —
     // este evento é o ÚNICO passo pra entrar na luta: se a guilda já
