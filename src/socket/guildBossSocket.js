@@ -200,8 +200,31 @@ async function criarBatalha(io, idGuild, tentativa, characterIdInicial, socketIn
   // GuildBossAbility UMA vez, no início da batalha (mesmo princípio de
   // Solo/Party). Boss sem nenhuma ability ativa = array vazio =
   // combatAiService.chooseAction sempre devolve "attack" (comportamento
-  // 100% legado, §12.1).
-  const habilidadesChefe = await monsterCombatAdapter.construirHabilidadesParaGuildBoss(tentativa.id_guild_boss_config);
+  // 100% legado, §12.1). Se a consulta falhar por qualquer motivo, cai
+  // no MESMO array vazio (nunca impede a entrada na luta por causa de
+  // uma habilidade extra — ver mesmo raciocínio abaixo pra combatTyping).
+  let habilidadesChefe = [];
+  try {
+    habilidadesChefe = await monsterCombatAdapter.construirHabilidadesParaGuildBoss(tentativa.id_guild_boss_config);
+  } catch (error) {
+    console.error("Boss da Guilda: falha ao carregar habilidades do chefe (seguindo sem elas):", error);
+  }
+
+  // Tipagem elemental (Afinidades de Combate) é um bônus/penalidade de
+  // DANO em cima do combate normal — nunca um requisito pra entrar na
+  // luta. Bug real: uma falha aqui (ex.: config do chefe incompleta)
+  // derrubava a entrada inteira com "Não foi possível entrar na luta do
+  // Boss.", sem o jogador ter feito nada de errado. `combatTyping`
+  // ausente faz resolveDamage() tratar o chefe como dano físico neutro
+  // (mesmo comportamento de antes dessa feature existir).
+  let combatTyping = null;
+  try {
+    const combatTypingService = require("../services/combatTypingService");
+    await combatTypingService.catalog();
+    combatTyping = combatTypingService.monsterProfile(chefe);
+  } catch (error) {
+    console.error("Boss da Guilda: falha ao carregar tipagem elemental do chefe (seguindo sem ela):", error);
+  }
 
   const battleId = proximaBatalhaId++;
   const sala = salaBatalha(battleId);
@@ -212,7 +235,7 @@ async function criarBatalha(io, idGuild, tentativa, characterIdInicial, socketIn
     sala,
     nomeChefe: chefe.nome_chefe,
     defesaChefe: chefe.defesa,
-    combatTyping: (await require("../services/combatTypingService").catalog(),require("../services/combatTypingService").monsterProfile(chefe)),
+    combatTyping,
     danoBaseChefe: chefe.dano_base_ataque,
     vidaTotal: Number(tentativa.vida_total),
     vidaRestante: Number(tentativa.vida_restante),

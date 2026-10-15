@@ -191,7 +191,25 @@ async function buscarBonusDeAtributos(idPersonagem, transaction) {
     bonus[campo] = Math.round(bonus[campo]);
   }
 
-  const combatTyping=await require("./combatTypingService").equipmentProfile(equipamentos.map(e=>e.id_item ?? e.item?.id).filter(Boolean),arma);
+  // Tipagem elemental dos equipamentos (Afinidades de Combate) é só um
+  // bônus/penalidade de DANO em cima do combate normal — nunca um
+  // requisito pra carregar o personagem. Bug real reportado pelo
+  // jogador ("Não foi possível entrar na luta do Boss."): esta função
+  // roda em TODO carregamento de lutador (Guild Boss, PvP, Ranqueado,
+  // Torneio, Grupo, Aventura — ver comentário de buscarBonusDeAtributos
+  // acima), então uma falha aqui (mesmo que rara/transitória) derrubava
+  // a entrada em QUALQUER modo de combate, não só o Boss da Guilda.
+  // `combatTyping: null` faz resolveDamage() tratar como dano físico
+  // neutro (mesmo comportamento de antes dessa feature existir).
+  let combatTyping = null;
+  try {
+    combatTyping = await require("./combatTypingService").equipmentProfile(
+      equipamentos.map((e) => e.id_item ?? e.item?.id).filter(Boolean),
+      arma,
+    );
+  } catch (error) {
+    console.error("Tipagem elemental: falha ao carregar afinidades do equipamento (seguindo sem elas):", error);
+  }
   return { ...bonus, arma, combatTyping, activeSetEffects: setState.activeEffects };
 }
 
